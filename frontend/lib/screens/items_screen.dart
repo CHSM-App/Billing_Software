@@ -120,21 +120,15 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       AsyncValue<List<Item>> itemsAsync, String userRole, bool inventoryEnabled) {
     return itemsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => RefreshIndicator(
-        onRefresh: () async {
-          ref.invalidate(itemsProvider);
-          await ref.read(itemsProvider.future);
-        },
-        child: ListView(children: [
-          EmptyState(
-            icon: Icons.wifi_off_outlined,
-            message: e.toString(),
-            actionLabel: 'Retry',
-            onAction: () => ref.invalidate(itemsProvider),
-          ),
-        ]),
+      error: (e, _) => NoInternetWidget(
+        onRetry: () => ref.invalidate(itemsProvider),
       ),
       data: (allItems) {
+        if (allItems.isEmpty && !ref.read(connectivityProvider)) {
+          return NoInternetWidget(
+            onRetry: () => ref.invalidate(itemsProvider),
+          );
+        }
         final items = _filtered(allItems);
         if (items.isEmpty) {
           return RefreshIndicator(

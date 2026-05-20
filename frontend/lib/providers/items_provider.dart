@@ -16,36 +16,47 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
   Future<List<Item>> _fetch() async {
     final businessId = await getBusinessId();
 
+    // Run both requests independently so ParallelWaitError doesn't hide the
+    // real cause. Fall back gracefully on any network failure.
+    List<dynamic>? rawItems;
+    List<String> topIds = [];
+
     try {
-      final (rawItems, topIds) = await (
-        api.getItems(),
-        api.getTopSoldItemIds(),
-      ).wait;
+      rawItems = await api.getItems();
+    } on SocketException {
+      // network down — fall through to cache
+    } on http.ClientException {
+      // network down — fall through to cache
+    } catch (_) {
+      // other error — fall through to cache
+    }
+
+    if (rawItems != null) {
+      // Online path — also try to fetch top-sold, but don't fail if it errors
+      try {
+        topIds = await api.getTopSoldItemIds();
+      } catch (_) {
+        // non-critical, continue with empty ranking
+      }
+
       final items = rawItems.map((j) => Item.fromJson(j)).toList();
       final sorted = _sorted(items, topIds);
+
       // Cache for offline use — fire and forget
       if (businessId != null) {
-        unawaited(
-            OfflineService.instance.replaceItemCache(sorted, businessId));
+        unawaited(OfflineService.instance.replaceItemCache(sorted, businessId));
       }
       return sorted;
-    } on SocketException {
-      return _loadFromCache(businessId);
-    } on http.ClientException {
-      return _loadFromCache(businessId);
     }
+
+    // Offline path — serve from cache silently
+    return _loadFromCache(businessId);
   }
 
   Future<List<Item>> _loadFromCache(String? businessId) async {
-    if (businessId == null) {
-      throw Exception('No internet connection and no session found.');
-    }
-    final cached = await OfflineService.instance.getCachedItems(businessId);
-    if (cached.isEmpty) {
-      throw Exception(
-          'No internet connection and no cached items available.\nPlease connect to the network first.');
-    }
-    return cached;
+    if (businessId == null) return [];
+    return OfflineService.instance.getCachedItems(businessId);
+    // Returns empty list if no cache — callers handle empty gracefully
   }
 
   List<Item> _sorted(List<Item> items, List<String> topIds) {
@@ -95,7 +106,6 @@ final itemsProvider =
 class CategoriesNotifier extends AsyncNotifier<List<String>> {
   @override
   Future<List<String>> build() async {
-    // Derive categories from itemsProvider — works offline too
     final items = await ref.watch(itemsProvider.future);
     return items
         .map((i) => i.category)

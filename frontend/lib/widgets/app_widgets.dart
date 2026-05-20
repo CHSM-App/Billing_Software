@@ -218,3 +218,55 @@ class StatusBadge extends StatelessWidget {
 }
 
 enum StatusType { success, warning, error, info }
+
+// Full-screen no-internet widget — only shown when offline data is unavailable
+class NoInternetWidget extends StatelessWidget {
+  final VoidCallback? onRetry;
+
+  const NoInternetWidget({super.key, this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.space48),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.wifi_off_rounded,
+                  size: 52, color: AppColors.error),
+            ),
+            const SizedBox(height: AppSpacing.space24),
+            Text(
+              'No Internet Connection',
+              style: Theme.of(context).textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.space8),
+            Text(
+              'Connect to the network to get started.\nYour data will load automatically.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(color: AppColors.textSecondary),
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(height: AppSpacing.space24),
+              SizedBox(
+                width: 160,
+                child: PrimaryButton(text: 'Retry', onPressed: onRetry),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}

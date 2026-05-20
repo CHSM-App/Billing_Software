@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -173,21 +174,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _handleBarcodeScan(String barcode) async {
     if (barcode.isEmpty) return;
-    final isOnline = ref.read(connectivityProvider);
     try {
-      if (isOnline) {
-        final data = await getItemByBarcode(barcode);
-        ref.read(cartProvider.notifier).addItem(Item.fromJson(data));
-      } else {
-        final businessId = await getBusinessId();
-        final item = await OfflineService.instance
-            .getCachedItemByBarcode(barcode, businessId ?? '');
-        if (item == null) {
-          _showSnack('Item not found for barcode: $barcode', isError: true);
-          return;
-        }
-        ref.read(cartProvider.notifier).addItem(item);
+      // Always try cache first — instant, no network latency
+      final businessId = await getBusinessId();
+      final cached = await OfflineService.instance
+          .getCachedItemByBarcode(barcode, businessId ?? '');
+      if (cached != null) {
+        ref.read(cartProvider.notifier).addItem(cached);
+        return;
       }
+      // Cache miss — fall back to server (new item not yet cached)
+      final data = await getItemByBarcode(barcode);
+      ref.read(cartProvider.notifier).addItem(Item.fromJson(data));
     } on ApiException catch (e) {
       _showSnack(e.message, isError: true);
     } catch (_) {
@@ -254,12 +252,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
-    final isOnline = ref.read(connectivityProvider);
-    if (!isOnline) {
-      await _generateBillOffline(cart);
+    // Table draft mode — must stay server-side (needs real bill ID for table state)
+    if (widget.activeBillId != null || widget.tableId != null) {
+      await _generateBillOnline(cart);
       return;
     }
 
+    // Retail / no-table: always offline-first — instant receipt, sync in background
+    await _generateBillOffline(cart);
+    unawaited(SyncService.instance.syncAll().then((_) {
+      ref.invalidate(reportProvider);
+    }));
+  }
+
+  Future<void> _generateBillOnline(List<CartEntry> cart) async {
     setState(() => _generatingBill = true);
     try {
       Map<String, dynamic> result;
@@ -267,7 +273,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (widget.activeBillId != null) {
         await updateBillItems(widget.activeBillId!, _cartPayload);
         result = await finalizeBill(widget.activeBillId!);
-      } else if (widget.tableId != null) {
+      } else {
         final draft = await createBill({
           'items': _cartPayload,
           'table_id': widget.tableId,
@@ -279,16 +285,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           'status': 'draft',
         });
         result = await finalizeBill(draft['id']);
-      } else {
-        result = await createBill({
-          'items': _cartPayload,
-          if (_customerNameController.text.trim().isNotEmpty)
-            'customer_name': _customerNameController.text.trim(),
-          if (_customerPhoneController.text.trim().isNotEmpty)
-            'customer_phone': _customerPhoneController.text.trim(),
-          'payment_mode': _paymentMode,
-          'status': 'finalized',
-        });
       }
 
       final bill = Bill.fromJson(result);
@@ -298,8 +294,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _customerNameController.clear();
       _customerPhoneController.clear();
       setState(() => _paymentMode = 'cash');
-
-      // Invalidate report so it refreshes next time reports tab opens
       ref.invalidate(reportProvider);
 
       _showBillDialog(bill);
@@ -389,7 +383,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _customerNameController.clear();
       _customerPhoneController.clear();
       setState(() => _paymentMode = 'cash');
-      ref.invalidate(pendingSyncCountProvider);
 
       if (!mounted) return;
       _showBillDialog(fakeBill);
@@ -399,16 +392,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     } finally {
       if (mounted) setState(() => _generatingBill = false);
     }
-  }
-
-  Future<void> _triggerSync() async {
-    final result = await SyncService.instance.syncAll();
-    ref.invalidate(pendingSyncCountProvider);
-    if (!mounted) return;
-    final msg = result.failed > 0
-        ? 'Synced ${result.synced}, failed ${result.failed}'
-        : 'Synced ${result.synced} bill${result.synced == 1 ? '' : 's'}';
-    _showSnack(msg, isError: result.failed > 0);
   }
 
   Future<void> _autoPrint(Bill bill) async {
@@ -646,56 +629,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // Items panel
   // ---------------------------------------------------------------------------
 
-  Widget _buildOfflineBanner() {
-    return Consumer(builder: (context, ref, _) {
-      final isOnline = ref.watch(connectivityProvider);
-      final pendingAsync = ref.watch(pendingSyncCountProvider);
-      final pending = pendingAsync.valueOrNull ?? 0;
-
-      if (isOnline && pending == 0) return const SizedBox.shrink();
-
-      final color = isOnline ? Colors.orange.shade700 : AppColors.error;
-      final icon = isOnline ? Icons.sync_outlined : Icons.wifi_off_outlined;
-      final message = isOnline
-          ? '$pending bill${pending == 1 ? '' : 's'} pending sync'
-          : pending > 0
-              ? 'Offline — $pending bill${pending == 1 ? '' : 's'} pending sync'
-              : 'Offline — using cached items';
-
-      return Container(
-        color: color,
-        padding:
-            const EdgeInsets.symmetric(horizontal: AppSpacing.space16, vertical: 6),
-        child: Row(
-          children: [
-            Icon(icon, size: 16, color: Colors.white),
-            const SizedBox(width: AppSpacing.space8),
-            Expanded(
-              child: Text(message,
-                  style: const TextStyle(color: Colors.white, fontSize: 13)),
-            ),
-            if (isOnline && pending > 0)
-              TextButton(
-                onPressed: _triggerSync,
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: const Text('Sync now',
-                    style: TextStyle(fontWeight: FontWeight.w700)),
-              ),
-          ],
-        ),
-      );
-    });
-  }
-
   Widget _buildItemsPanel() {
     return Column(
       children: [
-        _buildOfflineBanner(),
         Padding(
           padding: const EdgeInsets.fromLTRB(
               AppSpacing.space16, AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
@@ -758,21 +694,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
       return itemsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => RefreshIndicator(
-          onRefresh: () async {
-            ref.invalidate(itemsProvider);
-            await ref.read(itemsProvider.future);
-          },
-          child: ListView(children: [
-            EmptyState(
-              icon: Icons.wifi_off_outlined,
-              message: e.toString(),
-              actionLabel: 'Retry',
-              onAction: () => ref.invalidate(itemsProvider),
-            ),
-          ]),
+        error: (e, _) => NoInternetWidget(
+          onRetry: () => ref.invalidate(itemsProvider),
         ),
         data: (allItems) {
+          if (allItems.isEmpty && !ref.read(connectivityProvider)) {
+            return NoInternetWidget(
+              onRetry: () => ref.invalidate(itemsProvider),
+            );
+          }
           final items = _filteredItems(allItems);
           if (items.isEmpty) {
             return RefreshIndicator(
@@ -790,15 +720,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             );
           }
 
+          final isWide = MediaQuery.of(context).size.width >= 720;
           return RefreshIndicator(
             onRefresh: () async {
               ref.invalidate(itemsProvider);
               ref.invalidate(categoriesProvider);
               await ref.read(itemsProvider.future);
             },
-            child: ListView.builder(
+            child: GridView.builder(
               padding: const EdgeInsets.fromLTRB(
                   AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 80),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: isWide ? 2 : 1,
+                crossAxisSpacing: AppSpacing.space4,
+                mainAxisSpacing: 0,
+                mainAxisExtent: 60,
+              ),
               itemCount: items.length,
               itemBuilder: (_, i) => _buildItemRow(items[i], cart),
             ),

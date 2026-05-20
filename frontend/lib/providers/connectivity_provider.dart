@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
-import '../services/offline_service.dart';
 
 // ---------------------------------------------------------------------------
 // Connectivity notifier — polls /api/health every 15 seconds
@@ -38,13 +37,3 @@ class ConnectivityNotifier extends Notifier<bool> {
   /// Called externally to force an immediate re-check.
   Future<void> recheck() => _check();
 }
-
-// ---------------------------------------------------------------------------
-// Pending sync count — how many offline bills are waiting
-// ---------------------------------------------------------------------------
-
-final pendingSyncCountProvider = FutureProvider<int>((ref) async {
-  // Re-read whenever connectivity changes (after a sync)
-  ref.watch(connectivityProvider);
-  return OfflineService.instance.getPendingCount();
-});
