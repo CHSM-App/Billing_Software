@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import '../api.dart' as api;
 import '../models/models.dart';
+import '../services/offline_service.dart';
+import '../storage.dart';
 
 class ItemsNotifier extends AsyncNotifier<List<Item>> {
   @override
@@ -9,12 +14,38 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
   }
 
   Future<List<Item>> _fetch() async {
-    final (rawItems, topIds) = await (
-      api.getItems(),
-      api.getTopSoldItemIds(),
-    ).wait;
-    final items = rawItems.map((j) => Item.fromJson(j)).toList();
-    return _sorted(items, topIds);
+    final businessId = await getBusinessId();
+
+    try {
+      final (rawItems, topIds) = await (
+        api.getItems(),
+        api.getTopSoldItemIds(),
+      ).wait;
+      final items = rawItems.map((j) => Item.fromJson(j)).toList();
+      final sorted = _sorted(items, topIds);
+      // Cache for offline use — fire and forget
+      if (businessId != null) {
+        unawaited(
+            OfflineService.instance.replaceItemCache(sorted, businessId));
+      }
+      return sorted;
+    } on SocketException {
+      return _loadFromCache(businessId);
+    } on http.ClientException {
+      return _loadFromCache(businessId);
+    }
+  }
+
+  Future<List<Item>> _loadFromCache(String? businessId) async {
+    if (businessId == null) {
+      throw Exception('No internet connection and no session found.');
+    }
+    final cached = await OfflineService.instance.getCachedItems(businessId);
+    if (cached.isEmpty) {
+      throw Exception(
+          'No internet connection and no cached items available.\nPlease connect to the network first.');
+    }
+    return cached;
   }
 
   List<Item> _sorted(List<Item> items, List<String> topIds) {
@@ -64,11 +95,26 @@ final itemsProvider =
 class CategoriesNotifier extends AsyncNotifier<List<String>> {
   @override
   Future<List<String>> build() async {
-    return api.getCategories();
+    // Derive categories from itemsProvider — works offline too
+    final items = await ref.watch(itemsProvider.future);
+    return items
+        .map((i) => i.category)
+        .whereType<String>()
+        .toSet()
+        .toList()
+      ..sort();
   }
 
   Future<void> reload() async {
-    state = await AsyncValue.guard(api.getCategories);
+    state = await AsyncValue.guard(() async {
+      final items = await ref.read(itemsProvider.future);
+      return items
+          .map((i) => i.category)
+          .whereType<String>()
+          .toSet()
+          .toList()
+        ..sort();
+    });
   }
 }
 

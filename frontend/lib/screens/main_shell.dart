@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
+import '../services/sync_service.dart';
 import 'home_screen.dart';
 import 'items_screen.dart';
 import 'tables_screen.dart';
@@ -56,6 +57,18 @@ class _MainShellState extends ConsumerState<MainShell> {
       error: (_, __) =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
       data: (session) {
+        // Auto-sync when connectivity is restored
+        ref.listen<bool>(connectivityProvider, (prev, next) {
+          if (prev == false && next == true) {
+            SyncService.instance.syncAll().then((_) {
+              ref.invalidate(pendingSyncCountProvider);
+              ref.invalidate(itemsProvider);
+              ref.invalidate(categoriesProvider);
+              ref.invalidate(tablesProvider);
+            });
+          }
+        });
+
         final items =
             _buildNavItems(session.userRole, session.businessType);
         final safeIndex = _index.clamp(0, items.length - 1);

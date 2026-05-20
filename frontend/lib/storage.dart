@@ -53,6 +53,16 @@ Future<Map<String, dynamic>> getSession() async {
   };
 }
 
+Future<String?> getBusinessId() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(_keyBusinessId);
+}
+
+Future<String?> getUserId() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getString(_keyUserId);
+}
+
 Future<void> clearSession() async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.clear();

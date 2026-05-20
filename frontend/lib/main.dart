@@ -7,12 +7,15 @@ import 'providers.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_shell.dart';
+import 'services/offline_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   if (!kIsWeb) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
+  await OfflineService.instance.init();
   runApp(const ProviderScope(child: BillingApp()));
 }
 
@@ -38,8 +41,6 @@ class _Splash extends ConsumerStatefulWidget {
 }
 
 class _SplashState extends ConsumerState<_Splash> {
-  bool _backendOk = true;
-
   @override
   void initState() {
     super.initState();
@@ -47,14 +48,11 @@ class _SplashState extends ConsumerState<_Splash> {
   }
 
   Future<void> _route() async {
-    final ok = await checkHealth();
-    if (!mounted) return;
-    if (!ok) {
-      setState(() => _backendOk = false);
-      return;
-    }
+    // Reset any bills stuck in 'syncing' from a previous crash
+    await OfflineService.instance.resetStaleSyncing();
 
-    // Try loading session — routes to MainShell if valid, LoginScreen if not
+    final ok = await checkHealth();
+
     bool hasSession = false;
     try {
       await ref.read(sessionProvider.future);
@@ -64,52 +62,30 @@ class _SplashState extends ConsumerState<_Splash> {
     }
 
     if (!mounted) return;
+
+    // If no session at all, must go to login (can't do anything without auth)
+    if (!hasSession) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
+    // Wire connectivity notifier into api.dart
+    final notifier = ref.read(connectivityProvider.notifier);
+    setConnectivityNotifier(notifier);
+    if (!ok) notifier.markOffline();
+
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(
-        builder: (_) => hasSession ? const MainShell() : const LoginScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const MainShell()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_backendOk) {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.wifi_off_outlined, size: 48, color: AppColors.error),
-                const SizedBox(height: 16),
-                Text('Cannot reach server',
-                    style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 8),
-                Text(
-                  'Make sure the backend is running and your device is on the same network.',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: AppColors.textSecondary),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    setState(() => _backendOk = true);
-                    _route();
-                  },
-                  icon: const Icon(Icons.refresh_outlined),
-                  label: const Text('Retry'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
     return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }

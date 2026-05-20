@@ -1,12 +1,21 @@
 import 'dart:convert';
 import 'dart:developer' as dev;
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'storage.dart';
+import 'providers/connectivity_provider.dart';
 
 const String baseUrl = 'http://192.168.1.10:3000/api';
 
+// ---------------------------------------------------------------------------
+// Connectivity notifier reference — set once from main.dart after ProviderScope
+// ---------------------------------------------------------------------------
 
+ConnectivityNotifier? _connectivityNotifier;
 
+void setConnectivityNotifier(ConnectivityNotifier n) {
+  _connectivityNotifier = n;
+}
 
 // ---------------------------------------------------------------------------
 // Logging HTTP client
@@ -38,6 +47,34 @@ Future<http.Response> _delete(Uri uri, {Map<String, String>? headers}) async {
   final response = await http.delete(uri, headers: headers);
   _logResponse('DELETE', uri, response);
   return response;
+}
+
+// ---------------------------------------------------------------------------
+// Safe wrappers — mark offline on network failure
+// ---------------------------------------------------------------------------
+
+Future<http.Response> _safeGet(Uri uri, {Map<String, String>? headers}) async {
+  try {
+    return await _get(uri, headers: headers);
+  } on SocketException {
+    _connectivityNotifier?.markOffline();
+    rethrow;
+  } on http.ClientException {
+    _connectivityNotifier?.markOffline();
+    rethrow;
+  }
+}
+
+Future<http.Response> _safePost(Uri uri, {Map<String, String>? headers, Object? body}) async {
+  try {
+    return await _post(uri, headers: headers, body: body);
+  } on SocketException {
+    _connectivityNotifier?.markOffline();
+    rethrow;
+  } on http.ClientException {
+    _connectivityNotifier?.markOffline();
+    rethrow;
+  }
 }
 
 void _logRequest(String method, Uri uri, Map<String, String>? headers, {Object? body}) {
@@ -138,18 +175,18 @@ Future<List<dynamic>> getItems({String? search, String? category}) async {
   if (category != null) params['category'] = category;
 
   final uri = Uri.parse('$baseUrl/items').replace(queryParameters: params.isEmpty ? null : params);
-  final response = await _get(uri, headers: await _authHeaders());
+  final response = await _safeGet(uri, headers: await _authHeaders());
   return _parse(response);
 }
 
 Future<Map<String, dynamic>> getItemByBarcode(String barcode) async {
   final uri = Uri.parse('$baseUrl/items').replace(queryParameters: {'barcode': barcode});
-  final response = await _get(uri, headers: await _authHeaders());
+  final response = await _safeGet(uri, headers: await _authHeaders());
   return _parse(response);
 }
 
 Future<List<String>> getTopSoldItemIds() async {
-  final response = await _get(
+  final response = await _safeGet(
     Uri.parse('$baseUrl/items/top-sold'),
     headers: await _authHeaders(),
   );
@@ -157,7 +194,7 @@ Future<List<String>> getTopSoldItemIds() async {
 }
 
 Future<List<String>> getCategories() async {
-  final response = await _get(
+  final response = await _safeGet(
     Uri.parse('$baseUrl/items/categories'),
     headers: await _authHeaders(),
   );
@@ -281,7 +318,7 @@ Future<Map<String, dynamic>> getBill(String id) async {
 }
 
 Future<Map<String, dynamic>> createBill(Map<String, dynamic> data) async {
-  final response = await _post(
+  final response = await _safePost(
     Uri.parse('$baseUrl/bills'),
     headers: await _authHeaders(),
     body: jsonEncode(data),
