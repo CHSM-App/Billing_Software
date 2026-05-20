@@ -7,6 +7,13 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
+env:
+  BACKEND_DIR: backend
+  BACKEND_BRANCH: backend
+
 jobs:
   # ─────────────────────────────────────────────
   # Job 1: Sync backend folder → branch "backend"
@@ -17,49 +24,18 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     steps:
-      - name: Checkout full repo
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push backend folder to backend branch
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Check if backend branch exists on remote
-          if git ls-remote --exit-code --heads origin backend; then
-            # Branch exists — fetch and check it out as a worktree
-            git fetch origin backend
-            git worktree add /tmp/backend-branch origin/backend
-            cd /tmp/backend-branch
-            git checkout -B backend origin/backend
-          else
-            # Branch does not exist — create orphan worktree manually
-            mkdir -p /tmp/backend-branch
-            cd /tmp/backend-branch
-            git init
-            git remote add origin "$(git -C $GITHUB_WORKSPACE remote get-url origin)"
-            git checkout --orphan backend
-          fi
-
-          # Sync only the backend/ folder contents into the branch root
-          rsync -av --delete \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            $GITHUB_WORKSPACE/backend/ /tmp/backend-branch/
-
-          cd /tmp/backend-branch
-          git add -A
-
-          # Only commit if there are actual changes
-          if git diff --cached --quiet; then
-            echo "No backend changes to sync."
-          else
-            git commit -m "sync: backend from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
-            git push origin backend
-          fi
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: ${{ env.BACKEND_BRANCH }}
+          publish_dir: ./${{ env.BACKEND_DIR }}
+          force_orphan: true
+          exclude_assets: 'node_modules'
+          commit_message: "sync: backend from ${{ github.ref_name }} @ ${{ github.sha }}"
 
   # ─────────────────────────────────────────────
   # Job 2: Build Flutter APK on tag push (v*)
@@ -95,9 +71,8 @@ jobs:
 
       - name: Rename APK with tag version
         run: |
-          TAG=${GITHUB_REF_NAME}
           mv frontend/build/app/outputs/flutter-apk/app-release.apk \
-             frontend/build/app/outputs/flutter-apk/billing-${TAG}.apk
+             frontend/build/app/outputs/flutter-apk/billing-${{ github.ref_name }}.apk
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
