@@ -28,16 +28,27 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Create an orphan worktree for the backend branch
-          git fetch origin backend:backend 2>/dev/null || true
-          git worktree add /tmp/backend-branch backend 2>/dev/null || \
-            git worktree add --orphan /tmp/backend-branch backend
+          # Check if backend branch exists on remote
+          if git ls-remote --exit-code --heads origin backend; then
+            # Branch exists — fetch and check it out as a worktree
+            git fetch origin backend
+            git worktree add /tmp/backend-branch origin/backend
+            cd /tmp/backend-branch
+            git checkout -B backend origin/backend
+          else
+            # Branch does not exist — create orphan worktree manually
+            mkdir -p /tmp/backend-branch
+            cd /tmp/backend-branch
+            git init
+            git remote add origin "$(git -C $GITHUB_WORKSPACE remote get-url origin)"
+            git checkout --orphan backend
+          fi
 
           # Sync only the backend/ folder contents into the branch root
           rsync -av --delete \
             --exclude='.git' \
             --exclude='node_modules' \
-            backend/ /tmp/backend-branch/
+            $GITHUB_WORKSPACE/backend/ /tmp/backend-branch/
 
           cd /tmp/backend-branch
           git add -A
