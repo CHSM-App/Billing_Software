@@ -15,6 +15,10 @@ const config = {
 const pool = new sql.ConnectionPool(config);
 const poolConnect = pool.connect();
 
+pool.on('error', (err) => {
+  console.error('DB pool error:', err.message);
+});
+
 poolConnect.catch((err) => {
   console.error('DB connection failed:', err.message);
 });

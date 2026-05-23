@@ -48,7 +48,8 @@ class Printer {
 // PrinterService
 //
 // Android / iOS  → print_bluetooth_thermal (Classic BT / SPP)
-// Windows        → flutter_thermal_printer (BLE / USB via win_ble / win32)
+//                  Raw bytes: plain ASCII text + 0x0A line feeds (NO ESC @ reset)
+// Windows        → flutter_thermal_printer (BLE / USB) with TSPL commands
 // ---------------------------------------------------------------------------
 
 const _prefKey = 'active_printer';
@@ -144,25 +145,31 @@ class PrinterService {
   }
 
   // -------------------------------------------------------------------------
-  // Receipt building — TSPL commands for JPL/label mode thermal printers
+  // Raw-byte receipt builder for Android BT printers
   //
-  // Paper: 72 mm wide, continuous (no gap). Each TEXT command positions
-  // text at absolute Y coordinate (dots, 8 dots/mm ≈ 203 dpi).
-  // Font "3" = fixed 16×26 dot font (~12pt), fits ~42 chars on 72mm.
+  // Key findings from hardware testing:
+  //   - Printer IS ESC/POS capable but ESC @ (reset) causes blank output
+  //   - Plain ASCII bytes + 0x0A (LF) line feeds work perfectly
+  //   - No cut command needed — paper tears manually
+  //   - 32 chars fits safely on 58mm paper; 42 chars on 80mm
+  //
+  // Column layout (32 chars for 58mm safety):
+  //   Name(16) Qty(4) Price(6) Total(6) = 32
   // -------------------------------------------------------------------------
 
-  static const int _cols = 42; // chars that fit on 72mm with font "3"
-  static const int _lineSpacing = 30; // dots between lines
-  static const int _paperWidth = 72; // mm
-  static const String _font = '3';
+  static const int _cols = 42;
+  static const int _nameCols = 20;
+  static const int _qtyCols = 4;
+  static const int _priceCols = 9;
+  static const int _totalCols = 9;
 
-  List<int> _buildReceipt(Bill bill,
+  List<int> _buildReceiptRaw(Bill bill,
       {String? businessName,
       String? businessPhone,
       String? businessAddress}) {
-    // Build all text lines first so we know the total height
     final lines = <String>[];
 
+    // Header
     lines.add(_centre(businessName ?? 'BUSINESS', _cols));
     if (businessAddress != null && businessAddress.isNotEmpty) {
       lines.add(_centre(businessAddress, _cols));
@@ -171,6 +178,8 @@ class PrinterService {
       lines.add(_centre('Ph: $businessPhone', _cols));
     }
     lines.add('-' * _cols);
+
+    // Bill info
     lines.add('Bill#: ${bill.billNumber}');
     lines.add('Date : ${_formatDate(bill.createdAt.toLocal())}');
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
@@ -180,15 +189,20 @@ class PrinterService {
       lines.add('Ph   : ${bill.customerPhone}');
     }
     lines.add('-' * _cols);
-    lines.add(_colLine('Item', 'Qty', 'Price', 'Total'));
+
+    // Items header
+    lines.add(_itemRow('Item', 'Qty', 'Price', 'Total'));
     lines.add('-' * _cols);
+
+    // Items
     for (final item in bill.items) {
-      final name =
-          item.itemName.length > 18 ? item.itemName.substring(0, 18) : item.itemName;
+      final name = item.itemName.length > _nameCols
+          ? item.itemName.substring(0, _nameCols)
+          : item.itemName;
       final qty = item.quantity % 1 == 0
           ? item.quantity.toInt().toString()
           : item.quantity.toStringAsFixed(1);
-      lines.add(_colLine(
+      lines.add(_itemRow(
         name,
         qty,
         item.unitPrice.toStringAsFixed(2),
@@ -196,67 +210,36 @@ class PrinterService {
       ));
     }
     lines.add('-' * _cols);
+
+    // Totals
     if (bill.taxAmount > 0) {
-      lines.add(_twoCol('Subtotal:', bill.subtotal.toStringAsFixed(2)));
-      lines.add(_twoCol('Tax     :', bill.taxAmount.toStringAsFixed(2)));
+      lines.add(_twoCol('Subtotal:', 'Rs.${bill.subtotal.toStringAsFixed(2)}'));
+      lines.add(_twoCol('Tax     :', 'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
     }
-    lines.add(_twoCol('TOTAL:', 'Rs.${bill.total.toStringAsFixed(2)}'));
-    lines.add(_twoCol('Payment:', bill.paymentMode.toUpperCase()));
+    lines.add(_twoCol('TOTAL   :', 'Rs.${bill.total.toStringAsFixed(2)}'));
+    lines.add(_twoCol('Payment :', bill.paymentMode.toUpperCase()));
     lines.add('-' * _cols);
     lines.add(_centre('Thank you, visit again!', _cols));
-    lines.add(''); // blank line at bottom
 
-    // Calculate total height in dots (+20 for bottom margin)
-    final totalHeight = lines.length * _lineSpacing + 20;
-
-    // Build TSPL command string
-    final sb = StringBuffer();
-    sb.write('SIZE $_paperWidth mm,$totalHeight\r\n');
-    sb.write('GAP 0 mm,0 mm\r\n');
-    sb.write('CODEPAGE 437\r\n');
-    sb.write('CLS\r\n');
-
-    int y = 10;
+    // Build bytes: each line as ASCII + 0x0A
+    final bytes = <int>[];
     for (final line in lines) {
-      // Escape double-quotes in text
-      final escaped = line.replaceAll('"', '\\"');
-      sb.write('TEXT 10,$y,"$_font",0,1,1,"$escaped"\r\n');
-      y += _lineSpacing;
+      for (final c in line.codeUnits) {
+        bytes.add(c > 127 ? 63 : c); // replace non-ASCII with '?'
+      }
+      bytes.add(0x0A); // LF
     }
-
-    sb.write('PRINT 1,1\r\n');
-
-    return _enc(sb.toString());
-  }
-
-  /// Encode string to Latin-1 bytes (covers all standard ASCII + extended)
-  static List<int> _enc(String s) =>
-      s.codeUnits.map((c) => c > 255 ? 0x3F : c).toList(); // ? for non-latin
-
-  /// Centre text within a given column width
-  static String _centre(String text, int width) {
-    if (text.length >= width) return text.substring(0, width);
-    final pad = (width - text.length) ~/ 2;
-    return ' ' * pad + text;
-  }
-
-  /// 4-column row: name(18), qty(5), price(9), total(10) = 42 chars
-  static String _colLine(String name, String qty, String price, String total) {
-    final n = name.padRight(18).substring(0, 18);
-    final q = qty.padLeft(5);
-    final p = price.padLeft(9);
-    final t = total.padLeft(10);
-    return '$n$q$p$t';
-  }
-
-  /// 2-column row: label left, value right
-  static String _twoCol(String label, String value) {
-    final space = _cols - label.length - value.length;
-    return '$label${' ' * (space < 1 ? 1 : space)}$value';
+    // 4 extra feeds to advance paper past the print head for tearing
+    bytes.addAll([0x0A, 0x0A, 0x0A, 0x0A]);
+    return bytes;
   }
 
   // -------------------------------------------------------------------------
-  // Printing
+  // TSPL receipt builder — Windows USB/BLE printers only
+  // -------------------------------------------------------------------------
+
+  // -------------------------------------------------------------------------
+  // Printing dispatch
   // -------------------------------------------------------------------------
 
   Future<void> printBill(Bill bill,
@@ -265,7 +248,9 @@ class PrinterService {
       String? businessAddress}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
-    final bytes = _buildReceipt(bill,
+
+    // Raw byte approach works on both Android BT and Windows USB/BLE.
+    final bytes = _buildReceiptRaw(bill,
         businessName: businessName,
         businessPhone: businessPhone,
         businessAddress: businessAddress);
@@ -276,17 +261,72 @@ class PrinterService {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
 
-    const cmd =
-        'SIZE 72 mm,120\r\n'
-        'GAP 0 mm,0 mm\r\n'
-        'CODEPAGE 437\r\n'
-        'CLS\r\n'
-        'TEXT 10,10,"3",0,1,1,"   TEST PRINT"\r\n'
-        'TEXT 10,40,"3",0,1,1,"Printer is working correctly"\r\n'
-        'TEXT 10,70,"3",0,1,1,"--------------------------------"\r\n'
-        'PRINT 1,1\r\n';
-    await _printBytes(printer, _enc(cmd));
+    final lines = [
+      _centre('TEST PRINT', _cols),
+      '-' * _cols,
+      _centre('Printer is working!', _cols),
+      '-' * _cols,
+    ];
+    final bytes = <int>[];
+    for (final line in lines) {
+      for (final c in line.codeUnits) {
+        bytes.add(c > 127 ? 63 : c);
+      }
+      bytes.add(0x0A);
+    }
+    bytes.addAll([0x0A, 0x0A, 0x0A, 0x0A]);
+    await _printBytes(printer, bytes);
   }
+
+  // -------------------------------------------------------------------------
+  // Barcode label
+  // -------------------------------------------------------------------------
+
+  Future<void> printBarcodeLabel({
+    required String barcodeValue,
+    required String itemName,
+    required double price,
+    int copies = 1,
+  }) async {
+    final printer = await getActivePrinter();
+    if (printer == null) throw PrinterException('No printer configured');
+
+    final List<int> bytes;
+    if (_isWindows) {
+      // TSPL label with actual barcode graphic
+      final name = itemName.length > 38 ? itemName.substring(0, 38) : itemName;
+      final priceStr = 'Rs.${price.toStringAsFixed(2)}';
+      final sb = StringBuffer();
+      sb.write('SIZE 72 mm,40 mm\r\n');
+      sb.write('GAP 2 mm,0 mm\r\n');
+      sb.write('CODEPAGE 437\r\n');
+      sb.write('CLS\r\n');
+      sb.write('TEXT 10,10,"3",0,1,1,"${name.replaceAll('"', '\\"')}"\r\n');
+      sb.write('TEXT 480,10,"3",0,1,1,"${priceStr.replaceAll('"', '\\"')}"\r\n');
+      sb.write('BARCODE 10,40,"128",80,1,0,2,2,"$barcodeValue"\r\n');
+      sb.write('PRINT $copies,1\r\n');
+      bytes = _enc(sb.toString());
+    } else {
+      // Raw text label for BT printer (no barcode graphic — print value as text)
+      final name = itemName.length > _cols ? itemName.substring(0, _cols) : itemName;
+      final b = <int>[];
+      void addLine(String s) {
+        for (final c in s.codeUnits) { b.add(c > 127 ? 63 : c); }
+        b.add(0x0A);
+      }
+      addLine(_centre(name, _cols));
+      addLine(_centre('Rs.${price.toStringAsFixed(2)}', _cols));
+      addLine('-' * _cols);
+      addLine(_centre(barcodeValue, _cols));
+      b.addAll([0x0A, 0x0A, 0x0A, 0x0A]);
+      bytes = b;
+    }
+    await _printBytes(printer, bytes);
+  }
+
+  // -------------------------------------------------------------------------
+  // Low-level send
+  // -------------------------------------------------------------------------
 
   Future<void> _printBytes(Printer printer, List<int> bytes) async {
     if (_isWindows) {
@@ -301,22 +341,18 @@ class PrinterService {
       throw PrinterException('Printer address not set');
     }
     try {
-      // Check permission first
       final permitted = await PrintBluetoothThermal.isPermissionBluetoothGranted;
       if (!permitted) throw PrinterException('Bluetooth permission not granted');
 
-      // Check Bluetooth is on
       final btOn = await PrintBluetoothThermal.bluetoothEnabled;
       if (!btOn) throw PrinterException('Bluetooth is turned off');
 
-      // Disconnect any existing connection first
       final alreadyConnected = await PrintBluetoothThermal.connectionStatus;
       if (alreadyConnected) {
         await PrintBluetoothThermal.disconnect;
         await Future.delayed(const Duration(milliseconds: 500));
       }
 
-      // Connect
       final connected = await PrintBluetoothThermal.connect(
         macPrinterAddress: printer.address!,
       );
@@ -325,21 +361,14 @@ class PrinterService {
             'Could not connect to printer. Make sure it is powered on and paired.');
       }
 
-      // Wait for connection to stabilise (2s matches reference implementation)
       await Future.delayed(const Duration(seconds: 2));
 
-      final isConnected = await PrintBluetoothThermal.connectionStatus;
-      if (!isConnected) {
-        throw PrinterException('Printer disconnected after connect. Try again.');
-      }
-
-      // Send in 512-byte chunks — many printers drop data if sent all at once
       const chunkSize = 512;
       for (var i = 0; i < bytes.length; i += chunkSize) {
-        final chunk = bytes.sublist(i, i + chunkSize > bytes.length ? bytes.length : i + chunkSize);
-        final result = await PrintBluetoothThermal.writeBytes(chunk);
-        if (!result) throw PrinterException('Bytes sent but printer did not respond');
-        if (i + chunkSize < bytes.length) {
+        final end = (i + chunkSize).clamp(0, bytes.length);
+        final result = await PrintBluetoothThermal.writeBytes(bytes.sublist(i, end));
+        if (!result) throw PrinterException('Write failed at chunk $i');
+        if (end < bytes.length) {
           await Future.delayed(const Duration(milliseconds: 50));
         }
       }
@@ -371,6 +400,38 @@ class PrinterService {
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  /// Centre text within width
+  static String _centre(String text, int width) {
+    if (text.length >= width) return text.substring(0, width);
+    final pad = (width - text.length) ~/ 2;
+    return ' ' * pad + text;
+  }
+
+  /// 4-column item row for 32-char receipt
+  /// Name(16) Qty(4) Price(6) Total(6)
+  static String _itemRow(String name, String qty, String price, String total) {
+    final n = name.padRight(_nameCols).substring(0, _nameCols);
+    final q = qty.padLeft(_qtyCols);
+    final p = price.padLeft(_priceCols);
+    final t = total.padLeft(_totalCols);
+    return '$n$q$p$t';
+  }
+
+
+  /// 2-column row: label left, value right (32-char)
+  static String _twoCol(String label, String value) =>
+      _twoColN(label, value, _cols);
+
+  /// 2-column row with explicit width
+  static String _twoColN(String label, String value, int width) {
+    final space = width - label.length - value.length;
+    return '$label${' ' * (space < 1 ? 1 : space)}$value';
+  }
+
+  /// Encode string to Latin-1 bytes (for TSPL commands)
+  static List<int> _enc(String s) =>
+      s.codeUnits.map((c) => c > 255 ? 0x3F : c).toList();
 
   String _formatDate(DateTime dt) {
     final d = dt.day.toString().padLeft(2, '0');

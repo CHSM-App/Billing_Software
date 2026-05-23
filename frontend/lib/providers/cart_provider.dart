@@ -32,6 +32,19 @@ class CartNotifier extends Notifier<List<CartEntry>> {
     }
   }
 
+  void setQty(String itemId, int qty) {
+    if (qty <= 0) {
+      state = state.where((e) => e.item.id != itemId).toList();
+    } else {
+      final idx = state.indexWhere((e) => e.item.id == itemId);
+      if (idx < 0) return;
+      state = [
+        for (int i = 0; i < state.length; i++)
+          i == idx ? state[i].copyWith(quantity: qty) : state[i]
+      ];
+    }
+  }
+
   void clear() => state = [];
 
   void loadFromBill(Bill bill, List<Item> catalog) {

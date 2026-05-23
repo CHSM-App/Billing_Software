@@ -161,6 +161,135 @@ class Bill {
       );
 }
 
+class Expense {
+  final String id;
+  final String category;
+  final String? description;
+  final double amount;
+  final String paymentMode;
+  final DateTime expenseDate;
+  final DateTime createdAt;
+  final String? createdByName;
+
+  Expense({
+    required this.id,
+    required this.category,
+    this.description,
+    required this.amount,
+    required this.paymentMode,
+    required this.expenseDate,
+    required this.createdAt,
+    this.createdByName,
+  });
+
+  factory Expense.fromJson(Map<String, dynamic> j) => Expense(
+        id: j['id'],
+        category: j['category'],
+        description: j['description'],
+        amount: double.parse(j['amount'].toString()),
+        paymentMode: j['payment_mode'],
+        expenseDate: DateTime.parse(j['expense_date']),
+        createdAt: DateTime.parse(j['created_at']),
+        createdByName: j['created_by_name'],
+      );
+}
+
+class RecurringExpense {
+  final String id;
+  final String category;
+  final String? description;
+  final double amount;
+  final String paymentMode;
+
+  RecurringExpense({
+    required this.id,
+    required this.category,
+    this.description,
+    required this.amount,
+    required this.paymentMode,
+  });
+
+  factory RecurringExpense.fromJson(Map<String, dynamic> j) => RecurringExpense(
+        id: j['id'],
+        category: j['category'],
+        description: j['description'],
+        amount: double.parse(j['amount'].toString()),
+        paymentMode: j['payment_mode'],
+      );
+}
+
+class DailyReport {
+  final String day;
+  final double revenue;
+  final double expenses;
+  final double profit;
+
+  DailyReport({
+    required this.day,
+    required this.revenue,
+    required this.expenses,
+    required this.profit,
+  });
+
+  factory DailyReport.fromJson(Map<String, dynamic> j) => DailyReport(
+        day: j['day'],
+        revenue: double.parse(j['revenue'].toString()),
+        expenses: double.parse(j['expenses'].toString()),
+        profit: double.parse(j['profit'].toString()),
+      );
+}
+
+class ReportSummary {
+  final String from;
+  final String to;
+  final int billCount;
+  final double totalRevenue;
+  final double totalTax;
+  final double totalExpenses;
+  final double netProfit;
+  final Map<String, double> byPaymentMode;
+  final List<DailyReport> daily;
+  final List<MapEntry<String, double>> expensesByCategory;
+  final List<MapEntry<String, double>> revenueByPaymentMode;
+
+  ReportSummary({
+    required this.from,
+    required this.to,
+    required this.billCount,
+    required this.totalRevenue,
+    required this.totalTax,
+    required this.totalExpenses,
+    required this.netProfit,
+    required this.byPaymentMode,
+    required this.daily,
+    required this.expensesByCategory,
+    required this.revenueByPaymentMode,
+  });
+
+  factory ReportSummary.fromJson(Map<String, dynamic> j) {
+    final bpm = (j['by_payment_mode'] as Map<String, dynamic>? ?? {});
+    final expCat = (j['expenses_by_category'] as List? ?? [])
+        .map((e) => MapEntry<String, double>(e['category'], double.parse(e['total'].toString())))
+        .toList();
+    final revMode = (j['revenue_by_payment_mode'] as List? ?? [])
+        .map((e) => MapEntry<String, double>(e['mode'], double.parse(e['total'].toString())))
+        .toList();
+    return ReportSummary(
+      from: j['from'],
+      to: j['to'],
+      billCount: j['bill_count'],
+      totalRevenue: double.parse(j['total_revenue'].toString()),
+      totalTax: double.parse(j['total_tax'].toString()),
+      totalExpenses: double.parse(j['total_expenses'].toString()),
+      netProfit: double.parse(j['net_profit'].toString()),
+      byPaymentMode: bpm.map((k, v) => MapEntry(k, double.parse(v.toString()))),
+      daily: (j['daily'] as List? ?? []).map((d) => DailyReport.fromJson(d)).toList(),
+      expensesByCategory: expCat,
+      revenueByPaymentMode: revMode,
+    );
+  }
+}
+
 class TableModel {
   final String id;
   final String businessId;

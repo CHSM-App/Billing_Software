@@ -5,6 +5,8 @@ import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import 'login_screen.dart';
 import 'printer_setup_screen.dart';
+import 'printer_test_screen.dart';
+import 'printer_test_windows_screen.dart';
 import 'staff_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -19,170 +21,406 @@ class SettingsScreen extends ConsumerWidget {
           const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (_, __) =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
-      data: (session) => _buildContent(context, ref, session),
+      data: (session) => _SettingsContent(session: session, ref: ref),
+    );
+  }
+}
+
+class _SettingsContent extends StatefulWidget {
+  final dynamic session;
+  final WidgetRef ref;
+
+  const _SettingsContent({required this.session, required this.ref});
+
+  @override
+  State<_SettingsContent> createState() => _SettingsContentState();
+}
+
+class _SettingsContentState extends State<_SettingsContent>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _fadeAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+    _fadeAnim =
+        CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.errorLight,
+                borderRadius: BorderRadius.circular(AppRadius.small),
+              ),
+              child: const Icon(Icons.logout_outlined,
+                  size: 18, color: AppColors.error),
+            ),
+            const SizedBox(width: AppSpacing.space12),
+            const Text('Logout'),
+          ],
+        ),
+        content: const Text(
+            'Are you sure you want to logout from your account?'),
+        actions: [
+          SecondaryButton(
+            text: 'Cancel',
+            onPressed: () => Navigator.pop(context, false),
+          ),
+          const SizedBox(width: AppSpacing.space8),
+          DestructiveButton(
+            text: 'Logout',
+            onPressed: () => Navigator.pop(context, true),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.ref.read(sessionProvider.notifier).clear();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
     );
   }
 
-  Widget _buildContent(BuildContext context, WidgetRef ref, session) {
+  @override
+  Widget build(BuildContext context) {
+    final session = widget.session;
     final isOwner = session.userRole == 'owner';
 
-    Future<void> logout() async {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Logout'),
-          content: const Text('Are you sure you want to logout?'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Logout'),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true) return;
-      await ref.read(sessionProvider.notifier).clear();
-      if (!context.mounted) return;
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (_) => false,
-      );
-    }
-
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(title: const Text('Settings')),
-      body: RefreshIndicator(
-        onRefresh: () => ref.read(sessionProvider.notifier).refresh(),
-        child: ListView(
-          padding: const EdgeInsets.all(AppSpacing.space16),
-          children: [
-            // Business info
-            _sectionHeader(context, 'Business'),
-            const SizedBox(height: AppSpacing.space8),
-            AppCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _infoRow(context, 'Name', session.businessName),
-                  const Divider(height: AppSpacing.space24),
-                  _infoRow(context, 'Type', _formatType(session.businessType)),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppSpacing.space24),
-
-            // User info
-            _sectionHeader(context, 'Account'),
-            const SizedBox(height: AppSpacing.space8),
-            AppCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _infoRow(context, 'Name', session.userName),
-                  const Divider(height: AppSpacing.space24),
-                  _infoRow(context, 'Role', session.userRole.toUpperCase()),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppSpacing.space24),
-
-            // Staff management (owner only)
-            if (isOwner) ...[
-              _sectionHeader(context, 'Team'),
-              const SizedBox(height: AppSpacing.space8),
-              AppCard(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const StaffScreen()),
-                ),
-                child: Row(
+      body: FadeTransition(
+        opacity: _fadeAnim,
+        child: RefreshIndicator(
+          onRefresh: () =>
+              widget.ref.read(sessionProvider.notifier).refresh(),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(AppSpacing.space16),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Icon(Icons.people_outline,
-                        color: AppColors.primary, size: 20),
-                    const SizedBox(width: AppSpacing.space12),
-                    Expanded(
-                      child: Text('Manage Staff',
-                          style: Theme.of(context).textTheme.titleMedium),
+                    // Profile header card
+                    _buildProfileCard(context, session, isOwner),
+                    const SizedBox(height: AppSpacing.space24),
+
+                    if (isOwner) ...[
+                      _sectionLabel(context, 'TEAM'),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.people_outline,
+                        iconColor: AppColors.primary,
+                        title: 'Manage Staff',
+                        subtitle: 'Add, edit or remove cashiers',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const StaffScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.space24),
+                    ],
+
+                    _sectionLabel(context, 'HARDWARE'),
+                    const SizedBox(height: AppSpacing.space8),
+                    _buildNavCard(
+                      context,
+                      icon: Icons.print_outlined,
+                      iconColor: const Color(0xFF7C3AED),
+                      title: 'Printer Setup',
+                      subtitle: 'Configure your thermal printer',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const PrinterSetupScreen()),
+                      ),
                     ),
-                    const Icon(Icons.chevron_right_outlined,
-                        color: AppColors.textSecondary, size: 20),
+                    const SizedBox(height: AppSpacing.space8),
+                    _buildNavCard(
+                      context,
+                      icon: Icons.bug_report_outlined,
+                      iconColor: AppColors.warning,
+                      title: 'Printer Test Android (Dev)',
+                      subtitle: 'Test all print methods on Android',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const PrinterTestScreen()),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.space8),
+                    _buildNavCard(
+                      context,
+                      icon: Icons.bug_report_outlined,
+                      iconColor: const Color(0xFF0078D4),
+                      title: 'Printer Test Windows (Dev)',
+                      subtitle: 'Test all print methods on Windows',
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const PrinterTestWindowsScreen()),
+                      ),
+                    ),
+
+                    const SizedBox(height: AppSpacing.space32),
+                    _buildLogoutButton(),
+                    const SizedBox(height: AppSpacing.space32),
+
+                    // App version footer
+                    Center(
+                      child: Text(
+                        'VengurlaTech Billing v1.0',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.textDisabled,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.space16),
                   ],
                 ),
               ),
-              const SizedBox(height: AppSpacing.space24),
-            ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-            // Printer setup
-            _sectionHeader(context, 'Printer'),
-            const SizedBox(height: AppSpacing.space8),
-            AppCard(
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const PrinterSetupScreen()),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.print_outlined,
-                      color: AppColors.primary, size: 20),
-                  const SizedBox(width: AppSpacing.space12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Printer Setup',
-                            style: Theme.of(context).textTheme.titleMedium),
-                        Text('Configure thermal printer',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: AppColors.textSecondary)),
-                      ],
+  Widget _buildProfileCard(
+      BuildContext context, dynamic session, bool isOwner) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: AppColors.primaryGradient,
+        borderRadius: BorderRadius.circular(AppRadius.large),
+        boxShadow: AppShadow.primary,
+      ),
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.3),
+                      width: 2),
+                ),
+                child: Center(
+                  child: Text(
+                    session.userName.isNotEmpty
+                        ? session.userName[0].toUpperCase()
+                        : '?',
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
                     ),
                   ),
-                  const Icon(Icons.chevron_right_outlined,
-                      color: AppColors.textSecondary, size: 20),
-                ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.space16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      session.userName,
+                      style: const TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(100),
+                      ),
+                      child: Text(
+                        session.userRole.toUpperCase(),
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white.withValues(alpha: 0.9),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.space16),
+          Container(
+            height: 1,
+            color: Colors.white.withValues(alpha: 0.2),
+          ),
+          const SizedBox(height: AppSpacing.space16),
+          Row(
+            children: [
+              const Icon(Icons.storefront_outlined,
+                  size: 16, color: Colors.white70),
+              const SizedBox(width: AppSpacing.space8),
+              Expanded(
+                child: Text(
+                  session.businessName,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6.0),
+          Row(
+            children: [
+              const Icon(Icons.category_outlined,
+                  size: 16, color: Colors.white70),
+              const SizedBox(width: AppSpacing.space8),
+              Text(
+                _formatType(session.businessType),
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 13,
+                  color: Colors.white.withValues(alpha: 0.8),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavCard(
+    BuildContext context, {
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return AppCard(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(AppRadius.small),
+            ),
+            child: Icon(icon, size: 20, color: iconColor),
+          ),
+          const SizedBox(width: AppSpacing.space16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: Theme.of(context).textTheme.titleMedium),
+                Text(subtitle,
+                    style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant,
+              borderRadius: BorderRadius.circular(AppRadius.small),
+            ),
+            child: const Icon(Icons.chevron_right_outlined,
+                size: 18, color: AppColors.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLogoutButton() {
+    return GestureDetector(
+      onTap: _logout,
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          color: AppColors.errorLight,
+          borderRadius: BorderRadius.circular(AppRadius.medium),
+          border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.logout_outlined,
+                size: 18, color: AppColors.error),
+            const SizedBox(width: AppSpacing.space8),
+            const Text(
+              'Logout',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.error,
               ),
             ),
-            const SizedBox(height: AppSpacing.space48),
-
-            DestructiveButton(text: 'Logout', onPressed: logout),
-            const SizedBox(height: AppSpacing.space32),
           ],
         ),
       ),
     );
   }
 
-  Widget _sectionHeader(BuildContext context, String title) {
+  Widget _sectionLabel(BuildContext context, String label) {
     return Text(
-      title,
-      style: Theme.of(context)
-          .textTheme
-          .labelLarge
-          ?.copyWith(color: AppColors.textSecondary, letterSpacing: 0.8),
-    );
-  }
-
-  Widget _infoRow(BuildContext context, String label, String value) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 80,
-          child: Text(label,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: AppColors.textSecondary)),
-        ),
-        Expanded(
-          child: Text(value, style: Theme.of(context).textTheme.bodyMedium),
-        ),
-      ],
+      label,
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.textSecondary,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.0,
+          ),
     );
   }
 
@@ -195,3 +433,4 @@ class SettingsScreen extends ConsumerWidget {
     };
   }
 }
+

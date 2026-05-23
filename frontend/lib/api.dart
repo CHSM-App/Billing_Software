@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'http://192.168.1.10:3000/api';
+const String baseUrl = 'http://192.168.1.6:3000/api';
 
 // ---------------------------------------------------------------------------
 // Connectivity notifier reference — set once from main.dart after ProviderScope
@@ -367,6 +367,100 @@ Future<void> voidBill(String id) async {
 Future<Map<String, dynamic>> getTodayReport() async {
   final response = await _get(Uri.parse('$baseUrl/reports/today'), headers: await _authHeaders());
   return _parse(response);
+}
+
+Future<Map<String, dynamic>> getReportSummary({required String from, required String to}) async {
+  final uri = Uri.parse('$baseUrl/reports/summary')
+      .replace(queryParameters: {'from': from, 'to': to});
+  final response = await _get(uri, headers: await _authHeaders());
+  return _parse(response);
+}
+
+// ---------------------------------------------------------------------------
+// Expenses
+// ---------------------------------------------------------------------------
+
+Future<List<dynamic>> getExpenses({String? from, String? to, String? category}) async {
+  final params = <String, String>{};
+  if (from != null) params['from'] = from;
+  if (to != null) params['to'] = to;
+  if (category != null) params['category'] = category;
+  final uri = Uri.parse('$baseUrl/expenses')
+      .replace(queryParameters: params.isEmpty ? null : params);
+  final response = await _get(uri, headers: await _authHeaders());
+  return _parse(response);
+}
+
+Future<Map<String, dynamic>> createExpense(Map<String, dynamic> data) async {
+  final response = await _post(
+    Uri.parse('$baseUrl/expenses'),
+    headers: await _authHeaders(),
+    body: jsonEncode(data),
+  );
+  return _parse(response);
+}
+
+Future<Map<String, dynamic>> updateExpense(String id, Map<String, dynamic> data) async {
+  final response = await _put(
+    Uri.parse('$baseUrl/expenses/$id'),
+    headers: await _authHeaders(),
+    body: jsonEncode(data),
+  );
+  return _parse(response);
+}
+
+Future<void> deleteExpense(String id) async {
+  final response = await _delete(
+    Uri.parse('$baseUrl/expenses/$id'),
+    headers: await _authHeaders(),
+  );
+  _parse(response);
+}
+
+// ---------------------------------------------------------------------------
+// Recurring Expenses
+// ---------------------------------------------------------------------------
+
+Future<List<dynamic>> getRecurringExpenses() async {
+  final response = await _get(
+    Uri.parse('$baseUrl/expenses/recurring'),
+    headers: await _authHeaders(),
+  );
+  return _parse(response);
+}
+
+Future<Map<String, dynamic>> createRecurringExpense(Map<String, dynamic> data) async {
+  final response = await _post(
+    Uri.parse('$baseUrl/expenses/recurring'),
+    headers: await _authHeaders(),
+    body: jsonEncode(data),
+  );
+  return _parse(response);
+}
+
+Future<Map<String, dynamic>> updateRecurringExpense(String id, Map<String, dynamic> data) async {
+  final response = await _put(
+    Uri.parse('$baseUrl/expenses/recurring/$id'),
+    headers: await _authHeaders(),
+    body: jsonEncode(data),
+  );
+  return _parse(response);
+}
+
+Future<void> deleteRecurringExpense(String id) async {
+  final response = await _delete(
+    Uri.parse('$baseUrl/expenses/recurring/$id'),
+    headers: await _authHeaders(),
+  );
+  _parse(response);
+}
+
+Future<List<String>> getExpenseCategories() async {
+  final response = await _get(
+    Uri.parse('$baseUrl/expenses/categories'),
+    headers: await _authHeaders(),
+  );
+  return List<String>.from(_parse(response));
 }
 
 // ---------------------------------------------------------------------------

@@ -33,17 +33,21 @@ async function run() {
     for (const statement of statements) {
       // Skip pure comment lines
       if (statement.replace(/--.*$/gm, '').trim().length === 0) continue;
-      await pool.request().query(statement);
+      try {
+        await pool.request().query(statement);
+      } catch (err) {
+        if (err.message && err.message.includes('There is already an object named')) {
+          // Table already exists — skip
+        } else {
+          throw err;
+        }
+      }
     }
 
-    console.log('Schema created successfully.');
+    console.log('Schema applied successfully.');
   } catch (err) {
-    if (err.message && err.message.includes('There is already an object named')) {
-      console.log('Tables already exist — schema is up to date.');
-    } else {
-      console.error('Error:', err.message);
-      process.exit(1);
-    }
+    console.error('Error:', err.message);
+    process.exit(1);
   } finally {
     if (pool) await pool.close();
   }

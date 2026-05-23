@@ -10,6 +10,7 @@ import 'items_screen.dart';
 import 'tables_screen.dart';
 import 'history_screen.dart';
 import 'reports_screen.dart';
+import 'expenses_screen.dart';
 import 'settings_screen.dart';
 
 class MainShell extends ConsumerStatefulWidget {
@@ -20,13 +21,29 @@ class MainShell extends ConsumerStatefulWidget {
   ConsumerState<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends ConsumerState<MainShell> {
+class _MainShellState extends ConsumerState<MainShell>
+    with SingleTickerProviderStateMixin {
   int _index = 0;
+  late final AnimationController _railAnimController;
+  late final Animation<double> _railFadeAnim;
 
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
+    _railAnimController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    _railFadeAnim = CurvedAnimation(
+        parent: _railAnimController, curve: Curves.easeOut);
+    _railAnimController.forward();
+  }
+
+  @override
+  void dispose() {
+    _railAnimController.dispose();
+    super.dispose();
   }
 
   List<NavItem> _buildNavItems(String userRole, String businessType) {
@@ -44,9 +61,17 @@ class _MainShellState extends ConsumerState<MainShell> {
       if (userRole == 'owner')
         const NavItem(Icons.bar_chart_outlined, Icons.bar_chart, 'Reports',
             ReportsScreen()),
+      if (userRole == 'owner')
+        const NavItem(Icons.account_balance_wallet_outlined,
+            Icons.account_balance_wallet, 'Expenses', ExpensesScreen()),
       const NavItem(
           Icons.settings_outlined, Icons.settings, 'Settings', SettingsScreen()),
     ];
+  }
+
+  void _onNav(int i) {
+    if (i == _index) return;
+    setState(() => _index = i);
   }
 
   @override
@@ -54,12 +79,11 @@ class _MainShellState extends ConsumerState<MainShell> {
     final sessionAsync = ref.watch(sessionProvider);
 
     return sessionAsync.when(
-      loading: () =>
-          const Scaffold(body: Center(child: CircularProgressIndicator())),
-      error: (_, __) =>
-          const Scaffold(body: Center(child: CircularProgressIndicator())),
+      loading: () => const Scaffold(
+          body: Center(child: CircularProgressIndicator())),
+      error: (_, __) => const Scaffold(
+          body: Center(child: CircularProgressIndicator())),
       data: (session) {
-        // Auto-sync when connectivity is restored
         ref.listen<bool>(connectivityProvider, (prev, next) {
           if (prev == false && next == true) {
             SyncService.instance.syncAll().then((_) {
@@ -77,7 +101,11 @@ class _MainShellState extends ConsumerState<MainShell> {
         return Scaffold(
           body: Row(
             children: [
-              if (isWide) _buildRail(items, safeIndex),
+              if (isWide)
+                FadeTransition(
+                  opacity: _railFadeAnim,
+                  child: _buildRail(items, safeIndex),
+                ),
               Expanded(
                 child: IndexedStack(
                   index: safeIndex,
@@ -88,37 +116,75 @@ class _MainShellState extends ConsumerState<MainShell> {
           ),
           bottomNavigationBar: isWide
               ? null
-              : AppBottomNavBar(
-                  items: items,
-                  selectedIndex: safeIndex,
-                  onDestinationSelected: (i) => setState(() => _index = i),
-                ),
+              : _buildBottomNav(items, safeIndex),
         );
       },
     );
   }
 
   Widget _buildRail(List<NavItem> items, int selectedIndex) {
-    return NavigationRail(
-      selectedIndex: selectedIndex,
-      onDestinationSelected: (i) => setState(() => _index = i),
-      backgroundColor: AppColors.surface,
-      indicatorColor: AppColors.primaryLight,
-      selectedIconTheme: const IconThemeData(color: AppColors.primary),
-      unselectedIconTheme:
-          const IconThemeData(color: AppColors.textSecondary),
-      selectedLabelTextStyle: const TextStyle(
-          color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w600),
-      unselectedLabelTextStyle:
-          const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-      labelType: NavigationRailLabelType.all,
-      destinations: items
-          .map((item) => NavigationRailDestination(
-                icon: Icon(item.iconOutlined),
-                selectedIcon: Icon(item.iconFilled),
-                label: Text(item.label),
-              ))
-          .toList(),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: const Border(right: BorderSide(color: AppColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.textPrimary.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(2, 0),
+          ),
+        ],
+      ),
+      child: NavigationRail(
+        selectedIndex: selectedIndex,
+        onDestinationSelected: _onNav,
+        backgroundColor: Colors.transparent,
+        indicatorColor: AppColors.primaryLight,
+        selectedIconTheme:
+            const IconThemeData(color: AppColors.primary, size: 22),
+        unselectedIconTheme:
+            const IconThemeData(color: AppColors.textSecondary, size: 22),
+        selectedLabelTextStyle: const TextStyle(
+            color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w700),
+        unselectedLabelTextStyle: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w500),
+        labelType: NavigationRailLabelType.all,
+        minWidth: 72,
+        leading: const SizedBox(height: AppSpacing.space8),
+        destinations: items.map((item) {
+          return NavigationRailDestination(
+            icon: Icon(item.iconOutlined),
+            selectedIcon: Icon(item.iconFilled),
+            label: Text(item.label),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildBottomNav(List<NavItem> items, int safeIndex) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.textPrimary.withValues(alpha: 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: AppBottomNavBar(
+          items: items,
+          selectedIndex: safeIndex,
+          onDestinationSelected: _onNav,
+        ),
+      ),
     );
   }
 }

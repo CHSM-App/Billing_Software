@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:barcode_widget/barcode_widget.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../api.dart';
+import '../services/printer_service.dart';
 
 class ItemsScreen extends ConsumerStatefulWidget {
   const ItemsScreen({super.key});
@@ -32,6 +34,40 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final q = _searchController.text.toLowerCase().trim();
     if (q.isEmpty) return items;
     return items.where((i) => i.name.toLowerCase().contains(q)).toList();
+  }
+
+  void _showBarcodePrint(Item item) {
+    showDialog(
+      context: context,
+      builder: (_) => _BarcodePrintDialog(
+        item: item,
+        onBarcodeGenerated: (newBarcode) async {
+          await ref
+              .read(itemsProvider.notifier)
+              .updateItem(item.id, {'barcode': newBarcode});
+        },
+      ),
+    );
+  }
+
+  void _showStockPopup(Item item) {
+    final inventoryEnabled = ref.read(inventoryEnabledProvider);
+    showDialog(
+      context: context,
+      builder: (_) => _StockPopupDialog(
+        item: item,
+        inventoryEnabled: inventoryEnabled,
+        onStockUpdated: (newStock) async {
+          await ref
+              .read(itemsProvider.notifier)
+              .updateItem(item.id, {'stock_quantity': newStock});
+        },
+        onEditTapped: () {
+          Navigator.pop(context);
+          _showItemForm(item: item);
+        },
+      ),
+    );
   }
 
   void _showItemForm({Item? item}) {
@@ -149,84 +185,352 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           );
         }
 
+        final isWide = MediaQuery.of(context).size.width >= 720;
         return RefreshIndicator(
           onRefresh: () async {
             ref.invalidate(itemsProvider);
             await ref.read(itemsProvider.future);
           },
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpacing.space16, 0, AppSpacing.space16, AppSpacing.space32),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.space8),
-            itemBuilder: (_, i) {
-              final item = items[i];
-              return AppCard(
-                onTap: userRole == 'owner' ? () => _showItemForm(item: item) : null,
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(item.name,
-                              style: Theme.of(context).textTheme.titleMedium),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              if (item.category != null)
-                                Text(item.category!,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(color: AppColors.textSecondary)),
-                              if (item.category != null && item.taxRate != null)
-                                Text('  ·  ',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(color: AppColors.textDisabled)),
-                              if (item.taxRate != null)
-                                Text('${item.taxRate!.toStringAsFixed(0)}% tax',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(color: AppColors.textSecondary)),
-                            ],
-                          ),
-                          if (inventoryEnabled && item.stockQuantity != null)
-                            Text(
-                                'Stock: ${item.stockQuantity!.toStringAsFixed(0)}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: AppColors.textSecondary)),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      '₹${item.price.toStringAsFixed(2)}',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyLarge
-                          ?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    if (userRole == 'owner') ...[
-                      const SizedBox(width: AppSpacing.space8),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline,
-                            color: AppColors.error, size: 20),
-                        onPressed: () => _deleteItem(item),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            },
-          ),
+          child: isWide
+              ? _buildGrid(items, userRole, inventoryEnabled, crossAxisCount: 3)
+              : _buildList(items, userRole, inventoryEnabled),
         );
       },
+    );
+  }
+
+  Widget _buildList(List<Item> items, String userRole, bool inventoryEnabled) {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 1,
+        crossAxisSpacing: AppSpacing.space8,
+        mainAxisSpacing: 8,
+        mainAxisExtent: 62,
+      ),
+      itemCount: items.length,
+      itemBuilder: (_, i) =>
+          _buildItemCard(items[i], userRole, inventoryEnabled),
+    );
+  }
+
+  Widget _buildGrid(List<Item> items, String userRole, bool inventoryEnabled,
+      {int crossAxisCount = 3}) {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: AppSpacing.space8,
+        mainAxisSpacing: 8,
+        mainAxisExtent: 62,
+      ),
+      itemCount: items.length,
+      itemBuilder: (_, i) =>
+          _buildItemCard(items[i], userRole, inventoryEnabled),
+    );
+  }
+
+  Widget _buildItemCard(Item item, String userRole, bool inventoryEnabled) {
+    final subtitle = [
+      if (item.category != null) item.category!,
+      if (inventoryEnabled && item.stockQuantity != null)
+        'Stock: ${item.stockQuantity!.toStringAsFixed(0)}',
+    ].join('  ·  ');
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        child: InkWell(
+          onTap: () => _showStockPopup(item),
+          borderRadius: BorderRadius.circular(AppRadius.medium),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                // Color dot
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.border,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Name + subtitle
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (subtitle.isNotEmpty)
+                        Text(
+                          subtitle,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
+                // Price
+                Text(
+                  '₹${item.price.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.space8),
+                // Actions
+                InkWell(
+                  onTap: () => _showBarcodePrint(item),
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(
+                      Icons.qr_code_outlined,
+                      size: 16,
+                      color: item.barcode != null
+                          ? AppColors.accent
+                          : AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                if (userRole == 'owner') ...[
+                  const SizedBox(width: 2),
+                  InkWell(
+                    onTap: () => _deleteItem(item),
+                    borderRadius: BorderRadius.circular(4),
+                    child: const Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(Icons.delete_outline,
+                          size: 16, color: AppColors.error),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stock quick-update popup — tap item to update stock, Edit button for full edit
+// ---------------------------------------------------------------------------
+class _StockPopupDialog extends StatefulWidget {
+  final Item item;
+  final bool inventoryEnabled;
+  final Future<void> Function(double stock) onStockUpdated;
+  final VoidCallback onEditTapped;
+
+  const _StockPopupDialog({
+    required this.item,
+    required this.inventoryEnabled,
+    required this.onStockUpdated,
+    required this.onEditTapped,
+  });
+
+  @override
+  State<_StockPopupDialog> createState() => _StockPopupDialogState();
+}
+
+class _StockPopupDialogState extends State<_StockPopupDialog> {
+  late final TextEditingController _addCtrl;
+  bool _saving = false;
+
+  double get _current => widget.item.stockQuantity ?? 0;
+  double get _adding => double.tryParse(_addCtrl.text.trim()) ?? 0;
+  double get _total => _current + _adding;
+
+  @override
+  void initState() {
+    super.initState();
+    _addCtrl = TextEditingController();
+    _addCtrl.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _addCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_adding <= 0) return;
+    setState(() => _saving = true);
+    try {
+      await widget.onStockUpdated(_total);
+      if (mounted) Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    final hasInput = _adding > 0;
+
+    return AlertDialog(
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 8, 0),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(item.name,
+                style: Theme.of(context).textTheme.titleMedium,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
+          ),
+          IconButton(
+            tooltip: 'Edit item',
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: widget.onEditTapped,
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 280,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Item details row
+            Row(
+              children: [
+                Text('₹${item.price.toStringAsFixed(2)}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                        )),
+                if (item.category != null) ...[
+                  const SizedBox(width: 8),
+                  Text('·', style: const TextStyle(color: AppColors.textSecondary)),
+                  const SizedBox(width: 8),
+                  Text(item.category!,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.textSecondary)),
+                ],
+              ],
+            ),
+            if (widget.inventoryEnabled) ...[
+              const SizedBox(height: 20),
+              // Current stock display
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Current stock',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.textSecondary,
+                          )),
+                  Text(
+                    _current.toStringAsFixed(0),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                label: 'Add quantity',
+                controller: _addCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              // Total stock preview
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: hasInput
+                      ? AppColors.primaryLight
+                      : AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(AppRadius.small),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total after adding',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: hasInput
+                                  ? AppColors.primaryDark
+                                  : AppColors.textSecondary,
+                              fontWeight: FontWeight.w500,
+                            )),
+                    Text(
+                      _total.toStringAsFixed(0),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: hasInput
+                                ? AppColors.primary
+                                : AppColors.textSecondary,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              Text('Inventory tracking is disabled.',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.textSecondary)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel')),
+        if (widget.inventoryEnabled)
+          ElevatedButton(
+            onPressed: (_saving || !hasInput) ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Text('Update'),
+          ),
+      ],
     );
   }
 }
@@ -390,6 +694,198 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : Text(widget.item == null ? 'Add' : 'Save'),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Barcode print dialog — generates a barcode for items that don't have one,
+// shows a preview, and sends the label to the thermal printer via TSPL.
+// ---------------------------------------------------------------------------
+
+class _BarcodePrintDialog extends StatefulWidget {
+  final Item item;
+  final Future<void> Function(String barcode) onBarcodeGenerated;
+
+  const _BarcodePrintDialog({
+    required this.item,
+    required this.onBarcodeGenerated,
+  });
+
+  @override
+  State<_BarcodePrintDialog> createState() => _BarcodePrintDialogState();
+}
+
+class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
+  late String _barcodeValue;
+  late final TextEditingController _barcodeCtrl;
+  final _copiesCtrl = TextEditingController(text: '1');
+  bool _printing = false;
+  bool _saved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Use existing barcode or auto-generate one from the item id
+    _barcodeValue = widget.item.barcode ?? _generateBarcode(widget.item.id);
+    _barcodeCtrl = TextEditingController(text: _barcodeValue);
+    _barcodeCtrl.addListener(() {
+      final v = _barcodeCtrl.text.trim();
+      if (v.isNotEmpty && v != _barcodeValue) {
+        setState(() => _barcodeValue = v);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _barcodeCtrl.dispose();
+    _copiesCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Generate a numeric barcode from the item's UUID (12 digits, EAN-13 compatible)
+  static String _generateBarcode(String id) {
+    // Take first 12 hex chars of the id and convert to digits
+    final hex = id.replaceAll('-', '');
+    final digits = hex.substring(0, 12).split('').map((c) {
+      final code = c.codeUnitAt(0);
+      // 0-9 → same digit; a-f → 0-5
+      return code >= 48 && code <= 57 ? c : (code - 97).toString();
+    }).join();
+    return digits.padLeft(12, '0');
+  }
+
+  Future<void> _print() async {
+    final copies = int.tryParse(_copiesCtrl.text.trim()) ?? 1;
+    if (copies < 1) return;
+
+    setState(() => _printing = true);
+    try {
+      // If item had no barcode, save the generated one first
+      if (widget.item.barcode == null && !_saved) {
+        await widget.onBarcodeGenerated(_barcodeValue);
+        _saved = true;
+      }
+      await PrinterService.instance.printBarcodeLabel(
+        barcodeValue: _barcodeValue,
+        itemName: widget.item.name,
+        price: widget.item.price,
+        copies: copies,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Barcode label sent to printer')),
+        );
+        Navigator.pop(context);
+      }
+    } on PrinterException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(e.message), backgroundColor: AppColors.error),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(e.toString()), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isNew = widget.item.barcode == null;
+    return AlertDialog(
+      title: Text(isNew ? 'Generate & Print Barcode' : 'Print Barcode'),
+      content: SizedBox(
+        width: 360,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (isNew)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'This item has no barcode. A barcode has been generated. '
+                    'You can edit it before printing.',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: AppColors.textSecondary),
+                  ),
+                ),
+              // Barcode preview
+              Center(
+                child: BarcodeWidget(
+                  barcode: Barcode.code128(),
+                  data: _barcodeValue.isEmpty ? '000000000000' : _barcodeValue,
+                  width: 280,
+                  height: 80,
+                  drawText: true,
+                  style: const TextStyle(fontSize: 11),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Center(
+                child: Text(
+                  widget.item.name,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              Center(
+                child: Text(
+                  '₹${widget.item.price.toStringAsFixed(2)}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: AppColors.textSecondary),
+                ),
+              ),
+              const SizedBox(height: 16),
+              AppTextField(
+                label: 'Barcode value',
+                controller: _barcodeCtrl,
+                keyboardType: TextInputType.text,
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                label: 'Copies',
+                controller: _copiesCtrl,
+                keyboardType: TextInputType.number,
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel')),
+        ElevatedButton.icon(
+          onPressed: _printing ? null : _print,
+          icon: _printing
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child:
+                      CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.print_outlined, size: 18),
+          label: const Text('Print'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+          ),
         ),
       ],
     );

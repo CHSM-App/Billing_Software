@@ -156,6 +156,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               final bill = bills[i];
               return AppCard(
                 onTap: () => _showBillDetail(bill),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.space16, vertical: AppSpacing.space8),
                 child: Row(
                   children: [
                     Expanded(

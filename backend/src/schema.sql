@@ -72,3 +72,25 @@ CREATE TABLE bill_items (
     tax_rate    DECIMAL(5,2)     NULL,
     line_total  DECIMAL(10,2)    NOT NULL
 );
+
+CREATE TABLE recurring_expenses (
+    id           UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    business_id  UNIQUEIDENTIFIER NOT NULL,
+    category     NVARCHAR(100)    NOT NULL,
+    description  NVARCHAR(500)    NULL,
+    amount       DECIMAL(10,2)    NOT NULL,
+    payment_mode NVARCHAR(20)     NOT NULL DEFAULT 'cash',
+    created_at   DATETIME2        NOT NULL DEFAULT GETUTCDATE()
+);
+
+CREATE TABLE expenses (
+    id                  UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    business_id         UNIQUEIDENTIFIER NOT NULL,
+    category            NVARCHAR(100)    NOT NULL, -- e.g. 'Rent', 'Salary', 'Utilities', 'Stock Purchase', 'Other'
+    description         NVARCHAR(500)    NULL,
+    amount              DECIMAL(10,2)    NOT NULL,
+    payment_mode        NVARCHAR(20)     NOT NULL DEFAULT 'cash', -- 'cash', 'upi', 'card', 'other'
+    expense_date        DATE             NOT NULL DEFAULT CAST(GETUTCDATE() AS DATE),
+    created_by_user_id  UNIQUEIDENTIFIER NOT NULL,
+    created_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE()
+);
