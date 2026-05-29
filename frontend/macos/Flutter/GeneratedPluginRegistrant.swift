@@ -5,6 +5,7 @@
 import FlutterMacOS
 import Foundation
 
+import flutter_secure_storage_macos
 import flutter_thermal_printer
 import print_bluetooth_thermal
 import shared_preferences_foundation
@@ -12,6 +13,7 @@ import sqflite_darwin
 import universal_ble
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
+  FlutterSecureStoragePlugin.register(with: registry.registrar(forPlugin: "FlutterSecureStoragePlugin"))
   FlutterThermalPrinterPlugin.register(with: registry.registrar(forPlugin: "FlutterThermalPrinterPlugin"))
   PrintBluetoothThermalPlugin.register(with: registry.registrar(forPlugin: "PrintBluetoothThermalPlugin"))
   SharedPreferencesPlugin.register(with: registry.registrar(forPlugin: "SharedPreferencesPlugin"))

@@ -54,17 +54,25 @@ class _SplashState extends ConsumerState<_Splash> {
 
     final ok = await checkHealth();
 
+    // Retry reading the session up to 3 times — SharedPreferences can return
+    // empty on the first read after a cold boot or system-level app kill.
     bool hasSession = false;
-    try {
-      await ref.read(sessionProvider.future);
-      hasSession = true;
-    } catch (_) {
-      hasSession = false;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        await ref.read(sessionProvider.future);
+        hasSession = true;
+        break;
+      } catch (_) {
+        if (attempt < 2) {
+          await Future.delayed(const Duration(milliseconds: 300));
+          // Invalidate so the next read re-fetches from SharedPreferences.
+          ref.invalidate(sessionProvider);
+        }
+      }
     }
 
     if (!mounted) return;
 
-    // If no session at all, must go to login (can't do anything without auth)
     if (!hasSession) {
       Navigator.pushReplacement(
         context,

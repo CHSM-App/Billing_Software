@@ -118,11 +118,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           await ref.read(billsProvider.future);
         },
         child: ListView(children: [
-          EmptyState(
-            icon: Icons.wifi_off_outlined,
-            message: e.toString(),
-            actionLabel: 'Retry',
-            onAction: () => ref.invalidate(billsProvider),
+          AppErrorWidget(
+            error: e,
+            onRetry: () => ref.invalidate(billsProvider),
           ),
         ]),
       ),

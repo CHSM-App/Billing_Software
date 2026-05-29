@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
+const logger = require('../logger');
 
 const router = express.Router();
 
@@ -53,7 +54,7 @@ router.get('/', requireAuth, ownerOnly, async (req, res) => {
       created_by_name: row.created_by_name,
     })));
   } catch (err) {
-    console.error('Get expenses error:', err.message);
+    logger.error({ err }, 'Get expenses error');
     return res.status(500).json({ error: 'Failed to fetch expenses' });
   }
 });
@@ -97,7 +98,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       created_at: row.created_at,
     });
   } catch (err) {
-    console.error('Create expense error:', err);
+    logger.error({ err }, 'Create expense error');
     return res.status(500).json({ error: err.message || 'Failed to create expense' });
   }
 });
@@ -143,7 +144,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       created_at: row.created_at,
     });
   } catch (err) {
-    console.error('Update expense error:', err.message);
+    logger.error({ err }, 'Update expense error');
     return res.status(500).json({ error: 'Failed to update expense' });
   }
 });
@@ -162,7 +163,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
     }
     return res.json({ ok: true });
   } catch (err) {
-    console.error('Delete expense error:', err.message);
+    logger.error({ err }, 'Delete expense error');
     return res.status(500).json({ error: 'Failed to delete expense' });
   }
 });

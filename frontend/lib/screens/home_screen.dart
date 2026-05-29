@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'dart:io' show Platform;
+
 import '../api.dart';
 import '../models/models.dart';
 import '../models/cart_entry.dart';
@@ -24,9 +24,13 @@ class HomeScreen extends ConsumerStatefulWidget {
   final String? tableId;
   final String? tableNumber;
   final String? activeBillId;
+  /// Called instead of [Navigator.pop] when a bill is finalized or saved in
+  /// split-view mode. When null the default pop behaviour is used.
+  final VoidCallback? onBillDone;
 
   const HomeScreen(
-      {super.key, this.tableId, this.tableNumber, this.activeBillId});
+      {super.key, this.tableId, this.tableNumber, this.activeBillId,
+      this.onBillDone});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -82,13 +86,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _globalKeyHandler(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     final hasBarcodeScanner = ref.read(hasBarcodeProvider);
-    bool isBarcodeActive;
-    try {
-      isBarcodeActive = Platform.isWindows && hasBarcodeScanner;
-    } catch (_) {
-      isBarcodeActive = false;
-    }
-    if (!isBarcodeActive) return false;
+    if (!hasBarcodeScanner) return false;
 
     final primaryFocus = FocusManager.instance.primaryFocus;
     if (primaryFocus?.context != null) {
@@ -231,7 +229,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
       if (!mounted) return;
       _showSnack('Items saved. Table is now occupied.');
-      Navigator.pop(context);
+      if (widget.onBillDone != null) {
+        widget.onBillDone!();
+      } else {
+        Navigator.pop(context);
+      }
     } on ApiException catch (e) {
       _showSnack(e.message, isError: true);
     } catch (_) {
@@ -322,7 +324,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }).toList();
       final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
 
-      final localId = await OfflineService.instance.queueOfflineBill({
+      final queued = await OfflineService.instance.queueOfflineBill({
         'business_id': businessId,
         'user_id': userId,
         'table_id': widget.tableId,
@@ -335,6 +337,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'items_json': jsonEncode(lineItems),
         'created_at': DateTime.now().millisecondsSinceEpoch,
       });
+      final localId = queued.localId;
 
       final fakeBill = Bill(
         id: localId,
@@ -504,7 +507,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         text: 'Close',
                         onPressed: () {
                           Navigator.pop(context);
-                          if (widget.tableId != null) Navigator.pop(context);
+                          if (widget.tableId != null) {
+                            if (widget.onBillDone != null) {
+                              widget.onBillDone!();
+                            } else {
+                              Navigator.pop(context);
+                            }
+                          }
                         },
                       ),
                     ),
@@ -728,6 +737,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget _buildItemsPanel() {
     return Column(
       children: [
+        // Stale-cache warning — only shown when offline with outdated data
+        Consumer(builder: (context, ref, _) {
+          final cacheInfo = ref.watch(itemCacheInfoProvider);
+          final isOnline = ref.watch(connectivityProvider);
+          if (isOnline || !cacheInfo.isStale) return const SizedBox.shrink();
+
+          final isVeryStale =
+              cacheInfo.status == CacheStatus.veryStale;
+          return _StaleCacheBanner(
+            ageLabel: cacheInfo.ageLabel,
+            isVeryStale: isVeryStale,
+            onRefresh: () => ref.invalidate(itemsProvider),
+          );
+        }),
         Padding(
           padding: const EdgeInsets.fromLTRB(AppSpacing.space12,
               AppSpacing.space12, AppSpacing.space12, AppSpacing.space8),
@@ -1030,6 +1053,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ),
               ),
+            // Header — always visible
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                   AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
@@ -1063,6 +1087,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ],
               ),
             ),
+
+            // Scrollable cart items — takes all available space
             if (cart.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(
@@ -1089,9 +1115,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ],
                 ),
               )
+            else if (inSheet)
+              // In bottom sheet: not constrained, just list
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: cart.map((e) => _buildCartRow(e)).toList(),
+              )
             else
-              ...cart.map((e) => _buildCartRow(e)),
+              // In wide layout: scrollable list that takes remaining space
+              Expanded(
+                child: ListView(
+                  children: cart.map((e) => _buildCartRow(e)).toList(),
+                ),
+              ),
 
+            // Totals box — pinned below the list
             if (cart.isNotEmpty) ...[
               const Divider(height: 1),
               Container(
@@ -1438,6 +1476,70 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 // }
 
 // ---------------------------------------------------------------------------
+// Stale-cache banner — shown when offline with outdated item prices
+// ---------------------------------------------------------------------------
+
+class _StaleCacheBanner extends StatelessWidget {
+  final String? ageLabel;
+  final bool isVeryStale;
+  final VoidCallback onRefresh;
+
+  const _StaleCacheBanner({
+    required this.ageLabel,
+    required this.isVeryStale,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isVeryStale ? AppColors.error : AppColors.warning;
+    final bg = isVeryStale ? AppColors.errorLight : AppColors.warningLight;
+    final icon =
+        isVeryStale ? Icons.error_outline : Icons.warning_amber_rounded;
+    final label = ageLabel != null ? 'Prices from $ageLabel' : 'Stale prices';
+    final detail = isVeryStale
+        ? 'Very old cache — prices may be inaccurate'
+        : 'Connect to refresh pricing';
+
+    return Container(
+      width: double.infinity,
+      color: bg,
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.space12, vertical: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: AppSpacing.space8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+                Text(
+                  detail,
+                  style: TextStyle(fontSize: 11, color: color),
+                ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: onRefresh,
+            child: Icon(Icons.refresh, size: 18, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // NEW: Excel-style table — one item per row, minimal height
 // ---------------------------------------------------------------------------
 
@@ -1458,71 +1560,150 @@ class _ExcelItemTable extends StatelessWidget {
     required this.onSetQty,
   });
 
+  Widget _header() => Container(
+        height: 28,
+        color: AppColors.surfaceVariant,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            const SizedBox(width: 24),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Item',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  )),
+            ),
+            SizedBox(
+              width: 72,
+              child: Text('Price',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  )),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 112,
+              child: Text('Qty',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  )),
+            ),
+          ],
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
+    // Two item columns only on large screens (≥1200px total) where the
+    // items panel is wide enough to comfortably fit two side-by-side tables.
+    final screenWidth = MediaQuery.of(context).size.width;
+    final twoColumns = screenWidth >= 1200;
+
+    if (!twoColumns) {
+      return Column(
+        children: [
+          _header(),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.only(bottom: 80),
+              itemCount: items.length,
+              separatorBuilder: (_, __) =>
+                  const Divider(height: 1, indent: 12, endIndent: 12),
+              itemBuilder: (_, i) {
+                final item = items[i];
+                final entry =
+                    cart.where((e) => e.item.id == item.id).firstOrNull;
+                final qty = entry?.quantity ?? 0;
+                return _ExcelItemRow(
+                  index: i + 1,
+                  item: item,
+                  qty: qty,
+                  onAdd: () => onAdd(item),
+                  onDecrement: () => onDecrement(item),
+                  onIncrement: () => onIncrement(item),
+                  onSetQty: (v) => onSetQty(item, v),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
+    final rowCount = (items.length / 2).ceil();
+
     return Column(
       children: [
-        // Header row
-        Container(
-          height: 28,
-          color: AppColors.surfaceVariant,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            children: [
-              const SizedBox(width: 24), // # column
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('Item',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary,
-                    )),
-              ),
-              SizedBox(
-                width: 72,
-                child: Text('Price',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary,
-                    )),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 112,
-                child: Text('Qty',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary,
-                    )),
-              ),
-            ],
-          ),
+        Row(
+          children: [
+            Expanded(child: _header()),
+            Container(width: 1, color: AppColors.border),
+            Expanded(child: _header()),
+          ],
         ),
         const Divider(height: 1),
         Expanded(
           child: ListView.separated(
             padding: const EdgeInsets.only(bottom: 80),
-            itemCount: items.length,
+            itemCount: rowCount,
             separatorBuilder: (_, __) =>
                 const Divider(height: 1, indent: 12, endIndent: 12),
-            itemBuilder: (_, i) {
-              final item = items[i];
-              final entry =
-                  cart.where((e) => e.item.id == item.id).firstOrNull;
-              final qty = entry?.quantity ?? 0;
-              return _ExcelItemRow(
-                index: i + 1,
-                item: item,
-                qty: qty,
-                onAdd: () => onAdd(item),
-                onDecrement: () => onDecrement(item),
-                onIncrement: () => onIncrement(item),
-                onSetQty: (v) => onSetQty(item, v),
+            itemBuilder: (_, row) {
+              final leftIndex = row * 2;
+              final rightIndex = leftIndex + 1;
+              final leftItem = items[leftIndex];
+              final rightItem =
+                  rightIndex < items.length ? items[rightIndex] : null;
+
+              return IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _ExcelItemRow(
+                        index: leftIndex + 1,
+                        item: leftItem,
+                        qty: cart
+                                .where((e) => e.item.id == leftItem.id)
+                                .firstOrNull
+                                ?.quantity ??
+                            0,
+                        onAdd: () => onAdd(leftItem),
+                        onDecrement: () => onDecrement(leftItem),
+                        onIncrement: () => onIncrement(leftItem),
+                        onSetQty: (v) => onSetQty(leftItem, v),
+                      ),
+                    ),
+                    Container(width: 1, color: AppColors.border),
+                    Expanded(
+                      child: rightItem == null
+                          ? const SizedBox()
+                          : _ExcelItemRow(
+                              index: rightIndex + 1,
+                              item: rightItem,
+                              qty: cart
+                                      .where((e) => e.item.id == rightItem.id)
+                                      .firstOrNull
+                                      ?.quantity ??
+                                  0,
+                              onAdd: () => onAdd(rightItem),
+                              onDecrement: () => onDecrement(rightItem),
+                              onIncrement: () => onIncrement(rightItem),
+                              onSetQty: (v) => onSetQty(rightItem, v),
+                            ),
+                    ),
+                  ],
+                ),
               );
             },
           ),

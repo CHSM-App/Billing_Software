@@ -7,6 +7,34 @@ import '../models/models.dart';
 import '../services/offline_service.dart';
 import '../storage.dart';
 
+// ---------------------------------------------------------------------------
+// ItemCacheInfo — metadata about the current item cache.
+// Exposed via [itemCacheInfoProvider] so the UI can show staleness banners
+// without coupling to the item list itself.
+// ---------------------------------------------------------------------------
+
+class ItemCacheInfo {
+  /// Freshness status of the currently displayed items.
+  final CacheStatus status;
+
+  /// Human-readable age string, e.g. "3h 12m ago". Null when cache is empty.
+  final String? ageLabel;
+
+  const ItemCacheInfo({required this.status, this.ageLabel});
+
+  bool get isStale =>
+      status == CacheStatus.stale || status == CacheStatus.veryStale;
+  bool get isEmpty => status == CacheStatus.empty;
+}
+
+final itemCacheInfoProvider = StateProvider<ItemCacheInfo>(
+  (_) => const ItemCacheInfo(status: CacheStatus.fresh),
+);
+
+// ---------------------------------------------------------------------------
+// ItemsNotifier
+// ---------------------------------------------------------------------------
+
 class ItemsNotifier extends AsyncNotifier<List<Item>> {
   @override
   Future<List<Item>> build() async {
@@ -16,8 +44,6 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
   Future<List<Item>> _fetch() async {
     final businessId = await getBusinessId();
 
-    // Run both requests independently so ParallelWaitError doesn't hide the
-    // real cause. Fall back gracefully on any network failure.
     List<dynamic>? rawItems;
     List<String> topIds = [];
 
@@ -32,31 +58,48 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     }
 
     if (rawItems != null) {
-      // Online path — also try to fetch top-sold, but don't fail if it errors
+      // Online path — fetch top-sold ranking (non-critical).
       try {
         topIds = await api.getTopSoldItemIds();
-      } catch (_) {
-        // non-critical, continue with empty ranking
-      }
+      } catch (_) {}
 
       final items = rawItems.map((j) => Item.fromJson(j)).toList();
       final sorted = _sorted(items, topIds);
 
-      // Cache for offline use — fire and forget
+      // Write fresh data to cache — fire and forget.
       if (businessId != null) {
         unawaited(OfflineService.instance.replaceItemCache(sorted, businessId));
       }
+
+      // Cache is now fresh — clear any stale banner.
+      ref.read(itemCacheInfoProvider.notifier).state =
+          const ItemCacheInfo(status: CacheStatus.fresh);
+
       return sorted;
     }
 
-    // Offline path — serve from cache silently
+    // ── Offline path ─────────────────────────────────────────────────────────
     return _loadFromCache(businessId);
   }
 
   Future<List<Item>> _loadFromCache(String? businessId) async {
-    if (businessId == null) return [];
-    return OfflineService.instance.getCachedItems(businessId);
-    // Returns empty list if no cache — callers handle empty gracefully
+    if (businessId == null) {
+      ref.read(itemCacheInfoProvider.notifier).state =
+          const ItemCacheInfo(status: CacheStatus.empty);
+      return [];
+    }
+
+    final result =
+        await OfflineService.instance.getCachedItemsWithStatus(businessId);
+    final ageLabel =
+        await OfflineService.instance.getCacheAgeLabel(businessId);
+
+    ref.read(itemCacheInfoProvider.notifier).state = ItemCacheInfo(
+      status: result.status,
+      ageLabel: ageLabel,
+    );
+
+    return result.items;
   }
 
   List<Item> _sorted(List<Item> items, List<String> topIds) {
@@ -102,6 +145,10 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
 
 final itemsProvider =
     AsyncNotifierProvider<ItemsNotifier, List<Item>>(ItemsNotifier.new);
+
+// ---------------------------------------------------------------------------
+// CategoriesNotifier (unchanged)
+// ---------------------------------------------------------------------------
 
 class CategoriesNotifier extends AsyncNotifier<List<String>> {
   @override

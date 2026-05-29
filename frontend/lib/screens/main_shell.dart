@@ -26,7 +26,6 @@ class _MainShellState extends ConsumerState<MainShell>
   int _index = 0;
   late final AnimationController _railAnimController;
   late final Animation<double> _railFadeAnim;
-
   @override
   void initState() {
     super.initState();

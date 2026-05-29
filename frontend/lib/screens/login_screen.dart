@@ -62,7 +62,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           _phoneController.text.trim(), _pinController.text.trim());
       final business = result['business'] as Map<String, dynamic>;
       await saveSession(
-        token: result['token'],
+        accessToken: result['access_token'],
+        refreshToken: result['refresh_token'],
         userId: result['user']['id'],
         userName: result['user']['name'],
         userRole: result['user']['role'],

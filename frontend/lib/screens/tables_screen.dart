@@ -4,7 +4,9 @@ import '../api.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_widgets.dart';
 import 'home_screen.dart';
+import 'split_billing_screen.dart';
 
 class TablesScreen extends ConsumerStatefulWidget {
   const TablesScreen({super.key});
@@ -17,6 +19,10 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   // Track drag offset per table id (purely local UI state)
   final Map<String, Offset> _dragOffsets = {};
 
+  // Split-view mode: when true, first tap selects left table, second tap opens split screen
+  bool _splitMode = false;
+  TableModel? _splitLeft;
+
   Color _tableColor(String status) {
     return switch (status) {
       'occupied' => AppColors.tableOccupied,
@@ -27,18 +33,40 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 
   void _onTableTap(TableModel table) async {
     final userRole = ref.read(userRoleProvider);
-    if (table.status == 'empty') {
+
+    // Split mode: first tap picks left table, second tap opens split screen
+    if (_splitMode) {
+      if (table.status == 'billed') {
+        _showSnack('Cannot use a billed table in split view', isError: true);
+        return;
+      }
+      if (_splitLeft == null) {
+        setState(() => _splitLeft = table);
+        return;
+      }
+      if (_splitLeft!.id == table.id) {
+        // Tapped same table twice — deselect
+        setState(() => _splitLeft = null);
+        return;
+      }
+      final left = _splitLeft!;
+      setState(() { _splitLeft = null; _splitMode = false; });
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => HomeScreen(
-            tableId: table.id,
-            tableNumber: table.tableNumber,
-          ),
+          builder: (_) => SplitBillingScreen(leftTable: left, rightTable: table),
         ),
       );
       ref.invalidate(tablesProvider);
-    } else if (table.status == 'occupied') {
+      return;
+    }
+
+    // Normal mode
+    if (table.status == 'billed') {
+      _showBilledOptions(table, userRole);
+      return;
+    }
+    if (table.status == 'empty' || table.status == 'occupied') {
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -50,8 +78,6 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
         ),
       );
       ref.invalidate(tablesProvider);
-    } else if (table.status == 'billed') {
-      _showBilledOptions(table, userRole);
     }
   }
 
@@ -178,8 +204,29 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tables'),
+        title: _splitMode
+            ? Text(
+                _splitLeft == null
+                    ? 'Tap first table…'
+                    : 'Now tap second table',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(color: AppColors.primary),
+              )
+            : const Text('Tables'),
         actions: [
+          IconButton(
+            icon: Icon(
+              Icons.vertical_split_outlined,
+              color: _splitMode ? AppColors.primary : null,
+            ),
+            tooltip: _splitMode ? 'Cancel split view' : 'Split view',
+            onPressed: () => setState(() {
+              _splitMode = !_splitMode;
+              _splitLeft = null;
+            }),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_outlined),
             onPressed: () => ref.invalidate(tablesProvider),
@@ -196,15 +243,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           },
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.space32),
-                child: Text(e.toString(),
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: AppColors.error)),
-              ),
+            child: AppErrorWidget(
+              error: e,
+              onRetry: () => ref.invalidate(tablesProvider),
             ),
           ),
         ),
@@ -279,13 +320,14 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
             _dragOffsets[table.id] ?? Offset(table.floorX, table.floorY);
         final color = _tableColor(table.status);
 
+        final isSelectedForSplit = _splitLeft?.id == table.id;
         return Positioned(
           left: offset.dx,
           top: offset.dy,
           child: GestureDetector(
             onTap: () => _onTableTap(table),
             onLongPress: userRole == 'owner' ? () => _deleteTable(table) : null,
-            onPanUpdate: userRole == 'owner'
+            onPanUpdate: userRole == 'owner' && !_splitMode
                 ? (details) {
                     setState(() {
                       final current = _dragOffsets[table.id] ??
@@ -294,7 +336,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                     });
                   }
                 : null,
-            onPanEnd: userRole == 'owner'
+            onPanEnd: userRole == 'owner' && !_splitMode
                 ? (_) async {
                     final newOffset = _dragOffsets[table.id];
                     if (newOffset == null) return;
@@ -307,7 +349,11 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                     } catch (_) {}
                   }
                 : null,
-            child: _TableWidget(table: table, color: color),
+            child: _TableWidget(
+              table: table,
+              color: color,
+              isSelectedForSplit: isSelectedForSplit,
+            ),
           ),
         );
       }).toList(),
@@ -318,28 +364,46 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 class _TableWidget extends StatelessWidget {
   final TableModel table;
   final Color color;
+  final bool isSelectedForSplit;
 
-  const _TableWidget({required this.table, required this.color});
+  const _TableWidget({
+    required this.table,
+    required this.color,
+    this.isSelectedForSplit = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final borderColor = isSelectedForSplit ? AppColors.primary : color;
     return Container(
       width: 80,
       height: 80,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        border: Border.all(color: color, width: 2),
+        color: isSelectedForSplit
+            ? AppColors.primaryLight
+            : color.withValues(alpha: 0.15),
+        border: Border.all(
+          color: borderColor,
+          width: isSelectedForSplit ? 3 : 2,
+        ),
         borderRadius: BorderRadius.circular(AppRadius.medium),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          if (isSelectedForSplit)
+            const Icon(Icons.looks_one_rounded,
+                size: 14, color: AppColors.primary),
           Text(
             table.tableNumber,
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color),
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: borderColor,
+            ),
           ),
           const SizedBox(height: 2),
-          Text(table.status, style: TextStyle(fontSize: 10, color: color)),
+          Text(table.status, style: TextStyle(fontSize: 10, color: borderColor)),
         ],
       ),
     );

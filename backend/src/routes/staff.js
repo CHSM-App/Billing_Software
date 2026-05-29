@@ -2,6 +2,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
+const logger = require('../logger');
+const audit = require('../audit');
 
 const router = express.Router();
 
@@ -41,9 +43,16 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
         VALUES (@business_id, @name, @phone, @pin_hash, 'cashier')
       `);
 
-    return res.status(201).json(result.recordset[0]);
+    const created = result.recordset[0];
+
+    audit.logStaffAdded(
+      { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },
+      created,
+    );
+
+    return res.status(201).json(created);
   } catch (err) {
-    console.error('Add staff error:', err.message);
+    logger.error({ err }, 'Add staff error');
     return res.status(500).json({ error: 'Failed to add staff' });
   }
 });
@@ -63,7 +72,7 @@ router.get('/', requireAuth, ownerOnly, async (req, res) => {
 
     return res.json(result.recordset);
   } catch (err) {
-    console.error('Get staff error:', err.message);
+    logger.error({ err }, 'Get staff error');
     return res.status(500).json({ error: 'Failed to fetch staff' });
   }
 });
@@ -72,20 +81,30 @@ router.get('/', requireAuth, ownerOnly, async (req, res) => {
 router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
   try {
     await poolConnect;
-    const result = await pool.request()
+
+    // Fetch before delete to snapshot name/phone for the audit log
+    const snapshot = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query(`
-        DELETE FROM users
-        WHERE id = @id AND business_id = @business_id AND role = 'cashier'
-      `);
+      .query('SELECT id, name, phone FROM users WHERE id = @id AND business_id = @business_id AND role = \'cashier\'');
 
-    if (result.rowsAffected[0] === 0) {
+    if (snapshot.recordset.length === 0) {
       return res.status(404).json({ error: 'Staff member not found' });
     }
+
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query('DELETE FROM users WHERE id = @id AND business_id = @business_id AND role = \'cashier\'');
+
+    audit.logStaffDeleted(
+      { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },
+      snapshot.recordset[0],
+    );
+
     return res.json({ success: true });
   } catch (err) {
-    console.error('Delete staff error:', err.message);
+    logger.error({ err }, 'Delete staff error');
     return res.status(500).json({ error: 'Failed to delete staff' });
   }
 });
@@ -147,9 +166,23 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       WHERE id = @id AND business_id = @business_id AND role = 'cashier'
     `);
 
-    return res.json(result.recordset[0]);
+    const updated = result.recordset[0];
+
+    // Build a changes summary — never log the PIN hash
+    const changes = {};
+    if (name)  changes.name  = name;
+    if (phone) changes.phone = phone;
+    if (pin)   changes.pin_changed = true;
+
+    audit.logStaffUpdated(
+      { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },
+      updated,
+      changes,
+    );
+
+    return res.json(updated);
   } catch (err) {
-    console.error('Update staff error:', err.message);
+    logger.error({ err }, 'Update staff error');
     return res.status(500).json({ error: 'Failed to update staff' });
   }
 });

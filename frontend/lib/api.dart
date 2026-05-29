@@ -77,6 +77,21 @@ Future<http.Response> _safePost(Uri uri, {Map<String, String>? headers, Object? 
   }
 }
 
+// Auth-aware wrappers — automatically refresh the access token on 401 and retry.
+// Use these for all authenticated endpoints.
+
+Future<http.Response> _authGet(Uri uri) =>
+    _withAutoRefresh((h) => _safeGet(uri, headers: h));
+
+Future<http.Response> _authPost(Uri uri, {Object? body}) =>
+    _withAutoRefresh((h) => _safePost(uri, headers: h, body: body));
+
+Future<http.Response> _authPut(Uri uri, {Object? body}) =>
+    _withAutoRefresh((h) => _put(uri, headers: h, body: body));
+
+Future<http.Response> _authDelete(Uri uri) =>
+    _withAutoRefresh((h) => _delete(uri, headers: h));
+
 void _logRequest(String method, Uri uri, Map<String, String>? headers, {Object? body}) {
   final buf = StringBuffer();
   buf.writeln('→ $method ${uri.path}${uri.query.isNotEmpty ? '?${uri.query}' : ''}');
@@ -114,6 +129,55 @@ dynamic _parse(http.Response response) {
   throw ApiException(message, response.statusCode);
 }
 
+// ---------------------------------------------------------------------------
+// Token refresh serialisation — prevents the race condition where concurrent
+// 401 responses each try to rotate the refresh token simultaneously.
+// Only one refresh call runs at a time; others wait for it to complete and
+// then reuse the result.
+// ---------------------------------------------------------------------------
+
+Future<bool>? _pendingRefresh;
+
+/// Runs [call] with fresh auth headers. If the server returns 401 (access
+/// token expired), silently refreshes and retries once before throwing.
+/// Only forces logout when the server explicitly rejects the refresh token
+/// (401/403). All other failures (network, 5xx, storage) are treated as
+/// transient and the original request error is surfaced instead.
+///
+/// Concurrent 401s share a single refresh call to avoid token reuse detection.
+Future<http.Response> _withAutoRefresh(
+    Future<http.Response> Function(Map<String, String> headers) call) async {
+  final response = await call(await _authHeaders());
+  if (response.statusCode != 401) return response;
+
+  // Serialise: if a refresh is already in flight, wait for it instead of
+  // starting a second one (which would send a revoked token and trigger
+  // reuse detection on the server).
+  _pendingRefresh ??= refreshAccessToken().whenComplete(() {
+    _pendingRefresh = null;
+  });
+
+  final bool refreshed;
+  try {
+    refreshed = await _pendingRefresh!;
+  } on _TransientError {
+    // Storage read failure, network error, 5xx, rate-limit — do NOT logout.
+    // Surface as a generic request failure so the UI shows a normal error.
+    rethrow;
+  } catch (_) {
+    // SocketException, ClientException, etc. — also transient.
+    rethrow;
+  }
+
+  if (!refreshed) {
+    // Refresh token is genuinely expired (after 30 days of no use).
+    // Throw so the request fails with a clear message — do NOT auto-logout.
+    // The user will see an error and can manually log in again if needed.
+    throw ApiException('Session expired. Please log in again.', 401);
+  }
+  return call(await _authHeaders());
+}
+
 class ApiException implements Exception {
   final String message;
   final int statusCode;
@@ -134,6 +198,72 @@ Future<Map<String, dynamic>> login(String phone, String pin) async {
     body: jsonEncode({'phone': phone, 'pin': pin}),
   );
   return _parse(response);
+}
+
+/// Exchanges the stored refresh token for a new access+refresh token pair.
+/// Saves both tokens on success (token rotation).
+///
+/// Returns true on success.
+/// Returns false only when the server explicitly rejects the token (401/403) —
+/// meaning the token is expired or revoked and the user must log in again.
+/// Throws on network errors so the caller does NOT treat a WiFi blip as a
+/// logged-out session.
+Future<bool> refreshAccessToken() async {
+  final refreshToken = await getRefreshToken();
+  // No refresh token in storage — transient storage issue, do NOT log out.
+  if (refreshToken == null) {
+    throw const _TransientError('No refresh token in storage');
+  }
+  // Network errors propagate as exceptions — callers must not treat them as
+  // auth failures.
+  final response = await _post(
+    Uri.parse('$baseUrl/refresh'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'refresh_token': refreshToken}),
+  );
+  if (response.statusCode == 200) {
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    // Server only returns a new access token — refresh token is unchanged.
+    await saveAccessToken(body['access_token'] as String);
+    return true;
+  }
+  // Only 401/403 mean the refresh token is genuinely expired/revoked.
+  if (response.statusCode == 401 || response.statusCode == 403) {
+    return false;
+  }
+  // 429, 500, 502, 503 etc. are transient — throw, do NOT log out.
+  throw _TransientError('Refresh failed with status ${response.statusCode}');
+}
+
+/// Thrown when a refresh failure is transient (network, server error, rate
+/// limit) and must NOT cause a forced logout.
+class _TransientError implements Exception {
+  final String message;
+  const _TransientError(this.message);
+}
+
+Future<void> logoutApi() async {
+  final refreshToken = await getRefreshToken();
+  if (refreshToken == null) return;
+  try {
+    await _post(
+      Uri.parse('$baseUrl/logout'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'refresh_token': refreshToken}),
+    );
+  } catch (_) {
+    // Best-effort — local session will be cleared regardless
+  }
+}
+
+/// Revokes all refresh tokens for the current user on the server
+/// (signs out every device), then clears the local session.
+Future<void> logoutAllDevices() async {
+  try {
+    await _authPost(Uri.parse('$baseUrl/logout-all'));
+  } catch (_) {
+    // Best-effort — local session will be cleared regardless
+  }
 }
 
 Future<Map<String, dynamic>> register({
@@ -175,56 +305,32 @@ Future<List<dynamic>> getItems({String? search, String? category}) async {
   if (category != null) params['category'] = category;
 
   final uri = Uri.parse('$baseUrl/items').replace(queryParameters: params.isEmpty ? null : params);
-  final response = await _safeGet(uri, headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(uri));
 }
 
 Future<Map<String, dynamic>> getItemByBarcode(String barcode) async {
   final uri = Uri.parse('$baseUrl/items').replace(queryParameters: {'barcode': barcode});
-  final response = await _safeGet(uri, headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(uri));
 }
 
 Future<List<String>> getTopSoldItemIds() async {
-  final response = await _safeGet(
-    Uri.parse('$baseUrl/items/top-sold'),
-    headers: await _authHeaders(),
-  );
-  return List<String>.from(_parse(response));
+  return List<String>.from(_parse(await _authGet(Uri.parse('$baseUrl/items/top-sold'))));
 }
 
 Future<List<String>> getCategories() async {
-  final response = await _safeGet(
-    Uri.parse('$baseUrl/items/categories'),
-    headers: await _authHeaders(),
-  );
-  return List<String>.from(_parse(response));
+  return List<String>.from(_parse(await _authGet(Uri.parse('$baseUrl/items/categories'))));
 }
 
 Future<Map<String, dynamic>> createItem(Map<String, dynamic> data) async {
-  final response = await _post(
-    Uri.parse('$baseUrl/items'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPost(Uri.parse('$baseUrl/items'), body: jsonEncode(data)));
 }
 
 Future<Map<String, dynamic>> updateItem(String id, Map<String, dynamic> data) async {
-  final response = await _put(
-    Uri.parse('$baseUrl/items/$id'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPut(Uri.parse('$baseUrl/items/$id'), body: jsonEncode(data)));
 }
 
 Future<void> deleteItem(String id) async {
-  final response = await _delete(
-    Uri.parse('$baseUrl/items/$id'),
-    headers: await _authHeaders(),
-  );
-  _parse(response);
+  _parse(await _authDelete(Uri.parse('$baseUrl/items/$id')));
 }
 
 // ---------------------------------------------------------------------------
@@ -232,34 +338,19 @@ Future<void> deleteItem(String id) async {
 // ---------------------------------------------------------------------------
 
 Future<List<dynamic>> getStaff() async {
-  final response = await _get(Uri.parse('$baseUrl/staff'), headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(Uri.parse('$baseUrl/staff')));
 }
 
 Future<Map<String, dynamic>> createStaff(Map<String, dynamic> data) async {
-  final response = await _post(
-    Uri.parse('$baseUrl/staff'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPost(Uri.parse('$baseUrl/staff'), body: jsonEncode(data)));
 }
 
 Future<Map<String, dynamic>> updateStaff(String id, Map<String, dynamic> data) async {
-  final response = await _put(
-    Uri.parse('$baseUrl/staff/$id'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPut(Uri.parse('$baseUrl/staff/$id'), body: jsonEncode(data)));
 }
 
 Future<void> deleteStaff(String id) async {
-  final response = await _delete(
-    Uri.parse('$baseUrl/staff/$id'),
-    headers: await _authHeaders(),
-  );
-  _parse(response);
+  _parse(await _authDelete(Uri.parse('$baseUrl/staff/$id')));
 }
 
 // ---------------------------------------------------------------------------
@@ -267,34 +358,19 @@ Future<void> deleteStaff(String id) async {
 // ---------------------------------------------------------------------------
 
 Future<List<dynamic>> getTables() async {
-  final response = await _get(Uri.parse('$baseUrl/tables'), headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(Uri.parse('$baseUrl/tables')));
 }
 
 Future<Map<String, dynamic>> createTable(Map<String, dynamic> data) async {
-  final response = await _post(
-    Uri.parse('$baseUrl/tables'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPost(Uri.parse('$baseUrl/tables'), body: jsonEncode(data)));
 }
 
 Future<Map<String, dynamic>> updateTable(String id, Map<String, dynamic> data) async {
-  final response = await _put(
-    Uri.parse('$baseUrl/tables/$id'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPut(Uri.parse('$baseUrl/tables/$id'), body: jsonEncode(data)));
 }
 
 Future<void> deleteTable(String id) async {
-  final response = await _delete(
-    Uri.parse('$baseUrl/tables/$id'),
-    headers: await _authHeaders(),
-  );
-  _parse(response);
+  _parse(await _authDelete(Uri.parse('$baseUrl/tables/$id')));
 }
 
 // ---------------------------------------------------------------------------
@@ -308,56 +384,31 @@ Future<List<dynamic>> getBills({String? from, String? to, String? search}) async
   if (search != null) params['search'] = search;
 
   final uri = Uri.parse('$baseUrl/bills').replace(queryParameters: params.isEmpty ? null : params);
-  final response = await _get(uri, headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(uri));
 }
 
 Future<Map<String, dynamic>> getBill(String id) async {
-  final response = await _get(Uri.parse('$baseUrl/bills/$id'), headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(Uri.parse('$baseUrl/bills/$id')));
 }
 
 Future<Map<String, dynamic>> createBill(Map<String, dynamic> data) async {
-  final response = await _safePost(
-    Uri.parse('$baseUrl/bills'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPost(Uri.parse('$baseUrl/bills'), body: jsonEncode(data)));
 }
 
 Future<Map<String, dynamic>> finalizeBill(String id) async {
-  final response = await _put(
-    Uri.parse('$baseUrl/bills/$id/finalize'),
-    headers: await _authHeaders(),
-  );
-  return _parse(response);
+  return _parse(await _authPut(Uri.parse('$baseUrl/bills/$id/finalize')));
 }
 
 Future<Map<String, dynamic>> addItemsToBill(String id, List<Map<String, dynamic>> items) async {
-  final response = await _put(
-    Uri.parse('$baseUrl/bills/$id/add-items'),
-    headers: await _authHeaders(),
-    body: jsonEncode({'items': items}),
-  );
-  return _parse(response);
+  return _parse(await _authPut(Uri.parse('$baseUrl/bills/$id/add-items'), body: jsonEncode({'items': items})));
 }
 
 Future<Map<String, dynamic>> updateBillItems(String id, List<Map<String, dynamic>> items) async {
-  final response = await _put(
-    Uri.parse('$baseUrl/bills/$id/update-items'),
-    headers: await _authHeaders(),
-    body: jsonEncode({'items': items}),
-  );
-  return _parse(response);
+  return _parse(await _authPut(Uri.parse('$baseUrl/bills/$id/update-items'), body: jsonEncode({'items': items})));
 }
 
 Future<void> voidBill(String id) async {
-  final response = await _delete(
-    Uri.parse('$baseUrl/bills/$id'),
-    headers: await _authHeaders(),
-  );
-  _parse(response);
+  _parse(await _authDelete(Uri.parse('$baseUrl/bills/$id')));
 }
 
 // ---------------------------------------------------------------------------
@@ -365,15 +416,13 @@ Future<void> voidBill(String id) async {
 // ---------------------------------------------------------------------------
 
 Future<Map<String, dynamic>> getTodayReport() async {
-  final response = await _get(Uri.parse('$baseUrl/reports/today'), headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(Uri.parse('$baseUrl/reports/today')));
 }
 
 Future<Map<String, dynamic>> getReportSummary({required String from, required String to}) async {
   final uri = Uri.parse('$baseUrl/reports/summary')
       .replace(queryParameters: {'from': from, 'to': to});
-  final response = await _get(uri, headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(uri));
 }
 
 // ---------------------------------------------------------------------------
@@ -387,34 +436,19 @@ Future<List<dynamic>> getExpenses({String? from, String? to, String? category}) 
   if (category != null) params['category'] = category;
   final uri = Uri.parse('$baseUrl/expenses')
       .replace(queryParameters: params.isEmpty ? null : params);
-  final response = await _get(uri, headers: await _authHeaders());
-  return _parse(response);
+  return _parse(await _authGet(uri));
 }
 
 Future<Map<String, dynamic>> createExpense(Map<String, dynamic> data) async {
-  final response = await _post(
-    Uri.parse('$baseUrl/expenses'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPost(Uri.parse('$baseUrl/expenses'), body: jsonEncode(data)));
 }
 
 Future<Map<String, dynamic>> updateExpense(String id, Map<String, dynamic> data) async {
-  final response = await _put(
-    Uri.parse('$baseUrl/expenses/$id'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPut(Uri.parse('$baseUrl/expenses/$id'), body: jsonEncode(data)));
 }
 
 Future<void> deleteExpense(String id) async {
-  final response = await _delete(
-    Uri.parse('$baseUrl/expenses/$id'),
-    headers: await _authHeaders(),
-  );
-  _parse(response);
+  _parse(await _authDelete(Uri.parse('$baseUrl/expenses/$id')));
 }
 
 // ---------------------------------------------------------------------------
@@ -422,45 +456,35 @@ Future<void> deleteExpense(String id) async {
 // ---------------------------------------------------------------------------
 
 Future<List<dynamic>> getRecurringExpenses() async {
-  final response = await _get(
-    Uri.parse('$baseUrl/expenses/recurring'),
-    headers: await _authHeaders(),
-  );
-  return _parse(response);
+  return _parse(await _authGet(Uri.parse('$baseUrl/expenses/recurring')));
 }
 
 Future<Map<String, dynamic>> createRecurringExpense(Map<String, dynamic> data) async {
-  final response = await _post(
-    Uri.parse('$baseUrl/expenses/recurring'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPost(Uri.parse('$baseUrl/expenses/recurring'), body: jsonEncode(data)));
 }
 
 Future<Map<String, dynamic>> updateRecurringExpense(String id, Map<String, dynamic> data) async {
-  final response = await _put(
-    Uri.parse('$baseUrl/expenses/recurring/$id'),
-    headers: await _authHeaders(),
-    body: jsonEncode(data),
-  );
-  return _parse(response);
+  return _parse(await _authPut(Uri.parse('$baseUrl/expenses/recurring/$id'), body: jsonEncode(data)));
 }
 
 Future<void> deleteRecurringExpense(String id) async {
-  final response = await _delete(
-    Uri.parse('$baseUrl/expenses/recurring/$id'),
-    headers: await _authHeaders(),
-  );
-  _parse(response);
+  _parse(await _authDelete(Uri.parse('$baseUrl/expenses/recurring/$id')));
 }
 
 Future<List<String>> getExpenseCategories() async {
-  final response = await _get(
-    Uri.parse('$baseUrl/expenses/categories'),
-    headers: await _authHeaders(),
-  );
-  return List<String>.from(_parse(response));
+  return List<String>.from(_parse(await _authGet(Uri.parse('$baseUrl/expenses/categories'))));
+}
+
+// ---------------------------------------------------------------------------
+// Business profile
+// ---------------------------------------------------------------------------
+
+Future<Map<String, dynamic>> getBusinessProfile() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/businesses/profile')));
+}
+
+Future<Map<String, dynamic>> updateBusinessProfile(Map<String, dynamic> data) async {
+  return _parse(await _authPut(Uri.parse('$baseUrl/businesses/profile'), body: jsonEncode(data)));
 }
 
 // ---------------------------------------------------------------------------

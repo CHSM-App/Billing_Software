@@ -1,6 +1,8 @@
 const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
+const logger = require('../logger');
+const audit = require('../audit');
 
 const router = express.Router();
 
@@ -30,7 +32,7 @@ router.get('/top-sold', requireAuth, async (req, res) => {
       `);
     return res.json(result.recordset.map((r) => r.item_id));
   } catch (err) {
-    console.error('Get top-sold error:', err.message);
+    logger.error({ err }, 'Get top-sold error');
     return res.status(500).json({ error: 'Failed to fetch top-sold items' });
   }
 });
@@ -52,7 +54,7 @@ router.get('/categories', requireAuth, async (req, res) => {
 
     return res.json(result.recordset.map((r) => r.category));
   } catch (err) {
-    console.error('Get categories error:', err.message);
+    logger.error({ err }, 'Get categories error');
     return res.status(500).json({ error: 'Failed to fetch categories' });
   }
 });
@@ -69,8 +71,13 @@ router.get('/', requireAuth, async (req, res) => {
     let where = 'business_id = @business_id AND is_active = 1';
 
     if (barcode) {
-      request.input('barcode', sql.NVarChar(100), barcode);
-      where += ' AND barcode = @barcode';
+      // Normalise: strip spaces, dashes, dots so scanner formatting doesn't
+      // matter. Both the stored value and the incoming value are compared after
+      // stripping non-alphanumeric characters via REPLACE chains.
+      const normalised = barcode.replace(/[\s\-\.]/g, '');
+      request.input('barcode', sql.NVarChar(100), normalised);
+      // Match against stored barcode after stripping the same characters
+      where += ` AND REPLACE(REPLACE(REPLACE(barcode, '-', ''), ' ', ''), '.', '') = @barcode`;
     }
     if (search) {
       request.input('search', sql.NVarChar(200), `%${search}%`);
@@ -98,7 +105,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     return res.json(result.recordset);
   } catch (err) {
-    console.error('Get items error:', err.message);
+    logger.error({ err }, 'Get items error');
     return res.status(500).json({ error: 'Failed to fetch items' });
   }
 });
@@ -121,7 +128,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     }
     return res.json(result.recordset[0]);
   } catch (err) {
-    console.error('Get item error:', err.message);
+    logger.error({ err }, 'Get item error');
     return res.status(500).json({ error: 'Failed to fetch item' });
   }
 });
@@ -154,9 +161,16 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
         VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @stock_quantity)
       `);
 
-    return res.status(201).json(result.recordset[0]);
+    const created = result.recordset[0];
+
+    audit.logItemCreated(
+      { user_id: req.user.user_id, user_name: req.user.name || null },
+      created,
+    );
+
+    return res.status(201).json(created);
   } catch (err) {
-    console.error('Create item error:', err.message);
+    logger.error({ err }, 'Create item error');
     return res.status(500).json({ error: 'Failed to create item' });
   }
 });
@@ -178,11 +192,12 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     const check = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query('SELECT id FROM items WHERE id = @id AND business_id = @business_id');
+      .query('SELECT id, name, price, stock_quantity FROM items WHERE id = @id AND business_id = @business_id');
 
     if (check.recordset.length === 0) {
       return res.status(404).json({ error: 'Item not found' });
     }
+    const before = check.recordset[0];
 
     const sets = [];
     const request = pool.request()
@@ -222,9 +237,19 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       WHERE id = @id AND business_id = @business_id
     `);
 
-    return res.json(result.recordset[0]);
+    const updated = result.recordset[0];
+    const actor = { user_id: req.user.user_id, user_name: req.user.name || null };
+
+    if (price !== undefined && parseFloat(price) !== parseFloat(before.price)) {
+      audit.logItemPriceChanged(actor, updated, parseFloat(before.price), parseFloat(price));
+    }
+    if (stock_quantity !== undefined && parseFloat(stock_quantity) !== parseFloat(before.stock_quantity)) {
+      audit.logItemStockAdjusted(actor, updated, before.stock_quantity, parseFloat(stock_quantity));
+    }
+
+    return res.json(updated);
   } catch (err) {
-    console.error('Update item error:', err.message);
+    logger.error({ err }, 'Update item error');
     return res.status(500).json({ error: 'Failed to update item' });
   }
 });
@@ -233,20 +258,30 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
 router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
   try {
     await poolConnect;
-    const result = await pool.request()
+
+    // Fetch before soft-delete so we can snapshot name/price in the audit log
+    const snapshot = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query(`
-        UPDATE items SET is_active = 0
-        WHERE id = @id AND business_id = @business_id
-      `);
+      .query('SELECT id, business_id, name, price FROM items WHERE id = @id AND business_id = @business_id AND is_active = 1');
 
-    if (result.rowsAffected[0] === 0) {
+    if (snapshot.recordset.length === 0) {
       return res.status(404).json({ error: 'Item not found' });
     }
+
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query('UPDATE items SET is_active = 0 WHERE id = @id AND business_id = @business_id');
+
+    audit.logItemDeleted(
+      { user_id: req.user.user_id, user_name: req.user.name || null },
+      snapshot.recordset[0],
+    );
+
     return res.json({ success: true });
   } catch (err) {
-    console.error('Delete item error:', err.message);
+    logger.error({ err }, 'Delete item error');
     return res.status(500).json({ error: 'Failed to delete item' });
   }
 });

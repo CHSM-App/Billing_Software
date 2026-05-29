@@ -156,7 +156,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       AsyncValue<List<Item>> itemsAsync, String userRole, bool inventoryEnabled) {
     return itemsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => NoInternetWidget(
+      error: (e, _) => AppErrorWidget(
+        error: e,
         onRetry: () => ref.invalidate(itemsProvider),
       ),
       data: (allItems) {
@@ -589,13 +590,20 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
 
+    // Auto-generate a 12-digit barcode for new items that have no barcode.
+    // Use current timestamp so it's unique and scannable immediately.
+    final barcodeInput = _barcodeCtrl.text.trim();
+    final autoBarcode = (widget.item == null && barcodeInput.isEmpty)
+        ? DateTime.now().millisecondsSinceEpoch.toString().substring(1, 13)
+        : null;
+
     final data = {
       'name': _nameCtrl.text.trim(),
       if (_categoryCtrl.text.trim().isNotEmpty) 'category': _categoryCtrl.text.trim(),
       'price': double.parse(_priceCtrl.text.trim()),
       if (_taxCtrl.text.trim().isNotEmpty)
         'tax_rate': double.parse(_taxCtrl.text.trim()),
-      if (_barcodeCtrl.text.trim().isNotEmpty) 'barcode': _barcodeCtrl.text.trim(),
+      'barcode': barcodeInput.isNotEmpty ? barcodeInput : autoBarcode,
       if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
         'stock_quantity': double.parse(_stockCtrl.text.trim()),
     };

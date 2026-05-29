@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../providers.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_widgets.dart';
 
 final _amt = NumberFormat('#,##0.00');
 final _dateFmt = DateFormat('dd MMM yyyy');
@@ -62,22 +63,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
         ),
         body: summaryAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.error_outline,
-                    size: 48, color: AppColors.error),
-                const SizedBox(height: 12),
-                Text('$e', textAlign: TextAlign.center,
-                    style: const TextStyle(color: AppColors.textSecondary)),
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () => ref.invalidate(reportSummaryProvider),
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
+          error: (e, _) => AppErrorWidget(
+            error: e,
+            onRetry: () => ref.invalidate(reportSummaryProvider),
           ),
           data: (summary) => ListView(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),

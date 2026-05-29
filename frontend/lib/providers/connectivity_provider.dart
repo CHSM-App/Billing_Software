@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 
 // ---------------------------------------------------------------------------
-// Connectivity notifier — polls /api/health every 15 seconds
+// Connectivity notifier — polls /api/health every 15 seconds.
+// Automatically triggers a sync when the device comes back online.
 // ---------------------------------------------------------------------------
 
 final connectivityProvider =
@@ -26,7 +27,9 @@ class ConnectivityNotifier extends Notifier<bool> {
 
   Future<void> _check() async {
     final ok = await checkHealth();
-    if (state != ok) state = ok;
+    if (state == ok) return; // no change — nothing to do
+
+    state = ok;
   }
 
   /// Called by api.dart safe wrappers when a SocketException is caught.
@@ -34,6 +37,6 @@ class ConnectivityNotifier extends Notifier<bool> {
     if (state) state = false;
   }
 
-  /// Called externally to force an immediate re-check.
+  /// Called externally to force an immediate re-check (e.g. pull-to-refresh).
   Future<void> recheck() => _check();
 }

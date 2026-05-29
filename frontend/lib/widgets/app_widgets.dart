@@ -512,6 +512,71 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
   }
 }
 
+// Generic error widget with retry button
+class AppErrorWidget extends StatelessWidget {
+  final Object error;
+  final VoidCallback? onRetry;
+  final String? title;
+
+  const AppErrorWidget({
+    super.key,
+    required this.error,
+    this.onRetry,
+    this.title,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.space48),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: AppColors.errorLight,
+                borderRadius: BorderRadius.circular(AppRadius.large),
+              ),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                size: 34,
+                color: AppColors.error,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.space16),
+            Text(
+              title ?? 'Something went wrong',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: AppSpacing.space8),
+            Text(
+              error.toString(),
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: AppColors.textSecondary),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(height: AppSpacing.space24),
+              SizedBox(
+                width: 160,
+                child: PrimaryButton(text: 'Retry', onPressed: onRetry),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // RadioGroup helper used in RegisterScreen
 class RadioGroup<T> extends StatelessWidget {
   final T groupValue;

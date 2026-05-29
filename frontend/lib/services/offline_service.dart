@@ -1,7 +1,82 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/models.dart';
+
+// ---------------------------------------------------------------------------
+// UUID v4 generator (no external package needed)
+// ---------------------------------------------------------------------------
+
+String _generateUuidV4() {
+  final rng = Random.secure();
+  final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
+  // Set version bits (version 4)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  // Set variant bits
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  String hex(int b) => b.toRadixString(16).padLeft(2, '0');
+  return '${hex(bytes[0])}${hex(bytes[1])}${hex(bytes[2])}${hex(bytes[3])}'
+      '-${hex(bytes[4])}${hex(bytes[5])}'
+      '-${hex(bytes[6])}${hex(bytes[7])}'
+      '-${hex(bytes[8])}${hex(bytes[9])}'
+      '-${hex(bytes[10])}${hex(bytes[11])}${hex(bytes[12])}${hex(bytes[13])}${hex(bytes[14])}${hex(bytes[15])}';
+}
+
+// ---------------------------------------------------------------------------
+// Sync status constants
+// ---------------------------------------------------------------------------
+
+/// All possible values of offline_bills.sync_status.
+///
+///   pending   — queued, not yet attempted
+///   syncing   — in-flight (reset to pending on app restart via resetStaleSyncing)
+///   failed    — server error or network failure; will retry up to [maxRetries]
+///   conflict  — server rejected permanently (409 stock conflict, 400 bad data);
+///               will NOT be retried automatically — requires user action
+///   done      — row has been deleted after a successful sync (never persisted)
+class SyncStatus {
+  static const pending  = 'pending';
+  static const syncing  = 'syncing';
+  static const failed   = 'failed';
+  static const conflict = 'conflict';
+}
+
+/// Bills are retried at most this many times before being abandoned as failed.
+const int maxRetries = 3;
+
+// ---------------------------------------------------------------------------
+// Cache TTL
+// ---------------------------------------------------------------------------
+
+/// How long a fresh item cache is considered valid before a background refresh
+/// is triggered.  Balances price freshness vs. unnecessary network traffic.
+const Duration kItemCacheTtl = Duration(hours: 1);
+
+/// A cache is considered "dangerously stale" after this duration: items may
+/// have been added/removed/repriced and the user must be warned.
+const Duration kItemCacheWarnTtl = Duration(hours: 6);
+
+/// Describes the current state of the cached_items table for a business.
+enum CacheStatus {
+  /// Cache exists and was populated within [kItemCacheTtl].
+  fresh,
+
+  /// Cache exists but is older than [kItemCacheTtl].
+  /// The provider will attempt a background refresh when online.
+  stale,
+
+  /// Cache exists but is older than [kItemCacheWarnTtl].
+  /// The UI should show a warning banner.
+  veryStale,
+
+  /// No cache rows exist for this business.
+  empty,
+}
+
+// ---------------------------------------------------------------------------
+// OfflineService
+// ---------------------------------------------------------------------------
 
 class OfflineService {
   OfflineService._();
@@ -9,63 +84,87 @@ class OfflineService {
 
   Database? _db;
 
-  // ---------------------------------------------------------------------------
-  // Init
-  // ---------------------------------------------------------------------------
+  // ── Init ──────────────────────────────────────────────────────────────────
 
   Future<void> init() async {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 1,
-      onCreate: (db, _) async {
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS cached_items (
-            id             TEXT    NOT NULL PRIMARY KEY,
-            business_id    TEXT    NOT NULL,
-            name           TEXT    NOT NULL,
-            barcode        TEXT,
-            category       TEXT,
-            price          REAL    NOT NULL,
-            tax_rate       REAL,
-            stock_quantity REAL,
-            is_active      INTEGER NOT NULL DEFAULT 1,
-            cached_at      INTEGER NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE INDEX IF NOT EXISTS idx_cached_items_barcode
-            ON cached_items (barcode)
-        ''');
-        await db.execute('''
-          CREATE INDEX IF NOT EXISTS idx_cached_items_business
-            ON cached_items (business_id)
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS offline_bills (
-            local_id       TEXT    NOT NULL PRIMARY KEY,
-            business_id    TEXT    NOT NULL,
-            user_id        TEXT    NOT NULL,
-            table_id       TEXT,
-            customer_name  TEXT,
-            customer_phone TEXT,
-            subtotal       REAL    NOT NULL,
-            tax_amount     REAL    NOT NULL,
-            total          REAL    NOT NULL,
-            payment_mode   TEXT    NOT NULL,
-            items_json     TEXT    NOT NULL,
-            created_at     INTEGER NOT NULL,
-            sync_status    TEXT    NOT NULL DEFAULT 'pending',
-            sync_error     TEXT,
-            retry_count    INTEGER NOT NULL DEFAULT 0
-          )
-        ''');
-        await db.execute('''
-          CREATE INDEX IF NOT EXISTS idx_offline_bills_status
-            ON offline_bills (sync_status)
-        ''');
-      },
+      version: 3,
+      onCreate: _createSchema,
+      onUpgrade: _migrateSchema,
     );
+  }
+
+  /// Full schema for fresh installs (version 2).
+  Future<void> _createSchema(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cached_items (
+        id             TEXT    NOT NULL PRIMARY KEY,
+        business_id    TEXT    NOT NULL,
+        name           TEXT    NOT NULL,
+        barcode        TEXT,
+        category       TEXT,
+        price          REAL    NOT NULL,
+        tax_rate       REAL,
+        stock_quantity REAL,
+        is_active      INTEGER NOT NULL DEFAULT 1,
+        cached_at      INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cached_items_barcode ON cached_items (barcode)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cached_items_business ON cached_items (business_id)',
+    );
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS offline_bills (
+        local_id        TEXT    NOT NULL PRIMARY KEY,
+        client_bill_id  TEXT    NOT NULL UNIQUE,
+        business_id     TEXT    NOT NULL,
+        user_id         TEXT    NOT NULL,
+        table_id        TEXT,
+        customer_name   TEXT,
+        customer_phone  TEXT,
+        subtotal        REAL    NOT NULL,
+        tax_amount      REAL    NOT NULL,
+        total           REAL    NOT NULL,
+        payment_mode    TEXT    NOT NULL,
+        items_json      TEXT    NOT NULL,
+        created_at      INTEGER NOT NULL,
+        sync_status     TEXT    NOT NULL DEFAULT '${SyncStatus.pending}',
+        sync_error      TEXT,
+        retry_count     INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_offline_bills_status ON offline_bills (sync_status)',
+    );
+  }
+
+  /// Incremental migrations.
+  Future<void> _migrateSchema(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // v1 → v2: add client_bill_id for idempotent sync.
+      await db.execute(
+        'ALTER TABLE offline_bills ADD COLUMN client_bill_id TEXT',
+      );
+      final rows = await db.query('offline_bills', columns: ['local_id']);
+      for (final row in rows) {
+        await db.update(
+          'offline_bills',
+          {'client_bill_id': _generateUuidV4()},
+          where: 'local_id = ?',
+          whereArgs: [row['local_id']],
+        );
+      }
+      await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_offline_bills_client_id ON offline_bills (client_bill_id)',
+      );
+    }
+    // v2 → v3: no schema change — cached_at was already present.
+    // Version bump records that TTL logic is now active.
   }
 
   Database get _database {
@@ -73,11 +172,9 @@ class OfflineService {
     return _db!;
   }
 
-  // ---------------------------------------------------------------------------
-  // Item cache
-  // ---------------------------------------------------------------------------
+  // ── Item cache ────────────────────────────────────────────────────────────
 
-  /// Replaces entire item cache for this business with fresh server data.
+  /// Replaces the entire item cache for this business with fresh server data.
   Future<void> replaceItemCache(List<Item> items, String businessId) async {
     final db = _database;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -111,17 +208,98 @@ class OfflineService {
     return rows.map(_rowToItem).toList();
   }
 
-  /// Looks up a single item by barcode. Returns null if not found.
-  Future<Item?> getCachedItemByBarcode(
-      String barcode, String businessId) async {
+  /// Returns the [CacheStatus] for a business without loading all rows.
+  /// Uses MAX(cached_at) for efficiency — a single aggregate query.
+  Future<CacheStatus> getCacheStatus(String businessId) async {
+    final result = await _database.rawQuery(
+      'SELECT MAX(cached_at) AS newest FROM cached_items WHERE business_id = ?',
+      [businessId],
+    );
+    final newest = result.first['newest'] as int?;
+    if (newest == null) return CacheStatus.empty;
+
+    final age = DateTime.now().millisecondsSinceEpoch - newest;
+    if (age > kItemCacheWarnTtl.inMilliseconds) return CacheStatus.veryStale;
+    if (age > kItemCacheTtl.inMilliseconds) return CacheStatus.stale;
+    return CacheStatus.fresh;
+  }
+
+  /// Returns cached items together with their [CacheStatus].
+  /// Use this when you need both the data and the freshness signal in one call.
+  Future<({List<Item> items, CacheStatus status})> getCachedItemsWithStatus(
+      String businessId) async {
     final rows = await _database.query(
       'cached_items',
-      where: 'barcode = ? AND business_id = ? AND is_active = 1',
-      whereArgs: [barcode, businessId],
-      limit: 1,
+      where: 'business_id = ? AND is_active = 1',
+      whereArgs: [businessId],
     );
-    if (rows.isEmpty) return null;
-    return _rowToItem(rows.first);
+    if (rows.isEmpty) {
+      return (items: <Item>[], status: CacheStatus.empty);
+    }
+
+    final items = rows.map(_rowToItem).toList();
+
+    // Determine age from the freshest row in this result set.
+    int newest = 0;
+    for (final row in rows) {
+      final t = (row['cached_at'] as int?) ?? 0;
+      if (t > newest) newest = t;
+    }
+    final age = DateTime.now().millisecondsSinceEpoch - newest;
+    final CacheStatus status;
+    if (age > kItemCacheWarnTtl.inMilliseconds) {
+      status = CacheStatus.veryStale;
+    } else if (age > kItemCacheTtl.inMilliseconds) {
+      status = CacheStatus.stale;
+    } else {
+      status = CacheStatus.fresh;
+    }
+
+    return (items: items, status: status);
+  }
+
+  /// Returns the age of the cache for a business as a human-readable string,
+  /// e.g. "3h 12m ago".  Returns null if no cache exists.
+  Future<String?> getCacheAgeLabel(String businessId) async {
+    final result = await _database.rawQuery(
+      'SELECT MAX(cached_at) AS newest FROM cached_items WHERE business_id = ?',
+      [businessId],
+    );
+    final newest = result.first['newest'] as int?;
+    if (newest == null) return null;
+
+    final diff = Duration(
+      milliseconds: DateTime.now().millisecondsSinceEpoch - newest,
+    );
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    final h = diff.inHours;
+    final m = diff.inMinutes % 60;
+    return m > 0 ? '${h}h ${m}m ago' : '${h}h ago';
+  }
+
+  /// Looks up a single item by barcode. Returns null if not found.
+  /// Normalise a barcode the same way the backend does: strip spaces, dashes,
+  /// dots so scanner formatting differences never cause a miss.
+  static String _normaliseBarcode(String barcode) =>
+      barcode.replaceAll(RegExp(r'[\s\-\.]'), '');
+
+  Future<Item?> getCachedItemByBarcode(
+      String barcode, String businessId) async {
+    final normalised = _normaliseBarcode(barcode);
+    // Query all active items for this business and filter in Dart after
+    // normalising the stored barcode — SQLite has no regex replace built-in.
+    final rows = await _database.query(
+      'cached_items',
+      where: 'business_id = ? AND is_active = 1 AND barcode IS NOT NULL',
+      whereArgs: [businessId],
+    );
+    final match = rows.where((r) {
+      final stored = r['barcode'] as String?;
+      return stored != null && _normaliseBarcode(stored) == normalised;
+    }).firstOrNull;
+    if (match == null) return null;
+    return _rowToItem(match);
   }
 
   Item _rowToItem(Map<String, dynamic> row) {
@@ -132,9 +310,8 @@ class OfflineService {
       barcode: row['barcode'] as String?,
       category: row['category'] as String?,
       price: (row['price'] as num).toDouble(),
-      taxRate: row['tax_rate'] != null
-          ? (row['tax_rate'] as num).toDouble()
-          : null,
+      taxRate:
+          row['tax_rate'] != null ? (row['tax_rate'] as num).toDouble() : null,
       stockQuantity: row['stock_quantity'] != null
           ? (row['stock_quantity'] as num).toDouble()
           : null,
@@ -142,50 +319,82 @@ class OfflineService {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Offline bill queue
-  // ---------------------------------------------------------------------------
+  // ── Offline bill queue ────────────────────────────────────────────────────
 
-  /// Saves a bill to the offline queue. Returns the generated local_id.
-  Future<String> queueOfflineBill(Map<String, dynamic> data) async {
-    final localId = 'LOCAL-${DateTime.now().millisecondsSinceEpoch}';
+  /// Saves a bill to the offline queue.
+  /// Generates and stores a UUID v4 as [client_bill_id] for idempotent sync.
+  /// Returns a record with both [localId] and [clientBillId].
+  Future<({String localId, String clientBillId})> queueOfflineBill(
+      Map<String, dynamic> data) async {
+    final localId      = 'LOCAL-${DateTime.now().millisecondsSinceEpoch}';
+    final clientBillId = _generateUuidV4();
+
     await _database.insert('offline_bills', {
-      'local_id': localId,
-      'business_id': data['business_id'],
-      'user_id': data['user_id'],
-      'table_id': data['table_id'],
-      'customer_name': data['customer_name'],
+      'local_id':       localId,
+      'client_bill_id': clientBillId,
+      'business_id':    data['business_id'],
+      'user_id':        data['user_id'],
+      'table_id':       data['table_id'],
+      'customer_name':  data['customer_name'],
       'customer_phone': data['customer_phone'],
-      'subtotal': data['subtotal'],
-      'tax_amount': data['tax_amount'],
-      'total': data['total'],
-      'payment_mode': data['payment_mode'],
-      'items_json': data['items_json'],
-      'created_at': data['created_at'],
-      'sync_status': 'pending',
-      'retry_count': 0,
+      'subtotal':       data['subtotal'],
+      'tax_amount':     data['tax_amount'],
+      'total':          data['total'],
+      'payment_mode':   data['payment_mode'],
+      'items_json':     data['items_json'],
+      'created_at':     data['created_at'],
+      'sync_status':    SyncStatus.pending,
+      'retry_count':    0,
     });
-    return localId;
+
+    return (localId: localId, clientBillId: clientBillId);
   }
 
-  /// Returns all bills that need to be synced (pending + failed with retries left).
+  /// Bills eligible for the next sync attempt:
+  ///   • status is pending or failed
+  ///   • retry_count has not reached [maxRetries]
   Future<List<Map<String, dynamic>>> getPendingBills() async {
     return _database.query(
       'offline_bills',
-      where: "sync_status IN ('pending', 'failed') AND retry_count < 3",
+      where:
+          "sync_status IN ('${SyncStatus.pending}', '${SyncStatus.failed}') AND retry_count < $maxRetries",
       orderBy: 'created_at ASC',
     );
   }
 
+  /// Bills that were permanently rejected by the server (stock conflict etc.)
+  /// and need the user to manually resolve or dismiss them.
+  Future<List<Map<String, dynamic>>> getConflictedBills() async {
+    return _database.query(
+      'offline_bills',
+      where: "sync_status = '${SyncStatus.conflict}'",
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  /// Bills that exhausted all retries (retry_count >= [maxRetries]) without
+  /// resolving to a conflict.  These are likely transient-failure victims.
+  Future<List<Map<String, dynamic>>> getExhaustedBills() async {
+    return _database.query(
+      'offline_bills',
+      where:
+          "sync_status = '${SyncStatus.failed}' AND retry_count >= $maxRetries",
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  // ── Status transitions ────────────────────────────────────────────────────
+
   Future<void> markBillSyncing(String localId) async {
     await _database.update(
       'offline_bills',
-      {'sync_status': 'syncing'},
+      {'sync_status': SyncStatus.syncing},
       where: 'local_id = ?',
       whereArgs: [localId],
     );
   }
 
+  /// Deletes the row after a successful server round-trip.
   Future<void> markBillSynced(String localId) async {
     await _database.delete(
       'offline_bills',
@@ -194,30 +403,79 @@ class OfflineService {
     );
   }
 
+  /// Transient failure (network error, 5xx).  Will be retried until
+  /// [maxRetries] is reached.
   Future<void> markBillFailed(String localId, String error) async {
     await _database.rawUpdate('''
       UPDATE offline_bills
-      SET sync_status = 'failed',
+      SET sync_status = '${SyncStatus.failed}',
           sync_error  = ?,
           retry_count = retry_count + 1
       WHERE local_id = ?
     ''', [error, localId]);
   }
 
+  /// Permanent server rejection (409 stock conflict, 422 validation).
+  /// Sets status to [SyncStatus.conflict] without incrementing retry_count.
+  /// The bill will NOT be retried automatically.
+  Future<void> markBillConflict(String localId, String error) async {
+    await _database.update(
+      'offline_bills',
+      {'sync_status': SyncStatus.conflict, 'sync_error': error},
+      where: 'local_id = ?',
+      whereArgs: [localId],
+    );
+  }
+
+  /// Puts a conflicted bill back into the pending queue so it can be
+  /// retried with refreshed item data (called from conflict resolution UI).
+  Future<void> requeueConflictedBill(String localId) async {
+    await _database.update(
+      'offline_bills',
+      {
+        'sync_status': SyncStatus.pending,
+        'sync_error':  null,
+        'retry_count': 0,
+      },
+      where: 'local_id = ?',
+      whereArgs: [localId],
+    );
+  }
+
+  /// Permanently removes a bill from the queue (user chose "Dismiss").
+  Future<void> dismissBill(String localId) async {
+    await _database.delete(
+      'offline_bills',
+      where: 'local_id = ?',
+      whereArgs: [localId],
+    );
+  }
+
   /// On app startup, reset any rows stuck in 'syncing' (from a crash).
   Future<void> resetStaleSyncing() async {
     await _database.update(
       'offline_bills',
-      {'sync_status': 'pending'},
-      where: "sync_status = 'syncing'",
+      {'sync_status': SyncStatus.pending},
+      where: "sync_status = '${SyncStatus.syncing}'",
     );
   }
 
-  /// Total count of bills waiting to be synced.
+  /// Total count of bills waiting to be synced (pending + retryable failed).
   Future<int> getPendingCount() async {
     final result = await _database.rawQuery('''
-      SELECT COUNT(*) as cnt FROM offline_bills
-      WHERE sync_status IN ('pending', 'failed') AND retry_count < 3
+      SELECT COUNT(*) AS cnt FROM offline_bills
+      WHERE sync_status IN ('${SyncStatus.pending}', '${SyncStatus.failed}')
+        AND retry_count < $maxRetries
+    ''');
+    return (result.first['cnt'] as int?) ?? 0;
+  }
+
+  /// Total count of bills needing user attention (conflicts + exhausted).
+  Future<int> getAttentionCount() async {
+    final result = await _database.rawQuery('''
+      SELECT COUNT(*) AS cnt FROM offline_bills
+      WHERE sync_status = '${SyncStatus.conflict}'
+         OR (sync_status = '${SyncStatus.failed}' AND retry_count >= $maxRetries)
     ''');
     return (result.first['cnt'] as int?) ?? 0;
   }

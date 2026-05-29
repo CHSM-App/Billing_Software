@@ -8,6 +8,9 @@ import 'printer_setup_screen.dart';
 import 'printer_test_screen.dart';
 import 'printer_test_windows_screen.dart';
 import 'staff_screen.dart';
+import 'business_profile_screen.dart';
+import 'conflict_resolution_screen.dart';
+import '../services/offline_service.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -131,12 +134,28 @@ class _SettingsContentState extends State<_SettingsContent>
                     const SizedBox(height: AppSpacing.space24),
 
                     if (isOwner) ...[
+                      _sectionLabel(context, 'BUSINESS'),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.storefront_outlined,
+                        iconColor: AppColors.primary,
+                        title: 'Business Profile',
+                        subtitle: 'Name, address, GST, billing settings',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const BusinessProfileScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.space24),
+
                       _sectionLabel(context, 'TEAM'),
                       const SizedBox(height: AppSpacing.space8),
                       _buildNavCard(
                         context,
                         icon: Icons.people_outline,
-                        iconColor: AppColors.primary,
+                        iconColor: const Color(0xFF0EA5E9),
                         title: 'Manage Staff',
                         subtitle: 'Add, edit or remove cashiers',
                         onTap: () => Navigator.push(
@@ -145,6 +164,11 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const StaffScreen()),
                         ),
                       ),
+                      const SizedBox(height: AppSpacing.space24),
+
+                      _sectionLabel(context, 'SYNC'),
+                      const SizedBox(height: AppSpacing.space8),
+                      const _SyncConflictTile(),
                       const SizedBox(height: AppSpacing.space24),
                     ],
 
@@ -431,6 +455,117 @@ class _SettingsContentState extends State<_SettingsContent>
       'restaurant_no_tables' => 'Restaurant (takeaway)',
       _ => type,
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _SyncConflictTile — shows attention count badge and opens conflict screen
+// ---------------------------------------------------------------------------
+
+class _SyncConflictTile extends StatefulWidget {
+  const _SyncConflictTile();
+
+  @override
+  State<_SyncConflictTile> createState() => _SyncConflictTileState();
+}
+
+class _SyncConflictTileState extends State<_SyncConflictTile> {
+  int _attentionCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCount();
+  }
+
+  Future<void> _loadCount() async {
+    final count = await OfflineService.instance.getAttentionCount();
+    if (mounted) setState(() => _attentionCount = count);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => const ConflictResolutionScreen()),
+        );
+        _loadCount(); // refresh badge after returning
+      },
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _attentionCount > 0
+                  ? AppColors.warningLight
+                  : AppColors.successLight,
+              borderRadius: BorderRadius.circular(AppRadius.small),
+            ),
+            child: Icon(
+              _attentionCount > 0
+                  ? Icons.sync_problem_outlined
+                  : Icons.sync_outlined,
+              size: 20,
+              color: _attentionCount > 0
+                  ? AppColors.warning
+                  : AppColors.success,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.space16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Unsynced Bills',
+                    style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  _attentionCount > 0
+                      ? '$_attentionCount bill(s) need attention'
+                      : 'All bills synced',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: _attentionCount > 0
+                            ? AppColors.warning
+                            : AppColors.textSecondary,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          if (_attentionCount > 0)
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.warning,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                '$_attentionCount',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            )
+          else
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: AppColors.surfaceVariant,
+                borderRadius: BorderRadius.circular(AppRadius.small),
+              ),
+              child: const Icon(Icons.chevron_right_outlined,
+                  size: 18, color: AppColors.textSecondary),
+            ),
+        ],
+      ),
+    );
   }
 }
 

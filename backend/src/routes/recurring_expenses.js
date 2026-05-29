@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
+const logger = require('../logger');
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ router.get('/', requireAuth, ownerOnly, async (req, res) => {
       created_at: r.created_at,
     })));
   } catch (err) {
-    console.error('Get recurring expenses error:', err);
+    logger.error({ err }, 'Get recurring expenses error');
     return res.status(500).json({ error: err.message || 'Failed to fetch recurring expenses' });
   }
 });
@@ -67,7 +68,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       created_at: r.created_at,
     });
   } catch (err) {
-    console.error('Create recurring expense error:', err);
+    logger.error({ err }, 'Create recurring expense error');
     return res.status(500).json({ error: err.message || 'Failed to create recurring expense' });
   }
 });
@@ -108,7 +109,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       created_at: r.created_at,
     });
   } catch (err) {
-    console.error('Update recurring expense error:', err);
+    logger.error({ err }, 'Update recurring expense error');
     return res.status(500).json({ error: err.message || 'Failed to update' });
   }
 });
@@ -126,7 +127,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
     }
     return res.json({ ok: true });
   } catch (err) {
-    console.error('Delete recurring expense error:', err);
+    logger.error({ err }, 'Delete recurring expense error');
     return res.status(500).json({ error: err.message || 'Failed to delete' });
   }
 });

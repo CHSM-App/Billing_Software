@@ -119,7 +119,10 @@ class _ThisMonthTab extends ConsumerWidget {
             child: Center(child: CircularProgressIndicator()),
           ),
           error: (e, _) => SliverFillRemaining(
-            child: Center(child: Text('Error: $e')),
+            child: AppErrorWidget(
+              error: e,
+              onRetry: () => ref.invalidate(expensesProvider),
+            ),
           ),
           data: (expenses) => expenses.isEmpty
               ? SliverFillRemaining(
@@ -387,7 +390,10 @@ class _RecurringTab extends ConsumerWidget {
       backgroundColor: AppColors.background,
       body: recurringAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => AppErrorWidget(
+          error: e,
+          onRetry: () => ref.invalidate(recurringExpensesProvider),
+        ),
         data: (list) => list.isEmpty
             ? EmptyState(
                 icon: Icons.repeat_rounded,

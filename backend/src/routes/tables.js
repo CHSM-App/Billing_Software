@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
+const logger = require('../logger');
 
 const router = express.Router();
 
@@ -33,7 +34,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     return res.json(result.recordset);
   } catch (err) {
-    console.error('Get tables error:', err.message);
+    logger.error({ err }, 'Get tables error');
     return res.status(500).json({ error: 'Failed to fetch tables' });
   }
 });
@@ -62,7 +63,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
     return res.status(201).json(result.recordset[0]);
   } catch (err) {
-    console.error('Create table error:', err.message);
+    logger.error({ err }, 'Create table error');
     return res.status(500).json({ error: 'Failed to create table' });
   }
 });
@@ -122,7 +123,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 
     return res.json(result.recordset[0]);
   } catch (err) {
-    console.error('Update table error:', err.message);
+    logger.error({ err }, 'Update table error');
     return res.status(500).json({ error: 'Failed to update table' });
   }
 });
@@ -160,7 +161,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
     }
     return res.json({ success: true });
   } catch (err) {
-    console.error('Delete table error:', err.message);
+    logger.error({ err }, 'Delete table error');
     return res.status(500).json({ error: 'Failed to delete table' });
   }
 });

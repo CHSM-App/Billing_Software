@@ -1,0 +1,224 @@
+/*
+ * SMSala WhatsApp Messaging Service
+ * Docs: https://api2.smsala.com
+ *
+ * Sends OTP messages via WhatsApp for business registration verification
+ * and forgot-PIN flow.
+ *
+ * Set WHATSAPP_ENABLED=true in .env to activate.
+ * Failures are logged but never throw — they must not break the main request flow.
+ *
+ * All sends (sent / failed / skipped) are recorded in whatsapp_otp_log.
+ */
+
+const https  = require('https')
+const crypto = require('crypto')
+const { pool, poolConnect, sql } = require('./db')
+const logger = require('./logger')
+
+const API_TOKEN    = process.env.WHATSAPP_API_TOKEN  || ''
+const ENABLED      = process.env.WHATSAPP_ENABLED === 'true'
+const OTP_TEMPLATE = process.env.WHATSAPP_TPL_OTP    || ''
+
+// OTP config
+const OTP_EXPIRY_MINUTES = 10
+const OTP_LENGTH         = 6
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP helper — JSON POST to api2.smsala.com
+// ─────────────────────────────────────────────────────────────────────────────
+
+function postJson(path, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body)
+    const options = {
+      hostname: 'api2.smsala.com',
+      path,
+      method: 'POST',
+      headers: {
+        'Content-Type':   'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }
+    const req = https.request(options, res => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) }
+        catch { resolve({ raw: data }) }
+      })
+    })
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phone normaliser — returns "91XXXXXXXXXX" or null
+// ─────────────────────────────────────────────────────────────────────────────
+
+function normalisePhone(raw) {
+  if (!raw) return null
+  const digits = String(raw).replace(/\D/g, '')
+  if (digits.length === 10)                                return `91${digits}`
+  if (digits.length === 12 && digits.startsWith('91'))     return digits
+  if (digits.length === 11 && digits.startsWith('0'))      return `91${digits.slice(1)}`
+  return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OTP generator
+// ─────────────────────────────────────────────────────────────────────────────
+
+function generateOtp() {
+  // Cryptographically random 6-digit OTP (000000 – 999999)
+  const buf = crypto.randomBytes(4)
+  const num = buf.readUInt32BE(0) % 1_000_000
+  return String(num).padStart(OTP_LENGTH, '0')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DB helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function saveOtp(phone, otpCode, purpose) {
+  await poolConnect
+  const otpHash  = crypto.createHash('sha256').update(otpCode).digest('hex')
+  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000)
+
+  // Invalidate any previous unused OTPs for this phone+purpose
+  await pool.request()
+    .input('phone',   sql.NVarChar(20), phone)
+    .input('purpose', sql.NVarChar(20), purpose)
+    .query(`
+      UPDATE whatsapp_otp_log
+      SET used = 1
+      WHERE phone = @phone AND purpose = @purpose AND used = 0
+    `)
+
+  await pool.request()
+    .input('phone',      sql.NVarChar(20),  phone)
+    .input('purpose',    sql.NVarChar(20),  purpose)
+    .input('otp_hash',   sql.NVarChar(64),  otpHash)
+    .input('expires_at', sql.DateTime2,     expiresAt)
+    .query(`
+      INSERT INTO whatsapp_otp_log (phone, purpose, otp_hash, expires_at)
+      VALUES (@phone, @purpose, @otp_hash, @expires_at)
+    `)
+}
+
+async function logSendResult(phone, purpose, status, campaignId, errorDetail) {
+  try {
+    await pool.request()
+      .input('phone',        sql.NVarChar(20),   phone        || null)
+      .input('purpose',      sql.NVarChar(20),   purpose      || null)
+      .input('status',       sql.NVarChar(20),   status       || 'sent')
+      .input('campaign_id',  sql.NVarChar(100),  campaignId   ? String(campaignId) : null)
+      .input('error_detail', sql.NVarChar(500),  errorDetail  || null)
+      .query(`
+        UPDATE TOP(1) whatsapp_otp_log
+        SET status = @status, campaign_id = @campaign_id, error_detail = @error_detail
+        WHERE phone = @phone AND purpose = @purpose
+        ORDER BY created_at DESC
+      `)
+  } catch (e) {
+    logger.warn({ err: e }, '[WhatsApp] DB log update failed')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendOtp — generates, stores, and delivers the OTP via WhatsApp
+//
+// purpose: 'register' | 'forgot_pin'
+// Returns: { sent: true } on success, throws on hard failure
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendOtp(phone, purpose) {
+  const normPhone = normalisePhone(phone)
+  if (!normPhone) throw new Error('Invalid phone number.')
+
+  if (!ENABLED) {
+    // In dev/test mode, still generate + store the OTP so verify works,
+    // just skip the actual WhatsApp delivery.
+    const otpCode = generateOtp()
+    await saveOtp(normPhone, otpCode, purpose)
+    logger.info(`[WhatsApp] Disabled — OTP for ${normPhone} (${purpose}): ${otpCode}`)
+    // Return the OTP in dev so it can be used without a real phone
+    return { sent: false, dev_otp: process.env.NODE_ENV !== 'production' ? otpCode : undefined }
+  }
+
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    throw new Error('WhatsApp API token not configured.')
+  }
+
+  const otpCode = generateOtp()
+  await saveOtp(normPhone, otpCode, purpose)
+
+  let result
+  try {
+    result = await postJson('/whatsapp/SendOtp', {
+      PhoneNumber: normPhone,
+      OtpCode:     otpCode,
+      ApiToken:    API_TOKEN,
+      TemplateId:  OTP_TEMPLATE || undefined,
+    })
+  } catch (err) {
+    await logSendResult(normPhone, purpose, 'failed', null, err.message)
+    throw new Error('Failed to send OTP. Please try again.')
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  await logSendResult(
+    normPhone, purpose,
+    success ? 'sent' : 'failed',
+    result.ReturnData,
+    success ? null : (result.ErrorDescription || JSON.stringify(result)),
+  )
+
+  if (!success) {
+    throw new Error(result.ErrorDescription || 'OTP delivery failed.')
+  }
+
+  logger.info(`[WhatsApp] OTP sent to ${normPhone} (${purpose}) — CampaignId: ${result.ReturnData}`)
+  return { sent: true }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// verifyOtp — checks OTP and marks it used on success
+//
+// Returns true if valid, false if wrong/expired/already-used
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function verifyOtp(phone, otpCode, purpose) {
+  const normPhone = normalisePhone(phone)
+  if (!normPhone) return false
+
+  await poolConnect
+  const otpHash = crypto.createHash('sha256').update(String(otpCode)).digest('hex')
+
+  const result = await pool.request()
+    .input('phone',      sql.NVarChar(20), normPhone)
+    .input('purpose',    sql.NVarChar(20), purpose)
+    .input('otp_hash',   sql.NVarChar(64), otpHash)
+    .input('now',        sql.DateTime2,    new Date())
+    .query(`
+      SELECT id FROM whatsapp_otp_log
+      WHERE phone     = @phone
+        AND purpose   = @purpose
+        AND otp_hash  = @otp_hash
+        AND used      = 0
+        AND expires_at > @now
+    `)
+
+  if (result.recordset.length === 0) return false
+
+  // Mark as used
+  await pool.request()
+    .input('id', sql.UniqueIdentifier, result.recordset[0].id)
+    .query(`UPDATE whatsapp_otp_log SET used = 1 WHERE id = @id`)
+
+  return true
+}
+
+module.exports = { sendOtp, verifyOtp, normalisePhone }

@@ -2,7 +2,9 @@ const { pool, poolConnect } = require('./src/db');
 
 // ─── PUT YOUR SQL QUERY HERE ───────────────────────────────────────────────
 const QUERY = `
-  SELECT TOP 10 * FROM Users
+  ALTER TABLE users ADD failed_attempts INT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD locked_until DATETIME2 NULL;
+
 `;
 // ──────────────────────────────────────────────────────────────────────────
 
