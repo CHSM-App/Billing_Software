@@ -181,7 +181,6 @@ router.post('/reset-pin', async (req, res) => {
 
   let payload;
   try {
-    const jwt = require('jsonwebtoken');
     payload = jwt.verify(verified_token, process.env.JWT_ACCESS_SECRET);
   } catch {
     return res.status(401).json({ error: 'Invalid or expired verification token' });
