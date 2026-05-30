@@ -56,104 +56,151 @@ router.get('/:token', async (req, res) => {
       const qty = Number(i.quantity) % 1 === 0 ? Number(i.quantity) : fmt(i.quantity);
       return `<tr>
           <td class="item-name">${esc(i.item_name)}</td>
-          <td class="num">${qty}</td>
-          <td class="num">&#8377;${fmt(i.unit_price)}</td>
-          <td class="num">&#8377;${fmt(i.line_total)}</td>
+          <td class="r">${qty}</td>
+          <td class="r">&#8377;${fmt(i.unit_price)}</td>
+          <td class="r amount">&#8377;${fmt(i.line_total)}</td>
         </tr>`;
     }).join('');
 
     const totalQty = items.reduce((s, i) => s + Number(i.quantity), 0);
 
-    const html = '<!DOCTYPE html>'
-      + '<html lang="en"><head>'
-      + '<meta charset="UTF-8"/>'
-      + '<meta name="viewport" content="width=device-width, initial-scale=1"/>'
-      + '<title>Receipt &mdash; ' + esc(bill.bill_number) + '</title>'
-      + '<style>'
-      + '*{box-sizing:border-box;margin:0;padding:0}'
-      + 'body{font-family:"Segoe UI",Arial,sans-serif;background:#f0f2f5;min-height:100vh;padding:12px;color:#1a1a1a}'
-      + '.wrap{max-width:480px;margin:0 auto}'
-      + '.shop-header{background:#fff;border-radius:10px 10px 0 0;padding:20px 16px 16px;text-align:center;border-bottom:2px dashed #ddd}'
-      + '.shop-logo{width:72px;height:72px;object-fit:contain;border-radius:8px;margin-bottom:8px}'
-      + '.shop-name{font-size:20px;font-weight:700;letter-spacing:.3px}'
-      + '.shop-meta{font-size:12px;color:#555;margin-top:3px;line-height:1.6}'
-      + '.shop-meta a{color:#1976d2;text-decoration:none}'
-      + '.bill-info{background:#fff;padding:12px 16px;border-bottom:1px dashed #ddd;font-size:13px;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}'
-      + '.bill-info .label{color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding-top:2px}'
-      + '.bill-info .value{font-weight:600}'
-      + '.customer{background:#f8f9ff;padding:10px 16px;border-bottom:1px dashed #ddd;font-size:13px}'
-      + '.customer .sec-title{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#888;margin-bottom:4px}'
-      + '.customer .cname{font-weight:700;font-size:14px}'
-      + '.customer .cphone{color:#555;margin-top:2px}'
-      + '.items-wrap{background:#fff;overflow-x:auto}'
-      + 'table{width:100%;border-collapse:collapse;font-size:13px}'
-      + 'thead tr{background:#f5f5f5;border-bottom:2px solid #e0e0e0}'
-      + 'th{padding:9px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#555}'
-      + 'td{padding:9px 10px;border-bottom:1px solid #f0f0f0}'
-      + 'td.item-name{font-weight:500}'
-      + '.num{text-align:right}'
-      + 'tbody tr:last-child td{border-bottom:none}'
-      + '.totals{background:#fff;border-top:2px dashed #ddd;padding:10px 16px}'
-      + '.totals .row{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;color:#555}'
-      + '.totals .grand{font-size:16px;font-weight:700;color:#1a1a1a;border-top:2px solid #1976d2;margin-top:6px;padding-top:8px}'
-      + '.totals .grand span:last-child{color:#1976d2}'
-      + '.payment{background:#fff;padding:10px 16px;border-top:1px dashed #ddd;display:flex;justify-content:space-between;align-items:center;font-size:13px}'
-      + '.pay-mode{font-weight:600}'
-      + '.pay-badge{background:#e8f5e9;color:#2e7d32;padding:3px 12px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}'
-      + '.receipt-footer{background:#fff;border-radius:0 0 10px 10px;padding:14px 16px;text-align:center;border-top:2px dashed #ddd;font-size:12px;color:#888;line-height:1.6}'
-      + '.receipt-footer .note{color:#444;font-style:italic;margin-bottom:4px}'
-      + '.powered{margin-top:8px;font-size:11px;color:#bbb}'
-      + '</style></head><body><div class="wrap">'
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Receipt &mdash; ${esc(bill.bill_number)}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',sans-serif;background:#eef0f4;min-height:100vh;padding:20px 12px;color:#1c1c1e;-webkit-font-smoothing:antialiased}
+  .receipt{max-width:500px;margin:0 auto;background:#fff;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.10)}
 
-      // Shop header
-      + '<div class="shop-header">'
-      + (bill.logo_url ? '<img src="' + esc(bill.logo_url) + '" class="shop-logo" alt="logo"/>' : '')
-      + '<div class="shop-name">' + esc(bill.shop_name) + '</div>'
-      + '<div class="shop-meta">'
-      + (addressLine ? addressLine + '<br/>' : '')
-      + (bill.shop_phone ? '&#128222; ' + esc(bill.shop_phone) : '')
-      + (bill.shop_phone && bill.shop_email ? ' &nbsp;|&nbsp; ' : '')
-      + (bill.shop_email ? '&#9993; <a href="mailto:' + esc(bill.shop_email) + '">' + esc(bill.shop_email) + '</a>' : '')
-      + (bill.gst_number ? '<br/>GSTIN: ' + esc(bill.gst_number) : '')
-      + '</div></div>'
+  /* ── top bar ── */
+  .top-bar{background:#1a1a2e;padding:24px 24px 20px;border-radius:4px 4px 0 0;text-align:center}
+  .top-bar .logo{width:64px;height:64px;object-fit:contain;border-radius:4px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto}
+  .top-bar .shop-name{font-size:18px;font-weight:700;color:#fff;letter-spacing:.4px}
+  .top-bar .shop-sub{font-size:12px;color:#a0a8c0;margin-top:5px;line-height:1.7}
+  .top-bar .shop-sub a{color:#a0a8c0;text-decoration:none}
 
-      // Bill info
-      + '<div class="bill-info">'
-      + '<div class="label">Bill No</div><div class="value">' + esc(bill.bill_number) + '</div>'
-      + '<div class="label">Date &amp; Time</div><div class="value">' + date + '</div>'
-      + '</div>'
+  /* ── section divider ── */
+  .divider{height:1px;background:#f0f0f0;margin:0 24px}
+  .divider-dashed{border:none;border-top:1px dashed #ddd;margin:0 24px}
 
-      // Customer (optional)
-      + (bill.customer_name || bill.customer_phone
-        ? '<div class="customer"><div class="sec-title">Customer Details</div>'
-          + (bill.customer_name ? '<div class="cname">' + esc(bill.customer_name) + '</div>' : '')
-          + (bill.customer_phone ? '<div class="cphone">&#128242; ' + esc(bill.customer_phone) + '</div>' : '')
-          + '</div>'
-        : '')
+  /* ── meta row ── */
+  .meta{display:flex;justify-content:space-between;align-items:flex-start;padding:16px 24px;gap:12px;flex-wrap:wrap}
+  .meta-item .label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#9a9aaa;margin-bottom:3px}
+  .meta-item .value{font-size:13px;font-weight:600;color:#1c1c1e}
+  .badge{display:inline-block;padding:3px 10px;border-radius:3px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;background:#e8f4ec;color:#1e7e34}
 
-      // Items table
-      + '<div class="items-wrap"><table>'
-      + '<thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>'
-      + '<tbody>' + itemRows + '</tbody>'
-      + '</table></div>'
+  /* ── customer ── */
+  .customer{padding:12px 24px;background:#f9f9fb;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0}
+  .customer .sec-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#9a9aaa;margin-bottom:6px}
+  .customer .cname{font-size:14px;font-weight:600;color:#1c1c1e}
+  .customer .cphone{font-size:12px;color:#666;margin-top:2px}
 
-      // Totals
-      + '<div class="totals">'
-      + '<div class="row"><span>Total Items</span><span>' + items.length + ' (Qty: ' + (totalQty % 1 === 0 ? totalQty : fmt(totalQty)) + ')</span></div>'
-      + '<div class="row grand"><span>Grand Total</span><span>&#8377;' + fmt(bill.total) + '</span></div>'
-      + '</div>'
+  /* ── items ── */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  .table-head{background:#f4f5f7}
+  .table-head th{padding:10px 24px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#888;text-align:left}
+  .table-head th.r{text-align:right}
+  tbody td{padding:11px 24px;border-bottom:1px solid #f4f4f6;color:#2c2c2e;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  td.r{text-align:right}
+  td.item-name{font-weight:500}
+  td.amount{font-weight:600}
 
-      // Payment
-      + '<div class="payment"><span class="pay-mode">Payment Mode</span><span class="pay-badge">' + esc(payLabel) + '</span></div>'
+  /* ── totals ── */
+  .totals{padding:14px 24px;background:#f9f9fb;border-top:1px solid #eee}
+  .totals .t-row{display:flex;justify-content:space-between;font-size:13px;color:#555;padding:3px 0}
+  .totals .t-grand{display:flex;justify-content:space-between;font-size:16px;font-weight:700;color:#1a1a2e;padding:12px 0 0;margin-top:8px;border-top:2px solid #1a1a2e}
 
-      // Footer
-      + '<div class="receipt-footer">'
-      + (bill.bill_footer_note ? '<div class="note">' + esc(bill.bill_footer_note) + '</div>' : '')
-      + '<div>Thank you for your purchase!</div>'
-      + '<div class="powered">Powered by VengurlaTech Billing</div>'
-      + '</div>'
+  /* ── footer ── */
+  .footer{padding:16px 24px;text-align:center;border-top:1px solid #eee}
+  .footer .note{font-size:12px;color:#444;font-style:italic;margin-bottom:6px}
+  .footer .thanks{font-size:13px;font-weight:600;color:#333;letter-spacing:.2px}
+  .footer .powered{font-size:11px;color:#bbb;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="receipt">
 
-      + '</div></body></html>';
+  <!-- Header -->
+  <div class="top-bar">
+    ${bill.logo_url ? '<img src="' + esc(bill.logo_url) + '" class="logo" alt=""/>' : ''}
+    <div class="shop-name">${esc(bill.shop_name)}</div>
+    <div class="shop-sub">
+      ${addressLine ? addressLine + '<br/>' : ''}
+      ${bill.shop_phone ? 'Tel: ' + esc(bill.shop_phone) : ''}
+      ${bill.shop_phone && bill.shop_email ? '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}
+      ${bill.shop_email ? '<a href="mailto:' + esc(bill.shop_email) + '">' + esc(bill.shop_email) + '</a>' : ''}
+      ${bill.gst_number ? '<br/>GSTIN: ' + esc(bill.gst_number) : ''}
+    </div>
+  </div>
+
+  <!-- Bill meta -->
+  <div class="meta">
+    <div class="meta-item">
+      <div class="label">Bill No</div>
+      <div class="value">${esc(bill.bill_number)}</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Date &amp; Time</div>
+      <div class="value">${date}</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Payment</div>
+      <div class="value"><span class="badge">${esc(payLabel)}</span></div>
+    </div>
+  </div>
+
+  ${bill.customer_name || bill.customer_phone ? `
+  <!-- Customer -->
+  <div class="customer">
+    <div class="sec-label">Billed To</div>
+    ${bill.customer_name ? '<div class="cname">' + esc(bill.customer_name) + '</div>' : ''}
+    ${bill.customer_phone ? '<div class="cphone">Mob: ' + esc(bill.customer_phone) + '</div>' : ''}
+  </div>` : ''}
+
+  <!-- Items -->
+  <table>
+    <thead class="table-head">
+      <tr>
+        <th>Description</th>
+        <th class="r">Qty</th>
+        <th class="r">Rate</th>
+        <th class="r">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+  </table>
+
+  <!-- Totals -->
+  <div class="totals">
+    <div class="t-row">
+      <span>Total Qty</span>
+      <span>${totalQty % 1 === 0 ? totalQty : fmt(totalQty)}</span>
+    </div>
+    <div class="t-row">
+      <span>Items</span>
+      <span>${items.length}</span>
+    </div>
+    <div class="t-grand">
+      <span>Grand Total</span>
+      <span>&#8377;${fmt(bill.total)}</span>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    ${bill.bill_footer_note ? '<div class="note">' + esc(bill.bill_footer_note) + '</div>' : ''}
+    <div class="thanks">Thank you for your business.</div>
+    <div class="powered">Powered by VengurlaTech Billing</div>
+  </div>
+
+</div>
+</body>
+</html>`;
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'public, max-age=3600');
