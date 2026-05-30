@@ -5,21 +5,28 @@
 -- No expiry — receipts are permanent.
 -- =============================================================================
 
+-- Step 1: Add column as nullable
 IF NOT EXISTS (
   SELECT 1 FROM sys.columns
   WHERE object_id = OBJECT_ID('bills') AND name = 'receipt_token'
 )
-BEGIN
-  ALTER TABLE bills ADD receipt_token NVARCHAR(16) NULL;
+  ALTER TABLE bills ADD receipt_token NVARCHAR(16) NULL
+GO
 
-  -- Backfill existing bills with random tokens
-  UPDATE bills
-  SET receipt_token = LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''), 16)
-  WHERE receipt_token IS NULL;
+-- Step 2: Backfill existing bills (separate batch so column is visible)
+UPDATE bills
+SET receipt_token = LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''), 16)
+WHERE receipt_token IS NULL
+GO
 
-  -- Make unique and not-null now that all rows are filled
-  ALTER TABLE bills ALTER COLUMN receipt_token NVARCHAR(16) NOT NULL;
+-- Step 3: Make NOT NULL
+ALTER TABLE bills ALTER COLUMN receipt_token NVARCHAR(16) NOT NULL
+GO
 
-  CREATE UNIQUE INDEX UQ_bills_receipt_token ON bills (receipt_token);
-END
+-- Step 4: Unique index
+IF NOT EXISTS (
+  SELECT 1 FROM sys.indexes
+  WHERE object_id = OBJECT_ID('bills') AND name = 'UQ_bills_receipt_token'
+)
+  CREATE UNIQUE INDEX UQ_bills_receipt_token ON bills (receipt_token)
 GO

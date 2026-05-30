@@ -20,7 +20,7 @@ function buildOptions() {
   if (isProd) {
     const options = {
       encrypt: true,
-      trustServerCertificate: false,
+      trustServerCertificate: true,
     };
     if (process.env.DB_SSL_CA) {
       options.cryptoCredentialsDetails = {
