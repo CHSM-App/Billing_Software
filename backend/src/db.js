@@ -1,7 +1,7 @@
 const sql    = require('mssql');
 const fs     = require('fs');
 const logger = require('./logger');
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
 const isProd = process.env.NODE_ENV === 'production';
 
