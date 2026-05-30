@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import '../api.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import 'otp_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -67,11 +68,48 @@ class _RegisterScreenState extends State<RegisterScreen>
 
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
+
+    final ownerPhone = _ownerPhoneController.text.trim();
+
+    // Step 1 — send OTP to owner's phone
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
+    try {
+      await sendOtp(ownerPhone, 'register');
+    } on ApiException catch (e) {
+      setState(() => _errorMessage = e.message);
+      return;
+    } catch (_) {
+      setState(() => _errorMessage =
+          'Could not send OTP. Check your internet connection.');
+      return;
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
 
+    if (!mounted) return;
+
+    // Step 2 — open OTP screen; returns true on success, null if user went back
+    final verified = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OtpScreen(phone: ownerPhone, purpose: 'register'),
+      ),
+    );
+
+    if (!mounted || verified != true) return;
+
+    // Step 3 — OTP confirmed, submit registration
+    await _submitRegistration();
+  }
+
+  Future<void> _submitRegistration() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
       await register(
         businessName: _businessNameController.text.trim(),
@@ -124,7 +162,7 @@ class _RegisterScreenState extends State<RegisterScreen>
       );
     } on ApiException catch (e) {
       setState(() => _errorMessage = e.message);
-    } catch (e) {
+    } catch (_) {
       setState(() => _errorMessage =
           'Could not connect to server. Check your internet connection.');
     } finally {

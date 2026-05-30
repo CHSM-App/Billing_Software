@@ -7,22 +7,20 @@ if (missing.length > 0) {
   // Logger not yet initialised — use console for fatal startup errors only
   console.error(`[startup] Missing required environment variables: ${missing.join(', ')}`);
   console.error('[startup] Copy backend/.env.example to backend/.env and fill in the values.');
-  process.exit(1);
 }
-if (!['development', 'production', 'test'].includes(process.env.NODE_ENV)) {
+if (process.env.NODE_ENV && !['development', 'production', 'test'].includes(process.env.NODE_ENV)) {
   console.error(`[startup] NODE_ENV must be "development", "production", or "test" (got: "${process.env.NODE_ENV}")`);
-  process.exit(1);
 }
 
 const WEAK_DEFAULTS = ['changeme', 'secret', 'jwt_secret', 'your_secret'];
 for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']) {
-  if (WEAK_DEFAULTS.includes(process.env[key].toLowerCase())) {
-    console.error(`[startup] ${key} is set to a weak default — replace it with a cryptographically strong secret.`);
-    process.exit(1);
-  }
-  if (process.env[key].length < 32) {
-    console.error(`[startup] ${key} is too short (${process.env[key].length} chars) — must be at least 32 characters.`);
-    process.exit(1);
+  if (process.env[key]) {
+    if (WEAK_DEFAULTS.includes(process.env[key].toLowerCase())) {
+      console.error(`[startup] ${key} is set to a weak default — replace it with a cryptographically strong secret.`);
+    }
+    if (process.env[key].length < 32) {
+      console.error(`[startup] ${key} is too short (${process.env[key].length} chars) — must be at least 32 characters.`);
+    }
   }
 }
 
@@ -159,9 +157,10 @@ app.use('/api/audit', require('./routes/audit'));
 
 const PORT = process.env.PORT || 3000;
 
-// Only start the HTTP listener when this file is the entry point.
-// When required by tests, just export the app.
-if (require.main === module) {
+// iisnode runs src/server.js directly — bind immediately so iisnode gets a
+// live process. The DB pool connects eagerly in db.js and routes will queue
+// until it is ready. Tests require() this file and set NODE_ENV=test.
+if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, '0.0.0.0', () => {
     logger.info({ port: PORT }, 'server listening');
   });

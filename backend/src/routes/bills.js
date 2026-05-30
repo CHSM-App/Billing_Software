@@ -4,6 +4,7 @@ const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const audit = require('../audit');
 const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUtils');
+const { sendBillMessage, normalisePhone } = require('../whatsapp');
 
 const router = express.Router();
 
@@ -178,7 +179,7 @@ router.post('/', requireAuth, async (req, res) => {
           requested[li.item_id] = (requested[li.item_id] || 0) + li.quantity;
         }
         const insufficient = lineItems
-          .filter((li) => requested[li.item_id] > itemMap[li.item_id].stock_quantity)
+          .filter((li) => itemMap[li.item_id].stock_quantity != null && requested[li.item_id] > itemMap[li.item_id].stock_quantity)
           .map((li) => ({
             item_id: li.item_id,
             item_name: li.item_name,
@@ -259,6 +260,8 @@ router.post('/', requireAuth, async (req, res) => {
       // consumed inventory between our read above and this write.
       if (inventoryEnabled) {
         for (const li of lineItems) {
+          // Skip items with NULL stock — treated as unlimited/untracked
+          if (itemMap[li.item_id].stock_quantity == null) continue;
           const stockResult = await transaction.request()
             .input('item_id', sql.UniqueIdentifier, li.item_id)
             .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -557,6 +560,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       // Atomic decrement — final concurrency guard.
       if (inventoryEnabled) {
         for (const li of lineItems) {
+          // Skip items with NULL stock — treated as unlimited/untracked
+          if (itemMap[li.item_id].stock_quantity == null) continue;
           const stockResult = await transaction.request()
             .input('item_id', sql.UniqueIdentifier, li.item_id)
             .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -749,6 +754,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       // Atomic decrement for new items — final concurrency guard.
       if (inventoryEnabled) {
         for (const li of lineItems) {
+          // Skip items with NULL stock — treated as unlimited/untracked
+          if (itemMap[li.item_id].stock_quantity == null) continue;
           const stockResult = await transaction.request()
             .input('item_id', sql.UniqueIdentifier, li.item_id)
             .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -885,6 +892,38 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
     logger.error({ err }, 'Void bill error');
     return res.status(500).json({ error: 'Failed to void bill' });
   }
+});
+
+// POST /api/bills/send-whatsapp
+// Sends a bill receipt to the customer's WhatsApp number.
+// Body: { phone, shop_name, bill_no, date, item_list, total, pay_mode }
+router.post('/send-whatsapp', requireAuth, async (req, res) => {
+  const { phone, shop_name, bill_no, date, item_list, total, pay_mode } = req.body;
+
+  if (!phone || !bill_no || !total) {
+    return res.status(400).json({ error: 'phone, bill_no, and total are required' });
+  }
+  if (!normalisePhone(phone)) {
+    return res.status(400).json({ error: 'Invalid phone number' });
+  }
+
+  const result = await sendBillMessage({
+    phone,
+    shopName:  shop_name  || 'Our Store',
+    billNo:    bill_no,
+    date:      date       || new Date().toLocaleDateString('en-IN'),
+    itemList:  item_list  || '',
+    total:     total,
+    payMode:   pay_mode   || 'Cash',
+  });
+
+  if (result.sent) {
+    return res.json({ success: true, campaign_id: result.campaignId });
+  }
+  if (result.skipped) {
+    return res.json({ success: false, skipped: true, message: 'WhatsApp sending is disabled' });
+  }
+  return res.status(500).json({ error: result.error || 'Failed to send WhatsApp message' });
 });
 
 module.exports = router;

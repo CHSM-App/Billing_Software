@@ -117,8 +117,7 @@ router.post('/send-otp', registerLimiter, async (req, res) => {
         .input('phone', sql.NVarChar(20), phone)
         .query(`SELECT id FROM users WHERE phone = @phone`);
       if (result.recordset.length === 0) {
-        // Generic message to prevent user enumeration
-        return res.json({ success: true, message: 'If this number is registered, an OTP has been sent.' });
+        return res.status(404).json({ error: 'No account found with this phone number.' });
       }
     } catch (err) {
       logger.error({ err }, 'send-otp forgot_pin lookup error');

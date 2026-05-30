@@ -16,9 +16,10 @@ const crypto = require('crypto')
 const { pool, poolConnect, sql } = require('./db')
 const logger = require('./logger')
 
-const API_TOKEN    = process.env.WHATSAPP_API_TOKEN  || ''
-const ENABLED      = process.env.WHATSAPP_ENABLED === 'true'
-const OTP_TEMPLATE = process.env.WHATSAPP_TPL_OTP    || ''
+const API_TOKEN     = process.env.WHATSAPP_API_TOKEN   || ''
+const ENABLED       = process.env.WHATSAPP_ENABLED === 'true'
+const OTP_TEMPLATE  = process.env.WHATSAPP_TPL_OTP     || ''
+const BILL_TEMPLATE = process.env.WHATSAPP_TPL_BILL    || ''
 
 // OTP config
 const OTP_EXPIRY_MINUTES = 10
@@ -221,4 +222,103 @@ async function verifyOtp(phone, otpCode, purpose) {
   return true
 }
 
-module.exports = { sendOtp, verifyOtp, normalisePhone }
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP helper — form-encoded POST (used by SendMessage)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function postForm(path, body) {
+  return new Promise((resolve, reject) => {
+    const payload = Object.entries(body)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&')
+    const options = {
+      hostname: 'api2.smsala.com',
+      path,
+      method: 'POST',
+      headers: {
+        'Content-Type':   'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }
+    const req = https.request(options, res => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) }
+        catch { resolve({ raw: data }) }
+      })
+    })
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendBillMessage — sends a bill summary to a customer via WhatsApp template
+//
+// Variables map to the template placeholders in order:
+//   {1} shop_name  {2} bill_no  {3} date  {4} item_list  {5} total  {6} pay_mode
+//
+// Never throws — failures are logged and returned as { sent: false, error }.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendBillMessage({ phone, shopName, billNo, date, itemList, total, payMode }) {
+  const normPhone = normalisePhone(phone)
+  if (!normPhone) return { sent: false, error: 'Invalid phone number' }
+
+  if (!ENABLED) {
+    logger.info(`[WhatsApp] Disabled — would send bill #${billNo} to ${normPhone}`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] API token not configured — skipping bill send')
+    return { sent: false, error: 'API token not configured' }
+  }
+
+  if (!BILL_TEMPLATE || BILL_TEMPLATE.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] Bill template ID not configured — skipping')
+    return { sent: false, error: 'Bill template not configured' }
+  }
+
+  // Sample: comma-separated values in placeholder order.
+  // itemList uses " | " as separator to avoid commas breaking the sample parsing.
+  // Strip any stray commas from individual values for the same reason.
+  const clean = (v) => String(v).replace(/,/g, '')
+  const sample = [
+    clean(shopName),
+    clean(billNo),
+    clean(date),
+    clean(itemList),   // items already joined with " | " from Flutter side
+    clean(total),
+    clean(payMode),
+  ].join(',')
+
+  let result
+  try {
+    result = await postForm('/whatsapp/SendMessage', {
+      ApiToken:     API_TOKEN,
+      TemplateId:   BILL_TEMPLATE,
+      QuickNumber:  normPhone,
+      Sample:       sample,
+      CampaignName: 'bill_receipt',
+    })
+  } catch (err) {
+    logger.error({ err }, `[WhatsApp] Network error sending bill #${billNo}`)
+    return { sent: false, error: err.message }
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  if (success) {
+    logger.info(`[WhatsApp] Bill #${billNo} sent to ${normPhone} — CampaignId: ${result.ReturnData}`)
+  } else {
+    logger.warn({ result }, `[WhatsApp] Bill send failed for #${billNo}`)
+  }
+
+  return success
+    ? { sent: true, campaignId: result.ReturnData }
+    : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
+}
+
+module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillMessage }

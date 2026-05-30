@@ -24,10 +24,13 @@ class BillFilterState {
 
 class BillFilterNotifier extends Notifier<BillFilterState> {
   @override
-  BillFilterState build() => BillFilterState(
-        from: DateTime.now(),
-        to: DateTime.now(),
-      );
+  BillFilterState build() {
+    // Use start-of-day in local time so the date sent to the backend
+    // matches what the user sees on their device clock.
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    return BillFilterState(from: startOfToday, to: startOfToday);
+  }
 
   void setDateRange(DateTime from, DateTime to) =>
       state = state.copyWith(from: from, to: to);

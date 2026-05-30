@@ -296,6 +296,68 @@ Future<Map<String, dynamic>> register({
 }
 
 // ---------------------------------------------------------------------------
+// OTP — WhatsApp verification
+// ---------------------------------------------------------------------------
+
+/// Sends an OTP to [phone] for [purpose] ('register' or 'forgot_pin').
+/// Returns the response map. In dev mode the server returns `dev_otp`.
+Future<Map<String, dynamic>> sendOtp(String phone, String purpose) async {
+  final response = await _post(
+    Uri.parse('$baseUrl/send-otp'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'phone': phone, 'purpose': purpose}),
+  );
+  return _parse(response);
+}
+
+/// Verifies [otp] for [phone]+[purpose].
+/// Returns `{ verified_token: '...' }` on success, throws [ApiException] on failure.
+Future<Map<String, dynamic>> verifyOtp(String phone, String otp, String purpose) async {
+  final response = await _post(
+    Uri.parse('$baseUrl/verify-otp'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'phone': phone, 'otp': otp, 'purpose': purpose}),
+  );
+  return _parse(response);
+}
+
+/// Sends a bill receipt to [phone] via WhatsApp template.
+/// Variables: shop_name={1}, bill_no={2}, date={3}, item_list={4}, total={5}, pay_mode={6}
+Future<Map<String, dynamic>> sendBillWhatsApp({
+  required String phone,
+  required String shopName,
+  required String billNo,
+  required String date,
+  required String itemList,
+  required String total,
+  required String payMode,
+}) async {
+  final response = await _authPost(
+    Uri.parse('$baseUrl/bills/send-whatsapp'),
+    body: jsonEncode({
+      'phone':     phone,
+      'shop_name': shopName,
+      'bill_no':   billNo,
+      'date':      date,
+      'item_list': itemList,
+      'total':     total,
+      'pay_mode':  payMode,
+    }),
+  );
+  return _parse(response);
+}
+
+/// Resets the PIN for the user associated with [verifiedToken].
+Future<void> resetPin(String verifiedToken, String newPin) async {
+  final response = await _post(
+    Uri.parse('$baseUrl/reset-pin'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'verified_token': verifiedToken, 'new_pin': newPin}),
+  );
+  _parse(response);
+}
+
+// ---------------------------------------------------------------------------
 // Items
 // ---------------------------------------------------------------------------
 

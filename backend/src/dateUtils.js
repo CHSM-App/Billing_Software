@@ -62,23 +62,26 @@ function requireDateParam(value, paramName) {
  * Treating the input as UTC ensures consistent behaviour regardless of the
  * Node.js process timezone.
  */
+// IST is UTC+5:30 = 330 minutes ahead of UTC.
+// The client sends a local (IST) date string. To query the DB correctly
+// (which stores UTC timestamps), we convert the IST day boundaries to UTC.
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 19800000 ms
+
 function utcDayStart(dateStr) {
-  return new Date(dateStr + 'T00:00:00.000Z');
+  // Start of day in IST = YYYY-MM-DDT00:00:00+05:30 = YYYY-MM-DDT(00:00 - 5:30)Z
+  const istMidnight = new Date(dateStr + 'T00:00:00.000Z');
+  return new Date(istMidnight.getTime() - IST_OFFSET_MS);
 }
 
 /**
  * Given a YYYY-MM-DD string, return a JS Date representing the exclusive upper
- * bound for that day — i.e. the start of the NEXT calendar day in UTC
- * (YYYY-MM-DDT00:00:00.000Z + 1 day).
- *
- * Use with a strict-less-than (<) comparison so that all sub-second timestamps
- * within the day are included:
- *   created_at >= utcDayStart(from)  AND  created_at < utcDayEnd(to)
+ * bound for that day in IST — i.e. the start of the NEXT calendar day in IST,
+ * converted to UTC.
  */
 function utcDayEnd(dateStr) {
   const d = new Date(dateStr + 'T00:00:00.000Z');
   d.setUTCDate(d.getUTCDate() + 1);
-  return d;
+  return new Date(d.getTime() - IST_OFFSET_MS);
 }
 
 /**
@@ -86,7 +89,9 @@ function utcDayEnd(dateStr) {
  * Callers that need local-date accuracy should pass ?date= from the client.
  */
 function todayUtc() {
-  return new Date().toISOString().slice(0, 10);
+  // Return today's date in IST (client timezone) as YYYY-MM-DD
+  const now = new Date(Date.now() + IST_OFFSET_MS);
+  return now.toISOString().slice(0, 10);
 }
 
 /**

@@ -28,11 +28,11 @@ describe('signAccessToken', () => {
     expect(decoded.role).toBe('owner');
   });
 
-  test('expires in 15 minutes', () => {
+  test('expires in 8 hours', () => {
     const token = signAccessToken(payload);
     const decoded = jwt.decode(token);
     const diffSec = decoded.exp - decoded.iat;
-    expect(diffSec).toBe(15 * 60);
+    expect(diffSec).toBe(8 * 60 * 60);
   });
 });
 

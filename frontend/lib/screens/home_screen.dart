@@ -250,13 +250,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     if (widget.activeBillId != null || widget.tableId != null) {
+      // Table billing — always online
       await _generateBillOnline(cart);
       return;
     }
-    await _generateBillOffline(cart);
-    unawaited(SyncService.instance.syncAll().then((_) {
-      ref.invalidate(reportProvider);
-    }));
+    // Retail billing — online when connected, offline when not
+    final isOnline = ref.read(connectivityProvider);
+    if (isOnline) {
+      await _generateBillOnline(cart);
+    } else {
+      await _generateBillOffline(cart);
+      unawaited(SyncService.instance.syncAll().then((_) {
+        ref.invalidate(reportProvider);
+      }));
+    }
   }
 
   Future<void> _generateBillOnline(List<CartEntry> cart) async {
@@ -393,14 +400,56 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  Future<void> _sendBillWhatsApp(Bill bill) async {
+    final businessName = ref.read(businessNameProvider);
+    final phone = bill.customerPhone;
+    if (phone == null || phone.trim().isEmpty) return;
+
+    // Build item list — " | " separator (SMSala rejects newlines in param text)
+    final itemList = bill.items
+        .map((i) {
+          final qty = i.quantity.toStringAsFixed(
+              i.quantity % 1 == 0 ? 0 : 1);
+          final price = i.lineTotal.toStringAsFixed(2);
+          return '${i.itemName} x$qty Rs.$price';
+        })
+        .join(' | ');
+
+    final date = '${bill.createdAt.day.toString().padLeft(2, '0')}-'
+        '${bill.createdAt.month.toString().padLeft(2, '0')}-'
+        '${bill.createdAt.year}';
+
+    try {
+      await sendBillWhatsApp(
+        phone:    phone,
+        shopName: businessName.isNotEmpty ? businessName : 'Our Store',
+        billNo:   bill.billNumber,
+        date:     date,
+        itemList: itemList,
+        total:    bill.total.toStringAsFixed(2),
+        payMode:  bill.paymentMode[0].toUpperCase() +
+                  bill.paymentMode.substring(1),
+      );
+      if (mounted) _showSnack('Bill sent to WhatsApp successfully');
+    } on ApiException catch (e) {
+      if (mounted) _showSnack('WhatsApp failed: ${e.message}', isError: true);
+    } catch (_) {
+      if (mounted) _showSnack('Could not send WhatsApp message', isError: true);
+    }
+  }
+
   void _showBillDialog(Bill bill) {
+    final hasPhone = bill.customerPhone != null && bill.customerPhone!.isNotEmpty;
     showDialog(
       context: context,
       builder: (_) => Dialog(
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.large)),
-        child: SizedBox(
-          width: 380,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 380,
+            maxHeight: MediaQuery.of(context).size.height * 0.82,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -452,82 +501,145 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ],
                 ),
               ),
-              // Items
-              Padding(
-                padding: const EdgeInsets.all(AppSpacing.space16),
-                child: Column(
-                  children: [
-                    ...bill.items.map((item) => Padding(
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
+              // Items — receipt style, scrollable when many items
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.space16),
+                    child: Column(
+                      children: [
+                        const Divider(height: 1),
+                        ...bill.items.map((item) {
+                          final qty = item.quantity.toStringAsFixed(
+                              item.quantity % 1 == 0 ? 0 : 1);
+                          return Column(
                             children: [
-                              Expanded(
-                                child: Text(
-                                  '${item.itemName} × ${item.quantity.toStringAsFixed(item.quantity % 1 == 0 ? 0 : 1)}',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium,
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 7),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        item.itemName,
+                                        style: const TextStyle(
+                                          fontFamily: 'Inter',
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      '×$qty',
+                                      style: const TextStyle(
+                                        fontFamily: 'Inter',
+                                        fontSize: 12,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                    const SizedBox(width: AppSpacing.space12),
+                                    SizedBox(
+                                      width: 72,
+                                      child: Text(
+                                        '₹${item.lineTotal.toStringAsFixed(2)}',
+                                        textAlign: TextAlign.right,
+                                        style: const TextStyle(
+                                          fontFamily: 'Inter',
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              Text(
-                                '₹${item.lineTotal.toStringAsFixed(2)}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(fontWeight: FontWeight.w600),
-                              ),
+                              const Divider(height: 1),
                             ],
-                          ),
-                        )),
-                    const Divider(height: AppSpacing.space24),
-                    if (bill.taxAmount > 0) ...[
-                      _billRow('Subtotal',
-                          '₹${bill.subtotal.toStringAsFixed(2)}'),
-                      const SizedBox(height: 4),
-                      _billRow(
-                          'Tax', '₹${bill.taxAmount.toStringAsFixed(2)}'),
-                      const SizedBox(height: 4),
-                    ],
-                    _billRow('Total', '₹${bill.total.toStringAsFixed(2)}',
-                        bold: true),
-                    const SizedBox(height: 4),
-                    _billRow('Payment', bill.paymentMode.toUpperCase()),
-                  ],
+                          );
+                        }),
+                        if (bill.taxAmount > 0) ...[
+                          _billRow('Subtotal',
+                              '₹${bill.subtotal.toStringAsFixed(2)}'),
+                          const SizedBox(height: 4),
+                          _billRow(
+                              'Tax', '₹${bill.taxAmount.toStringAsFixed(2)}'),
+                          const SizedBox(height: 4),
+                        ],
+                        const SizedBox(height: AppSpacing.space8),
+                        _billRow('Total', '₹${bill.total.toStringAsFixed(2)}',
+                            bold: true),
+                        const SizedBox(height: 4),
+                        _billRow('Payment', bill.paymentMode.toUpperCase()),
+                        const SizedBox(height: AppSpacing.space8),
+                      ],
+                    ),
+                  ),
                 ),
               ),
               // Actions
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.space16, 0,
                     AppSpacing.space16, AppSpacing.space16),
-                child: Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: SecondaryButton(
-                        text: 'Close',
-                        onPressed: () {
-                          Navigator.pop(context);
-                          if (widget.tableId != null) {
-                            if (widget.onBillDone != null) {
-                              widget.onBillDone!();
-                            } else {
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SecondaryButton(
+                            text: 'Close',
+                            onPressed: () {
                               Navigator.pop(context);
-                            }
-                          }
-                        },
-                      ),
+                              if (widget.tableId != null) {
+                                if (widget.onBillDone != null) {
+                                  widget.onBillDone!();
+                                } else {
+                                  Navigator.pop(context);
+                                }
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.space12),
+                        Expanded(
+                          child: PrimaryButton(
+                            text: 'Print',
+                            icon: Icons.print_outlined,
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _autoPrint(bill);
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: AppSpacing.space12),
-                    Expanded(
-                      child: PrimaryButton(
-                        text: 'Print',
-                        icon: Icons.print_outlined,
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _autoPrint(bill);
-                        },
+                    if (hasPhone) ...[
+                      const SizedBox(height: AppSpacing.space8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.message_outlined, size: 16,
+                              color: Color(0xFF25D366)),
+                          label: const Text(
+                            'Send to WhatsApp',
+                            style: TextStyle(color: Color(0xFF25D366),
+                                fontWeight: FontWeight.w600),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFF25D366)),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: AppSpacing.space12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.small),
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _sendBillWhatsApp(bill);
+                          },
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),

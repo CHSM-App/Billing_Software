@@ -6,6 +6,7 @@ import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import 'register_screen.dart';
+import 'otp_screen.dart';
 import 'main_shell.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -48,6 +49,164 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _phoneController.dispose();
     _pinController.dispose();
     super.dispose();
+  }
+
+  Future<void> _forgotPin() async {
+    final phoneCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool sending = false;
+    // Capture messenger before dialog opens so snackbars appear above the dialog
+    final messenger = ScaffoldMessenger.of(context);
+
+    // Step 1 — ask for phone number
+    final phone = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: const Text('Forgot PIN'),
+          content: Form(
+            key: formKey,
+            child: AppTextField(
+              label: 'Registered phone number',
+              controller: phoneCtrl,
+              hint: '10-digit number',
+              keyboardType: TextInputType.phone,
+              maxLength: 10,
+              prefixIcon: const Icon(Icons.phone_outlined,
+                  size: 18, color: AppColors.textSecondary),
+              validator: (v) {
+                if (v == null || v.isEmpty) return 'Required';
+                if (!RegExp(r'^\d{10}$').hasMatch(v)) return 'Enter 10-digit number';
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            PrimaryButton(
+              text: 'Send OTP',
+              isLoading: sending,
+              onPressed: () async {
+                if (!formKey.currentState!.validate()) return;
+                setS(() => sending = true);
+                try {
+                  await sendOtp(phoneCtrl.text.trim(), 'forgot_pin');
+                  if (ctx.mounted) Navigator.pop(ctx, phoneCtrl.text.trim());
+                } on ApiException catch (e) {
+                  messenger.showSnackBar(SnackBar(content: Text(e.message)));
+                } catch (_) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Failed to send OTP. Try again.')),
+                  );
+                } finally {
+                  setS(() => sending = false);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || phone == null) return;
+
+    // Step 2 — verify OTP; returns verified_token on success
+    final verifiedToken = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OtpScreen(phone: phone, purpose: 'forgot_pin'),
+      ),
+    );
+
+    if (!mounted || verifiedToken == null) return;
+
+    // Step 3 — ask for new PIN
+    final newPinCtrl = TextEditingController();
+    final confirmPinCtrl = TextEditingController();
+    final pinFormKey = GlobalKey<FormState>();
+    bool resetting = false;
+    // Re-capture messenger (previous one may be stale after navigation)
+    final pinMessenger = ScaffoldMessenger.of(context);
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: const Text('Set New PIN'),
+          content: Form(
+            key: pinFormKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppTextField(
+                  label: 'New PIN',
+                  controller: newPinCtrl,
+                  hint: '4-digit PIN',
+                  keyboardType: TextInputType.number,
+                  obscureText: true,
+                  maxLength: 4,
+                  prefixIcon: const Icon(Icons.lock_outline,
+                      size: 18, color: AppColors.textSecondary),
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Required';
+                    if (!RegExp(r'^\d{4}$').hasMatch(v)) return 'PIN must be 4 digits';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: AppSpacing.space12),
+                AppTextField(
+                  label: 'Confirm PIN',
+                  controller: confirmPinCtrl,
+                  hint: 'Re-enter PIN',
+                  keyboardType: TextInputType.number,
+                  obscureText: true,
+                  maxLength: 4,
+                  prefixIcon: const Icon(Icons.lock_outline,
+                      size: 18, color: AppColors.textSecondary),
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Required';
+                    if (v != newPinCtrl.text) return 'PINs do not match';
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            PrimaryButton(
+              text: 'Reset PIN',
+              isLoading: resetting,
+              onPressed: () async {
+                if (!pinFormKey.currentState!.validate()) return;
+                setS(() => resetting = true);
+                try {
+                  await resetPin(verifiedToken, newPinCtrl.text.trim());
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  pinMessenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('PIN reset successfully. Please log in.'),
+                      backgroundColor: AppColors.success,
+                    ),
+                  );
+                } on ApiException catch (e) {
+                  pinMessenger.showSnackBar(SnackBar(content: Text(e.message)));
+                } catch (_) {
+                  pinMessenger.showSnackBar(
+                    const SnackBar(content: Text('Reset failed. Try again.')),
+                  );
+                } finally {
+                  setS(() => resetting = false);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _login() async {
@@ -316,6 +475,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             onPressed: _login,
             isLoading: _isLoading,
             icon: Icons.login_rounded,
+          ),
+          const SizedBox(height: AppSpacing.space12),
+          Center(
+            child: TextButton(
+              onPressed: _forgotPin,
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                'Forgot PIN?',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
+            ),
           ),
           const SizedBox(height: AppSpacing.space16),
           Row(
