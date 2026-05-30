@@ -151,7 +151,7 @@ app.use('/api/staff', require('./routes/staff'));
 app.use('/api/businesses', require('./routes/businesses'));
 app.use('/api/items', require('./routes/items'));
 app.use('/api/bills', require('./routes/bills'));
-app.use('/receipt',  require('./routes/bills'));
+app.use('/receipt',  require('./routes/receipt'));
 app.use('/api/tables', require('./routes/tables'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/expenses/recurring', require('./routes/recurring_expenses'));
