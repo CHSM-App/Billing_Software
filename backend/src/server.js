@@ -38,17 +38,20 @@ const { pool, poolConnect, sql } = require('./db');
 
 const app = express();
 
+// Behind IIS — without this every request looks like 127.0.0.1 and the
+// rate limiter buckets all users together.
+app.set('trust proxy', 1);
+
 // ---------------------------------------------------------------------------
 // CORS
 // ---------------------------------------------------------------------------
-const allowedOrigins = process.env.CORS_ORIGINS
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
 
 if (allowedOrigins.includes('*')) {
-  logger.fatal('CORS_ORIGINS must not contain "*". Specify exact origins.');
-  process.exit(1);
+  logger.error('CORS_ORIGINS must not contain "*". Specify exact origins.');
 }
 
 for (const origin of allowedOrigins) {
@@ -56,8 +59,7 @@ for (const origin of allowedOrigins) {
     const u = new URL(origin);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error();
   } catch {
-    logger.fatal({ origin }, 'Invalid CORS origin — must be a full http/https URL');
-    process.exit(1);
+    logger.error({ origin }, 'Invalid CORS origin — must be a full http/https URL');
   }
 }
 
