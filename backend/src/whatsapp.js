@@ -255,20 +255,19 @@ function postForm(path, body) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// sendBillMessage — sends a bill summary to a customer via WhatsApp template
+// sendBillLink — sends a receipt URL to a customer via WhatsApp template
 //
-// Variables map to the template placeholders in order:
-//   {1} shop_name  {2} bill_no  {3} date  {4} item_list  {5} total  {6} pay_mode
+// Template variables: {1} shop_name  {2} bill_number  {3} receipt_url
 //
 // Never throws — failures are logged and returned as { sent: false, error }.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function sendBillMessage({ phone, shopName, billNo, date, itemList, total, payMode }) {
+async function sendBillLink({ phone, shopName, billNumber, receiptUrl }) {
   const normPhone = normalisePhone(phone)
   if (!normPhone) return { sent: false, error: 'Invalid phone number' }
 
   if (!ENABLED) {
-    logger.info(`[WhatsApp] Disabled — would send bill #${billNo} to ${normPhone}`)
+    logger.info(`[WhatsApp] Disabled — would send receipt link for #${billNumber} to ${normPhone}`)
     return { sent: false, skipped: true }
   }
 
@@ -282,18 +281,9 @@ async function sendBillMessage({ phone, shopName, billNo, date, itemList, total,
     return { sent: false, error: 'Bill template not configured' }
   }
 
-  // Sample: comma-separated values in placeholder order.
-  // itemList uses " | " as separator to avoid commas breaking the sample parsing.
-  // Strip any stray commas from individual values for the same reason.
+  // Sample: comma-separated values matching template placeholders in order.
   const clean = (v) => String(v).replace(/,/g, '')
-  const sample = [
-    clean(shopName),
-    clean(billNo),
-    clean(date),
-    clean(itemList),   // items already joined with " | " from Flutter side
-    clean(total),
-    clean(payMode),
-  ].join(',')
+  const sample = [clean(shopName), clean(billNumber), receiptUrl].join(',')
 
   let result
   try {
@@ -305,15 +295,15 @@ async function sendBillMessage({ phone, shopName, billNo, date, itemList, total,
       CampaignName: 'bill_receipt',
     })
   } catch (err) {
-    logger.error({ err }, `[WhatsApp] Network error sending bill #${billNo}`)
+    logger.error({ err }, `[WhatsApp] Network error sending receipt link for #${billNumber}`)
     return { sent: false, error: err.message }
   }
 
   const success = result.IsSuccess === true || result.ErrorCode === 0
   if (success) {
-    logger.info(`[WhatsApp] Bill #${billNo} sent to ${normPhone} — CampaignId: ${result.ReturnData}`)
+    logger.info(`[WhatsApp] Receipt link for #${billNumber} sent to ${normPhone} — CampaignId: ${result.ReturnData}`)
   } else {
-    logger.warn({ result }, `[WhatsApp] Bill send failed for #${billNo}`)
+    logger.warn({ result }, `[WhatsApp] Receipt link send failed for #${billNumber}`)
   }
 
   return success
@@ -321,4 +311,4 @@ async function sendBillMessage({ phone, shopName, billNo, date, itemList, total,
     : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
 }
 
-module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillMessage }
+module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink }

@@ -401,36 +401,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _sendBillWhatsApp(Bill bill) async {
-    final businessName = ref.read(businessNameProvider);
-    final phone = bill.customerPhone;
-    if (phone == null || phone.trim().isEmpty) return;
-
-    // Build item list — " | " separator (SMSala rejects newlines in param text)
-    final itemList = bill.items
-        .map((i) {
-          final qty = i.quantity.toStringAsFixed(
-              i.quantity % 1 == 0 ? 0 : 1);
-          final price = i.lineTotal.toStringAsFixed(2);
-          return '${i.itemName} x$qty Rs.$price';
-        })
-        .join(' | ');
-
-    final date = '${bill.createdAt.day.toString().padLeft(2, '0')}-'
-        '${bill.createdAt.month.toString().padLeft(2, '0')}-'
-        '${bill.createdAt.year}';
-
     try {
-      await sendBillWhatsApp(
-        phone:    phone,
-        shopName: businessName.isNotEmpty ? businessName : 'Our Store',
-        billNo:   bill.billNumber,
-        date:     date,
-        itemList: itemList,
-        total:    bill.total.toStringAsFixed(2),
-        payMode:  bill.paymentMode[0].toUpperCase() +
-                  bill.paymentMode.substring(1),
-      );
-      if (mounted) _showSnack('Bill sent to WhatsApp successfully');
+      await sendBillWhatsApp(bill.id);
+      if (mounted) _showSnack('Receipt link sent to WhatsApp');
     } on ApiException catch (e) {
       if (mounted) _showSnack('WhatsApp failed: ${e.message}', isError: true);
     } catch (_) {

@@ -321,28 +321,11 @@ Future<Map<String, dynamic>> verifyOtp(String phone, String otp, String purpose)
   return _parse(response);
 }
 
-/// Sends a bill receipt to [phone] via WhatsApp template.
-/// Variables: shop_name={1}, bill_no={2}, date={3}, item_list={4}, total={5}, pay_mode={6}
-Future<Map<String, dynamic>> sendBillWhatsApp({
-  required String phone,
-  required String shopName,
-  required String billNo,
-  required String date,
-  required String itemList,
-  required String total,
-  required String payMode,
-}) async {
+/// Sends a receipt link to the customer's WhatsApp for the given [billId].
+Future<Map<String, dynamic>> sendBillWhatsApp(String billId) async {
   final response = await _authPost(
     Uri.parse('$baseUrl/bills/send-whatsapp'),
-    body: jsonEncode({
-      'phone':     phone,
-      'shop_name': shopName,
-      'bill_no':   billNo,
-      'date':      date,
-      'item_list': itemList,
-      'total':     total,
-      'pay_mode':  payMode,
-    }),
+    body: jsonEncode({'bill_id': billId}),
   );
   return _parse(response);
 }
