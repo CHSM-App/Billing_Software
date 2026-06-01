@@ -102,7 +102,7 @@ router.post('/admin/activate', async (req, res) => {
     request.input('max_offline_days', sql.Int, max_offline_days);
     request.input('grace_period_days', sql.Int, grace_period_days);
 
-    // Upsert — insert if not exists, update if exists
+    // Upsert subscription — insert if not exists, update if exists
     await request.query(`
       MERGE subscriptions AS target
       USING (SELECT @business_id AS business_id) AS source
@@ -118,6 +118,15 @@ router.post('/admin/activate', async (req, res) => {
         INSERT (business_id, status, expires_at, max_offline_days, grace_period_days)
         VALUES (@business_id, @status, @expires_at, @max_offline_days, @grace_period_days);
     `);
+
+    // Auto-verify the business when activating subscription
+    if (status === 'active') {
+      const verifyReq = pool.request();
+      verifyReq.input('business_id', sql.UniqueIdentifier, business_id);
+      await verifyReq.query(`
+        UPDATE businesses SET is_verified = 1 WHERE id = @business_id
+      `);
+    }
 
     return res.json({ ok: true, business_id, status, expires_at });
   } catch (err) {
