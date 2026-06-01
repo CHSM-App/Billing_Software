@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../services/sync_service.dart';
+import '../services/license_service.dart';
 import '../widgets/nav_item.dart';
 import '../widgets/bottom_nav_bar.dart';
 import 'home_screen.dart';
@@ -15,7 +16,8 @@ import 'settings_screen.dart';
 
 class MainShell extends ConsumerStatefulWidget {
   final int initialIndex;
-  const MainShell({super.key, this.initialIndex = 0});
+  final LicenseStatus? licenseStatus;
+  const MainShell({super.key, this.initialIndex = 0, this.licenseStatus});
 
   @override
   ConsumerState<MainShell> createState() => _MainShellState();
@@ -102,18 +104,53 @@ class _MainShellState extends ConsumerState<MainShell>
         final safeIndex = _index.clamp(0, items.length - 1);
         final isWide = MediaQuery.of(context).size.width >= 720;
 
+        final inGrace = widget.licenseStatus?.state == LicenseState.grace;
+        final graceDays = widget.licenseStatus?.graceDaysRemaining ?? 0;
+
         return Scaffold(
-          body: Row(
+          body: Column(
             children: [
-              if (isWide)
-                FadeTransition(
-                  opacity: _railFadeAnim,
-                  child: _buildRail(items, safeIndex),
+              if (inGrace)
+                Container(
+                  width: double.infinity,
+                  color: AppColors.warningLight,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          size: 16, color: AppColors.warning),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          graceDays <= 1
+                              ? 'Last day! Go online today to keep using the app.'
+                              : '$graceDays days left — go online soon to verify your subscription.',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.warning,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               Expanded(
-                child: IndexedStack(
-                  index: safeIndex,
-                  children: items.map((e) => e.screen).toList(),
+                child: Row(
+                  children: [
+                    if (isWide)
+                      FadeTransition(
+                        opacity: _railFadeAnim,
+                        child: _buildRail(items, safeIndex),
+                      ),
+                    Expanded(
+                      child: IndexedStack(
+                        index: safeIndex,
+                        children: items.map((e) => e.screen).toList(),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],

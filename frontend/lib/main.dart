@@ -8,7 +8,9 @@ import 'providers.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/main_shell.dart';
+import 'screens/license_screen.dart';
 import 'services/offline_service.dart';
+import 'services/license_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,7 +67,6 @@ class _SplashState extends ConsumerState<_Splash> {
       } catch (_) {
         if (attempt < 2) {
           await Future.delayed(const Duration(milliseconds: 300));
-          // Invalidate so the next read re-fetches from SharedPreferences.
           ref.invalidate(sessionProvider);
         }
       }
@@ -86,10 +87,40 @@ class _SplashState extends ConsumerState<_Splash> {
     setConnectivityNotifier(notifier);
     if (!ok) notifier.markOffline();
 
+    // --- License check ---
+    final licenseStatus = await LicenseService.instance.check(isOnline: ok);
+
     if (!mounted) return;
+
+    if (licenseStatus.state == LicenseState.blockedOffline ||
+        licenseStatus.state == LicenseState.blockedSubscription ||
+        licenseStatus.state == LicenseState.blockedPending) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LicenseBlockedScreen(
+            reason: licenseStatus.state,
+            onUnblocked: () {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MainShell(
+                    licenseStatus: licenseStatus,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const MainShell()),
+      MaterialPageRoute(
+        builder: (_) => MainShell(licenseStatus: licenseStatus),
+      ),
     );
   }
 
