@@ -70,6 +70,11 @@ class _MainShellState extends ConsumerState<MainShell>
 
   void _onNav(int i) {
     if (i == _index) return;
+    // Tapping the Billing tab (index 0) always starts a fresh bill —
+    // clear any leftover cart from a previous table session.
+    if (i == 0) {
+      ref.read(cartProvider.notifier).clear();
+    }
     setState(() => _index = i);
   }
 

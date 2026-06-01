@@ -24,13 +24,16 @@ class HomeScreen extends ConsumerStatefulWidget {
   final String? tableId;
   final String? tableNumber;
   final String? activeBillId;
+  /// In-flight bill fetch — navigation and fetch run in parallel so the screen
+  /// opens instantly and the cart loads as soon as the response arrives.
+  final Future<Bill?>? activeBillFuture;
   /// Called instead of [Navigator.pop] when a bill is finalized or saved in
   /// split-view mode. When null the default pop behaviour is used.
   final VoidCallback? onBillDone;
 
   const HomeScreen(
       {super.key, this.tableId, this.tableNumber, this.activeBillId,
-      this.onBillDone});
+      this.activeBillFuture, this.onBillDone});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -51,10 +54,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final _barcodeBuffer = StringBuffer();
   DateTime? _lastKeyTime;
 
-  // Animation for cart item add
-  late final AnimationController _cartBadgeController;
-  late final Animation<double> _cartBadgeAnim;
-
   @override
   void initState() {
     super.initState();
@@ -63,20 +62,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) => _tryLoadDraft());
     }
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
-
-    _cartBadgeController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-    _cartBadgeAnim = Tween<double>(begin: 1.0, end: 1.3).animate(
-      CurvedAnimation(parent: _cartBadgeController, curve: Curves.elasticOut),
-    );
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_globalKeyHandler);
-    _cartBadgeController.dispose();
     _searchController.dispose();
     _customerNameController.dispose();
     _customerPhoneController.dispose();
@@ -138,8 +128,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     _draftLoaded = true;
     try {
-      final data = await getBill(widget.activeBillId!);
-      final bill = Bill.fromJson(data);
+      // Await the in-flight fetch (started before navigation) or fall back to
+      // a fresh network call if no future was provided.
+      final bill = (widget.activeBillFuture != null
+              ? await widget.activeBillFuture
+              : null) ??
+          Bill.fromJson(await getBill(widget.activeBillId!));
       final allItems = itemsAsync.value!;
       ref.read(cartProvider.notifier).loadFromBill(bill, allItems);
       if (mounted) {
@@ -178,12 +172,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           .getCachedItemByBarcode(barcode, businessId ?? '');
       if (cached != null) {
         ref.read(cartProvider.notifier).addItem(cached);
-        _animateCartBadge();
         return;
       }
       final data = await getItemByBarcode(barcode);
       ref.read(cartProvider.notifier).addItem(Item.fromJson(data));
-      _animateCartBadge();
+      // _animateCartBadge();
     } on ApiException catch (e) {
       _showSnack(e.message, isError: true);
     } catch (_) {
@@ -191,17 +184,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
-  void _animateCartBadge() {
-    _cartBadgeController.forward(from: 0).then((_) {
-      _cartBadgeController.reverse();
-    });
-  }
-
   List<Map<String, dynamic>> get _cartPayload {
     final cart = ref.read(cartProvider);
     return cart
         .map((e) => {'item_id': e.item.id, 'quantity': e.quantity})
         .toList();
+  }
+
+  Future<void> _clearCart() async {
+    // If this is a table with an active draft, offer to release the table.
+    if (widget.activeBillId != null) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Release Table?'),
+          content: const Text(
+              'Clearing all items will void the draft and mark the table as empty.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text('Release Table',
+                  style: TextStyle(color: AppColors.error)),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      try {
+        await voidBill(widget.activeBillId!);
+        ref.read(cartProvider.notifier).clear();
+        if (!mounted) return;
+        Navigator.pop(context);
+      } on ApiException catch (e) {
+        _showSnack(e.message, isError: true);
+      } catch (_) {
+        _showSnack('Failed to release table.', isError: true);
+      }
+    } else {
+      ref.read(cartProvider.notifier).clear();
+    }
   }
 
   Future<void> _saveDraft() async {
@@ -769,12 +793,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return Stack(
         children: [
           _buildItemsPanel(),
-          Positioned(
-            bottom: AppSpacing.space16,
-            right: AppSpacing.space16,
-            child: ScaleTransition(
-              scale: _cartBadgeAnim,
+          if (widget.tableId != null)
+            Positioned(
+              bottom: AppSpacing.space16,
+              left: AppSpacing.space16,
+              right: AppSpacing.space16,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: FloatingActionButton.extended(
+                      heroTag: 'saveDraftFab',
+                      onPressed: (count == 0 || _savingDraft) ? null : _saveDraft,
+                      backgroundColor: AppColors.surface,
+                      foregroundColor: AppColors.primary,
+                      elevation: 4,
+                      icon: _savingDraft
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined, size: 20),
+                      label: Text(
+                        _savingDraft ? 'Saving…' : 'Save Draft',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.space8),
+                  Expanded(
+                    child: FloatingActionButton.extended(
+                      heroTag: 'cartFab',
+                      onPressed: _openCartSheet,
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 4,
+                      icon: const Icon(Icons.shopping_cart_outlined, size: 20),
+                      label: Text(
+                        count == 0 ? 'Cart' : 'Cart ($count)',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            Positioned(
+              bottom: AppSpacing.space16,
+              right: AppSpacing.space16,
               child: FloatingActionButton.extended(
+                heroTag: 'cartFab',
                 onPressed: _openCartSheet,
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -787,7 +858,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
               ),
             ),
-          ),
         ],
       );
     });
@@ -956,8 +1026,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               cart: cart,
               onAdd: (item) {
                 ref.read(cartProvider.notifier).addItem(item);
-                _animateCartBadge();
-              },
+                      },
               onDecrement: (item) =>
                   ref.read(cartProvider.notifier).changeQty(item.id, -1),
               onIncrement: (item) =>
@@ -1001,8 +1070,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   //             ? null
   //             : () {
   //                 ref.read(cartProvider.notifier).addItem(item);
-  //                 _animateCartBadge();
-  //               },
+  //           //               },
   //         borderRadius: BorderRadius.circular(AppRadius.medium),
   //         child: Padding(
   //           padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
@@ -1160,8 +1228,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   const Spacer(),
                   if (cart.isNotEmpty)
                     TextButton.icon(
-                      onPressed: () =>
-                          ref.read(cartProvider.notifier).clear(),
+                      onPressed: _clearCart,
                       icon: const Icon(Icons.delete_outline, size: 14),
                       label: const Text('Clear'),
                       style: TextButton.styleFrom(

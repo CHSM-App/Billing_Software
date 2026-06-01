@@ -6,7 +6,6 @@ import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import 'home_screen.dart';
-import 'split_billing_screen.dart';
 
 class TablesScreen extends ConsumerStatefulWidget {
   const TablesScreen({super.key});
@@ -16,12 +15,7 @@ class TablesScreen extends ConsumerStatefulWidget {
 }
 
 class _TablesScreenState extends ConsumerState<TablesScreen> {
-  // Track drag offset per table id (purely local UI state)
   final Map<String, Offset> _dragOffsets = {};
-
-  // Split-view mode: when true, first tap selects left table, second tap opens split screen
-  bool _splitMode = false;
-  TableModel? _splitLeft;
 
   Color _tableColor(String status) {
     return switch (status) {
@@ -34,47 +28,39 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   void _onTableTap(TableModel table) async {
     final userRole = ref.read(userRoleProvider);
 
-    // Split mode: first tap picks left table, second tap opens split screen
-    if (_splitMode) {
-      if (table.status == 'billed') {
-        _showSnack('Cannot use a billed table in split view', isError: true);
-        return;
-      }
-      if (_splitLeft == null) {
-        setState(() => _splitLeft = table);
-        return;
-      }
-      if (_splitLeft!.id == table.id) {
-        // Tapped same table twice — deselect
-        setState(() => _splitLeft = null);
-        return;
-      }
-      final left = _splitLeft!;
-      setState(() { _splitLeft = null; _splitMode = false; });
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SplitBillingScreen(leftTable: left, rightTable: table),
-        ),
-      );
-      ref.invalidate(tablesProvider);
-      return;
-    }
-
-    // Normal mode
     if (table.status == 'billed') {
       _showBilledOptions(table, userRole);
       return;
     }
     if (table.status == 'empty' || table.status == 'occupied') {
+      if (table.activeBillId == null) {
+        ref.read(cartProvider.notifier).clear();
+      }
+
+      // Retrieve from cache — populated when tables were last fetched.
+      final cachedBill = ref
+          .read(tablesProvider.notifier)
+          .cachedBill(table.activeBillId);
+
       await Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => HomeScreen(
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 120),
+          reverseTransitionDuration: const Duration(milliseconds: 120),
+          pageBuilder: (_, __, ___) => HomeScreen(
             tableId: table.id,
             tableNumber: table.tableNumber,
             activeBillId: table.activeBillId,
+            activeBillFuture: cachedBill != null
+                ? Future.value(cachedBill)
+                : table.activeBillId != null
+                    ? getBill(table.activeBillId!)
+                        .then<Bill?>((d) => Bill.fromJson(d))
+                        .catchError((_) => null)
+                    : null,
           ),
+          transitionsBuilder: (_, animation, __, child) =>
+              FadeTransition(opacity: animation, child: child),
         ),
       );
       ref.invalidate(tablesProvider);
@@ -204,29 +190,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: _splitMode
-            ? Text(
-                _splitLeft == null
-                    ? 'Tap first table…'
-                    : 'Now tap second table',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(color: AppColors.primary),
-              )
-            : const Text('Tables'),
+        title: const Text('Tables'),
         actions: [
-          IconButton(
-            icon: Icon(
-              Icons.vertical_split_outlined,
-              color: _splitMode ? AppColors.primary : null,
-            ),
-            tooltip: _splitMode ? 'Cancel split view' : 'Split view',
-            onPressed: () => setState(() {
-              _splitMode = !_splitMode;
-              _splitLeft = null;
-            }),
-          ),
           IconButton(
             icon: const Icon(Icons.refresh_outlined),
             onPressed: () => ref.invalidate(tablesProvider),
@@ -236,69 +201,38 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       ),
       body: tablesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => RefreshIndicator(
-          onRefresh: () async {
-            ref.invalidate(tablesProvider);
-            await ref.read(tablesProvider.future);
-          },
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: AppErrorWidget(
-              error: e,
-              onRetry: () => ref.invalidate(tablesProvider),
-            ),
-          ),
+        error: (e, _) => AppErrorWidget(
+          error: e,
+          onRetry: () => ref.invalidate(tablesProvider),
         ),
         data: (tables) {
           if (tables.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: () async {
-                ref.invalidate(tablesProvider);
-                await ref.read(tablesProvider.future);
-              },
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(height: AppSpacing.space48),
-                      const Icon(Icons.table_restaurant_outlined,
-                          size: 48, color: AppColors.textDisabled),
-                      const SizedBox(height: AppSpacing.space16),
-                      Text('No tables yet',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(color: AppColors.textSecondary)),
-                      if (userRole == 'owner') ...[
-                        const SizedBox(height: AppSpacing.space16),
-                        ElevatedButton.icon(
-                          onPressed: _addTable,
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Table'),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.table_restaurant_outlined,
+                      size: 48, color: AppColors.textDisabled),
+                  const SizedBox(height: AppSpacing.space16),
+                  Text('No tables yet',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppColors.textSecondary)),
+                  if (userRole == 'owner') ...[
+                    const SizedBox(height: AppSpacing.space16),
+                    ElevatedButton.icon(
+                      onPressed: _addTable,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Table'),
+                    ),
+                  ],
+                ],
               ),
             );
           }
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(tablesProvider);
-              await ref.read(tablesProvider.future);
-            },
-            child: CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                SliverFillRemaining(
-                    child: _buildCanvas(tables, userRole)),
-              ],
-            ),
-          );
+          return _buildCanvas(tables, userRole);
         },
       ),
       floatingActionButton: userRole == 'owner'
@@ -314,20 +248,36 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   }
 
   Widget _buildCanvas(List<TableModel> tables, String userRole) {
-    return Stack(
-      children: tables.map((table) {
+    // Compute canvas size to fit all tables with padding.
+    double maxX = 600;
+    double maxY = 600;
+    for (final t in tables) {
+      final ox = (_dragOffsets[t.id] ?? Offset(t.floorX, t.floorY));
+      if (ox.dx + 100 > maxX) maxX = ox.dx + 100;
+      if (ox.dy + 100 > maxY) maxY = ox.dy + 100;
+    }
+
+    return InteractiveViewer(
+      boundaryMargin: const EdgeInsets.all(100),
+      minScale: 0.5,
+      maxScale: 2.0,
+      constrained: false,
+      child: SizedBox(
+        width: maxX,
+        height: maxY,
+        child: Stack(
+          children: tables.map((table) {
         final offset =
             _dragOffsets[table.id] ?? Offset(table.floorX, table.floorY);
         final color = _tableColor(table.status);
 
-        final isSelectedForSplit = _splitLeft?.id == table.id;
         return Positioned(
           left: offset.dx,
           top: offset.dy,
           child: GestureDetector(
             onTap: () => _onTableTap(table),
             onLongPress: userRole == 'owner' ? () => _deleteTable(table) : null,
-            onPanUpdate: userRole == 'owner' && !_splitMode
+            onPanUpdate: userRole == 'owner'
                 ? (details) {
                     setState(() {
                       final current = _dragOffsets[table.id] ??
@@ -336,7 +286,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                     });
                   }
                 : null,
-            onPanEnd: userRole == 'owner' && !_splitMode
+            onPanEnd: userRole == 'owner'
                 ? (_) async {
                     final newOffset = _dragOffsets[table.id];
                     if (newOffset == null) return;
@@ -349,14 +299,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                     } catch (_) {}
                   }
                 : null,
-            child: _TableWidget(
-              table: table,
-              color: color,
-              isSelectedForSplit: isSelectedForSplit,
-            ),
+            child: _TableWidget(table: table, color: color),
           ),
         );
       }).toList(),
+        ),
+      ),
     );
   }
 }
@@ -364,46 +312,32 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 class _TableWidget extends StatelessWidget {
   final TableModel table;
   final Color color;
-  final bool isSelectedForSplit;
 
-  const _TableWidget({
-    required this.table,
-    required this.color,
-    this.isSelectedForSplit = false,
-  });
+  const _TableWidget({required this.table, required this.color});
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = isSelectedForSplit ? AppColors.primary : color;
     return Container(
       width: 80,
       height: 80,
       decoration: BoxDecoration(
-        color: isSelectedForSplit
-            ? AppColors.primaryLight
-            : color.withValues(alpha: 0.15),
-        border: Border.all(
-          color: borderColor,
-          width: isSelectedForSplit ? 3 : 2,
-        ),
+        color: color.withValues(alpha: 0.15),
+        border: Border.all(color: color, width: 2),
         borderRadius: BorderRadius.circular(AppRadius.medium),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          if (isSelectedForSplit)
-            const Icon(Icons.looks_one_rounded,
-                size: 14, color: AppColors.primary),
           Text(
             table.tableNumber,
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
-              color: borderColor,
+              color: color,
             ),
           ),
           const SizedBox(height: 2),
-          Text(table.status, style: TextStyle(fontSize: 10, color: borderColor)),
+          Text(table.status, style: TextStyle(fontSize: 10, color: color)),
         ],
       ),
     );

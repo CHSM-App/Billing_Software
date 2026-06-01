@@ -3,18 +3,48 @@ import '../api.dart' as api;
 import '../models/models.dart';
 
 class TablesNotifier extends AsyncNotifier<List<TableModel>> {
+  // Cache of active draft bills keyed by bill id — populated on every fetch.
+  final Map<String, Bill> _billCache = {};
+
+  /// Returns the cached draft bill for a given bill id, or null if not loaded.
+  Bill? cachedBill(String? billId) =>
+      billId == null ? null : _billCache[billId];
+
   @override
-  Future<List<TableModel>> build() async {
+  Future<List<TableModel>> build() => _fetch();
+
+  Future<List<TableModel>> _fetch() async {
     final data = await api.getTables();
-    return data.map((j) => TableModel.fromJson(j)).toList();
+    final tables = data.map((j) => TableModel.fromJson(j)).toList();
+
+    // Fetch all active draft bills in parallel — zero extra sequential latency.
+    final activeIds = tables
+        .map((t) => t.activeBillId)
+        .whereType<String>()
+        .toList();
+
+    if (activeIds.isNotEmpty) {
+      final results = await Future.wait(
+        activeIds.map((id) => api
+            .getBill(id)
+            .then<Bill?>((d) => Bill.fromJson(d))
+            .catchError((_) => null)),
+      );
+      _billCache.clear();
+      for (int i = 0; i < activeIds.length; i++) {
+        final bill = results[i];
+        if (bill != null) _billCache[activeIds[i]] = bill;
+      }
+    } else {
+      _billCache.clear();
+    }
+
+    return tables;
   }
 
   Future<void> reload() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      final data = await api.getTables();
-      return data.map((j) => TableModel.fromJson(j)).toList();
-    });
+    state = await AsyncValue.guard(_fetch);
   }
 
   Future<void> addTable(Map<String, dynamic> data) async {

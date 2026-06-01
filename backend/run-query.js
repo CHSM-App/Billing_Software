@@ -2,9 +2,9 @@ const { pool, poolConnect } = require('./src/db');
 
 // ─── PUT YOUR SQL QUERY HERE ───────────────────────────────────────────────
 const QUERY = `
-  ALTER TABLE users ADD failed_attempts INT NOT NULL DEFAULT 0;
-ALTER TABLE users ADD locked_until DATETIME2 NULL;
-
+  SELECT name, category, price FROM items
+  WHERE business_id = '76758069-E5FB-47A4-8003-A82119A7E231'
+  ORDER BY category, name
 `;
 // ──────────────────────────────────────────────────────────────────────────
 
