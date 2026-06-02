@@ -62,9 +62,15 @@ class LicenseService {
     }
   }
 
+  // Last error message — shown on the blocked screen when online check fails
+  String? lastOnlineError;
+
   Future<LicenseStatus> _checkOnline() async {
+    lastOnlineError = null;
     try {
       final data = await getLicense();
+      // ignore: avoid_print
+      print('[LICENSE] server response: $data');
 
       // Save to secure storage
       await Future.wait([
@@ -75,13 +81,21 @@ class LicenseService {
         _secure.write(key: _keyVerifiedAt,       value: data['verified_at'] as String),
       ]);
 
-      return _evaluate(
+      final result = _evaluate(
         status:          data['status'] as String,
         expiresAt:       DateTime.parse(data['expires_at'] as String),
         maxOfflineDays:  data['max_offline_days'] as int,
         gracePeriodDays: data['grace_period_days'] as int,
         verifiedAt:      DateTime.parse(data['verified_at'] as String),
       );
+
+      // If server says blocked, clear local cache so offline fallback also blocks
+      if (result.state == LicenseState.blockedSubscription ||
+          result.state == LicenseState.blockedPending) {
+        await clear();
+      }
+
+      return result;
     } on ApiException catch (e) {
       if (e.statusCode == 403) {
         final body = e.message;
@@ -90,10 +104,12 @@ class LicenseService {
         }
         return const LicenseStatus(LicenseState.blockedSubscription);
       }
-      // Any other API error — fall back to cached
+      // Other API error (401, 500 etc.) — store error and fall back to cached
+      lastOnlineError = 'Server error (${e.statusCode}): ${e.message}';
       return await _checkOffline();
-    } catch (_) {
-      // Network error — fall back to cached
+    } catch (e) {
+      // Network error — store error and fall back to cached
+      lastOnlineError = e.toString();
       return await _checkOffline();
     }
   }

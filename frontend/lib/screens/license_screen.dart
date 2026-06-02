@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/license_service.dart';
-import '../providers/connectivity_provider.dart';
+import '../providers.dart';
 import '../theme/app_theme.dart';
+import 'login_screen.dart';
 
 /// Shown when the app is hard-blocked due to:
 ///   - Offline too long (exceeded offline limit + grace)
@@ -35,15 +36,7 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
       _errorMessage = null;
     });
 
-    final isOnline = ref.read(connectivityProvider);
-    if (!isOnline) {
-      setState(() {
-        _checking = false;
-        _errorMessage = 'Still offline. Connect to the internet and try again.';
-      });
-      return;
-    }
-
+    // Always attempt online check — don't rely on cached connectivity state
     final status = await LicenseService.instance.check(isOnline: true);
 
     if (!mounted) return;
@@ -52,9 +45,22 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
         status.state == LicenseState.grace) {
       widget.onUnblocked();
     } else {
+      final rawError = LicenseService.instance.lastOnlineError;
+      final isSessionExpired = rawError != null && rawError.contains('401');
+      if (isSessionExpired) {
+        // Session expired — clear session and go to login
+        await ref.read(sessionProvider.notifier).clear();
+        if (!mounted) return;
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (_) => false,
+        );
+        return;
+      }
       setState(() {
         _checking = false;
-        _errorMessage = _messageForState(status.state);
+        _errorMessage = rawError ?? _messageForState(status.state);
       });
     }
   }

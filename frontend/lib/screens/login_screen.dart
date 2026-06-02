@@ -8,6 +8,8 @@ import '../widgets/app_widgets.dart';
 import 'register_screen.dart';
 import 'otp_screen.dart';
 import 'main_shell.dart';
+import 'license_screen.dart';
+import '../services/license_service.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -241,8 +243,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       ref.invalidate(reportProvider);
       ref.invalidate(cartProvider);
       if (!mounted) return;
+
+      // License check after login — clear stale cache first so server is always authoritative
+      await LicenseService.instance.clear();
+      final licenseStatus = await LicenseService.instance.check(isOnline: true);
+      if (!mounted) return;
+
+      if (licenseStatus.state == LicenseState.blockedOffline ||
+          licenseStatus.state == LicenseState.blockedSubscription ||
+          licenseStatus.state == LicenseState.blockedPending) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => LicenseBlockedScreen(
+              reason: licenseStatus.state,
+              onUnblocked: () => Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MainShell(licenseStatus: licenseStatus),
+                ),
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+
       Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const MainShell()));
+          context, MaterialPageRoute(builder: (_) => MainShell(licenseStatus: licenseStatus)));
     } on ApiException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (e) {
