@@ -186,32 +186,32 @@ class _SettingsContentState extends State<_SettingsContent>
                             builder: (_) => const PrinterSetupScreen()),
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.space8),
-                    _buildNavCard(
-                      context,
-                      icon: Icons.bug_report_outlined,
-                      iconColor: AppColors.warning,
-                      title: 'Printer Test Android (Dev)',
-                      subtitle: 'Test all print methods on Android',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const PrinterTestScreen()),
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.space8),
-                    _buildNavCard(
-                      context,
-                      icon: Icons.bug_report_outlined,
-                      iconColor: const Color(0xFF0078D4),
-                      title: 'Printer Test Windows (Dev)',
-                      subtitle: 'Test all print methods on Windows',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const PrinterTestWindowsScreen()),
-                      ),
-                    ),
+                    // const SizedBox(height: AppSpacing.space8),
+                    // _buildNavCard(
+                    //   context,
+                    //   icon: Icons.bug_report_outlined,
+                    //   iconColor: AppColors.warning,
+                    //   title: 'Printer Test Android (Dev)',
+                    //   subtitle: 'Test all print methods on Android',
+                    //   onTap: () => Navigator.push(
+                    //     context,
+                    //     MaterialPageRoute(
+                    //         builder: (_) => const PrinterTestScreen()),
+                    //   ),
+                    // ),
+                    // const SizedBox(height: AppSpacing.space8),
+                    // _buildNavCard(
+                    //   context,
+                    //   icon: Icons.bug_report_outlined,
+                    //   iconColor: const Color(0xFF0078D4),
+                    //   title: 'Printer Test Windows (Dev)',
+                    //   subtitle: 'Test all print methods on Windows',
+                    //   onTap: () => Navigator.push(
+                    //     context,
+                    //     MaterialPageRoute(
+                    //         builder: (_) => const PrinterTestWindowsScreen()),
+                    //   ),
+                    // ),
 
                     const SizedBox(height: AppSpacing.space32),
                     _buildLogoutButton(),

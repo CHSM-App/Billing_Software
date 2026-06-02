@@ -13,12 +13,11 @@ permissions:
 env:
   BACKEND_DIR: backend
   BACKEND_BRANCH: backend
+  FLUTTER_VERSION: '3.32.0'
 
 jobs:
-  # ─────────────────────────────────────────────
   # Job 1: Backend tests (Jest + Supertest)
-  # Runs on every push; no real DB needed — all DB calls are mocked.
-  # ─────────────────────────────────────────────
+  # Runs on every push; DB calls are mocked.
   test-backend:
     name: Backend tests
     runs-on: ubuntu-latest
@@ -34,7 +33,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
@@ -60,10 +59,8 @@ jobs:
           path: backend/coverage/
           retention-days: 14
 
-  # ─────────────────────────────────────────────
   # Job 2: Flutter tests
   # Runs on every push; no device needed.
-  # ─────────────────────────────────────────────
   test-flutter:
     name: Flutter tests
     runs-on: ubuntu-latest
@@ -75,7 +72,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.32.0'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
@@ -94,12 +91,10 @@ jobs:
           path: frontend/coverage/
           retention-days: 14
 
-  # ─────────────────────────────────────────────
-  # Job 3: Sync backend folder → branch "backend"
-  # Runs on every push to any branch (not tags)
-  # ─────────────────────────────────────────────
+  # Job 3: Sync backend folder to branch "backend"
+  # Runs on every push to any branch (not tags).
   sync-backend:
-    name: Sync backend → backend branch
+    name: Sync backend to backend branch
     runs-on: ubuntu-latest
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     steps:
@@ -113,12 +108,10 @@ jobs:
           publish_branch: ${{ env.BACKEND_BRANCH }}
           publish_dir: ./${{ env.BACKEND_DIR }}
           force_orphan: true
-          exclude_assets: 'node_modules'
+          exclude_assets: node_modules
           commit_message: "sync: backend from ${{ github.ref_name }} @ ${{ github.sha }}"
 
-  # ─────────────────────────────────────────────
-  # Job 2: Build Flutter APK on tag push (v*)
-  # ─────────────────────────────────────────────
+  # Job 4: Build Flutter APK on tag push (v*)
   build-apk:
     name: Build Flutter APK
     runs-on: ubuntu-latest
@@ -136,7 +129,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.32.0'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
@@ -151,7 +144,7 @@ jobs:
       - name: Rename APK with tag version
         run: |
           mv frontend/build/app/outputs/flutter-apk/app-release.apk \
-             frontend/build/app/outputs/flutter-apk/billing-${{ github.ref_name }}.apk
+            frontend/build/app/outputs/flutter-apk/billing-${{ github.ref_name }}.apk
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
@@ -166,9 +159,7 @@ jobs:
           files: frontend/build/app/outputs/flutter-apk/billing-*.apk
           generate_release_notes: true
 
-  # ─────────────────────────────────────────────
-  # Job: Build Flutter Windows exe on tag push (v*)
-  # ─────────────────────────────────────────────
+  # Job 5: Build Flutter Windows release on tag push (v*)
   build-windows:
     name: Build Flutter Windows
     runs-on: windows-latest
@@ -180,7 +171,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.32.0'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
@@ -192,12 +183,12 @@ jobs:
         working-directory: frontend
         run: flutter build windows --release
 
-      - name: Rename output with tag version
+      - name: Copy output with tag version
         shell: bash
         run: |
           mkdir -p frontend/build/windows/dist
           cp -r "frontend/build/windows/x64/runner/Release/." \
-                "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows"
+            "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows"
 
       - name: Zip Windows build
         shell: pwsh
@@ -217,3 +208,49 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: frontend/build/windows/dist/billing-*.zip
+
+  # Job 6: Build unsigned Flutter iOS IPA on tag push (v*)
+  # This creates an unsigned IPA artifact. App Store/TestFlight distribution
+  # still requires Apple code signing and provisioning.
+  build-ios:
+    name: Build Flutter iOS
+    runs-on: macos-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get Flutter dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Build iOS app without code signing
+        working-directory: frontend
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          mkdir -p frontend/build/ios/ipa/Payload
+          cp -R frontend/build/ios/iphoneos/Runner.app frontend/build/ios/ipa/Payload/Runner.app
+          cd frontend/build/ios/ipa
+          ditto -c -k --sequesterRsrc --keepParent Payload billing-${{ github.ref_name }}.ipa
+
+      - name: Upload iOS build as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-ios-${{ github.ref_name }}
+          path: frontend/build/ios/ipa/billing-*.ipa
+          retention-days: 30
+
+      - name: Add iOS build to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: frontend/build/ios/ipa/billing-*.ipa
