@@ -1,0 +1,1 @@
+curl -X POST https://billing.vengurlatech.com/api/license/admin/activate -H "Content-Type: application/json" -H "x-admin-secret: "secret from .env here" " -d "{\"business_id\": \"6F1E69DB-FE80-4EB2-9AA3-D8AEC4D4947E\", \"expires_at\": \"2027-06-05\", \"max_offline_days\": 1, \"grace_period_days\": 5, \"status\": \"active\"}"
