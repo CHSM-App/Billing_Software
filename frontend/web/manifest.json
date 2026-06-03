@@ -1,9 +1,9 @@
 {
-    "name": "frontend",
-    "short_name": "frontend",
+    "name": "BillMate",
+    "short_name": "BillMate",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
+    "background_color": "#ffffff",
     "theme_color": "#0175C2",
     "description": "A new Flutter project.",
     "orientation": "portrait-primary",
