@@ -43,6 +43,14 @@ const app = express();
 app.set('trust proxy', 1);
 
 // ---------------------------------------------------------------------------
+// Static files — must be before CORS/rate-limit so assets are served without
+// any origin checks or request quotas.
+// ---------------------------------------------------------------------------
+const path = require('path');
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+app.use(express.static(PUBLIC_DIR));
+
+// ---------------------------------------------------------------------------
 // CORS
 // ---------------------------------------------------------------------------
 const allowedOrigins = (process.env.CORS_ORIGINS || '')
@@ -161,13 +169,8 @@ app.use('/api/license', require('./routes/license'));
 app.use('/api/account', require('./routes/account'));
 
 // ---------------------------------------------------------------------------
-// Landing page — serve the Vite build from backend/public/
-// Must be registered AFTER all API routes so /api/* is never intercepted.
-// The catch-all returns index.html for any unknown path so React Router works.
+// SPA catch-all — return index.html for any unmatched route so React Router works.
 // ---------------------------------------------------------------------------
-const path = require('path');
-const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-app.use(express.static(PUBLIC_DIR));
 // Express 5 requires a named wildcard; `/{*path}` also matches `/`.
 app.get('/{*path}', (req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
