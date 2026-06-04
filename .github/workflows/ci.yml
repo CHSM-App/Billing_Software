@@ -123,6 +123,9 @@ jobs:
         working-directory: backend
         run: npm ci --omit=dev
 
+      - name: Remove backend/public/ exclusion so it gets deployed
+        run: sed -i '/^backend\/public\//d' .gitignore
+
       - name: Push backend folder to backend branch
         uses: peaceiris/actions-gh-pages@v4
         with:
