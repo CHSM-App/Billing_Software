@@ -1,4 +1,4 @@
-package com.example.frontend
+package com.example.billmate
 
 import io.flutter.embedding.android.FlutterActivity
 
