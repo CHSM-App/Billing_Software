@@ -1,37 +1,18 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import Logo from './Logo'
 import { ArrowLeft, AlertTriangle, Phone, KeyRound, FileText, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 
 const API_BASE = 'https://billing.vengurlatech.com' || ''
 
-function createApiError(message, debug) {
-  const err = new Error(message)
-  err.debug = debug
-  return err
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function apiPost(path, body) {
-  const url = `${API_BASE}${path}`
-  let res
-
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-  } catch (err) {
-    throw createApiError(err?.message || 'Network request failed.', {
-      type: 'network',
-      url,
-      method: 'POST',
-      error_name: err?.name || 'Error',
-      error_message: err?.message || 'Unknown fetch error',
-      hint: 'Possible causes: CORS, TLS/certificate issue, DNS/network failure, or the request being blocked before the server replied.',
-    })
-  }
-
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
   const raw = await res.text()
   let data = null
 
@@ -42,34 +23,17 @@ async function apiPost(path, body) {
   }
 
   if (!res.ok) {
-    throw createApiError(
-      data?.error || data?.message || `Request failed with status ${res.status}.`,
-      {
-        type: 'http',
-        url,
-        method: 'POST',
-        status: res.status,
-        status_text: res.statusText || 'Unknown',
-        content_type: res.headers.get('content-type') || 'Unknown',
-        response_body: raw || '<empty>',
-      },
-    )
+    throw new Error(data?.error || data?.message || 'Something went wrong.')
   }
 
   if (!data || typeof data !== 'object') {
-    throw createApiError('Server returned an unexpected response.', {
-      type: 'parse',
-      url,
-      method: 'POST',
-      status: res.status,
-      status_text: res.statusText || 'Unknown',
-      content_type: res.headers.get('content-type') || 'Unknown',
-      response_body: raw || '<empty>',
-    })
+    throw new Error('Something went wrong.')
   }
 
   return data
 }
+
+// ── Step indicators ──────────────────────────────────────────────────────────
 
 function StepDot({ n, active, done }) {
   return (
@@ -92,7 +56,6 @@ function StepDot({ n, active, done }) {
 
 function Steps({ current }) {
   const labels = ['Phone', 'Verify OTP', 'Confirm']
-
   return (
     <div className="flex items-center gap-0 mb-8">
       {labels.map((label, i) => (
@@ -115,56 +78,31 @@ function Steps({ current }) {
   )
 }
 
-function ErrorPanel({ message, debug }) {
-  return (
-    <div
-      className="rounded-xl px-4 py-3 mb-5"
-      style={{ background: 'rgba(239,68,68,0.08)', color: '#b91c1c' }}
-    >
-      <div className="flex items-center gap-2 text-sm">
-        <XCircle size={15} className="flex-shrink-0" />
-        <span>{message}</span>
-      </div>
-
-      {debug && (
-        <pre
-          className="mt-3 text-[11px] leading-relaxed whitespace-pre-wrap break-words overflow-x-auto"
-          style={{ color: '#7f1d1d' }}
-        >
-          {JSON.stringify(debug, null, 2)}
-        </pre>
-      )}
-    </div>
-  )
-}
+// ── Main component ───────────────────────────────────────────────────────────
 
 export default function DeleteAccount() {
-  const [step, setStep] = useState(0)
-  const [phone, setPhone] = useState('')
-  const [otp, setOtp] = useState('')
-  const [reason, setReason] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [errorDebug, setErrorDebug] = useState(null)
+  const [step, setStep]         = useState(0)   // 0=phone, 1=otp, 2=confirm, 3=done
+  const [phone, setPhone]       = useState('')
+  const [otp, setOtp]           = useState('')
+  const [reason, setReason]     = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState('')
   const [scheduled, setScheduled] = useState(null)
 
-  const [showCancel, setShowCancel] = useState(false)
-  const [cancelPhone, setCancelPhone] = useState('')
-  const [cancelOtp, setCancelOtp] = useState('')
-  const [cancelStep, setCancelStep] = useState(0)
-  const [cancelLoading, setCancelLoading] = useState(false)
-  const [cancelError, setCancelError] = useState('')
-  const [cancelErrorDebug, setCancelErrorDebug] = useState(null)
-  const [cancelSuccess, setCancelSuccess] = useState(false)
+  // Cancel flow state
+  const [showCancel, setShowCancel]           = useState(false)
+  const [cancelPhone, setCancelPhone]         = useState('')
+  const [cancelOtp, setCancelOtp]             = useState('')
+  const [cancelStep, setCancelStep]           = useState(0)  // 0=phone, 1=otp
+  const [cancelLoading, setCancelLoading]     = useState(false)
+  const [cancelError, setCancelError]         = useState('')
+  const [cancelSuccess, setCancelSuccess]     = useState(false)
 
-  useEffect(() => {
-    window.scrollTo(0, 0)
-  }, [])
+  useEffect(() => { window.scrollTo(0, 0) }, [])
 
-  function clearError() {
-    setError('')
-    setErrorDebug(null)
-  }
+  function clearError() { setError('') }
+
+  // ── Step 0 → send OTP ────────────────────────────────────────────────────
 
   async function handleSendOtp(e) {
     e.preventDefault()
@@ -173,18 +111,18 @@ export default function DeleteAccount() {
       setError('Enter a valid 10-digit phone number.')
       return
     }
-
     setLoading(true)
     try {
       await apiPost('/api/account/deletion/request', { phone })
       setStep(1)
     } catch (err) {
       setError(err.message)
-      setErrorDebug(err.debug || null)
     } finally {
       setLoading(false)
     }
   }
+
+  // ── Step 1 → verify OTP (move to confirm screen) ─────────────────────────
 
   function handleOtpNext(e) {
     e.preventDefault()
@@ -196,6 +134,8 @@ export default function DeleteAccount() {
     setStep(2)
   }
 
+  // ── Step 2 → confirm deletion ────────────────────────────────────────────
+
   async function handleConfirm(e) {
     e.preventDefault()
     clearError()
@@ -205,33 +145,32 @@ export default function DeleteAccount() {
       setScheduled(new Date(data.scheduled_for))
       setStep(3)
     } catch (err) {
+      // If OTP was wrong/expired, send them back to OTP step
       if (err.message.toLowerCase().includes('otp')) {
         setStep(1)
         setOtp('')
       }
       setError(err.message)
-      setErrorDebug(err.debug || null)
     } finally {
       setLoading(false)
     }
   }
 
+  // ── Cancel flow ──────────────────────────────────────────────────────────
+
   async function handleCancelSendOtp(e) {
     e.preventDefault()
     setCancelError('')
-    setCancelErrorDebug(null)
     if (!/^\d{10}$/.test(cancelPhone)) {
       setCancelError('Enter a valid 10-digit phone number.')
       return
     }
-
     setCancelLoading(true)
     try {
       await apiPost('/api/account/deletion/request', { phone: cancelPhone })
       setCancelStep(1)
     } catch (err) {
       setCancelError(err.message)
-      setCancelErrorDebug(err.debug || null)
     } finally {
       setCancelLoading(false)
     }
@@ -240,23 +179,22 @@ export default function DeleteAccount() {
   async function handleCancelConfirm(e) {
     e.preventDefault()
     setCancelError('')
-    setCancelErrorDebug(null)
     if (!/^\d{6}$/.test(cancelOtp)) {
       setCancelError('OTP must be exactly 6 digits.')
       return
     }
-
     setCancelLoading(true)
     try {
       await apiPost('/api/account/deletion/cancel', { phone: cancelPhone, otp: cancelOtp })
       setCancelSuccess(true)
     } catch (err) {
       setCancelError(err.message)
-      setCancelErrorDebug(err.debug || null)
     } finally {
       setCancelLoading(false)
     }
   }
+
+  // ── Shared input style ───────────────────────────────────────────────────
 
   const inputCls = `w-full px-4 py-3 rounded-xl text-sm border outline-none transition-all
     focus:ring-2 bg-white text-slate-800 placeholder-slate-400`
@@ -267,8 +205,12 @@ export default function DeleteAccount() {
     cursor: disabled ? 'not-allowed' : 'pointer',
   })
 
+  // ── Render ───────────────────────────────────────────────────────────────
+
   return (
     <div className="min-h-screen bg-slate-50">
+
+      {/* Top bar */}
       <div className="bg-navy-900 px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <Logo size={32} />
@@ -282,6 +224,7 @@ export default function DeleteAccount() {
         </div>
       </div>
 
+      {/* Hero */}
       <div
         className="px-6 py-14 text-center"
         style={{ background: 'linear-gradient(135deg, #0d1b3e 0%, #1a3272 100%)' }}
@@ -293,7 +236,9 @@ export default function DeleteAccount() {
           <AlertTriangle size={11} />
           Permanent Action
         </div>
-        <h1 className="font-display text-4xl font-extrabold text-white mb-3">Delete Account</h1>
+        <h1 className="font-display text-4xl font-extrabold text-white mb-3">
+          Delete Account
+        </h1>
         <p className="text-white/45 max-w-sm mx-auto text-sm leading-relaxed">
           Permanently delete your BillMate account and all associated business data.
           This action cannot be undone after the 30-day grace period.
@@ -301,6 +246,8 @@ export default function DeleteAccount() {
       </div>
 
       <div className="max-w-xl mx-auto px-6 py-12">
+
+        {/* ── Done state ────────────────────────────────────────────────── */}
         {step === 3 && (
           <div className="rounded-2xl p-8 text-center border border-slate-200 bg-white shadow-sm">
             <div
@@ -333,15 +280,18 @@ export default function DeleteAccount() {
           </div>
         )}
 
+        {/* ── Multi-step deletion form ───────────────────────────────────── */}
         {step < 3 && (
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+
+            {/* Warning banner */}
             <div
               className="px-6 py-4 flex items-start gap-3"
               style={{ background: 'rgba(239,68,68,0.06)', borderBottom: '1px solid rgba(239,68,68,0.12)' }}
             >
               <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" style={{ color: '#ef4444' }} />
               <p className="text-xs text-slate-600 leading-relaxed">
-                <strong className="text-red-600">All data will be permanently deleted</strong> - bills,
+                <strong className="text-red-600">All data will be permanently deleted</strong> — bills,
                 items, expenses, staff accounts, and reports. You have 30 days to cancel after submitting.
               </p>
             </div>
@@ -349,8 +299,17 @@ export default function DeleteAccount() {
             <div className="p-6">
               <Steps current={step} />
 
-              {error && <ErrorPanel message={error} debug={errorDebug} />}
+              {error && (
+                <div
+                  className="flex items-center gap-2 rounded-xl px-4 py-3 mb-5 text-sm"
+                  style={{ background: 'rgba(239,68,68,0.08)', color: '#b91c1c' }}
+                >
+                  <XCircle size={15} className="flex-shrink-0" />
+                  {error}
+                </div>
+              )}
 
+              {/* Step 0 — Phone */}
               {step === 0 && (
                 <form onSubmit={handleSendOtp} className="space-y-4">
                   <div>
@@ -365,7 +324,7 @@ export default function DeleteAccount() {
                         maxLength={10}
                         placeholder="10-digit mobile number"
                         value={phone}
-                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                        onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                         className={`${inputCls} pl-10`}
                         style={inputStyle}
                         required
@@ -382,11 +341,12 @@ export default function DeleteAccount() {
                     style={btnPrimary(loading || phone.length !== 10)}
                   >
                     {loading && <Loader2 size={15} className="animate-spin" />}
-                    {loading ? 'Sending OTP...' : 'Send Verification Code'}
+                    {loading ? 'Sending OTP…' : 'Send Verification Code'}
                   </button>
                 </form>
               )}
 
+              {/* Step 1 — OTP */}
               {step === 1 && (
                 <form onSubmit={handleOtpNext} className="space-y-4">
                   <div>
@@ -401,7 +361,7 @@ export default function DeleteAccount() {
                         maxLength={6}
                         placeholder="6-digit OTP"
                         value={otp}
-                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                         className={`${inputCls} pl-10 tracking-widest text-center font-mono text-lg`}
                         style={inputStyle}
                         autoFocus
@@ -409,16 +369,12 @@ export default function DeleteAccount() {
                       />
                     </div>
                     <p className="text-xs text-slate-400 mt-1.5">
-                      The code expires in 10 minutes.{` `}
+                      The code expires in 10 minutes.{' '}
                       <button
                         type="button"
                         className="font-semibold hover:opacity-70 transition-opacity"
                         style={{ color: '#00a88a' }}
-                        onClick={() => {
-                          setOtp('')
-                          setStep(0)
-                          clearError()
-                        }}
+                        onClick={() => { setOtp(''); setStep(0); clearError() }}
                       >
                         Change number
                       </button>
@@ -435,6 +391,7 @@ export default function DeleteAccount() {
                 </form>
               )}
 
+              {/* Step 2 — Final confirmation */}
               {step === 2 && (
                 <form onSubmit={handleConfirm} className="space-y-5">
                   <div
@@ -459,9 +416,9 @@ export default function DeleteAccount() {
                       <FileText size={15} className="absolute left-3.5 top-3.5 text-slate-400 pointer-events-none" />
                       <textarea
                         rows={3}
-                        placeholder="Help us improve BillMate..."
+                        placeholder="Help us improve BillMate…"
                         value={reason}
-                        onChange={(e) => setReason(e.target.value.slice(0, 500))}
+                        onChange={e => setReason(e.target.value.slice(0, 500))}
                         className={`${inputCls} pl-10 resize-none`}
                         style={inputStyle}
                       />
@@ -479,19 +436,14 @@ export default function DeleteAccount() {
                     }}
                   >
                     {loading && <Loader2 size={15} className="animate-spin" />}
-                    {loading ? 'Submitting...' : 'Yes, Delete My Account'}
+                    {loading ? 'Submitting…' : 'Yes, Delete My Account'}
                   </button>
                   <button
                     type="button"
                     className="w-full py-2.5 rounded-xl text-sm font-semibold border border-slate-200 text-slate-500 hover:border-slate-300 transition-colors bg-white"
-                    onClick={() => {
-                      setStep(0)
-                      setOtp('')
-                      setPhone('')
-                      clearError()
-                    }}
+                    onClick={() => { setStep(0); setOtp(''); setPhone(''); clearError() }}
                   >
-                    Cancel - Keep My Account
+                    Cancel — Keep My Account
                   </button>
                 </form>
               )}
@@ -499,17 +451,13 @@ export default function DeleteAccount() {
           </div>
         )}
 
+        {/* ── Cancel existing request ────────────────────────────────────── */}
         <div className="mt-10">
           <button
             type="button"
             className="text-sm font-semibold w-full text-center transition-colors hover:opacity-70"
             style={{ color: '#00a88a' }}
-            onClick={() => {
-              setShowCancel((v) => !v)
-              setCancelError('')
-              setCancelErrorDebug(null)
-              setCancelSuccess(false)
-            }}
+            onClick={() => { setShowCancel(v => !v); setCancelError(''); setCancelSuccess(false) }}
           >
             {showCancel ? 'Hide cancellation form ▲' : 'Already submitted a request? Cancel it here ▼'}
           </button>
@@ -528,7 +476,15 @@ export default function DeleteAccount() {
                   </div>
                 ) : (
                   <>
-                    {cancelError && <ErrorPanel message={cancelError} debug={cancelErrorDebug} />}
+                    {cancelError && (
+                      <div
+                        className="flex items-center gap-2 rounded-xl px-4 py-3 mb-4 text-sm"
+                        style={{ background: 'rgba(239,68,68,0.08)', color: '#b91c1c' }}
+                      >
+                        <XCircle size={15} className="flex-shrink-0" />
+                        {cancelError}
+                      </div>
+                    )}
 
                     {cancelStep === 0 && (
                       <form onSubmit={handleCancelSendOtp} className="space-y-4">
@@ -540,7 +496,7 @@ export default function DeleteAccount() {
                             maxLength={10}
                             placeholder="Registered phone number"
                             value={cancelPhone}
-                            onChange={(e) => setCancelPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                            onChange={e => setCancelPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                             className={`${inputCls} pl-10`}
                             style={inputStyle}
                           />
@@ -552,7 +508,7 @@ export default function DeleteAccount() {
                           style={btnPrimary(cancelLoading || cancelPhone.length !== 10)}
                         >
                           {cancelLoading && <Loader2 size={15} className="animate-spin" />}
-                          {cancelLoading ? 'Sending OTP...' : 'Send Verification Code'}
+                          {cancelLoading ? 'Sending OTP…' : 'Send Verification Code'}
                         </button>
                       </form>
                     )}
@@ -567,7 +523,7 @@ export default function DeleteAccount() {
                             maxLength={6}
                             placeholder="6-digit OTP"
                             value={cancelOtp}
-                            onChange={(e) => setCancelOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            onChange={e => setCancelOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                             className={`${inputCls} pl-10 tracking-widest text-center font-mono text-lg`}
                             style={inputStyle}
                             autoFocus
@@ -580,7 +536,7 @@ export default function DeleteAccount() {
                           style={btnPrimary(cancelLoading || cancelOtp.length !== 6)}
                         >
                           {cancelLoading && <Loader2 size={15} className="animate-spin" />}
-                          {cancelLoading ? 'Cancelling...' : 'Cancel My Deletion Request'}
+                          {cancelLoading ? 'Cancelling…' : 'Cancel My Deletion Request'}
                         </button>
                       </form>
                     )}
@@ -591,6 +547,7 @@ export default function DeleteAccount() {
           )}
         </div>
 
+        {/* Footer nav */}
         <div className="flex flex-wrap justify-center gap-6 mt-12 pt-8 border-t border-slate-200 text-xs text-slate-400">
           <Link to="/" className="hover:text-navy-900 transition-colors">Home</Link>
           <Link to="/help" className="hover:text-navy-900 transition-colors">Help Center</Link>
