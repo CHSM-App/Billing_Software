@@ -1,8 +1,8 @@
+import 'package:billmate/models/models.dart';
+import 'package:billmate/providers/cart_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:frontend/models/models.dart';
-import 'package:frontend/models/cart_entry.dart';
-import 'package:frontend/providers/cart_provider.dart';
+
 
 Item makeItem({
   String id = 'item-1',

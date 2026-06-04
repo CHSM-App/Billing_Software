@@ -1,6 +1,8 @@
+import 'package:billmate/models/cart_entry.dart';
+import 'package:billmate/models/models.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frontend/models/models.dart';
-import 'package:frontend/models/cart_entry.dart';
+// import 'package:billmate/models/models.dart';
+// import 'package:/models/cart_entry.dart';
 
 void main() {
   // ─────────────────────────────────────────────────────────────
