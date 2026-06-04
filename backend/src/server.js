@@ -170,6 +170,7 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 app.use(express.static(PUBLIC_DIR));
 // Express 5 requires a named wildcard; `/{*path}` also matches `/`.
 app.get('/{*path}', (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
