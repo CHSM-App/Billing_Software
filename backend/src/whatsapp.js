@@ -121,7 +121,10 @@ async function logSendResult(phone, purpose, status, campaignId, errorDetail) {
         UPDATE TOP(1) whatsapp_otp_log
         SET status = @status, campaign_id = @campaign_id, error_detail = @error_detail
         WHERE phone = @phone AND purpose = @purpose
-        ORDER BY created_at DESC
+          AND created_at = (
+            SELECT MAX(created_at) FROM whatsapp_otp_log
+            WHERE phone = @phone AND purpose = @purpose
+          )
       `)
   } catch (e) {
     logger.warn({ err: e }, '[WhatsApp] DB log update failed')
