@@ -371,37 +371,37 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
                           ),
                           const SizedBox(height: AppSpacing.space24),
 
-                          _buildSection(
-                            context,
-                            label: 'BILLING',
-                            icon: Icons.print_outlined,
-                            iconColor: AppColors.warning,
-                            children: [
-                              _buildField(
-                                controller: _billPrefixCtrl,
-                                label: 'Bill Number Prefix',
-                                hint: 'INV',
-                                maxLength: 10,
-                                helperText: 'Bills will be numbered INV-0001, INV-0002, …',
-                                validator: (v) {
-                                  if (v == null || v.trim().isEmpty) return 'Required';
-                                  if (!RegExp(r'^[A-Za-z0-9\-/]+$').hasMatch(v.trim())) {
-                                    return 'Letters, numbers, hyphens, slashes only';
-                                  }
-                                  return null;
-                                },
-                              ),
-                              const SizedBox(height: AppSpacing.space12),
-                              _buildField(
-                                controller: _footerNoteCtrl,
-                                label: 'Bill Footer Note (optional)',
-                                hint: 'Thank you for shopping with us!',
-                                maxLines: 3,
-                                maxLength: 500,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: AppSpacing.space32),
+                          // _buildSection(
+                          //   context,
+                          //   label: 'BILLING',
+                          //   icon: Icons.print_outlined,
+                          //   iconColor: AppColors.warning,
+                          //   children: [
+                          //     _buildField(
+                          //       controller: _billPrefixCtrl,
+                          //       label: 'Bill Number Prefix',
+                          //       hint: 'INV',
+                          //       maxLength: 10,
+                          //       helperText: 'Bills will be numbered INV-0001, INV-0002, …',
+                          //       validator: (v) {
+                          //         if (v == null || v.trim().isEmpty) return 'Required';
+                          //         if (!RegExp(r'^[A-Za-z0-9\-/]+$').hasMatch(v.trim())) {
+                          //           return 'Letters, numbers, hyphens, slashes only';
+                          //         }
+                          //         return null;
+                          //       },
+                          //     ),
+                          //     const SizedBox(height: AppSpacing.space12),
+                          //     _buildField(
+                          //       controller: _footerNoteCtrl,
+                          //       label: 'Bill Footer Note (optional)',
+                          //       hint: 'Thank you for shopping with us!',
+                          //       maxLines: 3,
+                          //       maxLength: 500,
+                          //     ),
+                          //   ],
+                          // ),
+                          // const SizedBox(height: AppSpacing.space32),
 
                           PrimaryButton(
                             text: _saving ? 'Saving…' : 'Save Profile',
