@@ -8,7 +8,7 @@ const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUti
 const { sendBillLink, normalisePhone } = require('../whatsapp');
 
 // Base URL used in receipt links — no trailing slash
-const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://billing.vengurlatech.com';
+const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://billmate.vengurlatech.com';
 
 function generateReceiptToken() {
   // 16 URL-safe chars (base62) — ~95 bits of entropy, unguessable

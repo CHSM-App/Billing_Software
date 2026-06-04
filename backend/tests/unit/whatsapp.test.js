@@ -77,7 +77,7 @@ describe('sendBillLink — disabled', () => {
       phone: '9876543210',
       shopName: 'My Shop',
       billNumber: 'INV-0001',
-      receiptUrl: 'https://billing.vengurlatech.com/receipt/abc123',
+      receiptUrl: 'https://billmate.vengurlatech.com/receipt/abc123',
     });
     expect(result.sent).toBe(false);
     expect(result.skipped).toBe(true);
@@ -89,7 +89,7 @@ describe('sendBillLink — disabled', () => {
       phone: 'invalid',
       shopName: 'My Shop',
       billNumber: 'INV-0001',
-      receiptUrl: 'https://billing.vengurlatech.com/receipt/abc123',
+      receiptUrl: 'https://billmate.vengurlatech.com/receipt/abc123',
     });
     expect(result.sent).toBe(false);
     expect(result.error).toMatch(/phone/i);

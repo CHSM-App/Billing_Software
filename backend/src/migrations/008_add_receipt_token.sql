@@ -1,7 +1,7 @@
 -- =============================================================================
 -- Migration 008: add receipt_token to bills
 -- Each bill gets a unique 16-char random token used to generate a public
--- receipt URL: https://billing.vengurlatech.com/receipt/<token>
+-- receipt URL: https://billmate.vengurlatech.com/receipt/<token>
 -- No expiry — receipts are permanent.
 -- =============================================================================
 
