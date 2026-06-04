@@ -89,11 +89,11 @@ const SECTIONS = [
       },
       {
         subtitle: '5.2 Data Export',
-        text: 'You may request an export of your business data — bills, items, expenses, and reports — by contacting our support team at support@billmate.in. You can also export reports directly from within the app in CSV or PDF format.',
+        text: 'You may request an export of your business data — bills, items, expenses, and reports — by contacting our support team at support@vengurlatech.com. You can also export reports directly from within the app in CSV or PDF format.',
       },
       {
         subtitle: '5.3 Account Deletion',
-        text: 'You have the right to request deletion of your BillMate account and all associated data at any time. To submit a deletion request, contact us at support@billmate.in or reach out via WhatsApp support. Deletion is processed within 30 days of a verified request.',
+        text: 'You have the right to request deletion of your BillMate account and all associated data at any time. To submit a deletion request, contact us at support@vengurlatech.com or reach out via WhatsApp support. Deletion is processed within 30 days of a verified request.',
       },
     ],
   },
@@ -241,7 +241,7 @@ export default function PrivacyPolicy() {
           <Link to="/" className="hover:text-navy-900 transition-colors">Home</Link>
           <Link to="/help" className="hover:text-navy-900 transition-colors">Help Center</Link>
           <Link to="/delete-account" className="hover:text-navy-900 transition-colors">Delete Account</Link>
-          <a href="mailto:support@billmate.in" className="hover:text-navy-900 transition-colors">Contact</a>
+          <a href="mailto:support@vengurlatech.com" className="hover:text-navy-900 transition-colors">Contact</a>
         </div>
       </div>
     </div>

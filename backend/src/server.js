@@ -168,6 +168,23 @@ app.use('/api/audit', require('./routes/audit'));
 app.use('/api/license', require('./routes/license'));
 app.use('/api/account', require('./routes/account'));
 
+// Unexpected middleware/route failures should stay JSON for API callers.
+app.use((err, req, res, next) => {
+  logger.error({ err, method: req.method, url: req.originalUrl }, 'unhandled request error');
+
+  if (res.headersSent) return next(err);
+
+  if (req.originalUrl && req.originalUrl.startsWith('/api/')) {
+    const status = err.status || err.statusCode || (err instanceof SyntaxError ? 400 : 500);
+    const message = status === 400
+      ? 'Invalid request body.'
+      : 'Something went wrong. Please try again.';
+    return res.status(status).json({ error: message });
+  }
+
+  return next(err);
+});
+
 // ---------------------------------------------------------------------------
 // SPA catch-all — return index.html for any unmatched route so React Router works.
 // ---------------------------------------------------------------------------

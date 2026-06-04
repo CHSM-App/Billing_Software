@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import Logo from './Logo'
 import {
@@ -290,6 +290,10 @@ export default function HelpCenter() {
   const [search, setSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState('all')
 
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [])
+
   const filtered = FAQS.filter(faq => {
     const matchCat = activeCategory === 'all' || faq.category === activeCategory
     const matchSearch =
@@ -354,7 +358,7 @@ export default function HelpCenter() {
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 -mt-8 pb-20">
+      <div className="max-w-5xl mx-auto px-6 mt-10 pb-20">
 
         {/* Category chips */}
         <div className="flex flex-wrap gap-2 mb-10">
