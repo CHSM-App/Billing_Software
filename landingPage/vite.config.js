@@ -8,5 +8,12 @@ export default defineConfig({
     // Output directly into backend/public so the Express server can serve it
     outDir: path.resolve(__dirname, '../backend/public'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/index.js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name][extname]',
+      },
+    },
   },
 })

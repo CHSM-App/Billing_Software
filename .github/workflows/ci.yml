@@ -112,18 +112,12 @@ jobs:
         working-directory: landingPage
         run: npm ci
 
-      - name: Clear previous build output
-        run: rm -rf backend/public
-
       - name: Build landing page (outputs to backend/public/)
         working-directory: landingPage
         run: npm run build
         env:
           # API calls from the landing page go to the same domain — no prefix needed
           VITE_API_URL: ''
-
-      - name: Verify build output
-        run: ls -la backend/public/assets/
 
       - name: Install backend production dependencies
         working-directory: backend
