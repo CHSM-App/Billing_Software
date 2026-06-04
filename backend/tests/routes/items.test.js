@@ -12,6 +12,7 @@ jest.mock('../../src/middleware/rateLimiter', () => ({
   loginLimiter: (req, res, next) => next(),
   registerLimiter: (req, res, next) => next(),
   refreshLimiter: (req, res, next) => next(),
+  deletionLimiter: (req, res, next) => next(),
 }));
 
 const app = require('../../src/server');
