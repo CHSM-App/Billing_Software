@@ -384,6 +384,60 @@ async function logUserLocked(businessId, userId, userName) {
   });
 }
 
+// ── Account deletion ───────────────────────────────────────────────────────
+
+/**
+ * Log that an owner submitted and OTP-verified an account deletion request.
+ * @param {string} businessId
+ * @param {string} userId
+ * @param {string} userName
+ * @param {Date}   scheduledFor
+ */
+async function logAccountDeletionRequested(businessId, userId, userName, scheduledFor) {
+  await writeAudit({
+    business_id:  businessId,
+    user_id:      userId,
+    user_name:    userName,
+    event_type:   'account_deletion_requested',
+    entity_id:    businessId,
+    entity_label: userName,
+    new_value:    { scheduled_for: scheduledFor },
+    description:  `Account deletion requested by "${userName}" — scheduled for ${scheduledFor.toDateString()}`,
+  });
+}
+
+/**
+ * Log that the owner cancelled their pending deletion request.
+ */
+async function logAccountDeletionCancelled(businessId, userId, userName) {
+  await writeAudit({
+    business_id:  businessId,
+    user_id:      userId,
+    user_name:    userName,
+    event_type:   'account_deletion_cancelled',
+    entity_id:    businessId,
+    entity_label: userName,
+    description:  `Account deletion cancelled by "${userName}"`,
+  });
+}
+
+/**
+ * Log that the account was permanently deleted by the cleanup job.
+ * Called after the transaction commits — business row no longer exists,
+ * but the audit_logs FK is NO ACTION so the row is still written.
+ */
+async function logAccountDeleted(businessId, userId, userName) {
+  await writeAudit({
+    business_id:  businessId,
+    user_id:      userId,
+    user_name:    userName,
+    event_type:   'account_deleted',
+    entity_id:    businessId,
+    entity_label: userName,
+    description:  `Account for "${userName}" permanently deleted by scheduled cleanup`,
+  });
+}
+
 // ---------------------------------------------------------------------------
 
 module.exports = {
@@ -409,4 +463,8 @@ module.exports = {
   logUserLocked,
   // Business
   logBusinessProfileUpdated,
+  // Account deletion
+  logAccountDeletionRequested,
+  logAccountDeletionCancelled,
+  logAccountDeleted,
 };

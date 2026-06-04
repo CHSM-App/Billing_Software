@@ -45,4 +45,16 @@ const refreshLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
-module.exports = { loginLimiter, registerLimiter, refreshLimiter };
+// POST /api/account/deletion/request + /confirm + /cancel
+// 5 attempts per IP per hour — tight because each attempt triggers a WhatsApp OTP
+const deletionLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many account deletion attempts. Please try again in 1 hour.',
+  handler: onLimitReached,
+  skipSuccessfulRequests: false,
+});
+
+module.exports = { loginLimiter, registerLimiter, refreshLimiter, deletionLimiter };

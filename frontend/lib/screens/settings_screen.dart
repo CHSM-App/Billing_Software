@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb; // used to hide printer tile on web
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import 'login_screen.dart';
-import 'printer_setup_screen.dart';
-import 'printer_test_screen.dart';
-import 'printer_test_windows_screen.dart';
+// Printer screens use native-only packages — excluded on web.
+import 'printer_setup_screen.dart'
+    if (dart.library.html) 'printer_setup_screen_web.dart';
+import 'printer_test_screen.dart'
+    if (dart.library.html) 'printer_test_screen_web.dart';
+import 'printer_test_windows_screen.dart'
+    if (dart.library.html) 'printer_test_windows_screen_web.dart';
 import 'staff_screen.dart';
 import 'business_profile_screen.dart';
 import 'conflict_resolution_screen.dart';
@@ -172,20 +177,22 @@ class _SettingsContentState extends State<_SettingsContent>
                       const SizedBox(height: AppSpacing.space24),
                     ],
 
-                    _sectionLabel(context, 'HARDWARE'),
-                    const SizedBox(height: AppSpacing.space8),
-                    _buildNavCard(
-                      context,
-                      icon: Icons.print_outlined,
-                      iconColor: const Color(0xFF7C3AED),
-                      title: 'Printer Setup',
-                      subtitle: 'Configure your thermal printer',
-                      onTap: () => Navigator.push(
+                    if (!kIsWeb) ...[
+                      _sectionLabel(context, 'HARDWARE'),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
                         context,
-                        MaterialPageRoute(
-                            builder: (_) => const PrinterSetupScreen()),
+                        icon: Icons.print_outlined,
+                        iconColor: const Color(0xFF7C3AED),
+                        title: 'Printer Setup',
+                        subtitle: 'Configure your thermal printer',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const PrinterSetupScreen()),
+                        ),
                       ),
-                    ),
+                    ],
                     // const SizedBox(height: AppSpacing.space8),
                     // _buildNavCard(
                     //   context,

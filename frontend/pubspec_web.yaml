@@ -1,0 +1,28 @@
+name: frontend
+description: "Billing app for small Indian businesses."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  flutter_riverpod: ^2.5.1
+  cupertino_icons: ^1.0.8
+  http: ^1.2.0
+  shared_preferences: ^2.2.0
+  flutter_secure_storage: ^9.2.2
+  intl: ^0.19.0
+  google_fonts: ^6.1.0
+  barcode_widget: ^2.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

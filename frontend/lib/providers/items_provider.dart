@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../api.dart' as api;
@@ -49,12 +48,10 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
 
     try {
       rawItems = await api.getItems();
-    } on SocketException {
-      // network down — fall through to cache
     } on http.ClientException {
       // network down — fall through to cache
     } catch (_) {
-      // other error — fall through to cache
+      // SocketException on native, or other error — fall through to cache
     }
 
     if (rawItems != null) {

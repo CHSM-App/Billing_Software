@@ -91,15 +91,33 @@ jobs:
           path: frontend/coverage/
           retention-days: 14
 
-  # Job 3: Sync backend folder to branch "backend"
-  # Runs on every push to any branch (not tags).
+  # Job 3: Build landing page, copy output into backend/public/, then sync
+  # the whole backend folder (including the fresh build) to the backend branch.
   sync-backend:
-    name: Sync backend to backend branch
+    name: Build landing page + sync backend branch
     runs-on: ubuntu-latest
     if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: landingPage/package-lock.json
+
+      - name: Install landing page dependencies
+        working-directory: landingPage
+        run: npm ci
+
+      - name: Build landing page (outputs to backend/public/)
+        working-directory: landingPage
+        run: npm run build
+        env:
+          # API calls from the landing page go to the same domain — no prefix needed
+          VITE_API_URL: ''
 
       - name: Push backend folder to backend branch
         uses: peaceiris/actions-gh-pages@v4
@@ -109,7 +127,7 @@ jobs:
           publish_dir: ./${{ env.BACKEND_DIR }}
           force_orphan: true
           exclude_assets: node_modules
-          commit_message: "sync: backend from ${{ github.ref_name }} @ ${{ github.sha }}"
+          commit_message: "sync: backend + landing page from ${{ github.ref_name }} @ ${{ github.sha }}"
 
   # Job 4: Build Flutter APK on tag push (v*)
   build-apk:

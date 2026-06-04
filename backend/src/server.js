@@ -158,6 +158,19 @@ app.use('/api/expenses/recurring', require('./routes/recurring_expenses'));
 app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/audit', require('./routes/audit'));
 app.use('/api/license', require('./routes/license'));
+app.use('/api/account', require('./routes/account'));
+
+// ---------------------------------------------------------------------------
+// Landing page — serve the Vite build from backend/public/
+// Must be registered AFTER all API routes so /api/* is never intercepted.
+// The catch-all returns index.html for any unknown path so React Router works.
+// ---------------------------------------------------------------------------
+const path = require('path');
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+app.use(express.static(PUBLIC_DIR));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
 
 const PORT = process.env.PORT || 3000;
 

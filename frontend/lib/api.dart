@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:developer' as dev;
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
@@ -56,10 +55,11 @@ Future<http.Response> _delete(Uri uri, {Map<String, String>? headers}) async {
 Future<http.Response> _safeGet(Uri uri, {Map<String, String>? headers}) async {
   try {
     return await _get(uri, headers: headers);
-  } on SocketException {
+  } on http.ClientException {
     _connectivityNotifier?.markOffline();
     rethrow;
-  } on http.ClientException {
+  } catch (e) {
+    // Catches dart:io SocketException on native platforms
     _connectivityNotifier?.markOffline();
     rethrow;
   }
@@ -68,10 +68,11 @@ Future<http.Response> _safeGet(Uri uri, {Map<String, String>? headers}) async {
 Future<http.Response> _safePost(Uri uri, {Map<String, String>? headers, Object? body}) async {
   try {
     return await _post(uri, headers: headers, body: body);
-  } on SocketException {
+  } on http.ClientException {
     _connectivityNotifier?.markOffline();
     rethrow;
-  } on http.ClientException {
+  } catch (e) {
+    // Catches dart:io SocketException on native platforms
     _connectivityNotifier?.markOffline();
     rethrow;
   }

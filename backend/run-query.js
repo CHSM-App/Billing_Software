@@ -2,9 +2,7 @@ const { pool, poolConnect } = require('./src/db');
 
 // ─── PUT YOUR SQL QUERY HERE ───────────────────────────────────────────────
 const QUERY = `
- UPDATE subscriptions SET status = 'active', expires_at = '2026-06-03', updated_at = GETUTCDATE()
-  WHERE business_id = '6F1E69DB-FE80-4EB2-9AA3-D8AEC4D4947E'
-
+ select * from account_deletion_requests
 `;
 // ──────────────────────────────────────────────────────────────────────────
 

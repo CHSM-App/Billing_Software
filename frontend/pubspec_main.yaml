@@ -1,0 +1,50 @@
+name: frontend
+description: "Billing app for small Indian businesses."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  flutter_riverpod: ^2.5.1
+  cupertino_icons: ^1.0.8
+  http: ^1.2.0
+  shared_preferences: ^2.2.0
+  flutter_secure_storage: ^9.2.2
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.0
+  path_provider: ^2.1.0
+  path: ^1.9.0
+  intl: ^0.19.0
+  google_fonts: ^6.1.0
+  flutter_thermal_printer: 2.0.0
+  print_bluetooth_thermal: ^1.0.0
+  permission_handler: ^11.0.0
+  esc_pos_utils_plus: ^2.0.4
+  barcode_widget: ^2.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter:
+  uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+  windows:
+    generate: true
+    image_path: "assets/logo.png"
+    icon_size: 48
+  web:
+    generate: true
+    image_path: "assets/logo.png"
+    background_color: "#ffffff"

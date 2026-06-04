@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'dart:io' show Platform;
 import '../api.dart';
+import '../utils/platform_utils.dart' as platform;
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import 'otp_screen.dart';
@@ -34,13 +34,7 @@ class _RegisterScreenState extends State<RegisterScreen>
   late final Animation<double> _fadeAnim;
 
   bool get _isRetail => _businessType == 'retail';
-  bool get _isWindows {
-    try {
-      return Platform.isWindows;
-    } catch (_) {
-      return false;
-    }
-  }
+  bool get _isWindows => platform.isWindows;
 
   @override
   void initState() {
