@@ -168,7 +168,8 @@ app.use('/api/account', require('./routes/account'));
 const path = require('path');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 app.use(express.static(PUBLIC_DIR));
-app.get('*', (req, res) => {
+// Express 5 requires a named wildcard; `/{*path}` also matches `/`.
+app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 

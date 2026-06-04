@@ -5,6 +5,14 @@ import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
 const String baseUrl = 'https://billing.vengurlatech.com/api';
+const String _genericApiErrorMessage = 'Something went wrong';
+
+String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
+  if (error is ApiException && error.message.trim().isNotEmpty) {
+    return error.message;
+  }
+  return fallback;
+}
 
 // ---------------------------------------------------------------------------
 // Connectivity notifier reference — set once from main.dart after ProviderScope
@@ -122,12 +130,56 @@ Future<Map<String, String>> _authHeaders() async {
 }
 
 dynamic _parse(http.Response response) {
-  final body = jsonDecode(response.body);
+  final body = _decodeResponseBody(response.body);
   if (response.statusCode >= 200 && response.statusCode < 300) {
     return body;
   }
-  final message = body['error'] ?? body['message'] ?? 'Unknown error';
-  throw ApiException(message, response.statusCode);
+  final serverMessage = _extractServerMessage(body);
+  throw ApiException(
+    _genericApiErrorMessage,
+    response.statusCode,
+    serverMessage: serverMessage,
+  );
+}
+
+dynamic _decodeResponseBody(String responseBody) {
+  if (responseBody.isEmpty) return null;
+  try {
+    return jsonDecode(responseBody);
+  } catch (_) {
+    return responseBody;
+  }
+}
+
+String? _extractServerMessage(dynamic body) {
+  if (body is Map<String, dynamic>) {
+    final message = body['error'] ?? body['message'];
+    if (message is String && message.trim().isNotEmpty) {
+      return message.trim();
+    }
+  }
+  if (body is String && body.trim().isNotEmpty) {
+    return body.trim();
+  }
+  return null;
+}
+
+Map<String, dynamic> _asJsonMap(
+  dynamic body, {
+  int statusCode = 500,
+  String? serverMessage,
+}) {
+  if (body is Map<String, dynamic>) {
+    return body;
+  }
+  if (body is Map) {
+    return Map<String, dynamic>.from(body);
+  }
+  throw ApiException(
+    _genericApiErrorMessage,
+    statusCode,
+    serverMessage: serverMessage ?? 'Unexpected response format',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +234,9 @@ Future<http.Response> _withAutoRefresh(
 class ApiException implements Exception {
   final String message;
   final int statusCode;
-  ApiException(this.message, this.statusCode);
+  final String? serverMessage;
+
+  ApiException(this.message, this.statusCode, {this.serverMessage});
 
   @override
   String toString() => message;
@@ -462,7 +516,8 @@ Future<void> voidBill(String id) async {
 // ---------------------------------------------------------------------------
 
 Future<Map<String, dynamic>> getLicense() async {
-  return _parse(await _authGet(Uri.parse('$baseUrl/license')));
+  final body = _parse(await _authGet(Uri.parse('$baseUrl/license')));
+  return _asJsonMap(body, statusCode: 200);
 }
 
 // ---------------------------------------------------------------------------

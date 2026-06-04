@@ -114,9 +114,14 @@ class SyncService {
   /// Convert ApiException to a short, human-readable conflict reason that can
   /// be shown in the conflict resolution screen.
   String _friendlyError(ApiException e) {
-    if (e.statusCode == 409) return 'Insufficient stock: ${e.message}';
+    final serverMessage = e.serverMessage?.trim();
+    if (e.statusCode == 409) {
+      return (serverMessage != null && serverMessage.isNotEmpty)
+          ? 'Insufficient stock: $serverMessage'
+          : 'Insufficient stock';
+    }
     if (e.statusCode == 404) return 'Item or table no longer exists';
-    return e.message;
+    return serverMessage?.isNotEmpty == true ? serverMessage! : e.message;
   }
 
   /// Converts a stored offline_bills row into the POST /api/bills payload.

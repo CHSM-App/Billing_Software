@@ -98,7 +98,7 @@ class LicenseService {
       return result;
     } on ApiException catch (e) {
       if (e.statusCode == 403) {
-        final body = e.message;
+        final body = e.serverMessage ?? '';
         if (body.contains('no_subscription')) {
           return const LicenseStatus(LicenseState.blockedPending);
         }

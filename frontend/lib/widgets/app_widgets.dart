@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../api.dart';
 import '../theme/app_theme.dart';
 
 // Animated primary button with gradient and press effect
@@ -554,7 +555,7 @@ class AppErrorWidget extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.space8),
             Text(
-              error.toString(),
+              sanitizeUiErrorMessage(error),
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme

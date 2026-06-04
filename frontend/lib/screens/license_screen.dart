@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../api.dart';
 import '../services/license_service.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
@@ -60,7 +61,9 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
       }
       setState(() {
         _checking = false;
-        _errorMessage = rawError ?? _messageForState(status.state);
+        _errorMessage = rawError == null
+            ? _messageForState(status.state)
+            : sanitizeUiErrorMessage(rawError);
       });
     }
   }
