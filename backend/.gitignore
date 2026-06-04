@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.*
+!.env.example
+iisnode_logs/
+logs/
+coverage/

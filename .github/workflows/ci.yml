@@ -119,6 +119,10 @@ jobs:
           # API calls from the landing page go to the same domain — no prefix needed
           VITE_API_URL: ''
 
+      - name: Install backend production dependencies
+        working-directory: backend
+        run: npm ci --omit=dev
+
       - name: Push backend folder to backend branch
         uses: peaceiris/actions-gh-pages@v4
         with:
@@ -126,7 +130,6 @@ jobs:
           publish_branch: ${{ env.BACKEND_BRANCH }}
           publish_dir: ./${{ env.BACKEND_DIR }}
           force_orphan: true
-          exclude_assets: node_modules
           commit_message: "sync: backend + landing page from ${{ github.ref_name }} @ ${{ github.sha }}"
 
   # Job 4: Build Flutter APK on tag push (v*)
