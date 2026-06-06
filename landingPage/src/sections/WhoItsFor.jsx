@@ -41,7 +41,7 @@ export default function WhoItsFor() {
             </h2>
             <p className="text-slate-500 leading-relaxed mb-8 max-w-md">
               Whether you run a neighbourhood kirana store, a busy café, or a restaurant
-              with multiple tables — BillMate adapts to your exact workflow, not the other
+              with multiple tables — VBill adapts to your exact workflow, not the other
               way around.
             </p>
             <a

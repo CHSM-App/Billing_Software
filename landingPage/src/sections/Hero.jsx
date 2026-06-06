@@ -18,7 +18,7 @@ function BillingMockup() {
         <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
         <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
         <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
-        <span className="mx-auto text-[11px] font-mono text-white/30">BillMate</span>
+        <span className="mx-auto text-[11px] font-mono text-white/30">VBill</span>
       </div>
 
       {/* Body */}
@@ -144,7 +144,7 @@ export default function Hero() {
 
             <p className="text-lg text-slate-500 leading-relaxed mb-8 max-w-lg
                           animate-fadeUp delay-300 anim-init">
-              BillMate brings fast billing, inventory management, table orders,
+              VBill brings fast billing, inventory management, table orders,
               expense tracking, and offline sync — all in one lightweight app built for
               Indian shopkeepers.
             </p>

@@ -215,7 +215,7 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'VengurlaTech Billing',
+                  'VBill Billing',
                   style: TextStyle(
                     fontSize: 12,
                     color: AppColors.textDisabled,

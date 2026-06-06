@@ -77,7 +77,7 @@ export default function Features() {
           </h2>
           <p className="text-slate-500 max-w-md mx-auto leading-relaxed">
             From the first item scanned to the final report at day's end —
-            BillMate handles every part of your business day.
+            VBill handles every part of your business day.
           </p>
         </div>
 

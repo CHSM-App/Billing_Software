@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import Logo from './Logo'
 import { ArrowLeft, AlertTriangle, Phone, KeyRound, FileText, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 
-const API_BASE = 'https://billmate.vengurlatech.com' || ''
+const API_BASE = 'https://VBill.vengurlatech.com' || ''
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -240,7 +240,7 @@ export default function DeleteAccount() {
           Delete Account
         </h1>
         <p className="text-white/45 max-w-sm mx-auto text-sm leading-relaxed">
-          Permanently delete your BillMate account and all associated business data.
+          Permanently delete your VBill account and all associated business data.
           This action cannot be undone after the 30-day grace period.
         </p>
       </div>
@@ -416,7 +416,7 @@ export default function DeleteAccount() {
                       <FileText size={15} className="absolute left-3.5 top-3.5 text-slate-400 pointer-events-none" />
                       <textarea
                         rows={3}
-                        placeholder="Help us improve BillMate…"
+                        placeholder="Help us improve VBill…"
                         value={reason}
                         onChange={e => setReason(e.target.value.slice(0, 500))}
                         className={`${inputCls} pl-10 resize-none`}
@@ -552,7 +552,7 @@ export default function DeleteAccount() {
           <Link to="/" className="hover:text-navy-900 transition-colors">Home</Link>
           <Link to="/help" className="hover:text-navy-900 transition-colors">Help Center</Link>
           <Link to="/privacy" className="hover:text-navy-900 transition-colors">Privacy Policy</Link>
-          <a href="mailto:support@billmate.in" className="hover:text-navy-900 transition-colors">Contact</a>
+          <a href="mailto:support@vengurlatech.com" className="hover:text-navy-900 transition-colors">Contact</a>
         </div>
       </div>
     </div>

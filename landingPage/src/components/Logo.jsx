@@ -6,7 +6,7 @@ export default function Logo({ size = 36 }) {
     <div className="flex items-center select-none">
       <img
         src={logoSrc}
-        alt="BillMate"
+        alt="VBill"
         style={{ height: size }}
         className="object-contain"
       />

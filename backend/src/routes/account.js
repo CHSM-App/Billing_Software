@@ -41,7 +41,7 @@ const OTP_PURPOSE = 'delete_account';
 // POST /api/account/deletion/request
 // Sends a WhatsApp OTP to the supplied phone number.
 // Always returns 200 regardless of whether the phone exists — prevents
-// attackers from enumerating which phones have BillMate accounts.
+// attackers from enumerating which phones have VBill accounts.
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post('/deletion/request', deletionLimiter, async (req, res) => {

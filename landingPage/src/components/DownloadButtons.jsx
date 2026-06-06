@@ -3,14 +3,14 @@ import { Monitor, Smartphone, Globe } from 'lucide-react'
 
 /**
  * Drop your installer files into the `public/downloads/` folder:
- *   public/downloads/BillMate-Setup.exe   → Windows installer
- *   public/downloads/BillMate.apk         → Android APK
+ *   public/downloads/VBill-Setup.exe   → Windows installer
+ *   public/downloads/VBill.apk         → Android APK
  *
  * The web app link can be an external URL — update WEB_URL below.
  */
-const WIN_URL = '/downloads/BillMate-windows.zip'
-const APK_URL = '/downloads/BillMate.apk'
-const WEB_URL = 'https://app.billmate.in'   // ← update to your web app URL
+const WIN_URL = '/downloads/VBill-windows.zip'
+const APK_URL = '/downloads/VBill.apk'
+const WEB_URL = 'https://app.VBill.in'   // ← update to your web app URL
 
 export function DownloadButtons({ size = 'md', row = false }) {
   const base =

@@ -51,8 +51,8 @@ const FAQS = [
   },
   {
     category: 'billing',
-    q: 'Does BillMate support GST billing?',
-    a: 'Yes. BillMate is GST-ready. You can add your GSTIN in Settings → Business Profile. GST rates can be assigned per item (0%, 5%, 12%, 18%, 28%). The GST breakdown — CGST, SGST, or IGST — is shown separately on the bill and included in exports.',
+    q: 'Does VBill support GST billing?',
+    a: 'Yes. VBill is GST-ready. You can add your GSTIN in Settings → Business Profile. GST rates can be assigned per item (0%, 5%, 12%, 18%, 28%). The GST breakdown — CGST, SGST, or IGST — is shown separately on the bill and included in exports.',
   },
   {
     category: 'billing',
@@ -96,7 +96,7 @@ const FAQS = [
   {
     category: 'tables',
     q: 'How do I set up tables for my restaurant?',
-    a: 'Go to Settings → Business Profile → Table Setup. Add the number of tables or sections your restaurant has and name them (e.g. "Table 1", "A1", "Terrace 3"). Once saved, tables appear on the Billing screen when BillMate is in Restaurant mode.',
+    a: 'Go to Settings → Business Profile → Table Setup. Add the number of tables or sections your restaurant has and name them (e.g. "Table 1", "A1", "Terrace 3"). Once saved, tables appear on the Billing screen when VBill is in Restaurant mode.',
   },
   {
     category: 'tables',
@@ -106,7 +106,7 @@ const FAQS = [
   {
     category: 'tables',
     q: 'What happens if I close the app mid-order?',
-    a: 'All open table orders are saved automatically. When you reopen BillMate, every active table order will be exactly as you left it — even if the device was offline. No order data is lost on app restart or device reboot.',
+    a: 'All open table orders are saved automatically. When you reopen VBill, every active table order will be exactly as you left it — even if the device was offline. No order data is lost on app restart or device reboot.',
   },
   {
     category: 'tables',
@@ -145,7 +145,7 @@ const FAQS = [
   {
     category: 'expenses',
     q: 'Can I set up recurring expenses?',
-    a: 'Yes. When adding an expense, toggle "Recurring" and set the frequency (monthly, weekly). BillMate will automatically log this expense on the scheduled date each period so you do not have to enter it manually every time.',
+    a: 'Yes. When adding an expense, toggle "Recurring" and set the frequency (monthly, weekly). VBill will automatically log this expense on the scheduled date each period so you do not have to enter it manually every time.',
   },
   {
     category: 'expenses',
@@ -156,8 +156,8 @@ const FAQS = [
   // ── Offline Mode ─────────────────────────────────────────────────────────
   {
     category: 'offline',
-    q: 'Does BillMate work without an internet connection?',
-    a: 'Yes. BillMate is built offline-first. You can create bills, add items, manage inventory, and run your store with zero internet connectivity. All data is stored locally and synced to the cloud automatically when your connection is restored.',
+    q: 'Does VBill work without an internet connection?',
+    a: 'Yes. VBill is built offline-first. You can create bills, add items, manage inventory, and run your store with zero internet connectivity. All data is stored locally and synced to the cloud automatically when your connection is restored.',
   },
   {
     category: 'offline',
@@ -179,7 +179,7 @@ const FAQS = [
   {
     category: 'printing',
     q: 'Which thermal printer models are supported?',
-    a: 'BillMate supports most ESC/POS compatible thermal printers including popular models from Epson, Star Micronics, TVS, and generic 58mm/80mm Bluetooth or USB printers. If your printer accepts ESC/POS commands, it will work with BillMate.',
+    a: 'VBill supports most ESC/POS compatible thermal printers including popular models from Epson, Star Micronics, TVS, and generic 58mm/80mm Bluetooth or USB printers. If your printer accepts ESC/POS commands, it will work with VBill.',
   },
   {
     category: 'printing',
@@ -211,7 +211,7 @@ const FAQS = [
   {
     category: 'staff',
     q: 'How many staff members can I add?',
-    a: 'The number of staff accounts depends on your subscription plan. BillMate Free supports up to 2 staff members. BillMate Pro supports unlimited staff accounts. Visit Settings → Subscription to check or upgrade your current plan.',
+    a: 'The number of staff accounts depends on your subscription plan. VBill Free supports up to 2 staff members. VBill Pro supports unlimited staff accounts. Visit Settings → Subscription to check or upgrade your current plan.',
   },
 
   // ── Settings ─────────────────────────────────────────────────────────────
@@ -228,12 +228,12 @@ const FAQS = [
   {
     category: 'settings',
     q: 'How do I delete my account?',
-    a: 'Contact our support team at support@billmate.in or reach out via WhatsApp to request account deletion. Once submitted, your account and all associated data will be permanently deleted within 30 days. This action cannot be undone.',
+    a: 'Contact our support team at support@vengurlatech.com or reach out via WhatsApp to request account deletion. Once submitted, your account and all associated data will be permanently deleted within 30 days. This action cannot be undone.',
   },
   {
     category: 'settings',
-    q: 'Can I use BillMate on multiple devices?',
-    a: 'Yes. Log in with the same phone number and PIN on any device — Android, Windows PC, or the web app at app.billmate.in. Data syncs across all devices automatically when you are online.',
+    q: 'Can I use VBill on multiple devices?',
+    a: 'Yes. Log in with the same phone number and PIN on any device — Android, Windows PC, or the web app at app.VBill.in. Data syncs across all devices automatically when you are online.',
   },
 
   // ── WhatsApp ─────────────────────────────────────────────────────────────
@@ -307,9 +307,9 @@ export default function HelpCenter() {
     <div className="min-h-screen bg-slate-50">
 
       {/* Top bar */}
-      <div className="bg-navy-900 px-6 py-4">
+      <div className="bg-navy-700 ">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <Logo size={32} />
+          <Logo size={60} />
           <Link
             to="/"
             className="flex items-center gap-2 text-sm text-white/50 hover:text-white transition-colors"
@@ -451,10 +451,10 @@ export default function HelpCenter() {
             <h3 className="font-display font-bold text-navy-900 text-sm mb-1">Email Support</h3>
             <p className="text-slate-400 text-xs mb-4">We reply within 24 hours</p>
             <a
-              href="mailto:support@billmate.in"
+              href="mailto:support@vengurlatech.com"
               className="inline-block text-xs font-bold px-4 py-2.5 rounded-xl bg-navy-900 text-white"
             >
-              support@billmate.in
+              support@vengurlatech.com
             </a>
           </div>
 
@@ -478,7 +478,7 @@ export default function HelpCenter() {
           <Link to="/" className="hover:text-navy-900 transition-colors">Home</Link>
           <Link to="/privacy" className="hover:text-navy-900 transition-colors">Privacy Policy</Link>
           <Link to="/delete-account" className="hover:text-navy-900 transition-colors">Delete Account</Link>
-          <a href="mailto:support@billmate.in" className="hover:text-navy-900 transition-colors">Contact</a>
+          <a href="mailto:support@vengurlatech.com" className="hover:text-navy-900 transition-colors">Contact</a>
         </div>
       </div>
     </div>

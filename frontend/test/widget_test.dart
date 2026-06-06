@@ -1,5 +1,5 @@
 // Unit tests for model parsing — no platform plugins required.
-import 'package:billmate/models/models.dart';
+import 'package:VBill/models/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
