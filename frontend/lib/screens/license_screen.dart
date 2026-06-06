@@ -31,6 +31,16 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
   bool _checking = false;
   String? _errorMessage;
 
+  Future<void> _logout() async {
+    await ref.read(sessionProvider.notifier).clear();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
+  }
+
   Future<void> _retry() async {
     setState(() {
       _checking = true;
@@ -49,14 +59,7 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
       final rawError = LicenseService.instance.lastOnlineError;
       final isSessionExpired = rawError != null && rawError.contains('401');
       if (isSessionExpired) {
-        // Session expired — clear session and go to login
-        await ref.read(sessionProvider.notifier).clear();
-        if (!mounted) return;
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
-          (_) => false,
-        );
+        await _logout();
         return;
       }
       setState(() {
@@ -193,6 +196,23 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
                       ),
                     ),
                   ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _logout,
+                    icon: const Icon(Icons.logout_outlined),
+                    label: const Text('Logout'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: BorderSide(color: AppColors.border),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.small),
+                      ),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 16),
                 Text(
                   'VengurlaTech Billing',
