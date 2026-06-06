@@ -316,6 +316,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _customerPhoneController.clear();
       setState(() => _paymentMode = 'cash');
       ref.invalidate(reportProvider);
+      ref.invalidate(billsProvider);
       _showBillDialog(bill);
       _autoPrint(bill);
     } on ApiException catch (e) {

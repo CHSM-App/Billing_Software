@@ -2,9 +2,7 @@ const { pool, poolConnect } = require('./src/db');
 
 // ─── PUT YOUR SQL QUERY HERE ───────────────────────────────────────────────
 const QUERY = `
- SELECT definition 
-FROM sys.check_constraints 
-WHERE name = 'CK_whatsapp_otp_log_purpose'
+ SELECT * from subscriptions
 
 `;
 // ──────────────────────────────────────────────────────────────────────────

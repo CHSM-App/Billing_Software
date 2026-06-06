@@ -135,9 +135,9 @@ jobs:
           force_orphan: true
           commit_message: "sync: backend + landing page from ${{ github.ref_name }} @ ${{ github.sha }}"
 
-  # Job 4: Build Flutter APK on tag push (v*)
+  # Job 4: Build Flutter APK + AAB on tag push (v*)
   build-apk:
-    name: Build Flutter APK
+    name: Build Flutter APK + AAB
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
@@ -161,14 +161,32 @@ jobs:
         working-directory: frontend
         run: flutter pub get
 
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > frontend/android/app/upload-keystore.jks
+
+      - name: Create key.properties
+        run: |
+          cat > frontend/android/key.properties << EOF
+          storePassword=${{ secrets.STORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=app/upload-keystore.jks
+          EOF
+
       - name: Build APK (release)
         working-directory: frontend
         run: flutter build apk --release
 
-      - name: Rename APK with tag version
+      - name: Build AAB (release)
+        working-directory: frontend
+        run: flutter build appbundle --release
+
+      - name: Rename APK and AAB with tag version
         run: |
           mv frontend/build/app/outputs/flutter-apk/app-release.apk \
             frontend/build/app/outputs/flutter-apk/billing-${{ github.ref_name }}.apk
+          mv frontend/build/app/outputs/bundle/release/app-release.aab \
+            frontend/build/app/outputs/bundle/release/billing-${{ github.ref_name }}.aab
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
@@ -177,10 +195,19 @@ jobs:
           path: frontend/build/app/outputs/flutter-apk/billing-*.apk
           retention-days: 30
 
-      - name: Create GitHub Release with APK
+      - name: Upload AAB as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-aab-${{ github.ref_name }}
+          path: frontend/build/app/outputs/bundle/release/billing-*.aab
+          retention-days: 30
+
+      - name: Create GitHub Release with APK and AAB
         uses: softprops/action-gh-release@v2
         with:
-          files: frontend/build/app/outputs/flutter-apk/billing-*.apk
+          files: |
+            frontend/build/app/outputs/flutter-apk/billing-*.apk
+            frontend/build/app/outputs/bundle/release/billing-*.aab
           generate_release_notes: true
 
   # Job 5: Build Flutter Windows release on tag push (v*)
