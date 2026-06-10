@@ -26,7 +26,7 @@ export default function Navbar() {
       }`}
     >
       <div className="max-w-6xl mx-auto px-6 flex items-center justify-between">
-        <Logo size={60} />
+        <Logo size={50} />
 
         {/* Desktop links */}
         <div className="hidden md:flex items-center gap-7">

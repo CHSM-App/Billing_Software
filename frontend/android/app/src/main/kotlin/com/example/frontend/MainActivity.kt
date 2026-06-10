@@ -1,4 +1,4 @@
-package com.vengurlatech.VBill
+package com.vengurlatech.Vittam
 
 import io.flutter.embedding.android.FlutterActivity
 

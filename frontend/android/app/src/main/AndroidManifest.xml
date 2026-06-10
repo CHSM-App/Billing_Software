@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
     <application
-        android:label="VBill"
+        android:label="Vittam"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import Logo from './Logo'
 import { ArrowLeft, AlertTriangle, Phone, KeyRound, FileText, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 
-const API_BASE = 'https://VBill.vengurlatech.com' || ''
+const API_BASE = 'https://Vittam.vengurlatech.com' || ''
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -240,7 +240,7 @@ export default function DeleteAccount() {
           Delete Account
         </h1>
         <p className="text-white/45 max-w-sm mx-auto text-sm leading-relaxed">
-          Permanently delete your VBill account and all associated business data.
+          Permanently delete your Vittam account and all associated business data.
           This action cannot be undone after the 30-day grace period.
         </p>
       </div>
@@ -416,7 +416,7 @@ export default function DeleteAccount() {
                       <FileText size={15} className="absolute left-3.5 top-3.5 text-slate-400 pointer-events-none" />
                       <textarea
                         rows={3}
-                        placeholder="Help us improve VBill…"
+                        placeholder="Help us improve Vittam…"
                         value={reason}
                         onChange={e => setReason(e.target.value.slice(0, 500))}
                         className={`${inputCls} pl-10 resize-none`}

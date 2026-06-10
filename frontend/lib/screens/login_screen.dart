@@ -366,7 +366,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ),
           SizedBox(height: large ? AppSpacing.space16 : AppSpacing.space12),
           Text(
-            'VBill',
+            'Vittam',
             style: TextStyle(
               fontFamily: 'Inter',
               fontSize: large ? 28 : 22,

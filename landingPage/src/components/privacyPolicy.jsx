@@ -9,19 +9,19 @@ const SECTIONS = [
     content: [
       {
         subtitle: '1.1 Account Information',
-        text: 'When you create a VBill account, we collect your name, phone number, email address (optional), business name, business type, and GSTIN (if applicable). This information is required to set up your store profile and provide you with our billing and business management services.',
+        text: 'When you create a Vittam account, we collect your name, phone number, email address (optional), business name, business type, and GSTIN (if applicable). This information is required to set up your store profile and provide you with our billing and business management services.',
       },
       {
         subtitle: '1.2 Business & Transaction Data',
-        text: 'We collect data you enter into the app, including item names, prices, categories, GST rates, barcode values, bill records, expense entries, and customer details (if you choose to add them). This data belongs entirely to you and is stored to deliver the core billing, inventory, reporting, and expense-tracking features of VBill.',
+        text: 'We collect data you enter into the app, including item names, prices, categories, GST rates, barcode values, bill records, expense entries, and customer details (if you choose to add them). This data belongs entirely to you and is stored to deliver the core billing, inventory, reporting, and expense-tracking features of Vittam.',
       },
       {
         subtitle: '1.3 Device & Usage Information',
-        text: 'We automatically collect certain technical information when you use our app, including device model, operating system version, app version, and general usage patterns. This helps us diagnose issues, ensure stability, and improve the VBill experience over time.',
+        text: 'We automatically collect certain technical information when you use our app, including device model, operating system version, app version, and general usage patterns. This helps us diagnose issues, ensure stability, and improve the Vittam experience over time.',
       },
       {
         subtitle: '1.4 Payment Information',
-        text: 'If you subscribe to VBill Pro, payment processing is handled entirely by our third-party payment provider. We do not store your card details, UPI credentials, or any sensitive payment information on our servers.',
+        text: 'If you subscribe to Vittam Pro, payment processing is handled entirely by our third-party payment provider. We do not store your card details, UPI credentials, or any sensitive payment information on our servers.',
       },
     ],
   },
@@ -30,7 +30,7 @@ const SECTIONS = [
     content: [
       {
         subtitle: '2.1 Providing the Service',
-        text: 'Your data is used to operate VBill — to generate bills, manage inventory, track expenses, display reports, handle table orders, and sync data across your devices. Your business profile is used to personalise your experience and display your business details on generated receipts.',
+        text: 'Your data is used to operate Vittam — to generate bills, manage inventory, track expenses, display reports, handle table orders, and sync data across your devices. Your business profile is used to personalise your experience and display your business details on generated receipts.',
       },
       {
         subtitle: '2.2 Customer Support',
@@ -38,7 +38,7 @@ const SECTIONS = [
       },
       {
         subtitle: '2.3 Service Improvements',
-        text: 'Aggregated and anonymised usage data helps us understand how VBill is being used, identify common pain points, and prioritise new features. We do not use individual-level data for this purpose.',
+        text: 'Aggregated and anonymised usage data helps us understand how Vittam is being used, identify common pain points, and prioritise new features. We do not use individual-level data for this purpose.',
       },
       {
         subtitle: '2.4 Communication',
@@ -51,11 +51,11 @@ const SECTIONS = [
     content: [
       {
         subtitle: '3.1 Data Storage',
-        text: 'Your data is stored on secure servers. VBill supports offline billing — data created offline is stored locally on your device and automatically synced to our servers when your internet connection is restored. You can use VBill on Android, Windows, and the web at app.VBill.in.',
+        text: 'Your data is stored on secure servers. Vittam supports offline billing — data created offline is stored locally on your device and automatically synced to our servers when your internet connection is restored. You can use Vittam on Android, Windows, and the web at app.Vittam.in.',
       },
       {
         subtitle: '3.2 Security Measures',
-        text: 'We implement industry-standard security measures including encrypted data transmission (HTTPS/TLS), PIN-based authentication, and strict access controls. However, no system is completely secure, and we encourage you to use a strong PIN for your VBill account and keep it confidential.',
+        text: 'We implement industry-standard security measures including encrypted data transmission (HTTPS/TLS), PIN-based authentication, and strict access controls. However, no system is completely secure, and we encourage you to use a strong PIN for your Vittam account and keep it confidential.',
       },
       {
         subtitle: '3.3 Data Retention',
@@ -68,15 +68,15 @@ const SECTIONS = [
     content: [
       {
         subtitle: '4.1 We Do Not Sell Your Data',
-        text: 'VBill does not sell, rent, or trade your personal information or business data to third parties for their marketing or any other purposes. Your business data is yours — we are custodians of it, not owners.',
+        text: 'Vittam does not sell, rent, or trade your personal information or business data to third parties for their marketing or any other purposes. Your business data is yours — we are custodians of it, not owners.',
       },
       {
         subtitle: '4.2 Service Providers',
-        text: 'We share data with trusted third-party service providers who assist us in operating VBill — such as cloud hosting providers and payment processors. These providers are contractually bound to protect your data and may only use it to provide services on our behalf.',
+        text: 'We share data with trusted third-party service providers who assist us in operating Vittam — such as cloud hosting providers and payment processors. These providers are contractually bound to protect your data and may only use it to provide services on our behalf.',
       },
       {
         subtitle: '4.3 Legal Requirements',
-        text: 'We may disclose your information if required to do so by law, court order, or government authority, or if we believe disclosure is necessary to protect the rights, property, or safety of VBill, our users, or the public.',
+        text: 'We may disclose your information if required to do so by law, court order, or government authority, or if we believe disclosure is necessary to protect the rights, property, or safety of Vittam, our users, or the public.',
       },
     ],
   },
@@ -85,7 +85,7 @@ const SECTIONS = [
     content: [
       {
         subtitle: '5.1 Access & Correction',
-        text: 'You may access and update your account information at any time through the Settings section of the VBill app. You can edit your business profile, contact details, GSTIN, and preferences directly without contacting support.',
+        text: 'You may access and update your account information at any time through the Settings section of the Vittam app. You can edit your business profile, contact details, GSTIN, and preferences directly without contacting support.',
       },
       {
         subtitle: '5.2 Data Export',
@@ -93,7 +93,7 @@ const SECTIONS = [
       },
       {
         subtitle: '5.3 Account Deletion',
-        text: 'You have the right to request deletion of your VBill account and all associated data at any time. To submit a deletion request, contact us at support@vengurlatech.com or reach out via WhatsApp support. Deletion is processed within 30 days of a verified request.',
+        text: 'You have the right to request deletion of your Vittam account and all associated data at any time. To submit a deletion request, contact us at support@vengurlatech.com or reach out via WhatsApp support. Deletion is processed within 30 days of a verified request.',
       },
     ],
   },
@@ -102,7 +102,7 @@ const SECTIONS = [
     content: [
       {
         subtitle: '',
-        text: 'VBill is a business management tool intended for adults operating businesses. We do not knowingly collect personal information from individuals under the age of 18. If you believe a minor has provided us with personal information, please contact us immediately and we will promptly delete it.',
+        text: 'Vittam is a business management tool intended for adults operating businesses. We do not knowingly collect personal information from individuals under the age of 18. If you believe a minor has provided us with personal information, please contact us immediately and we will promptly delete it.',
       },
     ],
   },
@@ -111,7 +111,7 @@ const SECTIONS = [
     content: [
       {
         subtitle: '',
-        text: 'We may update this Privacy Policy from time to time to reflect changes in our practices, features, or applicable laws. When we make significant changes, we will notify you through the app or via your registered contact method. Continued use of VBill after changes are published constitutes your acceptance of the updated policy.',
+        text: 'We may update this Privacy Policy from time to time to reflect changes in our practices, features, or applicable laws. When we make significant changes, we will notify you through the app or via your registered contact method. Continued use of Vittam after changes are published constitutes your acceptance of the updated policy.',
       },
     ],
   },
@@ -135,7 +135,7 @@ export default function PrivacyPolicy() {
     <div className="min-h-screen bg-slate-50">
 
       {/* Top bar */}
-      <div className="bg-navy-700 ">
+      <div className="bg-[#143b9f]">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <Logo size={60} />
           <Link
@@ -164,7 +164,7 @@ export default function PrivacyPolicy() {
           Privacy Policy
         </h1>
         <p className="text-white/45 max-w-md mx-auto text-sm leading-relaxed">
-          This policy explains how VBill collects, uses, and protects the
+          This policy explains how Vittam collects, uses, and protects the
           information you provide when using our app and services.
         </p>
         <p className="text-white/25 text-xs mt-4">
@@ -181,7 +181,7 @@ export default function PrivacyPolicy() {
           style={{ background: 'rgba(0,229,192,0.06)', borderColor: 'rgba(0,229,192,0.2)' }}
         >
           <p className="text-sm text-slate-600 leading-relaxed">
-            <span className="font-semibold text-navy-900">Summary:</span> VBill ("we", "our", "us")
+            <span className="font-semibold text-navy-900">Summary:</span> Vittam ("we", "our", "us")
             is a billing and business management app built for small shops, retailers, and restaurants
             across India. We collect only the information needed to run the app — billing data, inventory,
             expenses, and your business profile. We do not sell your data, and you can request deletion of

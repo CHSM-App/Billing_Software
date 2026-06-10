@@ -3,14 +3,14 @@ import { Monitor, Smartphone, Globe } from 'lucide-react'
 
 /**
  * Drop your installer files into the `public/downloads/` folder:
- *   public/downloads/VBill-Setup.exe   → Windows installer
- *   public/downloads/VBill.apk         → Android APK
+ *   public/downloads/Vittam-Setup.exe   → Windows installer
+ *   public/downloads/Vittam.apk         → Android APK
  *
  * The web app link can be an external URL — update WEB_URL below.
  */
-const WIN_URL = '/downloads/VBill-windows.zip'
-const APK_URL = '/downloads/VBill.apk'
-const WEB_URL = 'https://app.VBill.in'   // ← update to your web app URL
+const WIN_URL = '/downloads/Vittam-windows.zip'
+const APK_URL = '/downloads/Vittam.apk'
+const WEB_URL = 'https://app.Vittam.in'   // ← update to your web app URL
 
 export function DownloadButtons({ size = 'md', row = false }) {
   const base =

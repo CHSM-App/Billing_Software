@@ -26,7 +26,7 @@ export default function CTA() {
           Ready to simplify<br />your billing?
         </h2>
         <p className="text-lg text-white/50 mb-10 leading-relaxed">
-          Join hundreds of shop owners who replaced paper registers with VBill.
+          Join hundreds of shop owners who replaced paper registers with Vittam.
           Setup takes under 5 minutes.
         </p>
 
@@ -34,7 +34,7 @@ export default function CTA() {
         <div className="flex flex-wrap justify-center gap-3">
           {/* Windows */}
           <a
-            href="/downloads/VBill-windows.zip"
+            href="/downloads/Vittam-windows.zip"
             download
             className="btn-teal inline-flex items-center gap-3 px-6 py-4 rounded-2xl text-sm font-bold"
           >
@@ -49,7 +49,7 @@ export default function CTA() {
 
           {/* Android */}
           <a
-            href="/downloads/VBill.apk"
+            href="/downloads/Vittam.apk"
             download
             className="btn-teal inline-flex items-center gap-3 px-6 py-4 rounded-2xl text-sm font-bold"
           >
@@ -64,7 +64,7 @@ export default function CTA() {
 
           {/* Web */}
           <a
-            href="https://app.VBill.in"
+            href="https://app.Vittam.in"
             target="_blank"
             rel="noopener noreferrer"
             className="btn-outline-white inline-flex items-center gap-3 px-6 py-4 rounded-2xl text-sm font-semibold"

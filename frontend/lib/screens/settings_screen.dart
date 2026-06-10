@@ -227,7 +227,7 @@ class _SettingsContentState extends State<_SettingsContent>
                     // App version footer
                     Center(
                       child: Text(
-                        'VBill Billing v1.0',
+                        'Vittam Billing v1.0',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: AppColors.textDisabled,
                             ),

@@ -63,7 +63,7 @@ export default function Footer() {
           style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
         >
           <p className="text-xs text-white/25">
-            © 2026 VBill. All rights reserved. Made with ♥ for Indian businesses.
+            © 2026 Vittam. All rights reserved. Made with ♥ for Indian businesses.
           </p>
           <div className="flex items-center gap-2 text-xs text-white/25">
             <span className="w-1.5 h-1.5 rounded-full bg-teal inline-block" />
