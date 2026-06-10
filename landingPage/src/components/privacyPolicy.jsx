@@ -18,11 +18,8 @@ const SECTIONS = [
       {
         subtitle: '1.3 Device & Usage Information',
         text: 'We automatically collect certain technical information when you use our app, including device model, operating system version, app version, and general usage patterns. This helps us diagnose issues, ensure stability, and improve the Vittam experience over time.',
-      },
-      {
-        subtitle: '1.4 Payment Information',
-        text: 'If you subscribe to Vittam Pro, payment processing is handled entirely by our third-party payment provider. We do not store your card details, UPI credentials, or any sensitive payment information on our servers.',
-      },
+      }
+     
     ],
   },
   {
@@ -51,7 +48,7 @@ const SECTIONS = [
     content: [
       {
         subtitle: '3.1 Data Storage',
-        text: 'Your data is stored on secure servers. Vittam supports offline billing — data created offline is stored locally on your device and automatically synced to our servers when your internet connection is restored. You can use Vittam on Android, Windows, and the web at app.Vittam.in.',
+        text: 'Your data is stored on secure servers. Vittam supports offline billing — data created offline is stored locally on your device and automatically synced to our servers when your internet connection is restored. You can use Vittam on Android, Windows.',
       },
       {
         subtitle: '3.2 Security Measures',
