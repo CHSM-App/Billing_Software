@@ -171,13 +171,16 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
 
   // ── Summary cards ──────────────────────────────────────────────────────────
   Widget _buildSummaryCards(ReportSummary s, bool isWide) {
+    final netRevenue = s.totalRevenue - s.totalDiscount;
     final cards = [
       _StatCard(
-        label: 'Revenue',
-        value: 'Rs. ${_amt.format(s.totalRevenue)}',
+        label: 'Net Revenue',
+        value: 'Rs. ${_amt.format(netRevenue)}',
         icon: Icons.trending_up_rounded,
         gradient: AppColors.primaryGradient,
-        sub: '${s.billCount} bills',
+        sub: s.totalDiscount > 0
+            ? '${s.billCount} bills · −Rs. ${_amt.format(s.totalDiscount)} disc'
+            : '${s.billCount} bills',
       ),
       _StatCard(
         label: 'Expenses',
@@ -193,8 +196,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     if (isWide) {
       return Row(
         children: cards
-            .map((c) => Expanded(child: Padding(
-                padding: const EdgeInsets.only(right: 12), child: c)))
+            .asMap()
+            .entries
+            .map((e) => Expanded(
+                child: Padding(
+                    padding: EdgeInsets.only(right: e.key < cards.length - 1 ? 12 : 0),
+                    child: e.value)))
             .toList(),
       );
     }

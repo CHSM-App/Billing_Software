@@ -194,12 +194,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                         ],
                       ),
                     ),
-                    Text(
-                      '₹${bill.total.toStringAsFixed(2)}',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyLarge
-                          ?.copyWith(fontWeight: FontWeight.w700),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        if (bill.discountAmount > 0)
+                          Text(
+                            '₹${bill.total.toStringAsFixed(2)}',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -325,8 +338,18 @@ class _BillDetailDialog extends StatelessWidget {
                 _row(context, 'Tax', '₹${bill.taxAmount.toStringAsFixed(2)}'),
                 const SizedBox(height: AppSpacing.space4),
               ],
-              _row(context, 'Total', '₹${bill.total.toStringAsFixed(2)}',
-                  bold: true),
+              _row(context, 'Total Amount', '₹${bill.total.toStringAsFixed(2)}',
+                  bold: bill.discountAmount == 0),
+              if (bill.discountAmount > 0) ...[
+                const SizedBox(height: 4),
+                _row(context, 'Discount',
+                    '− ₹${bill.discountAmount.toStringAsFixed(2)}',
+                    valueColor: const Color(0xFF16A34A)),
+                const Divider(height: AppSpacing.space12),
+                _row(context, 'Net Payable',
+                    '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
+                    bold: true),
+              ],
               const SizedBox(height: AppSpacing.space4),
               _row(context, 'Payment', bill.paymentMode.toUpperCase()),
             ],
@@ -363,7 +386,7 @@ class _BillDetailDialog extends StatelessWidget {
   }
 
   Widget _row(BuildContext context, String label, String value,
-      {bool bold = false}) {
+      {bool bold = false, Color? valueColor}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
@@ -377,6 +400,7 @@ class _BillDetailDialog extends StatelessWidget {
           Text(value,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+                    color: valueColor ?? (bold ? AppColors.textPrimary : null),
                   )),
         ],
       ),

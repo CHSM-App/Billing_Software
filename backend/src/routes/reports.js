@@ -43,6 +43,7 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
           SELECT
             COUNT(*) AS bill_count,
             ISNULL(SUM(total), 0) AS total_revenue,
+            ISNULL(SUM(discount_amount), 0) AS total_discount,
             ISNULL(SUM(CASE WHEN payment_mode = 'cash'   THEN total ELSE 0 END), 0) AS cash,
             ISNULL(SUM(CASE WHEN payment_mode = 'upi'    THEN total ELSE 0 END), 0) AS upi,
             ISNULL(SUM(CASE WHEN payment_mode = 'card'   THEN total ELSE 0 END), 0) AS card,
@@ -65,16 +66,19 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
         `),
     ]);
 
-    const bill    = billResult.recordset[0];
-    const revenue  = parseFloat(bill.total_revenue);
-    const expenses = parseFloat(expenseResult.recordset[0].total_expenses);
+    const bill      = billResult.recordset[0];
+    const revenue   = parseFloat(bill.total_revenue);
+    const discount  = parseFloat(bill.total_discount);
+    const expenses  = parseFloat(expenseResult.recordset[0].total_expenses);
+    const netRevenue = parseFloat((revenue - discount).toFixed(2));
 
     return res.json({
       date: dateStr,
-      bill_count:     bill.bill_count,
-      total_revenue:  revenue,
-      total_expenses: expenses,
-      net_profit:     parseFloat((revenue - expenses).toFixed(2)),
+      bill_count:      bill.bill_count,
+      total_revenue:   revenue,
+      total_discount:  discount,
+      total_expenses:  expenses,
+      net_profit:      parseFloat((netRevenue - expenses).toFixed(2)),
       by_payment_mode: {
         cash:   parseFloat(bill.cash),
         upi:    parseFloat(bill.upi),
@@ -120,6 +124,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
           SELECT
             COUNT(*) AS bill_count,
             ISNULL(SUM(total), 0) AS total_revenue,
+            ISNULL(SUM(discount_amount), 0) AS total_discount,
             ISNULL(SUM(tax_amount), 0) AS total_tax,
             ISNULL(SUM(CASE WHEN payment_mode = 'cash'   THEN total ELSE 0 END), 0) AS cash,
             ISNULL(SUM(CASE WHEN payment_mode = 'upi'    THEN total ELSE 0 END), 0) AS upi,
@@ -208,18 +213,21 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         `),
     ]);
 
-    const bill     = billResult.recordset[0];
-    const revenue  = parseFloat(bill.total_revenue);
-    const expenses = parseFloat(expenseResult.recordset[0].total_expenses);
+    const bill      = billResult.recordset[0];
+    const revenue   = parseFloat(bill.total_revenue);
+    const discount  = parseFloat(bill.total_discount);
+    const expenses  = parseFloat(expenseResult.recordset[0].total_expenses);
+    const netRevenue = parseFloat((revenue - discount).toFixed(2));
 
     return res.json({
       from: fromStr,
       to:   toStr,
-      bill_count:     bill.bill_count,
-      total_revenue:  revenue,
-      total_tax:      parseFloat(bill.total_tax),
-      total_expenses: expenses,
-      net_profit:     parseFloat((revenue - expenses).toFixed(2)),
+      bill_count:      bill.bill_count,
+      total_revenue:   revenue,
+      total_discount:  discount,
+      total_tax:       parseFloat(bill.total_tax),
+      total_expenses:  expenses,
+      net_profit:      parseFloat((netRevenue - expenses).toFixed(2)),
       by_payment_mode: {
         cash:   parseFloat(bill.cash),
         upi:    parseFloat(bill.upi),

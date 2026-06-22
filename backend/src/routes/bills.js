@@ -53,7 +53,7 @@ async function fetchBill(billId, businessId) {
     .input('business_id', sql.UniqueIdentifier, businessId)
     .query(`
       SELECT id, business_id, bill_number, table_id, customer_name, customer_phone,
-             subtotal, tax_amount, total, payment_mode, status, created_by_user_id, created_at,
+             subtotal, tax_amount, discount_amount, total, payment_mode, status, created_by_user_id, created_at,
              receipt_token
       FROM bills
       WHERE id = @id AND business_id = @business_id
@@ -76,7 +76,7 @@ async function fetchBill(billId, businessId) {
 
 // POST /api/bills
 router.post('/', requireAuth, async (req, res) => {
-  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id } = req.body;
+  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id, discount_amount } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
@@ -171,9 +171,13 @@ router.post('/', requireAuth, async (req, res) => {
           line_total: parseFloat(lineTotal.toFixed(2)),
         };
       });
-      const total = parseFloat((subtotal + taxAmount).toFixed(2));
       subtotal = parseFloat(subtotal.toFixed(2));
       taxAmount = parseFloat(taxAmount.toFixed(2));
+      const total = parseFloat((subtotal + taxAmount).toFixed(2));
+      const discountAmount = parseFloat(Math.min(
+        Math.max(parseFloat(discount_amount) || 0, 0),
+        total,
+      ).toFixed(2));
 
       // Centralized stock pre-check: validate ALL items before any writes.
       // itemMap rows were fetched inside this transaction (locked), so
@@ -220,6 +224,7 @@ router.post('/', requireAuth, async (req, res) => {
         .input('customer_phone',  sql.NVarChar(20),     customer_phone || null)
         .input('subtotal',        sql.Decimal(10, 2),   subtotal)
         .input('tax_amount',      sql.Decimal(10, 2),   taxAmount)
+        .input('discount_amount', sql.Decimal(10, 2),   discountAmount)
         .input('total',           sql.Decimal(10, 2),   total)
         .input('payment_mode',    sql.NVarChar(20),     payment_mode)
         .input('status',          sql.NVarChar(20),     billStatus)
@@ -228,12 +233,12 @@ router.post('/', requireAuth, async (req, res) => {
         .input('receipt_token',   sql.NVarChar(16),     receiptToken)
         .query(`
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
-                             subtotal, tax_amount, total, payment_mode, status, created_by_user_id,
-                             client_bill_id, receipt_token)
+                             subtotal, tax_amount, discount_amount, total, payment_mode, status,
+                             created_by_user_id, client_bill_id, receipt_token)
           OUTPUT INSERTED.id
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
-                  @subtotal, @tax_amount, @total, @payment_mode, @status, @created_by_user_id,
-                  @client_bill_id, @receipt_token)
+                  @subtotal, @tax_amount, @discount_amount, @total, @payment_mode, @status,
+                  @created_by_user_id, @client_bill_id, @receipt_token)
         `);
 
       const billId = billResult.recordset[0].id;
@@ -361,8 +366,8 @@ router.get('/', requireAuth, async (req, res) => {
 
     const billsResult = await request.query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
-             b.subtotal, b.tax_amount, b.total, b.payment_mode, b.status, b.created_by_user_id,
-             b.created_at, b.receipt_token
+             b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.status,
+             b.created_by_user_id, b.created_at, b.receipt_token
       FROM bills b
       WHERE ${where}
       ORDER BY b.created_at DESC

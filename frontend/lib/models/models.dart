@@ -119,6 +119,7 @@ class Bill {
   final String? customerPhone;
   final double subtotal;
   final double taxAmount;
+  final double discountAmount;
   final double total;
   final String paymentMode;
   final String status;
@@ -135,6 +136,7 @@ class Bill {
     this.customerPhone,
     required this.subtotal,
     required this.taxAmount,
+    this.discountAmount = 0.0,
     required this.total,
     required this.paymentMode,
     required this.status,
@@ -152,6 +154,9 @@ class Bill {
         customerPhone: j['customer_phone'],
         subtotal: double.parse(j['subtotal'].toString()),
         taxAmount: double.parse(j['tax_amount'].toString()),
+        discountAmount: j['discount_amount'] != null
+            ? double.parse(j['discount_amount'].toString())
+            : 0.0,
         total: double.parse(j['total'].toString()),
         paymentMode: j['payment_mode'],
         status: j['status'],
@@ -244,6 +249,7 @@ class ReportSummary {
   final String to;
   final int billCount;
   final double totalRevenue;
+  final double totalDiscount;
   final double totalTax;
   final double totalExpenses;
   final double netProfit;
@@ -257,6 +263,7 @@ class ReportSummary {
     required this.to,
     required this.billCount,
     required this.totalRevenue,
+    this.totalDiscount = 0.0,
     required this.totalTax,
     required this.totalExpenses,
     required this.netProfit,
@@ -279,6 +286,9 @@ class ReportSummary {
       to: j['to'],
       billCount: j['bill_count'],
       totalRevenue: double.parse(j['total_revenue'].toString()),
+      totalDiscount: j['total_discount'] != null
+          ? double.parse(j['total_discount'].toString())
+          : 0.0,
       totalTax: double.parse(j['total_tax'].toString()),
       totalExpenses: double.parse(j['total_expenses'].toString()),
       netProfit: double.parse(j['net_profit'].toString()),

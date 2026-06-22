@@ -41,7 +41,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with TickerProviderStateMixin {
   String _selectedCategory = '';
-  bool _showCustomerFields = false;
+  bool _showCustomerFields = true;
   String _paymentMode = 'cash';
   bool _generatingBill = false;
   bool _savingDraft = false;
@@ -50,6 +50,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final _searchController = TextEditingController();
   final _customerNameController = TextEditingController();
   final _customerPhoneController = TextEditingController();
+  final _discountPctController = TextEditingController();
+  final _discountAmtController = TextEditingController();
+  bool _updatingDiscount = false;
+
+  // Focus nodes — used to auto-scroll the field above the keyboard
+  final _customerNameFocus = FocusNode();
+  final _customerPhoneFocus = FocusNode();
+  final _discountPctFocus = FocusNode();
+  final _discountAmtFocus = FocusNode();
+
+  // GlobalKeys — give Scrollable.ensureVisible a handle to each field's context
+  final _customerNameKey = GlobalKey();
+  final _customerPhoneKey = GlobalKey();
+  final _discountPctKey = GlobalKey();
+  final _discountAmtKey = GlobalKey();
+
   final _barcodeBuffer = StringBuffer();
   DateTime? _lastKeyTime;
 
@@ -57,10 +73,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void initState() {
     super.initState();
     _searchController.addListener(() => setState(() {}));
+    _discountPctController.addListener(_onDiscountPctChanged);
+    _discountAmtController.addListener(_onDiscountAmtChanged);
+    // Auto-scroll focused field above the keyboard
+    _customerNameFocus.addListener(() {
+      if (_customerNameFocus.hasFocus) _ensureVisible(_customerNameKey);
+    });
+    _customerPhoneFocus.addListener(() {
+      if (_customerPhoneFocus.hasFocus) _ensureVisible(_customerPhoneKey);
+    });
+    _discountPctFocus.addListener(() {
+      if (_discountPctFocus.hasFocus) _ensureVisible(_discountPctKey);
+    });
+    _discountAmtFocus.addListener(() {
+      if (_discountAmtFocus.hasFocus) _ensureVisible(_discountAmtKey);
+    });
     if (widget.activeBillId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _tryLoadDraft());
     }
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
+  }
+
+  void _ensureVisible(GlobalKey key) {
+    // Two frames: first applies viewInsets padding, second has final layout.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final ctx = key.currentContext;
+        if (ctx == null || !mounted) return;
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+          alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+        );
+      });
+    });
   }
 
   @override
@@ -69,6 +116,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _searchController.dispose();
     _customerNameController.dispose();
     _customerPhoneController.dispose();
+    _discountPctController.dispose();
+    _discountAmtController.dispose();
+    _customerNameFocus.dispose();
+    _customerPhoneFocus.dispose();
+    _discountPctFocus.dispose();
+    _discountAmtFocus.dispose();
     super.dispose();
   }
 
@@ -163,6 +216,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }).toList();
   }
 
+  void _onDiscountPctChanged() {
+    if (_updatingDiscount) return;
+    final total = ref.read(cartTotalProvider);
+    final pct = double.tryParse(_discountPctController.text) ?? 0;
+    _updatingDiscount = true;
+    final amt = total > 0 && pct > 0 ? (total * pct / 100) : 0.0;
+    _discountAmtController.text = amt > 0 ? amt.toStringAsFixed(2) : '';
+    _updatingDiscount = false;
+    setState(() {});
+  }
+
+  void _onDiscountAmtChanged() {
+    if (_updatingDiscount) return;
+    final total = ref.read(cartTotalProvider);
+    final amt = double.tryParse(_discountAmtController.text) ?? 0;
+    _updatingDiscount = true;
+    final pct = total > 0 && amt > 0 ? (amt / total * 100) : 0.0;
+    _discountPctController.text = pct > 0 ? pct.toStringAsFixed(2) : '';
+    _updatingDiscount = false;
+    setState(() {});
+  }
+
   Future<void> _handleBarcodeScan(String barcode) async {
     if (barcode.isEmpty) return;
     try {
@@ -215,6 +290,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       try {
         await voidBill(widget.activeBillId!);
         ref.read(cartProvider.notifier).clear();
+        _discountPctController.clear();
+        _discountAmtController.clear();
         if (!mounted) return;
         Navigator.pop(context);
       } on ApiException catch (e) {
@@ -224,6 +301,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
     } else {
       ref.read(cartProvider.notifier).clear();
+      _discountPctController.clear();
+      _discountAmtController.clear();
     }
   }
 
@@ -306,6 +385,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'customer_phone': _customerPhoneController.text.trim(),
           'payment_mode': _paymentMode,
           'status': 'draft',
+          if (_discountAmtController.text.trim().isNotEmpty)
+            'discount_amount': double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
         });
         result = await finalizeBill(draft['id']);
       }
@@ -314,6 +395,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _customerNameController.clear();
       _customerPhoneController.clear();
+      _discountPctController.clear();
+      _discountAmtController.clear();
       setState(() => _paymentMode = 'cash');
       ref.invalidate(reportProvider);
       ref.invalidate(billsProvider);
@@ -354,6 +437,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         };
       }).toList();
       final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+      final discountAmt = (double.tryParse(_discountAmtController.text) ?? 0.0)
+          .clamp(0.0, total);
 
       final queued = await OfflineService.instance.queueOfflineBill({
         'business_id': businessId,
@@ -363,6 +448,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'customer_phone': _customerPhoneController.text.trim().nullIfEmpty,
         'subtotal': subtotal,
         'tax_amount': taxAmount,
+        'discount_amount': discountAmt,
         'total': total,
         'payment_mode': _paymentMode,
         'items_json': jsonEncode(lineItems),
@@ -401,6 +487,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _customerNameController.clear();
       _customerPhoneController.clear();
+      _discountPctController.clear();
+      _discountAmtController.clear();
       setState(() => _paymentMode = 'cash');
       if (!mounted) return;
       _showBillDialog(fakeBill);
@@ -558,14 +646,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           _billRow('Subtotal',
                               '₹${bill.subtotal.toStringAsFixed(2)}'),
                           const SizedBox(height: 4),
-                          _billRow(
-                              'Tax', '₹${bill.taxAmount.toStringAsFixed(2)}'),
+                          _billRow('Tax (GST)',
+                              '₹${bill.taxAmount.toStringAsFixed(2)}'),
                           const SizedBox(height: 4),
                         ],
+                        _billRow('Total Amount',
+                            '₹${bill.total.toStringAsFixed(2)}',
+                            bold: bill.discountAmount == 0),
+                        if (bill.discountAmount > 0) ...[
+                          const SizedBox(height: 4),
+                          _billRow('Discount',
+                              '− ₹${bill.discountAmount.toStringAsFixed(2)}',
+                              valueColor: const Color(0xFF16A34A)),
+                          const Divider(height: AppSpacing.space12),
+                          _billRow(
+                            'Net Payable',
+                            '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
+                            bold: true,
+                          ),
+                        ],
                         const SizedBox(height: AppSpacing.space8),
-                        _billRow('Total', '₹${bill.total.toStringAsFixed(2)}',
-                            bold: true),
-                        const SizedBox(height: 4),
                         _billRow('Payment', bill.paymentMode.toUpperCase()),
                         const SizedBox(height: AppSpacing.space8),
                       ],
@@ -647,7 +747,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Widget _billRow(String label, String value, {bool bold = false}) {
+  Widget _billRow(String label, String value,
+      {bool bold = false, Color? valueColor}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
@@ -662,7 +763,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             value,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-                  color: bold ? AppColors.textPrimary : null,
+                  color: valueColor ?? (bold ? AppColors.textPrimary : null),
                 ),
           ),
         ],
@@ -872,16 +973,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         borderRadius: BorderRadius.vertical(
             top: Radius.circular(AppRadius.xl)),
       ),
-      builder: (_) => DraggableScrollableSheet(
-        initialChildSize: 0.85,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (_, scrollController) => SingleChildScrollView(
-          controller: scrollController,
-          child: _buildCartPanel(inSheet: true),
-        ),
-      ),
+      builder: (sheetCtx) {
+        final keyboardHeight = MediaQuery.of(sheetCtx).viewInsets.bottom;
+        return AnimatedPadding(
+          padding: EdgeInsets.only(bottom: keyboardHeight),
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.decelerate,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(sheetCtx).size.height * 0.88,
+            ),
+            child: SingleChildScrollView(
+              child: _buildCartPanel(inSheet: true),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1281,32 +1388,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
               ),
 
-            // Totals box — pinned below the list
-            if (cart.isNotEmpty) ...[
-              const Divider(height: 1),
-              Container(
-                margin: const EdgeInsets.all(AppSpacing.space12),
-                padding: const EdgeInsets.all(AppSpacing.space12),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(AppRadius.small),
-                ),
-                child: Column(
-                  children: [
-                    if (tax > 0) ...[
-                      _totalRow(
-                          'Subtotal', '₹${subtotal.toStringAsFixed(2)}'),
-                      const SizedBox(height: 4),
-                      _totalRow('Tax', '₹${tax.toStringAsFixed(2)}'),
-                      const Divider(height: AppSpacing.space12),
-                    ],
-                    _totalRow('Total', '₹${total.toStringAsFixed(2)}',
-                        bold: true),
-                  ],
-                ),
-              ),
-            ],
-
             const Divider(height: 1),
 
             // Customer info — local StatefulBuilder so toggle works in both
@@ -1359,16 +1440,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             child: Column(
                               children: [
                                 AppTextField(
+                                  key: _customerNameKey,
                                   label: 'Customer name',
                                   controller: _customerNameController,
+                                  focusNode: _customerNameFocus,
                                   prefixIcon: const Icon(Icons.person_outline,
                                       size: 16,
                                       color: AppColors.textSecondary),
                                 ),
                                 const SizedBox(height: AppSpacing.space8),
                                 AppTextField(
+                                  key: _customerPhoneKey,
                                   label: 'Customer phone',
                                   controller: _customerPhoneController,
+                                  focusNode: _customerPhoneFocus,
                                   keyboardType: TextInputType.phone,
                                   maxLength: 10,
                                   prefixIcon: const Icon(Icons.phone_outlined,
@@ -1406,6 +1491,164 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 onChanged: (v) => setState(() => _paymentMode = v!),
               ),
             ),
+
+            // Discount row
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
+                  AppSpacing.space12, AppSpacing.space16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: AppTextField(
+                      key: _discountPctKey,
+                      label: 'Discount %',
+                      controller: _discountPctController,
+                      focusNode: _discountPctFocus,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
+                      prefixIcon: const Icon(Icons.percent,
+                          size: 16, color: AppColors.textSecondary),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.space12),
+                  Expanded(
+                    child: AppTextField(
+                      key: _discountAmtKey,
+                      label: 'Discount ₹',
+                      controller: _discountAmtController,
+                      focusNode: _discountAmtFocus,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
+                      prefixIcon: const Icon(Icons.currency_rupee,
+                          size: 16, color: AppColors.textSecondary),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Bill summary
+            if (cart.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
+                    AppSpacing.space12, AppSpacing.space16, 0),
+                child: Builder(builder: (ctx) {
+                  final discountAmt =
+                      (double.tryParse(_discountAmtController.text) ?? 0.0)
+                          .clamp(0.0, total);
+                  final netPayable = total - discountAmt;
+                  return Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
+                    child: Column(
+                      children: [
+                        // Total Amount row
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.space12, vertical: 10),
+                          child: Row(
+                            children: [
+                              Text(
+                                'Total Amount',
+                                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.textSecondary,
+                                    ),
+                              ),
+                              const Spacer(),
+                              if (tax > 0)
+                                Text(
+                                  '₹${subtotal.toStringAsFixed(2)} + ₹${tax.toStringAsFixed(2)} GST',
+                                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontSize: 11,
+                                      ),
+                                ),
+                              if (tax > 0) const SizedBox(width: 6),
+                              Text(
+                                '₹${total.toStringAsFixed(2)}',
+                                style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Discount row — only when applied
+                        if (discountAmt > 0) ...[
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space12, vertical: 10),
+                            child: Row(
+                              children: [
+                                Text(
+                                  'Discount Applied',
+                                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                        color: AppColors.textSecondary,
+                                      ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '− ₹${discountAmt.toStringAsFixed(2)}',
+                                  style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: const Color(0xFF16A34A),
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        // Net Payable — highlighted footer
+                        Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryLight,
+                            borderRadius: BorderRadius.only(
+                              bottomLeft:
+                                  Radius.circular(AppRadius.small - 1),
+                              bottomRight:
+                                  Radius.circular(AppRadius.small - 1),
+                              topLeft: discountAmt > 0
+                                  ? Radius.zero
+                                  : Radius.circular(AppRadius.small - 1),
+                              topRight: discountAmt > 0
+                                  ? Radius.zero
+                                  : Radius.circular(AppRadius.small - 1),
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.space12, vertical: 11),
+                          child: Row(
+                            children: [
+                              Text(
+                                'Net Payable',
+                                style: Theme.of(ctx).textTheme.bodyMedium
+                                    ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.primaryDark,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                '₹${netPayable.toStringAsFixed(2)}',
+                                style: Theme.of(ctx)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ),
 
             if (widget.tableId != null)
               Padding(
@@ -1506,28 +1749,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Widget _totalRow(String label, String value, {bool bold = false}) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: bold ? AppColors.textPrimary : AppColors.textSecondary,
-                  fontWeight: bold ? FontWeight.w600 : FontWeight.w400,
-                ),
-          ),
-        ),
-        Text(
-          value,
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
-                color: bold ? AppColors.primary : AppColors.textPrimary,
-              ),
-        ),
-      ],
-    );
-  }
 }
 
 // ---------------------------------------------------------------------------
