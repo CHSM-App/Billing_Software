@@ -47,18 +47,19 @@ export default function CTA() {
             </span>
           </a>
 
-          {/* Android */}
+          {/* Play Store */}
           <a
-            href="/downloads/Vittam.apk"
-            download
+            href="https://play.google.com/store/apps/details?id=com.vengurlatech.Vittam"
+            target="_blank"
+            rel="noopener noreferrer"
             className="btn-teal inline-flex items-center gap-3 px-6 py-4 rounded-2xl text-sm font-bold"
           >
             <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6.18 15.64a2.18 2.18 0 0 1-2.18-2.18V9.54a2.18 2.18 0 0 1 4.36 0v3.92a2.18 2.18 0 0 1-2.18 2.18m11.64 0a2.18 2.18 0 0 1-2.18-2.18V9.54a2.18 2.18 0 0 1 4.36 0v3.92a2.18 2.18 0 0 1-2.18 2.18M3.64 7.27a.91.91 0 0 1-.91-.91V4.18a.91.91 0 0 1 1.82 0v2.18a.91.91 0 0 1-.91.91m16.72 0a.91.91 0 0 1-.91-.91V4.18a.91.91 0 0 1 1.82 0v2.18a.91.91 0 0 1-.91.91M12 2.73a9.27 9.27 0 0 0-9.27 9.27v5.45a1.09 1.09 0 0 0 1.09 1.09h16.36a1.09 1.09 0 0 0 1.09-1.09V12A9.27 9.27 0 0 0 12 2.73z"/>
+              <path d="M3.18 23.76c.3.17.64.2.96.1l11.2-11.2-2.56-2.56L3.18 23.76zM20.5 10.2l-2.46-1.4-2.86 2.86 2.86 2.86 2.48-1.42A1.5 1.5 0 0 0 20.5 10.2zM2.01 1.05A1.5 1.5 0 0 0 2 1.5v21a1.5 1.5 0 0 0 .01.45l11.73-11.73L2.01 1.05zM4.14.14A1.5 1.5 0 0 0 3.18.24l11.6 11.6 2.56-2.56L4.14.14z"/>
             </svg>
             <span className="flex flex-col text-left leading-tight">
-              <span className="text-[10px] font-normal opacity-60 -mb-0.5">Download</span>
-              <span>Android APK</span>
+              <span className="text-[10px] font-normal opacity-60 -mb-0.5">Get it on</span>
+              <span>Google Play</span>
             </span>
           </a>
 
@@ -81,7 +82,7 @@ export default function CTA() {
         </div>
 
         <p className="text-white/25 text-xs mt-8">
-          Available on Windows, Android, and Web · No credit card required
+          Available on Windows, Android (Google Play), and Web · No credit card required
         </p>
       </div>
     </section>

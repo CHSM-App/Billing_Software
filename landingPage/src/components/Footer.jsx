@@ -6,6 +6,7 @@ const LINKS = {
   Product: [
     { label: 'Features',    href: '/#features' },
     { label: 'Download',    href: '/#download' },
+    { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=com.vengurlatech.Vittam' },
   ],
   Support: [
     { label: 'Help Center', href: '/help' },
@@ -21,7 +22,16 @@ function FooterLink({ href, label }) {
   if (href.startsWith('/') && !href.startsWith('/#')) {
     return <Link to={href} className={cls}>{label}</Link>
   }
-  return <a href={href} className={cls}>{label}</a>
+  const isExternal = href.startsWith('http')
+  return (
+    <a
+      href={href}
+      className={cls}
+      {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+    >
+      {label}
+    </a>
+  )
 }
 
 export default function Footer() {
