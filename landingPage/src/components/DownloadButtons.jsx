@@ -1,16 +1,15 @@
 import React from 'react'
-import { Monitor, Smartphone, Globe } from 'lucide-react'
+import { Monitor, Globe } from 'lucide-react'
 
 /**
  * Drop your installer files into the `public/downloads/` folder:
  *   public/downloads/Vittam-Setup.exe   → Windows installer
- *   public/downloads/Vittam.apk         → Android APK
  *
  * The web app link can be an external URL — update WEB_URL below.
  */
 const WIN_URL = '/downloads/Vittam-windows.zip'
-const APK_URL = '/downloads/Vittam.apk'
 const WEB_URL = 'https://app.Vittam.in'   // ← update to your web app URL
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.vengurlatech.Vittam'
 
 export function DownloadButtons({ size = 'md', row = false }) {
   const base =
@@ -35,16 +34,24 @@ export function DownloadButtons({ size = 'md', row = false }) {
         </span>
       </a>
 
-      {/* Android APK */}
+      {/* Play Store */}
       <a
-        href={APK_URL}
-        download
+        href={PLAY_URL}
+        target="_blank"
+        rel="noopener noreferrer"
         className={`${base} ${pad} btn-navy`}
       >
-        <Smartphone size={size === 'lg' ? 20 : 18} className="flex-shrink-0" />
+        <svg
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          className="flex-shrink-0"
+          style={{ width: size === 'lg' ? 20 : 18, height: size === 'lg' ? 20 : 18 }}
+        >
+          <path d="M3.18 23.76c.3.17.64.2.96.1l11.2-11.2-2.56-2.56L3.18 23.76zM20.5 10.2l-2.46-1.4-2.86 2.86 2.86 2.86 2.48-1.42A1.5 1.5 0 0 0 20.5 10.2zM2.01 1.05A1.5 1.5 0 0 0 2 1.5v21a1.5 1.5 0 0 0 .01.45l11.73-11.73L2.01 1.05zM4.14.14A1.5 1.5 0 0 0 3.18.24l11.6 11.6 2.56-2.56L4.14.14z"/>
+        </svg>
         <span className="flex flex-col text-left leading-tight">
-          <span className="text-[10px] opacity-50 font-normal -mb-0.5">Download</span>
-          <span>Android APK</span>
+          <span className="text-[10px] opacity-50 font-normal -mb-0.5">Get it on</span>
+          <span>Google Play</span>
         </span>
       </a>
 
