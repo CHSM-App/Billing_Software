@@ -401,7 +401,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.invalidate(reportProvider);
       ref.invalidate(billsProvider);
       _showBillDialog(bill);
-      _autoPrint(bill);
+      // _autoPrint(bill);
     } on ApiException catch (e) {
       _showSnack(e.message, isError: true);
     } catch (_) {
@@ -492,7 +492,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       setState(() => _paymentMode = 'cash');
       if (!mounted) return;
       _showBillDialog(fakeBill);
-      _autoPrint(fakeBill);
+      // _autoPrint(fakeBill);
     } catch (e) {
       _showSnack('Failed to save bill offline: $e', isError: true);
     } finally {
