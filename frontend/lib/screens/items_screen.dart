@@ -20,7 +20,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
 
   @override
   void initState() {
-    super.initState();
+    super.initState(); 
     _searchController.addListener(() => setState(() {}));
   }
 
