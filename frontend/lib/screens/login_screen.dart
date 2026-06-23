@@ -356,13 +356,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             width: large ? 80 : 64,
             height: large ? 80 : 64,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(AppRadius.large),
-              border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.3), width: 1.5),
+              boxShadow: AppShadow.medium,
             ),
-            child: Icon(Icons.receipt_long_rounded,
-                size: large ? 42 : 32, color: Colors.white),
+            padding: const EdgeInsets.all(10),
+            child: Image.asset('assets/logo.png', fit: BoxFit.contain),
           ),
           SizedBox(height: large ? AppSpacing.space16 : AppSpacing.space12),
           Text(

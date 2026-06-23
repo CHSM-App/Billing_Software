@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vittam — Firebase Remote Config Update System</title>
+  <style>
+    :root {
+      --green: #1DB954;
+      --green-light: #F0FFF4;
+      --green-mid: #D1FAE5;
+      --dark: #1A3C27;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --code-bg: #f3f4f6;
+      --red: #dc2626;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text);
+      background: #fff;
+    }
+
+    /* ── Cover Page ── */
+    .cover {
+      background: linear-gradient(135deg, var(--dark) 0%, #2d6a4f 100%);
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 60px 40px;
+      page-break-after: always;
+    }
+
+    .cover-logo {
+      width: 80px; height: 80px;
+      background: var(--green);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 28px;
+      box-shadow: 0 8px 32px rgba(29,185,84,0.4);
+    }
+
+    .cover-logo svg { width: 44px; height: 44px; fill: #fff; }
+
+    .cover h1 {
+      font-size: 36px; font-weight: 800; letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .cover .subtitle {
+      font-size: 16px; opacity: 0.8; margin-bottom: 40px;
+    }
+
+    .cover-divider {
+      width: 60px; height: 3px;
+      background: var(--green);
+      border-radius: 2px;
+      margin: 0 auto 40px;
+    }
+
+    .cover-meta {
+      font-size: 13px; opacity: 0.65; line-height: 2;
+    }
+
+    .cover-meta strong { opacity: 1; color: #fff; }
+
+    .cover-badge {
+      display: inline-block;
+      background: rgba(29,185,84,0.25);
+      border: 1px solid rgba(29,185,84,0.5);
+      color: var(--green);
+      padding: 4px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-top: 32px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── Content Layout ── */
+    .content {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 40px 48px;
+    }
+
+    /* ── TOC ── */
+    .toc {
+      background: var(--green-light);
+      border: 1px solid var(--green-mid);
+      border-radius: 10px;
+      padding: 28px 32px;
+      margin-bottom: 48px;
+      page-break-after: always;
+    }
+
+    .toc h2 {
+      font-size: 15px; font-weight: 700; color: var(--dark);
+      margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.8px;
+    }
+
+    .toc ol {
+      padding-left: 20px;
+      line-height: 2.2;
+    }
+
+    .toc ol li { font-size: 13px; color: var(--text); }
+    .toc ol li .section-num { color: var(--green); font-weight: 700; margin-right: 6px; }
+    .toc ol li span { color: var(--muted); font-size: 11px; margin-left: 8px; }
+
+    /* ── Section Headings ── */
+    .section {
+      margin-bottom: 48px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--green-mid);
+    }
+
+    .section-num-badge {
+      background: var(--green);
+      color: #fff;
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    h2.section-title {
+      font-size: 18px; font-weight: 700; color: var(--dark);
+    }
+
+    h3 {
+      font-size: 14px; font-weight: 700; color: var(--dark);
+      margin: 20px 0 10px;
+    }
+
+    p { margin-bottom: 12px; color: var(--text); }
+
+    /* ── Code Blocks ── */
+    pre {
+      background: #1e293b;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 16px 20px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      overflow-x: auto;
+      margin: 12px 0 20px;
+    }
+
+    pre .comment { color: #64748b; }
+    pre .keyword { color: #7dd3fc; }
+    pre .string { color: #86efac; }
+    pre .type { color: #f9a8d4; }
+    pre .fn { color: #fbbf24; }
+    pre .num { color: #fb923c; }
+
+    code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 11.5px;
+      color: #be185d;
+    }
+
+    /* ── Tables ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 20px;
+      font-size: 12.5px;
+    }
+
+    th {
+      background: var(--dark);
+      color: #fff;
+      padding: 10px 14px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 11.5px;
+      letter-spacing: 0.3px;
+    }
+
+    th:first-child { border-radius: 6px 0 0 0; }
+    th:last-child  { border-radius: 0 6px 0 0; }
+
+    td {
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    tr:nth-child(even) td { background: #f9fafb; }
+    tr:last-child td { border-bottom: none; }
+
+    td code { background: var(--code-bg); }
+
+    /* ── Callout Boxes ── */
+    .callout {
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin: 14px 0;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .callout-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+    .callout-body { flex: 1; }
+
+    .callout-body strong { display: block; margin-bottom: 4px; font-size: 13px; }
+
+    .callout-body p { margin: 0; font-size: 12.5px; }
+
+    .callout.tip    { background: var(--green-light); border-left: 4px solid var(--green); }
+    .callout.warn   { background: #fffbeb;            border-left: 4px solid #f59e0b; }
+    .callout.danger { background: #fef2f2;            border-left: 4px solid var(--red); }
+    .callout.info   { background: #eff6ff;            border-left: 4px solid #3b82f6; }
+
+    /* ── File Tree ── */
+    .file-tree {
+      background: #1e293b;
+      color: #94a3b8;
+      border-radius: 8px;
+      padding: 18px 22px;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 2;
+      margin: 12px 0 20px;
+    }
+
+    .file-tree .dir  { color: #7dd3fc; font-weight: 600; }
+    .file-tree .file { color: #e2e8f0; }
+    .file-tree .new  { color: #86efac; }
+    .file-tree .desc { color: #64748b; font-style: italic; margin-left: 8px; }
+
+    /* ── Flow Diagram ── */
+    .flow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      margin: 20px auto;
+      max-width: 420px;
+    }
+
+    .flow-box {
+      background: var(--green-light);
+      border: 1.5px solid var(--green);
+      border-radius: 10px;
+      padding: 10px 24px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--dark);
+      text-align: center;
+      width: 100%;
+    }
+
+    .flow-box.force {
+      background: #fef2f2;
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    .flow-box.gray {
+      background: #f9fafb;
+      border-color: #d1d5db;
+      color: var(--muted);
+    }
+
+    .flow-arrow {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.2;
+      text-align: center;
+    }
+
+    .flow-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      margin: -2px 0;
+    }
+
+    /* ── Step List ── */
+    .steps { list-style: none; padding: 0; margin: 12px 0 20px; }
+
+    .steps li {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 14px;
+      align-items: flex-start;
+    }
+
+    .step-num {
+      background: var(--green);
+      color: #fff;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .step-body { flex: 1; font-size: 12.5px; }
+    .step-body strong { display: block; margin-bottom: 2px; }
+
+    /* ── Pill Tags ── */
+    .pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      margin: 2px;
+    }
+
+    .pill.green  { background: var(--green-mid); color: var(--dark); }
+    .pill.blue   { background: #dbeafe; color: #1e40af; }
+    .pill.red    { background: #fee2e2; color: #991b1b; }
+    .pill.gray   { background: #f3f4f6; color: var(--muted); }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 20px 48px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 48px;
+    }
+
+    /* ── Print ── */
+    @media print {
+      body { font-size: 12px; }
+
+      .cover { min-height: 100vh; }
+
+      .content { padding: 32px 40px; }
+
+      .section { page-break-inside: avoid; }
+
+      pre { page-break-inside: avoid; font-size: 11px; }
+
+      table { page-break-inside: avoid; }
+
+      h2.section-title { page-break-after: avoid; }
+
+      h3 { page-break-after: avoid; }
+
+      footer { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     COVER PAGE
+═══════════════════════════════════════════ -->
+<div class="cover">
+  <div class="cover-logo">
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18 17H6v-2h12v2zm0-4H6v-2h12v2zm0-4H6V7h12v2zM3 22l1.5-1.5L6 22l1.5-1.5L9 22l1.5-1.5L12 22l1.5-1.5L15 22l1.5-1.5L18 22l1.5-1.5L21 22V2l-1.5 1.5L18 2l-1.5 1.5L15 2l-1.5 1.5L12 2l-1.5 1.5L9 2 7.5 3.5 6 2 4.5 3.5 3 2v20z"/>
+    </svg>
+  </div>
+
+  <h1>Vittam</h1>
+  <p class="subtitle">Firebase Remote Config — In-App Update System</p>
+  <div class="cover-divider"></div>
+
+  <div class="cover-meta">
+    <strong>Package</strong> &nbsp;com.vengurlatech.vittam<br>
+    <strong>Framework</strong> &nbsp;Flutter 3.x · Riverpod · Firebase<br>
+    <strong>Prepared by</strong> &nbsp;VengurlaTech<br>
+    <strong>Date</strong> &nbsp;June 2026
+  </div>
+
+  <div class="cover-badge">INTERNAL REFERENCE</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     MAIN CONTENT
+═══════════════════════════════════════════ -->
+<div class="content">
+
+  <!-- Table of Contents -->
+  <div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+      <li><span class="section-num">1.</span> Overview &amp; Architecture <span>How the system works end-to-end</span></li>
+      <li><span class="section-num">2.</span> Folder Structure &amp; Files Created <span>Every new file and its role</span></li>
+      <li><span class="section-num">3.</span> File-by-File Reference <span>Key logic in each module</span></li>
+      <li><span class="section-num">4.</span> Firebase Console Setup <span>Remote Config parameters</span></li>
+      <li><span class="section-num">5.</span> Android Configuration <span>Gradle &amp; Manifest changes</span></li>
+      <li><span class="section-num">6.</span> Update Logic Rules <span>When optional vs force update fires</span></li>
+      <li><span class="section-num">7.</span> How to Trigger an Update <span>Day-to-day operations</span></li>
+      <li><span class="section-num">8.</span> Packages Added <span>Dependencies and versions</span></li>
+      <li><span class="section-num">9.</span> First-Time Setup Checklist <span>Steps to reproduce from scratch</span></li>
+    </ol>
+  </div>
+
+
+  <!-- ─── SECTION 1 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">1</div>
+      <h2 class="section-title">Overview &amp; Architecture</h2>
+    </div>
+
+    <p>
+      Vittam uses <strong>Firebase Remote Config</strong> to deliver soft (optional) and hard (forced) update
+      prompts to users without pushing a new build. The version logic runs entirely on the client —
+      Remote Config just serves version strings and flags.
+    </p>
+
+    <h3>App Boot Flow</h3>
+
+    <div class="flow">
+      <div class="flow-box">main() — Firebase.initializeApp()</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">VittamRemoteConfig.initialize() — fetch &amp; activate RC</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">VittamSplashScreen (min 2 s display)</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">updateCheckProvider — compare versions</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-label">update available?</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box">VittamUpdateDialog — optional or forced</div>
+      <div class="flow-arrow">↓</div>
+      <div class="flow-box gray">_AppEntry → Login / License / MainShell</div>
+    </div>
+
+    <div class="callout tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>Non-fatal design</strong>
+        <p>If Remote Config fetch fails (no internet, cold start), the app silently proceeds — <code>fetchAndActivate</code> errors are caught and logged with <code>debugPrint</code> only. Users are never blocked by an RC outage.</p>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ─── SECTION 2 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">2</div>
+      <h2 class="section-title">Folder Structure &amp; Files Created</h2>
+    </div>
+
+    <div class="file-tree">
+<span class="dir">frontend/lib/</span><br>
+├── <span class="dir">core/</span><br>
+│   ├── <span class="dir">services/</span><br>
+│   │   └── <span class="new">remote_config_service.dart</span>  <span class="desc">← Firebase RC singleton</span><br>
+│   ├── <span class="dir">update/</span><br>
+│   │   ├── <span class="new">update_provider.dart</span>  <span class="desc">← Riverpod FutureProviders</span><br>
+│   │   └── <span class="new">update_state.dart</span>  <span class="desc">← Immutable update model</span><br>
+│   └── <span class="dir">utils/</span><br>
+│       └── <span class="new">semver.dart</span>  <span class="desc">← Semantic version comparator</span><br>
+├── <span class="dir">features/</span><br>
+│   ├── <span class="dir">splash/</span><br>
+│   │   └── <span class="new">vittam_splash_screen.dart</span>  <span class="desc">← Brand splash + update gate</span><br>
+│   └── <span class="dir">update/</span><br>
+│       └── <span class="new">vittam_update_dialog.dart</span>  <span class="desc">← Update dialog widget</span><br>
+├── <span class="file">firebase_options.dart</span>  <span class="desc">← Auto-generated by flutterfire</span><br>
+└── <span class="file">main.dart</span>  <span class="desc">← Modified: Firebase init + named routes</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Type</th>
+          <th>Responsibility</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>semver.dart</code></td>
+          <td><span class="pill green">Utility</span></td>
+          <td>Parses and compares semantic version strings (MAJOR.MINOR.PATCH)</td>
+        </tr>
+        <tr>
+          <td><code>update_state.dart</code></td>
+          <td><span class="pill blue">Model</span></td>
+          <td>Immutable data class carrying all update information to the UI</td>
+        </tr>
+        <tr>
+          <td><code>remote_config_service.dart</code></td>
+          <td><span class="pill blue">Service</span></td>
+          <td>Singleton wrapping FirebaseRemoteConfig — fetch, cache, typed getters</td>
+        </tr>
+        <tr>
+          <td><code>update_provider.dart</code></td>
+          <td><span class="pill green">State</span></td>
+          <td>Riverpod providers: computes UpdateState and exposes app version</td>
+        </tr>
+        <tr>
+          <td><code>vittam_update_dialog.dart</code></td>
+          <td><span class="pill blue">Widget</span></td>
+          <td>AlertDialog with Hindi labels, version pill, force-update lock</td>
+        </tr>
+        <tr>
+          <td><code>vittam_splash_screen.dart</code></td>
+          <td><span class="pill blue">Screen</span></td>
+          <td>Brand splash; waits ≥ 2 s, shows update dialog if needed, then routes</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ─── SECTION 3 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">3</div>
+      <h2 class="section-title">File-by-File Reference</h2>
+    </div>
+
+    <!-- semver -->
+    <h3>3.1 &nbsp;lib/core/utils/semver.dart</h3>
+    <p>Parses strings like <code>"1.2.3"</code> or <code>"v2.0"</code> into a comparable <code>SemVer</code> object.</p>
+    <pre><span class="comment">// Safe parse — returns null on invalid input</span>
+<span class="type">SemVer</span>? v = <span class="type">SemVer</span>.<span class="fn">tryParse</span>(<span class="string">"1.2.3"</span>);
+
+<span class="comment">// Strict parse — throws FormatException on invalid input</span>
+<span class="type">SemVer</span> v = <span class="type">SemVer</span>.<span class="fn">parse</span>(<span class="string">"v2.0"</span>); <span class="comment">// patch defaults to 0</span>
+
+<span class="comment">// Comparison operators</span>
+v1 &lt; v2   <span class="comment">// older</span>
+v1 &gt; v2   <span class="comment">// newer</span>
+v1 &gt;= v2  <span class="comment">// same or newer</span></pre>
+
+    <!-- update_state -->
+    <h3>3.2 &nbsp;lib/core/update/update_state.dart</h3>
+    <p>Immutable model passed from provider to UI. Use the named constructor when no update is needed.</p>
+    <pre><span class="comment">// No update needed</span>
+<span class="keyword">return</span> <span class="type">UpdateState</span>.upToDate(currentVersion);
+
+<span class="comment">// Update available</span>
+<span class="keyword">return</span> <span class="type">UpdateState</span>(
+  updateAvailable: <span class="keyword">true</span>,
+  forceUpdate: <span class="keyword">false</span>,
+  currentVersion: <span class="string">"1.0.0"</span>,
+  latestVersion:  <span class="string">"1.1.0"</span>,
+  dialogTitle:    rc.updateTitle,
+  dialogMessage:  rc.updateMessage,
+);</pre>
+
+    <!-- remote_config -->
+    <h3>3.3 &nbsp;lib/core/services/remote_config_service.dart</h3>
+    <p>Singleton accessed via <code>VittamRemoteConfig.instance</code>. Call <code>initialize()</code> once in <code>main()</code>, and <code>refresh()</code> on app resume.</p>
+    <pre><span class="comment">// In main()</span>
+<span class="keyword">await</span> <span class="type">VittamRemoteConfig</span>.instance.<span class="fn">initialize</span>();
+
+<span class="comment">// In app lifecycle (optional — triggers re-fetch on foreground)</span>
+<span class="type">VittamRemoteConfig</span>.instance.<span class="fn">refresh</span>();
+
+<span class="comment">// Typed getters available after initialize()</span>
+rc.latestVersion           <span class="comment">// String</span>
+rc.minimumSupportedVersion <span class="comment">// String</span>
+rc.forceUpdate             <span class="comment">// bool</span>
+rc.forceUpdateBelowVersion <span class="comment">// String</span>
+rc.updateTitle             <span class="comment">// String</span>
+rc.updateMessage           <span class="comment">// String</span></pre>
+
+    <div class="callout info">
+      <div class="callout-icon">ℹ️</div>
+      <div class="callout-body">
+        <strong>Fetch interval</strong>
+        <p><code>minimumFetchInterval</code> is <code>Duration.zero</code> in debug builds so you can see RC changes immediately. In release builds it is <strong>1 hour</strong>, meaning the user's device may show old values for up to an hour after you publish RC changes.</p>
+      </div>
+    </div>
+
+    <!-- update_provider -->
+    <h3>3.4 &nbsp;lib/core/update/update_provider.dart</h3>
+    <p>Two <code>FutureProvider</code>s. <code>updateCheckProvider</code> is read once per app session via <code>ref.listen</code> in the splash screen.</p>
+    <pre><span class="comment">// In any ConsumerWidget</span>
+<span class="keyword">final</span> versionAsync = ref.<span class="fn">watch</span>(appVersionProvider);
+
+<span class="comment">// In VittamSplashScreen — fires once on completion</span>
+ref.<span class="fn">listen</span>(updateCheckProvider, (_, next) {
+  next.<span class="fn">when</span>(
+    data: _onUpdateData,
+    error: (e, __) =&gt; _onUpdateError(e),
+    loading: () {},
+  );
+});</pre>
+
+    <!-- update_dialog -->
+    <h3>3.5 &nbsp;lib/features/update/vittam_update_dialog.dart</h3>
+    <p>Call the static helper — it is a no-op when no update is available.</p>
+    <pre><span class="keyword">await</span> <span class="type">VittamUpdateDialog</span>.<span class="fn">showIfNeeded</span>(context, state);
+<span class="comment">// Returns null  — no update available</span>
+<span class="comment">// Returns false — user tapped "बाद में" (Later)</span>
+<span class="comment">// Returns true  — user tapped "अभी अपडेट करें" (Update Now)</span></pre>
+
+    <!-- splash -->
+    <h3>3.6 &nbsp;lib/features/splash/vittam_splash_screen.dart</h3>
+    <p>Enforces a <strong>minimum 2-second</strong> display regardless of how fast the RC fetch resolves. Navigation only fires after both the timer AND the update check are complete.</p>
+
+    <div class="callout warn">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>Force update blocks all navigation</strong>
+        <p>When <code>forceUpdate == true</code> the "Later" button is hidden, <code>PopScope(canPop: false)</code> blocks the back gesture, and <code>barrierDismissible: false</code> prevents tapping outside the dialog. The user cannot reach the app until they update.</p>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ─── SECTION 4 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">4</div>
+      <h2 class="section-title">Firebase Console Setup</h2>
+    </div>
+
+    <p>Navigate to <strong>Firebase Console → your project → Remote Config → Create configuration</strong>.</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Parameter Key</th>
+          <th>Type</th>
+          <th>Initial Value</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>latest_version</code></td>
+          <td>String</td>
+          <td><code>1.0.0</code></td>
+          <td>Newest version available on Play Store</td>
+        </tr>
+        <tr>
+          <td><code>minimum_supported_version</code></td>
+          <td>String</td>
+          <td><code>1.0.0</code></td>
+          <td>Oldest version allowed to run — triggers force update below this</td>
+        </tr>
+        <tr>
+          <td><code>update_title</code></td>
+          <td>String</td>
+          <td>नया अपडेट उपलब्ध है</td>
+          <td>Dialog title (Hindi)</td>
+        </tr>
+        <tr>
+          <td><code>update_message</code></td>
+          <td>String</td>
+          <td>बेहतर अनुभव के लिए कृपया ऐप को अपडेट करें।</td>
+          <td>Dialog body text (Hindi)</td>
+        </tr>
+        <tr>
+          <td><code>force_update</code></td>
+          <td>Boolean</td>
+          <td><code>false</code></td>
+          <td>Master force-update switch (overrides version checks)</td>
+        </tr>
+        <tr>
+          <td><code>force_update_below_version</code></td>
+          <td>String</td>
+          <td><em>(empty)</em></td>
+          <td>Force update for any version strictly below this value</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout tip">
+      <div class="callout-icon">✅</div>
+      <div class="callout-body">
+        <strong>After adding all parameters, click Publish changes</strong>
+        <p>Changes are live immediately but devices may cache the old config for up to 1 hour in production.</p>
+      </div>
+    </div>
+
+    <h3>Hardcoded Defaults (in-app fallback)</h3>
+    <p>If Remote Config is unreachable, these defaults kick in (defined in <code>remote_config_service.dart</code>):</p>
+    <table>
+      <thead><tr><th>Key</th><th>Fallback value</th></tr></thead>
+      <tbody>
+        <tr><td><code>latest_version</code></td><td><em>empty string → no dialog shown</em></td></tr>
+        <tr><td><code>update_title</code></td><td>नया अपडेट उपलब्ध है</td></tr>
+        <tr><td><code>update_message</code></td><td>बेहतर अनुभव के लिए कृपया ऐप को अपडेट करें।</td></tr>
+        <tr><td><code>force_update</code></td><td><code>false</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ─── SECTION 5 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">5</div>
+      <h2 class="section-title">Android Configuration</h2>
+    </div>
+
+    <h3>5.1 &nbsp;android/app/build.gradle.kts</h3>
+    <p>Two changes were made:</p>
+    <ol style="padding-left:20px; line-height:2.2; font-size:12.5px;">
+      <li>The <code>com.google.gms.google-services</code> plugin was added by <code>flutterfire configure</code>.</li>
+      <li><code>minSdk</code> set to <code>maxOf(flutter.minSdkVersion, 21)</code> — Firebase requires API 21+.</li>
+    </ol>
+
+    <pre><span class="comment">// plugins block (added by flutterfire configure)</span>
+id(<span class="string">"com.google.gms.google-services"</span>)
+
+<span class="comment">// defaultConfig</span>
+minSdk = <span class="fn">maxOf</span>(flutter.minSdkVersion, <span class="num">21</span>)</pre>
+
+    <h3>5.2 &nbsp;AndroidManifest.xml</h3>
+    <p>Added <code>https</code> scheme to the existing <code>&lt;queries&gt;</code> block so <code>url_launcher</code> can open Play Store links on Android 11+:</p>
+
+    <pre><span class="comment">&lt;!-- inside &lt;manifest&gt;, outside &lt;application&gt; --&gt;</span>
+&lt;<span class="keyword">queries</span>&gt;
+  &lt;<span class="keyword">intent</span>&gt;
+    &lt;<span class="keyword">action</span> android:name=<span class="string">"android.intent.action.PROCESS_TEXT"</span>/&gt;
+    &lt;<span class="keyword">data</span> android:mimeType=<span class="string">"text/plain"</span>/&gt;
+  &lt;/<span class="keyword">intent</span>&gt;
+  <span class="string">&lt;!-- Required for url_launcher Play Store links --&gt;</span>
+  &lt;<span class="keyword">intent</span>&gt;
+    &lt;<span class="keyword">action</span> android:name=<span class="string">"android.intent.action.VIEW"</span> /&gt;
+    &lt;<span class="keyword">data</span> android:scheme=<span class="string">"https"</span> /&gt;
+  &lt;/<span class="keyword">intent</span>&gt;
+&lt;/<span class="keyword">queries</span>&gt;</pre>
+
+    <h3>5.3 &nbsp;Files added by flutterfire configure</h3>
+    <table>
+      <thead><tr><th>File</th><th>Purpose</th><th>Edit manually?</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>lib/firebase_options.dart</code></td>
+          <td>Platform-specific Firebase config (API keys, App IDs)</td>
+          <td><span class="pill red">Never</span> — regenerate with flutterfire</td>
+        </tr>
+        <tr>
+          <td><code>android/app/google-services.json</code></td>
+          <td>Android Firebase credentials</td>
+          <td><span class="pill red">Never</span> — download from Firebase Console</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ─── SECTION 6 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">6</div>
+      <h2 class="section-title">Update Logic Rules</h2>
+    </div>
+
+    <p>The decision tree runs in <code>update_provider.dart</code> every time the app launches:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Condition</th>
+          <th>Result</th>
+          <th>Dialog type</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>latest_version</code> is blank or unparseable</td>
+          <td>No dialog</td>
+          <td><span class="pill gray">Silent</span></td>
+        </tr>
+        <tr>
+          <td>current version ≥ <code>latest_version</code></td>
+          <td>No dialog</td>
+          <td><span class="pill gray">Silent</span></td>
+        </tr>
+        <tr>
+          <td>current &lt; <code>latest_version</code></td>
+          <td>Update available</td>
+          <td><span class="pill green">Optional</span></td>
+        </tr>
+        <tr>
+          <td><code>force_update</code> = <code>true</code></td>
+          <td>Forced regardless of version</td>
+          <td><span class="pill red">Force</span></td>
+        </tr>
+        <tr>
+          <td>current &lt; <code>minimum_supported_version</code></td>
+          <td>Forced</td>
+          <td><span class="pill red">Force</span></td>
+        </tr>
+        <tr>
+          <td>current &lt; <code>force_update_below_version</code></td>
+          <td>Forced</td>
+          <td><span class="pill red">Force</span></td>
+        </tr>
+        <tr>
+          <td>RC fetch fails (no internet, timeout)</td>
+          <td>Uses cached or default values</td>
+          <td><span class="pill gray">Non-fatal</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout danger">
+      <div class="callout-icon">🚨</div>
+      <div class="callout-body">
+        <strong>Force update is permanent until the user installs the update</strong>
+        <p>Once <code>forceUpdate == true</code> is served, the user cannot dismiss the dialog. They must go to the Play Store and update the app. Test this carefully before publishing RC changes.</p>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ─── SECTION 7 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">7</div>
+      <h2 class="section-title">How to Trigger an Update (Day-to-Day)</h2>
+    </div>
+
+    <h3>Optional update prompt</h3>
+    <ul class="steps">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-body">Publish new APK/AAB to Play Store (e.g. version <code>1.2.0</code>).</div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-body">In Firebase Console → Remote Config, set <code>latest_version</code> to <code>1.2.0</code>.</div>
+      </li>
+      <li>
+        <div class="step-num">3</div>
+        <div class="step-body">Click <strong>Publish changes</strong>. Users on older versions will see the optional dialog next launch.</div>
+      </li>
+    </ul>
+
+    <h3>Force update (critical fix)</h3>
+    <ul class="steps">
+      <li>
+        <div class="step-num">1</div>
+        <div class="step-body">Publish fixed version to Play Store (e.g. <code>1.2.1</code>).</div>
+      </li>
+      <li>
+        <div class="step-num">2</div>
+        <div class="step-body">Set <code>latest_version</code> → <code>1.2.1</code> and <code>minimum_supported_version</code> → <code>1.2.1</code>.</div>
+      </li>
+      <li>
+        <div class="step-num">3</div>
+        <div class="step-body">Alternatively set <code>force_update</code> → <code>true</code> for an immediate master override.</div>
+      </li>
+      <li>
+        <div class="step-num">4</div>
+        <div class="step-body">Publish changes. All users below the threshold are hard-blocked until they update.</div>
+      </li>
+      <li>
+        <div class="step-num">5</div>
+        <div class="step-body">Once rollout is complete, set <code>force_update</code> back to <code>false</code> and publish again.</div>
+      </li>
+    </ul>
+
+    <div class="callout tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>To refresh RC immediately in a debug build</strong>
+        <p><code>minimumFetchInterval</code> is <code>Duration.zero</code> in debug. Hot-restart the app after publishing RC changes and it will pick them up instantly.</p>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ─── SECTION 8 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">8</div>
+      <h2 class="section-title">Packages Added</h2>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Package</th><th>Version</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>firebase_core</code></td>
+          <td>^3.3.0</td>
+          <td>Firebase initialization — required by all Firebase packages</td>
+        </tr>
+        <tr>
+          <td><code>firebase_remote_config</code></td>
+          <td>^5.1.0</td>
+          <td>Remote Config SDK — fetches and caches key-value config from Firebase</td>
+        </tr>
+        <tr>
+          <td><code>package_info_plus</code></td>
+          <td>^8.0.2</td>
+          <td>Reads the app's version string from pubspec / store metadata</td>
+        </tr>
+        <tr>
+          <td><code>url_launcher</code></td>
+          <td>^6.3.0</td>
+          <td>Opens the Play Store listing in an external browser</td>
+        </tr>
+        <tr>
+          <td><code>flutter_riverpod</code></td>
+          <td>^2.5.1</td>
+          <td>State management — already present, used for FutureProviders</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <!-- ─── SECTION 9 ─── -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num-badge">9</div>
+      <h2 class="section-title">First-Time Setup Checklist</h2>
+    </div>
+
+    <p>Use this checklist when setting up the update system in a new environment or after cloning the repo.</p>
+
+    <table>
+      <thead><tr><th>#</th><th>Step</th><th>Command / Action</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>Install Firebase CLI</td>
+          <td><code>npm install -g firebase-tools</code></td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>Log in to Firebase</td>
+          <td><code>firebase login --no-localhost</code></td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>Activate FlutterFire CLI</td>
+          <td><code>dart pub global activate flutterfire_cli</code></td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>Run flutterfire configure</td>
+          <td><code>flutterfire configure --project=vittam-ffc4c</code> (from <code>frontend/</code>)</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>Verify <code>firebase_options.dart</code> generated</td>
+          <td>Check <code>lib/firebase_options.dart</code> exists</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>Verify <code>google-services.json</code> placed</td>
+          <td>Check <code>android/app/google-services.json</code> exists</td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>Get dependencies</td>
+          <td><code>flutter pub get</code></td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>Add RC parameters in Firebase Console</td>
+          <td>See Section 4 table above</td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>Run the app</td>
+          <td><code>flutter run</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>Never commit google-services.json or firebase_options.dart to a public repo</strong>
+        <p>These files contain API keys. Add them to <code>.gitignore</code> if the repository is public, and distribute them to team members securely.</p>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end .content -->
+
+<footer>
+  <span>Vittam · Firebase Remote Config Update System · VengurlaTech</span>
+  <span>Internal Reference · June 2026</span>
+</footer>
+
+</body>
+</html>

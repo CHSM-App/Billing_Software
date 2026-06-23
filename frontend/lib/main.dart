@@ -1,6 +1,11 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+// TODO: Uncomment after running `flutterfire configure` to generate this file:
+import 'firebase_options.dart';
+
 import 'api.dart';
 import 'providers.dart';
 import 'theme/app_theme.dart';
@@ -9,6 +14,8 @@ import 'screens/main_shell.dart';
 import 'screens/license_screen.dart';
 import 'services/offline_service.dart';
 import 'services/license_service.dart';
+import 'core/services/remote_config_service.dart';
+import 'features/splash/vittam_splash_screen.dart';
 
 // Desktop-only SQLite FFI init — imported only on non-web builds.
 import 'services/ffi_init_stub.dart'
@@ -16,10 +23,18 @@ import 'services/ffi_init_stub.dart'
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   if (!kIsWeb) {
     ffi.initFfi();
   }
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  await VittamRemoteConfig.instance.initialize();
   await OfflineService.instance.init();
+
   runApp(const ProviderScope(child: BillingApp()));
 }
 
@@ -29,22 +44,28 @@ class BillingApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Billing App',
+      title: 'Vittam',
       debugShowCheckedModeBanner: false,
       theme: appTheme,
-      home: const _Splash(),
+      initialRoute: '/',
+      routes: {
+        '/': (_) => const VittamSplashScreen(),
+        '/home': (_) => const _AppEntry(),
+      },
     );
   }
 }
 
-class _Splash extends ConsumerStatefulWidget {
-  const _Splash();
+/// Runs the real app startup after the update splash clears.
+/// Handles session validation, connectivity, and license checks.
+class _AppEntry extends ConsumerStatefulWidget {
+  const _AppEntry();
 
   @override
-  ConsumerState<_Splash> createState() => _SplashState();
+  ConsumerState<_AppEntry> createState() => _AppEntryState();
 }
 
-class _SplashState extends ConsumerState<_Splash> {
+class _AppEntryState extends ConsumerState<_AppEntry> {
   @override
   void initState() {
     super.initState();
@@ -105,9 +126,7 @@ class _SplashState extends ConsumerState<_Splash> {
               Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => MainShell(
-                    licenseStatus: licenseStatus,
-                  ),
+                  builder: (_) => MainShell(licenseStatus: licenseStatus),
                 ),
               );
             },
