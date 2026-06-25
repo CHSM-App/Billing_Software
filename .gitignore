@@ -27,6 +27,10 @@ Thumbs.db
 *.njsproj
 *.sln
 
+# Deploy — service account key must never be committed
+deploy/service-account.json
+deploy/node_modules/
+
 # Flutter/Dart
 frontend/.dart_tool/
 frontend/.flutter-plugins

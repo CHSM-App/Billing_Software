@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:in_app_update/in_app_update.dart';
 
 import '../../core/update/update_provider.dart';
-import '../../core/update/update_state.dart';
 import '../../theme/app_theme.dart';
-import '../update/vittam_update_dialog.dart';
 
 class VittamSplashScreen extends ConsumerStatefulWidget {
   const VittamSplashScreen({super.key});
@@ -17,12 +16,6 @@ class VittamSplashScreen extends ConsumerStatefulWidget {
 class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
     with SingleTickerProviderStateMixin {
   static const _minSplashDuration = Duration(milliseconds: 2000);
-
-  bool _navigated = false;
-  bool _timerDone = false;
-  bool _updateCheckDone = false;
-  UpdateState? _pendingState;
-  Object? _pendingError;
 
   late final AnimationController _animController;
   late final Animation<double> _fadeIn;
@@ -50,12 +43,7 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
     );
 
     _animController.forward();
-
-    Future.delayed(_minSplashDuration, () {
-      if (!mounted) return;
-      _timerDone = true;
-      _tryNavigate();
-    });
+    _run();
   }
 
   @override
@@ -64,47 +52,47 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
     super.dispose();
   }
 
-  void _onUpdateData(UpdateState state) {
-    _pendingState = state;
-    _updateCheckDone = true;
-    _tryNavigate();
-  }
+  Future<void> _run() async {
+    // Wait minimum 2 seconds then check for update
+    await Future.delayed(_minSplashDuration);
+    if (!mounted) return;
 
-  void _onUpdateError(Object error) {
-    _pendingError = error;
-    _updateCheckDone = true;
-    _tryNavigate();
-  }
-
-  Future<void> _tryNavigate() async {
-    if (!mounted || _navigated) return;
-    if (!_timerDone || !_updateCheckDone) return;
-
-    _navigated = true;
-
-    if (_pendingError != null) {
-      Navigator.pushReplacementNamed(context, '/home');
-      return;
-    }
-
-    final state = _pendingState!;
-    if (state.updateAvailable && mounted) {
-      await VittamUpdateDialog.showIfNeeded(context, state);
-    }
+    await _checkUpdate();
 
     if (mounted) Navigator.pushReplacementNamed(context, '/home');
   }
 
+  /// Checks Play Store for updates directly — no Firebase RC needed.
+  ///
+  /// Priority is set via deploy.js at publish time:
+  ///   0–3 → bottom sheet popup  (optional, user can dismiss)
+  ///   4–5 → full screen forced  (user cannot dismiss)
+  ///
+  /// Silently ignored in debug builds or sideloaded APKs.
+  Future<void> _checkUpdate() async {
+    try {
+      final info = await InAppUpdate.checkForUpdate();
+      debugPrint('in_app_update: availability=${info.updateAvailability}, priority=${info.updatePriority}');
+
+      if (info.updateAvailability != UpdateAvailability.updateAvailable) return;
+
+      if (info.updatePriority >= 4) {
+        // Full-screen forced update — user cannot dismiss
+        await InAppUpdate.performImmediateUpdate();
+      } else {
+        // Bottom sheet — user can dismiss; download happens in background
+        final result = await InAppUpdate.startFlexibleUpdate();
+        debugPrint('in_app_update: flexible result=$result');
+        // Note: completeFlexibleUpdate() must be called only after
+        // InstallStatus.downloaded — Play Store notifies user when ready
+      }
+    } catch (e, st) {
+      debugPrint('in_app_update ERROR: $e\n$st');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    ref.listen<AsyncValue<UpdateState>>(updateCheckProvider, (_, next) {
-      next.when(
-        data: _onUpdateData,
-        error: (e, __) => _onUpdateError(e),
-        loading: () {},
-      );
-    });
-
     final size = MediaQuery.sizeOf(context);
     final versionAsync = ref.watch(appVersionProvider);
 
