@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb; // used to hide printer tile on web
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
@@ -48,6 +49,7 @@ class _SettingsContentState extends State<_SettingsContent>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _fadeAnim;
+  String _appVersion = '';
 
   @override
   void initState() {
@@ -59,6 +61,9 @@ class _SettingsContentState extends State<_SettingsContent>
     _fadeAnim =
         CurvedAnimation(parent: _controller, curve: Curves.easeOut);
     _controller.forward();
+    PackageInfo.fromPlatform().then((info) {
+      if (mounted) setState(() => _appVersion = info.version);
+    });
   }
 
   @override
@@ -227,7 +232,7 @@ class _SettingsContentState extends State<_SettingsContent>
                     // App version footer
                     Center(
                       child: Text(
-                        'Vittam Billing v1.0',
+                        'Vittam Billing v$_appVersion',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: AppColors.textDisabled,
                             ),

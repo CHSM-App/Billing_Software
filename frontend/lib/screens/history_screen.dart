@@ -72,15 +72,20 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    decoration: const InputDecoration(
-                      hintText: 'Search bill no. or phone…',
-                      prefixIcon: Icon(Icons.search_outlined, size: 20),
-                      contentPadding: EdgeInsets.symmetric(
-                          horizontal: AppSpacing.space16, vertical: 12),
+                  child: SizedBox(
+                    height: 40,
+                    child: TextField(
+                      decoration: const InputDecoration(
+                        hintText: 'Search bill no. or phone…',
+                        isDense: true,
+                        prefixIcon: Icon(Icons.search_outlined,
+                            size: 18, color: AppColors.textSecondary),
+                        contentPadding: EdgeInsets.symmetric(
+                            horizontal: AppSpacing.space16, vertical: 0),
+                      ),
+                      onChanged: (v) =>
+                          ref.read(billFilterProvider.notifier).setSearch(v),
                     ),
-                    onChanged: (v) =>
-                        ref.read(billFilterProvider.notifier).setSearch(v),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.space8),
@@ -95,9 +100,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     style: const TextStyle(fontSize: 12),
                   ),
                   style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 44),
+                    minimumSize: const Size(0, 40),
                     padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.space12, vertical: 0),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
                   ),
                 ),
               ],

@@ -5,7 +5,7 @@ import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
 const String baseUrl = 'https://vittam.vengurlatech.com/api';
-// const String baseUrl = 'http://192.168.1.8:5000/api';
+// const String baseUrl = 'http://192.168.1.11:5000/api';
 const String _genericApiErrorMessage = 'Something went wrong';
 
 String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
@@ -136,10 +136,18 @@ dynamic _parse(http.Response response) {
     return body;
   }
   final serverMessage = _extractServerMessage(body);
+  List<Map<String, dynamic>>? items;
+  if (response.statusCode == 409 && body is Map<String, dynamic>) {
+    final raw = body['items'];
+    if (raw is List) {
+      items = raw.whereType<Map<String, dynamic>>().toList();
+    }
+  }
   throw ApiException(
     _genericApiErrorMessage,
     response.statusCode,
     serverMessage: serverMessage,
+    items: items,
   );
 }
 
@@ -236,8 +244,9 @@ class ApiException implements Exception {
   final String message;
   final int statusCode;
   final String? serverMessage;
+  final List<Map<String, dynamic>>? items;
 
-  ApiException(this.message, this.statusCode, {this.serverMessage});
+  ApiException(this.message, this.statusCode, {this.serverMessage, this.items});
 
   @override
   String toString() => message;
@@ -610,4 +619,22 @@ Future<bool> checkHealth() async {
   } catch (_) {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// FCM tokens
+// ---------------------------------------------------------------------------
+
+Future<void> registerFcmToken(String token) async {
+  _parse(await _authPost(
+    Uri.parse('$baseUrl/fcm/token'),
+    body: jsonEncode({'token': token}),
+  ));
+}
+
+Future<void> deleteFcmToken(String token) async {
+  _parse(await _authPost(
+    Uri.parse('$baseUrl/fcm/token/remove'),
+    body: jsonEncode({'token': token}),
+  ));
 }

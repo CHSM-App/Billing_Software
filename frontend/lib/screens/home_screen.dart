@@ -1,4 +1,4 @@
-import 'dart:async' show unawaited;
+import 'dart:async' show Timer, unawaited;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -403,13 +403,81 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _showBillDialog(bill);
       // _autoPrint(bill);
     } on ApiException catch (e) {
-      _showSnack(e.message, isError: true);
+      if (e.statusCode == 409 && e.items != null && e.items!.isNotEmpty) {
+        _showInsufficientStockDialog(e.items!);
+      } else {
+        _showSnack(e.serverMessage ?? e.message, isError: true);
+      }
     } catch (_) {
       _showSnack('Failed to generate bill. Check your connection.',
           isError: true);
     } finally {
       if (mounted) setState(() => _generatingBill = false);
     }
+  }
+
+  void _showInsufficientStockDialog(List<Map<String, dynamic>> items) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.inventory_2_outlined, color: AppColors.error, size: 20),
+            SizedBox(width: 8),
+            Text('Insufficient Stock'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'The following items do not have enough stock:',
+              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            ...items.map((item) {
+              final name = item['item_name'] ?? item['name'] ?? 'Unknown';
+              final available = item['available'];
+              final requested = item['requested'];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.circle, size: 6, color: AppColors.error),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    if (available != null)
+                      Text(
+                        'Available: $available${requested != null ? ' / Asked: $requested' : ''}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.error,
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _generateBillOffline(List<CartEntry> cart) async {
@@ -1083,23 +1151,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         }),
         Padding(
           padding: const EdgeInsets.fromLTRB(AppSpacing.space12,
-              AppSpacing.space12, AppSpacing.space12, AppSpacing.space8),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Search items…',
-              prefixIcon: const Icon(Icons.search_outlined,
-                  size: 18, color: AppColors.textSecondary),
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.space16, vertical: 12),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 16),
-                      onPressed: () => _searchController.clear(),
-                    )
-                  : null,
-            ),
-          ),
+              6, AppSpacing.space12, AppSpacing.space4),
+          child: Consumer(builder: (context, ref, _) {
+            final cartCount = ref.watch(cartItemCountProvider);
+            return Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 40,
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search items…',
+                        isDense: true,
+                        prefixIcon: const Icon(Icons.search_outlined,
+                            size: 18, color: AppColors.textSecondary),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.space16, vertical: 0),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 16),
+                                onPressed: () => _searchController.clear(),
+                              )
+                            : null,
+                      ),
+                    ),
+                  ),
+                ),
+                if (cartCount > 0) ...[
+                  const SizedBox(width: AppSpacing.space8),
+                  Tooltip(
+                    message: 'Clear selected items',
+                    child: IconButton(
+                      onPressed: () {
+                        ref.read(cartProvider.notifier).clear();
+                      },
+                      icon: const Icon(Icons.remove_shopping_cart_outlined),
+                      color: AppColors.error,
+                      style: IconButton.styleFrom(
+                        backgroundColor: AppColors.errorLight,
+                        minimumSize: const Size(40, 40),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.small),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            );
+          }),
         ),
         Consumer(builder: (context, ref, _) {
           final cats = ref.watch(categoriesProvider).valueOrNull ?? [];
@@ -1215,143 +1317,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // OLD grid-card design — kept for reference, commented out
-  // ---------------------------------------------------------------------------
-
-  // Widget _buildItemRow_OLD(Item item, List<CartEntry> cart) {
-  //   final entry = cart.where((e) => e.item.id == item.id).firstOrNull;
-  //   final qty = entry?.quantity ?? 0;
-  //   final inCart = qty > 0;
-  //
-  //   return AnimatedContainer(
-  //     duration: const Duration(milliseconds: 220),
-  //     curve: Curves.easeInOut,
-  //     margin: const EdgeInsets.symmetric(horizontal: 4),
-  //     decoration: BoxDecoration(
-  //       color: inCart ? AppColors.primaryLight : AppColors.surface,
-  //       borderRadius: BorderRadius.circular(AppRadius.medium),
-  //       border: Border.all(
-  //         color: inCart ? AppColors.primary : AppColors.border,
-  //         width: inCart ? 1.5 : 1,
-  //       ),
-  //       boxShadow: inCart ? AppShadow.small : [],
-  //     ),
-  //     child: Material(
-  //       color: Colors.transparent,
-  //       borderRadius: BorderRadius.circular(AppRadius.medium),
-  //       child: InkWell(
-  //         onTap: inCart
-  //             ? null
-  //             : () {
-  //                 ref.read(cartProvider.notifier).addItem(item);
-  //           //               },
-  //         borderRadius: BorderRadius.circular(AppRadius.medium),
-  //         child: Padding(
-  //           padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-  //           child: Column(
-  //             crossAxisAlignment: CrossAxisAlignment.start,
-  //             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-  //             children: [
-  //               Row(
-  //                 crossAxisAlignment: CrossAxisAlignment.center,
-  //                 children: [
-  //                   Expanded(
-  //                     child: Text(
-  //                       item.name,
-  //                       style: TextStyle(
-  //                         fontSize: 13,
-  //                         fontWeight: FontWeight.w600,
-  //                         color: inCart ? AppColors.primaryDark : AppColors.textPrimary,
-  //                         height: 1.2,
-  //                       ),
-  //                       maxLines: 1,
-  //                       overflow: TextOverflow.ellipsis,
-  //                     ),
-  //                   ),
-  //                   const SizedBox(width: 6),
-  //                   AnimatedContainer(
-  //                     duration: const Duration(milliseconds: 220),
-  //                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-  //                     decoration: BoxDecoration(
-  //                       color: inCart
-  //                           ? AppColors.primary.withValues(alpha: 0.12)
-  //                           : AppColors.surfaceVariant,
-  //                       borderRadius: BorderRadius.circular(20),
-  //                     ),
-  //                     child: Text(
-  //                       '₹${item.price.toStringAsFixed(2)}',
-  //                       style: TextStyle(
-  //                         fontSize: 11,
-  //                         fontWeight: FontWeight.w700,
-  //                         color: inCart ? AppColors.primary : AppColors.textSecondary,
-  //                       ),
-  //                     ),
-  //                   ),
-  //                 ],
-  //               ),
-  //               const SizedBox(height: 6),
-  //               AnimatedSwitcher(
-  //                 duration: const Duration(milliseconds: 220),
-  //                 switchInCurve: Curves.easeOut,
-  //                 switchOutCurve: Curves.easeIn,
-  //                 transitionBuilder: (child, anim) => ScaleTransition(
-  //                   scale: anim,
-  //                   child: FadeTransition(opacity: anim, child: child),
-  //                 ),
-  //                 child: inCart
-  //                     ? _QtyStepper(
-  //                         key: ValueKey('stepper_${item.id}'),
-  //                         qty: qty,
-  //                         onRemove: () => ref.read(cartProvider.notifier).changeQty(item.id, -1),
-  //                         onAdd: () => ref.read(cartProvider.notifier).addItem(item),
-  //                       )
-  //                     : SizedBox(
-  //                         key: ValueKey('add_${item.id}'),
-  //                         width: double.infinity,
-  //                         height: 32,
-  //                         child: DecoratedBox(
-  //                           decoration: BoxDecoration(
-  //                             gradient: AppColors.primaryGradient,
-  //                             borderRadius: BorderRadius.circular(8),
-  //                             boxShadow: [
-  //                               BoxShadow(
-  //                                 color: AppColors.primary.withValues(alpha: 0.22),
-  //                                 blurRadius: 6,
-  //                                 offset: const Offset(0, 2),
-  //                               ),
-  //                             ],
-  //                           ),
-  //                           child: const Center(
-  //                             child: Row(
-  //                               mainAxisSize: MainAxisSize.min,
-  //                               children: [
-  //                                 Icon(Icons.add, size: 14, color: Colors.white),
-  //                                 SizedBox(width: 4),
-  //                                 Text(
-  //                                   'Add',
-  //                                   style: TextStyle(
-  //                                     fontSize: 12,
-  //                                     fontWeight: FontWeight.w700,
-  //                                     color: Colors.white,
-  //                                     letterSpacing: 0.3,
-  //                                   ),
-  //                                 ),
-  //                               ],
-  //                             ),
-  //                           ),
-  //                         ),
-  //                       ),
-  //               ),
-  //             ],
-  //           ),
-  //         ),
-  //       ),
-  //     ),
-  //   );
-  // }
-
-
+ 
   // ---------------------------------------------------------------------------
   // Cart panel
   // ---------------------------------------------------------------------------
@@ -2186,6 +2152,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
   late final AnimationController _swipeCtrl;
   late final TextEditingController _qtyTextCtrl;
   bool _editing = false;
+  Timer? _debounce;
 
   // Track horizontal drag
   double _dragDx = 0;
@@ -2206,13 +2173,20 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
   @override
   void didUpdateWidget(_ExcelItemRow old) {
     super.didUpdateWidget(old);
-    if (old.qty != widget.qty && !_editing) {
-      _qtyTextCtrl.text = widget.qty > 0 ? '${widget.qty}' : '';
+    if (old.qty != widget.qty) {
+      if (widget.qty == 0) {
+        // Cart was cleared (bill generated) — always reset the field
+        _editing = false;
+        _qtyTextCtrl.text = '';
+      } else if (!_editing) {
+        _qtyTextCtrl.text = '${widget.qty}';
+      }
     }
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _swipeCtrl.dispose();
     _qtyTextCtrl.dispose();
     super.dispose();
@@ -2413,6 +2387,16 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                                     ),
                                   ),
                                   onTap: () => _editing = true,
+                                  onChanged: (val) {
+                                    _debounce?.cancel();
+                                    // Don't commit while field is empty —
+                                    // user may be mid-edit (erased to retype)
+                                    if (val.trim().isEmpty) return;
+                                    _debounce = Timer(
+                                      const Duration(milliseconds: 400),
+                                      _commitText,
+                                    );
+                                  },
                                   onSubmitted: (_) => _commitText(),
                                   onEditingComplete: _commitText,
                                   onTapOutside: (_) => _commitText(),

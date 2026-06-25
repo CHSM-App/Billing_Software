@@ -89,7 +89,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, is_active, created_at
+      SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, is_active, created_at
       FROM items
       WHERE ${where}
       ORDER BY name ASC
@@ -118,7 +118,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, is_active, created_at
+        SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, is_active, created_at
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -155,10 +155,10 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('tax_rate', sql.Decimal(5, 2), tax_rate != null ? parseFloat(tax_rate) : null)
       .input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null)
       .query(`
-        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, stock_quantity)
+        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
-               INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @stock_quantity)
+               INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.is_active, INSERTED.created_at
+        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @stock_quantity, 50)
       `);
 
     const created = result.recordset[0];
@@ -228,12 +228,11 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       sets.push('stock_quantity = @stock_quantity');
       request.input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null);
     }
-
     const result = await request.query(`
       UPDATE items
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
-             INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.is_active, INSERTED.created_at
+             INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);
 

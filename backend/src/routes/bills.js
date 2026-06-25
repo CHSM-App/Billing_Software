@@ -6,6 +6,7 @@ const logger = require('../logger');
 const audit = require('../audit');
 const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUtils');
 const { sendBillLink, normalisePhone } = require('../whatsapp');
+const { sendLowStockNotification } = require('../fcm');
 
 // Base URL used in receipt links — no trailing slash
 const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
@@ -136,7 +137,7 @@ router.post('/', requireAuth, async (req, res) => {
       const itemsData = await bindItems(transaction.request())
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT id, name, price, tax_rate, stock_quantity
+          SELECT id, name, price, tax_rate, stock_quantity, low_stock_threshold
           FROM items
           WHERE id IN (${itemClause}) AND business_id = @business_id AND is_active = 1
         `);
@@ -185,13 +186,14 @@ router.post('/', requireAuth, async (req, res) => {
       // The atomic UPDATE below is still the final concurrency guard, but this
       // pre-check catches obvious shortfalls early and reports all failing items
       // at once rather than discovering them one-by-one mid-write.
+      // Aggregate requested quantities per item — used for both stock validation
+      // and the post-commit low-stock notification check below.
+      const requested = {};
+      for (const li of lineItems) {
+        requested[li.item_id] = (requested[li.item_id] || 0) + li.quantity;
+      }
+
       if (inventoryEnabled) {
-        // Aggregate requested quantities per item (a single bill may list the
-        // same item on multiple lines).
-        const requested = {};
-        for (const li of lineItems) {
-          requested[li.item_id] = (requested[li.item_id] || 0) + li.quantity;
-        }
         const insufficient = lineItems
           .filter((li) => itemMap[li.item_id].stock_quantity != null && requested[li.item_id] > itemMap[li.item_id].stock_quantity)
           .map((li) => ({
@@ -300,6 +302,34 @@ router.post('/', requireAuth, async (req, res) => {
       }
 
       await transaction.commit();
+
+      // Collect items that just crossed below their threshold (stock was above before, at/below after).
+      // Bundle into one notification so 50 items = 1 alert, not 50.
+      if (inventoryEnabled) {
+        (async () => {
+          try {
+            const lowItems = [];
+            const seen = new Set();
+            for (const li of lineItems) {
+              if (!li.item_id || seen.has(li.item_id)) continue;
+              seen.add(li.item_id);
+              const item = itemMap[li.item_id];
+              if (!item || item.stock_quantity == null || item.low_stock_threshold == null) continue;
+              const stockBefore = parseFloat(item.stock_quantity);
+              const threshold   = parseFloat(item.low_stock_threshold);
+              const stockAfter  = stockBefore - (requested[li.item_id] || 0);
+              logger.info({ item: item.name, stockBefore, stockAfter, threshold }, '[FCM] stock check');
+              if (stockBefore > threshold && stockAfter <= threshold) {
+                lowItems.push({ name: item.name, remaining: stockAfter });
+              }
+            }
+            logger.info({ lowItems }, '[FCM] sending low-stock notification');
+            await sendLowStockNotification(pool, sql, req.user.business_id, lowItems);
+          } catch (err) {
+            logger.error({ err }, '[FCM] low-stock notification error');
+          }
+        })();
+      }
 
       const created = await fetchBill(billId, req.user.business_id);
 
@@ -498,7 +528,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       const itemsData = await bindItems2(transaction.request())
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT id, name, price, tax_rate, stock_quantity
+          SELECT id, name, price, tax_rate, stock_quantity, low_stock_threshold
           FROM items
           WHERE id IN (${itemClause2}) AND business_id = @business_id AND is_active = 1
         `);
@@ -602,6 +632,28 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
       addedLineItems = lineItems;
       await transaction.commit();
+
+      // Collect items that just crossed below their threshold, send one notification.
+      if (inventoryEnabled) {
+        (async () => {
+          try {
+            const lowItems = [];
+            const seen = new Set();
+            for (const li of lineItems) {
+              if (!li.item_id || seen.has(li.item_id)) continue;
+              seen.add(li.item_id);
+              const item = itemMap[li.item_id];
+              if (!item || item.stock_quantity == null || item.low_stock_threshold == null) continue;
+              const stockBefore = item.stock_quantity;
+              const stockAfter  = stockBefore - (requested2[li.item_id] || 0);
+              if (stockBefore > item.low_stock_threshold && stockAfter <= item.low_stock_threshold) {
+                lowItems.push({ name: item.name, remaining: stockAfter });
+              }
+            }
+            await sendLowStockNotification(pool, sql, req.user.business_id, lowItems);
+          } catch (_) {}
+        })();
+      }
     } catch (err) {
       await transaction.rollback();
       throw err;

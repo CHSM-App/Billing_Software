@@ -167,6 +167,7 @@ app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/audit', require('./routes/audit'));
 app.use('/api/license', require('./routes/license'));
 app.use('/api/account', require('./routes/account'));
+app.use('/api/fcm', require('./routes/fcm'));
 
 // Unexpected middleware/route failures should stay JSON for API callers.
 app.use((err, req, res, next) => {

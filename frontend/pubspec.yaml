@@ -30,6 +30,8 @@ dependencies:
   # Firebase – update system
   firebase_core: ^3.3.0
   firebase_remote_config: ^5.1.0
+  firebase_messaging: ^15.0.0
+  flutter_local_notifications: ^18.0.0
   package_info_plus: ^8.0.2
   url_launcher: ^6.3.0
   in_app_update: ^4.2.3

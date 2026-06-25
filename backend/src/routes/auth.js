@@ -237,10 +237,8 @@ router.post('/login', loginLimiter, async (req, res) => {
         WHERE u.phone = @phone
       `);
 
-    // Return the same generic error whether the phone is unknown or PIN is wrong
-    // to prevent user enumeration
     if (userResult.recordset.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(404).json({ error: 'phone_not_found' });
     }
 
     const row = userResult.recordset[0];

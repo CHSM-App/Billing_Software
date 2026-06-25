@@ -50,6 +50,7 @@ class Item {
   final double price;
   final double? taxRate;
   final double? stockQuantity;
+  final double? lowStockThreshold;
   final bool isActive;
 
   Item({
@@ -61,6 +62,7 @@ class Item {
     required this.price,
     this.taxRate,
     this.stockQuantity,
+    this.lowStockThreshold,
     required this.isActive,
   });
 
@@ -73,8 +75,14 @@ class Item {
         price: double.parse(j['price'].toString()),
         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
         stockQuantity: j['stock_quantity'] != null ? double.parse(j['stock_quantity'].toString()) : null,
+        lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
         isActive: j['is_active'] == true || j['is_active'] == 1,
       );
+
+  bool get isLowStock =>
+      stockQuantity != null &&
+      lowStockThreshold != null &&
+      stockQuantity! <= lowStockThreshold!;
 }
 
 class BillItem {

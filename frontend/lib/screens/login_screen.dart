@@ -10,6 +10,7 @@ import 'otp_screen.dart';
 import 'main_shell.dart';
 import 'license_screen.dart';
 import '../services/license_service.dart';
+import '../services/notification_service.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -25,6 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _pinController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  bool _isPendingActivation = false;
 
   late final AnimationController _animController;
   late final Animation<double> _fadeAnim;
@@ -216,6 +218,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _isPendingActivation = false;
     });
 
     try {
@@ -234,6 +237,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         inventoryEnabled: business['inventory_enabled'] == true,
         hasBarcodeScanner: business['has_barcode_scanner'] == true,
       );
+      NotificationService.instance.init();
       await ref.read(sessionProvider.notifier).refresh();
       ref.invalidate(itemsProvider);
       ref.invalidate(categoriesProvider);
@@ -272,7 +276,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       Navigator.pushReplacement(
           context, MaterialPageRoute(builder: (_) => MainShell(licenseStatus: licenseStatus)));
     } on ApiException catch (e) {
-      setState(() => _errorMessage = e.message);
+      if (e.statusCode == 403) {
+        setState(() => _isPendingActivation = true);
+      } else if (e.statusCode == 404) {
+        setState(() => _errorMessage = 'No account found with this phone number.');
+      } else if (e.statusCode == 401) {
+        setState(() => _errorMessage = 'Incorrect PIN. Please try again.');
+      } else if (e.statusCode == 423) {
+        setState(() => _errorMessage = e.serverMessage ?? 'Account temporarily locked. Try again in 15 minutes.');
+      } else {
+        setState(() => _errorMessage = e.serverMessage ?? 'Something went wrong. Please try again.');
+      }
     } catch (e) {
       setState(() => _errorMessage =
           'Could not connect to server. Check your internet connection.');
@@ -467,7 +481,52 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
               return null;
             },
           ),
-          if (_errorMessage != null) ...[
+          if (_isPendingActivation) ...[
+            const SizedBox(height: AppSpacing.space16),
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.space12),
+              decoration: BoxDecoration(
+                color: AppColors.warningLight,
+                borderRadius: BorderRadius.circular(AppRadius.small),
+                border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.hourglass_top_rounded,
+                          size: 16, color: AppColors.warning),
+                      const SizedBox(width: AppSpacing.space8),
+                      Text(
+                        'Account not activated',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.warning,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Your account is pending activation. Please contact our support team to activate your account.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.warning,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'support@vengurlatech.com',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.warning,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ] else if (_errorMessage != null) ...[
             const SizedBox(height: AppSpacing.space16),
             AnimatedContainer(
               duration: const Duration(milliseconds: 300),

@@ -128,12 +128,20 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(AppSpacing.space16),
-            child: TextField(
-              controller: _searchController,
-              decoration: const InputDecoration(
-                hintText: 'Search items…',
-                prefixIcon: Icon(Icons.search_outlined, size: 20),
+            padding: const EdgeInsets.fromLTRB(AppSpacing.space12,
+                6, AppSpacing.space12, AppSpacing.space4),
+            child: SizedBox(
+              height: 40,
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  hintText: 'Search items…',
+                  isDense: true,
+                  prefixIcon: Icon(Icons.search_outlined,
+                      size: 18, color: AppColors.textSecondary),
+                  contentPadding: EdgeInsets.symmetric(
+                      horizontal: AppSpacing.space16, vertical: 0),
+                ),
               ),
             ),
           ),
@@ -282,15 +290,34 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (subtitle.isNotEmpty)
-                        Text(
-                          subtitle,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textSecondary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      if (subtitle.isNotEmpty || (inventoryEnabled && item.isLowStock))
+                        Row(
+                          children: [
+                            if (subtitle.isNotEmpty)
+                              Flexible(
+                                child: Text(
+                                  subtitle,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            if (inventoryEnabled && item.isLowStock) ...[
+                              if (subtitle.isNotEmpty)
+                                const SizedBox(width: 6),
+                              const Text(
+                                '· Low stock',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.warning,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                     ],
                   ),

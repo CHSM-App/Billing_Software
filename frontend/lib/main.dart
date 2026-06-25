@@ -1,9 +1,9 @@
-// import 'package:firebase_core/firebase_core.dart';  // TODO: enable when Firebase is needed
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-// import 'firebase_options.dart';           // TODO: enable when Firebase is needed
+import 'firebase_options.dart';
 import 'api.dart';
 import 'providers.dart';
 import 'theme/app_theme.dart';
@@ -12,6 +12,7 @@ import 'screens/main_shell.dart';
 import 'screens/license_screen.dart';
 import 'services/offline_service.dart';
 import 'services/license_service.dart';
+import 'services/notification_service.dart';
 // import 'core/services/remote_config_service.dart';  // TODO: enable when Firebase is needed
 import 'features/splash/vittam_splash_screen.dart';
 
@@ -26,11 +27,9 @@ void main() async {
     ffi.initFfi();
   }
 
-  // TODO: Enable Firebase when Remote Config is needed
-  // await Firebase.initializeApp(
-  //   options: DefaultFirebaseOptions.currentPlatform,
-  // );
-  // await VittamRemoteConfig.instance.initialize();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   await OfflineService.instance.init();
 
@@ -102,6 +101,9 @@ class _AppEntryState extends ConsumerState<_AppEntry> {
       );
       return;
     }
+
+    // Init notifications now that we have an authenticated session
+    NotificationService.instance.init();
 
     // Wire connectivity notifier into api.dart
     final notifier = ref.read(connectivityProvider.notifier);
