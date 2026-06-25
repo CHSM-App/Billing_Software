@@ -792,19 +792,69 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _logout() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Logout?'),
-        content: const Text('Are you sure you want to log out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.large),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.space24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: AppColors.errorLight,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.logout_rounded,
+                  color: AppColors.error,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.space16),
+              Text(
+                'Logout?',
+                style: Theme.of(ctx).textTheme.titleLarge,
+              ),
+              const SizedBox(height: AppSpacing.space8),
+              Text(
+                'Are you sure you want to log out of your account?',
+                style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppSpacing.space24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 46),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.space12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.error,
+                        minimumSize: const Size(0, 46),
+                      ),
+                      child: const Text('Logout'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Logout', style: TextStyle(color: AppColors.error)),
-          ),
-        ],
+        ),
       ),
     );
     if (confirmed != true || !mounted) return;

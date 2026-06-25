@@ -1,11 +1,9 @@
-import 'package:firebase_core/firebase_core.dart';
+// import 'package:firebase_core/firebase_core.dart';  // TODO: enable when Firebase is needed
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-// TODO: Uncomment after running `flutterfire configure` to generate this file:
-import 'firebase_options.dart';
-
+// import 'firebase_options.dart';           // TODO: enable when Firebase is needed
 import 'api.dart';
 import 'providers.dart';
 import 'theme/app_theme.dart';
@@ -14,7 +12,7 @@ import 'screens/main_shell.dart';
 import 'screens/license_screen.dart';
 import 'services/offline_service.dart';
 import 'services/license_service.dart';
-import 'core/services/remote_config_service.dart';
+// import 'core/services/remote_config_service.dart';  // TODO: enable when Firebase is needed
 import 'features/splash/vittam_splash_screen.dart';
 
 // Desktop-only SQLite FFI init — imported only on non-web builds.
@@ -28,11 +26,12 @@ void main() async {
     ffi.initFfi();
   }
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  // TODO: Enable Firebase when Remote Config is needed
+  // await Firebase.initializeApp(
+  //   options: DefaultFirebaseOptions.currentPlatform,
+  // );
+  // await VittamRemoteConfig.instance.initialize();
 
-  await VittamRemoteConfig.instance.initialize();
   await OfflineService.instance.init();
 
   runApp(const ProviderScope(child: BillingApp()));
