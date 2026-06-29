@@ -5,7 +5,7 @@ import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
 const String baseUrl = 'https://vittam.vengurlatech.com/api';
-// const String baseUrl = 'http://192.168.1.11:5000/api';
+// const String baseUrl = 'http://192.168.1.4:5000/api';
 const String _genericApiErrorMessage = 'Something went wrong';
 
 String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
