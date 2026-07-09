@@ -47,6 +47,12 @@ router.post('/register', registerLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Phone must be a 10-digit number' });
   }
 
+  const toTitleCase = (str) => str.replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const businessNameSaved = toTitleCase(business_name.trim());
+  const ownerNameSaved    = toTitleCase(owner_name.trim());
+  const addressSaved      = address ? toTitleCase(address.trim()) : null;
+
   try {
     await poolConnect;
     const pinHash = await bcrypt.hash(pin, 10);
@@ -56,9 +62,9 @@ router.post('/register', registerLimiter, async (req, res) => {
     try {
       // Insert business
       const businessResult = await transaction.request()
-        .input('name', sql.NVarChar(200), business_name)
+        .input('name', sql.NVarChar(200), businessNameSaved)
         .input('business_type', sql.NVarChar(50), business_type)
-        .input('address', sql.NVarChar(500), address || null)
+        .input('address', sql.NVarChar(500), addressSaved)
         .input('phone', sql.NVarChar(20), phone)
         .input('inventory_enabled', sql.Bit, inventory_enabled ? 1 : 0)
         .input('has_barcode_scanner', sql.Bit, has_barcode_scanner ? 1 : 0)
@@ -73,7 +79,7 @@ router.post('/register', registerLimiter, async (req, res) => {
       // Insert owner user
       await transaction.request()
         .input('business_id', sql.UniqueIdentifier, businessId)
-        .input('name', sql.NVarChar(200), owner_name)
+        .input('name', sql.NVarChar(200), ownerNameSaved)
         .input('phone', sql.NVarChar(20), owner_phone)
         .input('pin_hash', sql.NVarChar(255), pinHash)
         .query(`
@@ -85,8 +91,8 @@ router.post('/register', registerLimiter, async (req, res) => {
 
       // Fire-and-forget — alert admin about new onboarding request
       whatsapp.sendOnboardingAlert({
-        businessName: business_name,
-        ownerName:    owner_name,
+        businessName: businessNameSaved,
+        ownerName:    ownerNameSaved,
         phone:        owner_phone,
         businessType: business_type,
       }).catch(err => logger.warn({ err }, 'Onboarding alert failed'));
