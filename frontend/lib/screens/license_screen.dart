@@ -47,15 +47,18 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
       _errorMessage = null;
     });
 
-    // Always attempt online check — don't rely on cached connectivity state
-    final status = await LicenseService.instance.check(isOnline: true);
+    try {
+      // Always attempt online check — don't rely on cached connectivity state
+      final status = await LicenseService.instance.check(isOnline: true);
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    if (status.state == LicenseState.allowed ||
-        status.state == LicenseState.grace) {
-      widget.onUnblocked();
-    } else {
+      if (status.state == LicenseState.allowed ||
+          status.state == LicenseState.grace) {
+        widget.onUnblocked();
+        return;
+      }
+
       final rawError = LicenseService.instance.lastOnlineError;
       final isSessionExpired = rawError != null && rawError.contains('401');
       if (isSessionExpired) {
@@ -63,11 +66,17 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
         return;
       }
       setState(() {
-        _checking = false;
         _errorMessage = rawError == null
             ? _messageForState(status.state)
             : sanitizeUiErrorMessage(rawError);
       });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Could not connect. Check your internet and try again.';
+      });
+    } finally {
+      if (mounted) setState(() => _checking = false);
     }
   }
 

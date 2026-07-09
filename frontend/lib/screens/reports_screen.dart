@@ -5,6 +5,7 @@ import '../providers.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/shell_app_bar.dart';
 
 final _amt = NumberFormat('#,##0.00');
 final _dateFmt = DateFormat('dd MMM yyyy');
@@ -17,24 +18,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
   ConsumerState<ReportsScreen> createState() => _ReportsScreenState();
 }
 
-class _ReportsScreenState extends ConsumerState<ReportsScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _fade;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
-    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    _ctrl.forward();
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
+class _ReportsScreenState extends ConsumerState<ReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
@@ -42,32 +26,32 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
     final summaryAsync = ref.watch(reportSummaryProvider);
     final isWide = MediaQuery.of(context).size.width >= 720;
 
-    return FadeTransition(
-      opacity: _fade,
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: AppBar(
-          title: const Text('Reports'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.calendar_month_outlined),
-              tooltip: 'Change period',
-              onPressed: () => _showPeriodPicker(context, filter),
-            ),
-            IconButton(
-              icon: const Icon(Icons.refresh_outlined),
-              tooltip: 'Refresh',
-              onPressed: () => ref.invalidate(reportSummaryProvider),
-            ),
-          ],
-        ),
-        body: summaryAsync.when(
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Column(children: [
+          ShellAppBar(
+            title: const Text('Reports'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.calendar_month_outlined),
+                tooltip: 'Change period',
+                onPressed: () => _showPeriodPicker(context, filter),
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh_outlined),
+                tooltip: 'Refresh',
+                onPressed: () => ref.invalidate(reportSummaryProvider),
+              ),
+            ],
+          ),
+          Expanded(child: summaryAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (e, _) => AppErrorWidget(
             error: e,
             onRetry: () => ref.invalidate(reportSummaryProvider),
           ),
           data: (summary) => ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
             children: [
               _buildPeriodBar(filter),
@@ -86,15 +70,15 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen>
               ],
             ],
           ),
-        ),
-      ),
+        )),
+        ]),
     );
   }
 
   // ── Period bar ─────────────────────────────────────────────────────────────
   Widget _buildPeriodBar(ReportSummaryFilter filter) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: AppColors.surface,

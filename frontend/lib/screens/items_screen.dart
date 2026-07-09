@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/shell_app_bar.dart';
 import '../api.dart';
 import '../services/printer_service.dart';
 
@@ -124,27 +125,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final itemsAsync = ref.watch(itemsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Items / Menu')),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.space12,
-                6, AppSpacing.space12, AppSpacing.space4),
-            child: SizedBox(
-              height: 40,
-              child: TextField(
-                controller: _searchController,
-                decoration: const InputDecoration(
-                  hintText: 'Search items…',
-                  isDense: true,
-                  prefixIcon: Icon(Icons.search_outlined,
-                      size: 18, color: AppColors.textSecondary),
-                  contentPadding: EdgeInsets.symmetric(
-                      horizontal: AppSpacing.space16, vertical: 0),
-                ),
-              ),
-            ),
-          ),
+          ShellAppBar(title: const Text('Items / Menu')),
           Expanded(child: _buildBody(itemsAsync, userRole, inventoryEnabled)),
         ],
       ),
@@ -159,6 +142,27 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           : null,
     );
   }
+
+  Widget _searchBarSliver() => SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.space12, 6, AppSpacing.space12, AppSpacing.space4),
+          child: SizedBox(
+            height: 40,
+            child: TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                hintText: 'Search items…',
+                isDense: true,
+                prefixIcon: Icon(Icons.search_outlined,
+                    size: 18, color: AppColors.textSecondary),
+                contentPadding: EdgeInsets.symmetric(
+                    horizontal: AppSpacing.space16, vertical: 0),
+              ),
+            ),
+          ),
+        ),
+      );
 
   Widget _buildBody(
       AsyncValue<List<Item>> itemsAsync, String userRole, bool inventoryEnabled) {
@@ -181,14 +185,17 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
               ref.invalidate(itemsProvider);
               await ref.read(itemsProvider.future);
             },
-            child: ListView(children: [
-              EmptyState(
-                icon: Icons.inventory_2_outlined,
-                message: userRole == 'owner'
-                    ? 'No items yet. Tap + to add your first item.'
-                    : 'No items found.',
-                actionLabel: userRole == 'owner' ? 'Add Item' : null,
-                onAction: userRole == 'owner' ? () => _showItemForm() : null,
+            child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
+              _searchBarSliver(),
+              SliverFillRemaining(
+                child: EmptyState(
+                  icon: Icons.inventory_2_outlined,
+                  message: userRole == 'owner'
+                      ? 'No items yet. Tap + to add your first item.'
+                      : 'No items found.',
+                  actionLabel: userRole == 'owner' ? 'Add Item' : null,
+                  onAction: userRole == 'owner' ? () => _showItemForm() : null,
+                ),
               ),
             ]),
           );
@@ -200,44 +207,32 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             ref.invalidate(itemsProvider);
             await ref.read(itemsProvider.future);
           },
-          child: isWide
-              ? _buildGrid(items, userRole, inventoryEnabled, crossAxisCount: 3)
-              : _buildList(items, userRole, inventoryEnabled),
+          child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
+            _searchBarSliver(),
+            _buildGridSliver(items, userRole, inventoryEnabled,
+                crossAxisCount: isWide ? 3 : 1),
+          ]),
         );
       },
     );
   }
 
-  Widget _buildList(List<Item> items, String userRole, bool inventoryEnabled) {
-    return GridView.builder(
+  Widget _buildGridSliver(List<Item> items, String userRole, bool inventoryEnabled,
+      {int crossAxisCount = 1}) {
+    return SliverPadding(
       padding: const EdgeInsets.fromLTRB(
           AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 1,
-        crossAxisSpacing: AppSpacing.space8,
-        mainAxisSpacing: 8,
-        mainAxisExtent: 62,
+      sliver: SliverGrid.builder(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          crossAxisSpacing: AppSpacing.space8,
+          mainAxisSpacing: 8,
+          mainAxisExtent: 62,
+        ),
+        itemCount: items.length,
+        itemBuilder: (_, i) =>
+            _buildItemCard(items[i], userRole, inventoryEnabled),
       ),
-      itemCount: items.length,
-      itemBuilder: (_, i) =>
-          _buildItemCard(items[i], userRole, inventoryEnabled),
-    );
-  }
-
-  Widget _buildGrid(List<Item> items, String userRole, bool inventoryEnabled,
-      {int crossAxisCount = 3}) {
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        crossAxisSpacing: AppSpacing.space8,
-        mainAxisSpacing: 8,
-        mainAxisExtent: 62,
-      ),
-      itemCount: items.length,
-      itemBuilder: (_, i) =>
-          _buildItemCard(items[i], userRole, inventoryEnabled),
     );
   }
 

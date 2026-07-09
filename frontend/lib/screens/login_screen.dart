@@ -301,6 +301,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     final isWide = size.width >= 720;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: isWide ? _buildWideLayout() : _buildNarrowLayout(),
     );
   }

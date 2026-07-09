@@ -7,6 +7,7 @@ import '../providers.dart';
 import '../services/printer_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/shell_app_bar.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -59,65 +60,66 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final billsAsync = ref.watch(billsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Bill History')),
       body: Column(
         children: [
-          // Filters row
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpacing.space16,
-                AppSpacing.space16,
-                AppSpacing.space16,
-                AppSpacing.space8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 40,
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        hintText: 'Search bill no. or phone…',
-                        isDense: true,
-                        prefixIcon: Icon(Icons.search_outlined,
-                            size: 18, color: AppColors.textSecondary),
-                        contentPadding: EdgeInsets.symmetric(
-                            horizontal: AppSpacing.space16, vertical: 0),
-                      ),
-                      onChanged: (v) =>
-                          ref.read(billFilterProvider.notifier).setSearch(v),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.space8),
-                OutlinedButton.icon(
-                  onPressed: _pickDateRange,
-                  icon: const Icon(Icons.calendar_today_outlined, size: 16),
-                  label: Text(
-                    filter.from == filter.to ||
-                            filter.from.isAtSameMomentAs(filter.to)
-                        ? _dateFmt.format(filter.from)
-                        : '${_dateFmt.format(filter.from)} – ${_dateFmt.format(filter.to)}',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 40),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.space12, vertical: 0),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.small),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(child: _buildBody(billsAsync)),
+          ShellAppBar(title: const Text('Bill History')),
+          Expanded(child: _buildBody(billsAsync, filter)),
         ],
       ),
     );
   }
 
-  Widget _buildBody(AsyncValue<List<Bill>> billsAsync) {
+  SliverToBoxAdapter _filterRowSliver(BillFilterState filter) =>
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.space16, AppSpacing.space16,
+              AppSpacing.space16, AppSpacing.space8),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 40,
+                  child: TextField(
+                    decoration: const InputDecoration(
+                      hintText: 'Search bill no. or phone…',
+                      isDense: true,
+                      prefixIcon: Icon(Icons.search_outlined,
+                          size: 18, color: AppColors.textSecondary),
+                      contentPadding: EdgeInsets.symmetric(
+                          horizontal: AppSpacing.space16, vertical: 0),
+                    ),
+                    onChanged: (v) =>
+                        ref.read(billFilterProvider.notifier).setSearch(v),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.space8),
+              OutlinedButton.icon(
+                onPressed: _pickDateRange,
+                icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                label: Text(
+                  filter.from == filter.to ||
+                          filter.from.isAtSameMomentAs(filter.to)
+                      ? _dateFmt.format(filter.from)
+                      : '${_dateFmt.format(filter.from)} – ${_dateFmt.format(filter.to)}',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 40),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.space12, vertical: 0),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.small),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _buildBody(AsyncValue<List<Bill>> billsAsync, BillFilterState filter) {
     return billsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => RefreshIndicator(
@@ -125,10 +127,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ref.invalidate(billsProvider);
           await ref.read(billsProvider.future);
         },
-        child: ListView(children: [
-          AppErrorWidget(
-            error: e,
-            onRetry: () => ref.invalidate(billsProvider),
+        child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
+          _filterRowSliver(filter),
+          SliverFillRemaining(
+            child: AppErrorWidget(
+              error: e,
+              onRetry: () => ref.invalidate(billsProvider),
+            ),
           ),
         ]),
       ),
@@ -139,10 +144,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               ref.invalidate(billsProvider);
               await ref.read(billsProvider.future);
             },
-            child: ListView(children: const [
-              EmptyState(
-                icon: Icons.receipt_long_outlined,
-                message: 'No bills found for this period.',
+            child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
+              _filterRowSliver(filter),
+              const SliverFillRemaining(
+                child: EmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  message: 'No bills found for this period.',
+                ),
               ),
             ]),
           );
@@ -153,12 +161,16 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             ref.invalidate(billsProvider);
             await ref.read(billsProvider.future);
           },
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpacing.space16, 0, AppSpacing.space16, AppSpacing.space32),
-            itemCount: bills.length,
-            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.space8),
-            itemBuilder: (_, i) {
+          child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
+            _filterRowSliver(filter),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.space16, 0, AppSpacing.space16, AppSpacing.space32),
+              sliver: SliverList.separated(
+                itemCount: bills.length,
+                separatorBuilder: (_, __) =>
+                    const SizedBox(height: AppSpacing.space8),
+                itemBuilder: (_, i) {
               final bill = bills[i];
               return AppCard(
                 onTap: () => _showBillDetail(bill),
@@ -225,8 +237,10 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   ],
                 ),
               );
-            },
-          ),
+                },
+              ),
+            ),
+          ]),
         );
       },
     );

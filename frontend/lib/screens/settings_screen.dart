@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/shell_app_bar.dart';
 import 'login_screen.dart';
 // Printer screens use native-only packages — excluded on web.
 import 'printer_setup_screen.dart'
@@ -99,7 +100,7 @@ class _SettingsContentState extends State<_SettingsContent>
             text: 'Cancel',
             onPressed: () => Navigator.pop(context, false),
           ),
-          const SizedBox(width: AppSpacing.space8),
+          const SizedBox(height: AppSpacing.space8),
           DestructiveButton(
             text: 'Logout',
             onPressed: () => Navigator.pop(context, true),
@@ -124,8 +125,9 @@ class _SettingsContentState extends State<_SettingsContent>
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Settings')),
-      body: FadeTransition(
+      body: Column(children: [
+        ShellAppBar(title: const Text('Settings')),
+        Expanded(child: FadeTransition(
         opacity: _fadeAnim,
         child: RefreshIndicator(
           onRefresh: () =>
@@ -244,8 +246,8 @@ class _SettingsContentState extends State<_SettingsContent>
               ),
             ),
           ),
-        ),
-      ),
+        ))),
+      ]),
     );
   }
 

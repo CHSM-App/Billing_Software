@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/shell_app_bar.dart';
 import 'home_screen.dart';
 
 class TablesScreen extends ConsumerStatefulWidget {
@@ -189,52 +190,54 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     final tablesAsync = ref.watch(tablesProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Tables'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_outlined),
-            onPressed: () => ref.invalidate(tablesProvider),
-            tooltip: 'Refresh',
-          ),
-        ],
-      ),
-      body: tablesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => AppErrorWidget(
-          error: e,
-          onRetry: () => ref.invalidate(tablesProvider),
+      body: Column(children: [
+        ShellAppBar(
+          title: const Text('Tables'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh_outlined),
+              onPressed: () => ref.invalidate(tablesProvider),
+              tooltip: 'Refresh',
+            ),
+          ],
         ),
-        data: (tables) {
-          if (tables.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.table_restaurant_outlined,
-                      size: 48, color: AppColors.textDisabled),
-                  const SizedBox(height: AppSpacing.space16),
-                  Text('No tables yet',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: AppColors.textSecondary)),
-                  if (userRole == 'owner') ...[
+        Expanded(child: tablesAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => AppErrorWidget(
+            error: e,
+            onRetry: () => ref.invalidate(tablesProvider),
+          ),
+          data: (tables) {
+            if (tables.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.table_restaurant_outlined,
+                        size: 48, color: AppColors.textDisabled),
                     const SizedBox(height: AppSpacing.space16),
-                    ElevatedButton.icon(
-                      onPressed: _addTable,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Table'),
-                    ),
+                    Text('No tables yet',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: AppColors.textSecondary)),
+                    if (userRole == 'owner') ...[
+                      const SizedBox(height: AppSpacing.space16),
+                      ElevatedButton.icon(
+                        onPressed: _addTable,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add Table'),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            );
-          }
+                ),
+              );
+            }
 
-          return _buildCanvas(tables, userRole);
-        },
-      ),
+            return _buildCanvas(tables, userRole);
+          },
+        )),
+      ]),
       floatingActionButton: userRole == 'owner'
           ? FloatingActionButton.extended(
               onPressed: _addTable,

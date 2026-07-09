@@ -82,6 +82,15 @@ router.post('/register', registerLimiter, async (req, res) => {
         `);
 
       await transaction.commit();
+
+      // Fire-and-forget — alert admin about new onboarding request
+      whatsapp.sendOnboardingAlert({
+        businessName: business_name,
+        ownerName:    owner_name,
+        phone:        owner_phone,
+        businessType: business_type,
+      }).catch(err => logger.warn({ err }, 'Onboarding alert failed'));
+
       return res.json({ success: true, message: 'Registration successful. Account pending verification.' });
     } catch (err) {
       await transaction.rollback();
@@ -109,20 +118,21 @@ router.post('/send-otp', registerLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Phone must be a 10-digit number' });
   }
 
-  // For forgot_pin: verify the phone belongs to an existing user
-  if (purpose === 'forgot_pin') {
-    try {
-      await poolConnect;
-      const result = await pool.request()
-        .input('phone', sql.NVarChar(20), phone)
-        .query(`SELECT id FROM users WHERE phone = @phone`);
-      if (result.recordset.length === 0) {
-        return res.status(404).json({ error: 'No account found with this phone number.' });
-      }
-    } catch (err) {
-      logger.error({ err }, 'send-otp forgot_pin lookup error');
-      return res.status(500).json({ error: 'Failed to send OTP' });
+  try {
+    await poolConnect;
+    const existing = await pool.request()
+      .input('phone', sql.NVarChar(20), phone)
+      .query(`SELECT id FROM users WHERE phone = @phone`);
+
+    if (purpose === 'register' && existing.recordset.length > 0) {
+      return res.status(409).json({ error: 'An account with this phone number already exists.' });
     }
+    if (purpose === 'forgot_pin' && existing.recordset.length === 0) {
+      return res.status(404).json({ error: 'No account found with this phone number.' });
+    }
+  } catch (err) {
+    logger.error({ err }, 'send-otp phone lookup error');
+    return res.status(500).json({ error: 'Failed to send OTP' });
   }
 
   try {

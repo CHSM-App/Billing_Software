@@ -9,6 +9,7 @@ import '../models/cart_entry.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/shell_app_bar.dart';
 import '../services/printer_service.dart';
 import '../services/offline_service.dart';
 import '../services/sync_service.dart';
@@ -47,6 +48,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _savingDraft = false;
   bool _draftLoaded = false;
 
+  // Search bar expand state
+  bool _searchExpanded = false;
+  late final AnimationController _searchAnimCtrl;
+  late final Animation<double> _searchAnim;
+  final _searchFocus = FocusNode();
+
   final _searchController = TextEditingController();
   final _customerNameController = TextEditingController();
   final _customerPhoneController = TextEditingController();
@@ -72,6 +79,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void initState() {
     super.initState();
+    _searchAnimCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _searchAnim = CurvedAnimation(parent: _searchAnimCtrl, curve: Curves.easeInOut);
     _searchController.addListener(() => setState(() {}));
     _discountPctController.addListener(_onDiscountPctChanged);
     _discountAmtController.addListener(_onDiscountAmtChanged);
@@ -113,6 +125,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_globalKeyHandler);
+    _searchAnimCtrl.dispose();
+    _searchFocus.dispose();
     _searchController.dispose();
     _customerNameController.dispose();
     _customerPhoneController.dispose();
@@ -345,7 +359,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
-  Future<void> _generateBill() async {
+  Future<void> _generateBill({void Function(Bill)? onBillReady}) async {
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) {
       _showSnack('Add at least one item to the cart', isError: true);
@@ -353,22 +367,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     if (widget.activeBillId != null || widget.tableId != null) {
       // Table billing — always online
-      await _generateBillOnline(cart);
+      await _generateBillOnline(cart, onBillReady: onBillReady);
       return;
     }
     // Retail billing — online when connected, offline when not
     final isOnline = ref.read(connectivityProvider);
     if (isOnline) {
-      await _generateBillOnline(cart);
+      await _generateBillOnline(cart, onBillReady: onBillReady);
     } else {
-      await _generateBillOffline(cart);
+      await _generateBillOffline(cart, onBillReady: onBillReady);
       unawaited(SyncService.instance.syncAll().then((_) {
         ref.invalidate(reportProvider);
       }));
     }
   }
 
-  Future<void> _generateBillOnline(List<CartEntry> cart) async {
+  Future<void> _generateBillAndPrint() async {
+    await _generateBill(onBillReady: (bill) {
+      _navigateAfterBill();
+      _autoPrint(bill);
+    });
+  }
+
+  Future<void> _generateBillAndWhatsApp() async {
+    await _generateBill(onBillReady: (bill) {
+      _navigateAfterBill();
+      _sendBillWhatsApp(bill);
+    });
+  }
+
+  void _navigateAfterBill() {
+    if (!mounted) return;
+    if (widget.tableId != null) {
+      if (widget.onBillDone != null) {
+        widget.onBillDone!();
+      } else {
+        Navigator.pop(context);
+      }
+    }
+  }
+
+  Future<void> _generateBillOnline(List<CartEntry> cart,
+      {void Function(Bill)? onBillReady}) async {
     setState(() => _generatingBill = true);
     try {
       Map<String, dynamic> result;
@@ -400,8 +440,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       setState(() => _paymentMode = 'cash');
       ref.invalidate(reportProvider);
       ref.invalidate(billsProvider);
-      _showBillDialog(bill);
-      // _autoPrint(bill);
+      if (onBillReady != null) {
+        onBillReady(bill);
+      } else {
+        _navigateAfterBill();
+      }
     } on ApiException catch (e) {
       if (e.statusCode == 409 && e.items != null && e.items!.isNotEmpty) {
         _showInsufficientStockDialog(e.items!);
@@ -480,7 +523,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  Future<void> _generateBillOffline(List<CartEntry> cart) async {
+  Future<void> _generateBillOffline(List<CartEntry> cart,
+      {void Function(Bill)? onBillReady}) async {
     setState(() => _generatingBill = true);
     try {
       final businessId = await getBusinessId() ?? '';
@@ -559,8 +603,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _discountAmtController.clear();
       setState(() => _paymentMode = 'cash');
       if (!mounted) return;
-      _showBillDialog(fakeBill);
-      // _autoPrint(fakeBill);
+      if (onBillReady != null) {
+        onBillReady(fakeBill);
+      } else {
+        _navigateAfterBill();
+      }
     } catch (e) {
       _showSnack('Failed to save bill offline: $e', isError: true);
     } finally {
@@ -572,6 +619,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final businessName = ref.read(businessNameProvider);
     try {
       await PrinterService.instance.printBill(bill, businessName: businessName);
+      if (mounted) _showSnack('Bill printed successfully');
     } on PrinterException catch (e) {
       if (e.message == 'No printer configured') return;
       if (mounted) _showSnack('Print failed: ${e.message}', isError: true);
@@ -589,254 +637,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {
       if (mounted) _showSnack('Could not send WhatsApp message', isError: true);
     }
-  }
-
-  void _showBillDialog(Bill bill) {
-    final hasPhone = bill.customerPhone != null && bill.customerPhone!.isNotEmpty;
-    showDialog(
-      context: context,
-      builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.large)),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: 380,
-            maxHeight: MediaQuery.of(context).size.height * 0.82,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.space24),
-                decoration: BoxDecoration(
-                  gradient: AppColors.accentGradient,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(AppRadius.large),
-                    topRight: Radius.circular(AppRadius.large),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.check_rounded,
-                          color: Colors.white, size: 26),
-                    ),
-                    const SizedBox(width: AppSpacing.space12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Bill Generated!',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                        Text(
-                          'Bill #${bill.billNumber}',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 13,
-                            color: Colors.white.withValues(alpha: 0.85),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // Items — receipt style, scrollable when many items
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.space16),
-                    child: Column(
-                      children: [
-                        const Divider(height: 1),
-                        ...bill.items.map((item) {
-                          final qty = item.quantity.toStringAsFixed(
-                              item.quantity % 1 == 0 ? 0 : 1);
-                          return Column(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 7),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        item.itemName,
-                                        style: const TextStyle(
-                                          fontFamily: 'Inter',
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      '×$qty',
-                                      style: const TextStyle(
-                                        fontFamily: 'Inter',
-                                        fontSize: 12,
-                                        color: AppColors.textSecondary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: AppSpacing.space12),
-                                    SizedBox(
-                                      width: 72,
-                                      child: Text(
-                                        '₹${item.lineTotal.toStringAsFixed(2)}',
-                                        textAlign: TextAlign.right,
-                                        style: const TextStyle(
-                                          fontFamily: 'Inter',
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const Divider(height: 1),
-                            ],
-                          );
-                        }),
-                        if (bill.taxAmount > 0) ...[
-                          _billRow('Subtotal',
-                              '₹${bill.subtotal.toStringAsFixed(2)}'),
-                          const SizedBox(height: 4),
-                          _billRow('Tax (GST)',
-                              '₹${bill.taxAmount.toStringAsFixed(2)}'),
-                          const SizedBox(height: 4),
-                        ],
-                        _billRow('Total Amount',
-                            '₹${bill.total.toStringAsFixed(2)}',
-                            bold: bill.discountAmount == 0),
-                        if (bill.discountAmount > 0) ...[
-                          const SizedBox(height: 4),
-                          _billRow('Discount',
-                              '− ₹${bill.discountAmount.toStringAsFixed(2)}',
-                              valueColor: const Color(0xFF16A34A)),
-                          const Divider(height: AppSpacing.space12),
-                          _billRow(
-                            'Net Payable',
-                            '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
-                            bold: true,
-                          ),
-                        ],
-                        const SizedBox(height: AppSpacing.space8),
-                        _billRow('Payment', bill.paymentMode.toUpperCase()),
-                        const SizedBox(height: AppSpacing.space8),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // Actions
-              Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.space16, 0,
-                    AppSpacing.space16, AppSpacing.space16),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SecondaryButton(
-                            text: 'Close',
-                            onPressed: () {
-                              Navigator.pop(context);
-                              if (widget.tableId != null) {
-                                if (widget.onBillDone != null) {
-                                  widget.onBillDone!();
-                                } else {
-                                  Navigator.pop(context);
-                                }
-                              }
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.space12),
-                        Expanded(
-                          child: PrimaryButton(
-                            text: 'Print',
-                            icon: Icons.print_outlined,
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _autoPrint(bill);
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (hasPhone) ...[
-                      const SizedBox(height: AppSpacing.space8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.message_outlined, size: 16,
-                              color: Color(0xFF25D366)),
-                          label: const Text(
-                            'Send to WhatsApp',
-                            style: TextStyle(color: Color(0xFF25D366),
-                                fontWeight: FontWeight.w600),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xFF25D366)),
-                            padding: const EdgeInsets.symmetric(
-                                vertical: AppSpacing.space12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.small),
-                            ),
-                          ),
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _sendBillWhatsApp(bill);
-                          },
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _billRow(String label, String value,
-      {bool bold = false, Color? valueColor}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(label,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
-                    )),
-          ),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-                  color: valueColor ?? (bold ? AppColors.textPrimary : null),
-                ),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showSnack(String message, {bool isError = false}) {
@@ -943,71 +743,114 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: _buildAppBar(businessName, userName),
-      body: isWide ? _buildWideLayout() : _buildNarrowLayout(),
+      body: Column(
+        children: [
+          _buildAppBar(businessName, userName),
+          Expanded(child: isWide ? _buildWideLayout() : _buildNarrowLayout()),
+        ],
+      ),
     );
   }
 
-  AppBar _buildAppBar(String businessName, String userName) {
-    return AppBar(
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(businessName, style: Theme.of(context).textTheme.titleLarge),
-          if (widget.tableNumber != null)
-            Container(
-              margin: const EdgeInsets.only(top: 2),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(
-                color: AppColors.primaryLight,
-                borderRadius: BorderRadius.circular(4),
+  ShellAppBar _buildAppBar(String businessName, String userName) {
+    return ShellAppBar(
+      title: AnimatedOpacity(
+        opacity: _searchExpanded ? 0.0 : 1.0,
+        duration: const Duration(milliseconds: 200),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(businessName, style: Theme.of(context).textTheme.titleLarge),
+            if (widget.tableNumber != null)
+              Container(
+                margin: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppColors.primaryLight,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'Table ${widget.tableNumber}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                ),
               ),
-              child: Text(
-                'Table ${widget.tableNumber}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 11,
-                    ),
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
       actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: AppSpacing.space8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.space8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(AppRadius.small),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.person_outline,
-                        size: 14, color: AppColors.textSecondary),
-                    const SizedBox(width: 4),
-                    Text(userName,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w500,
-                            )),
-                  ],
-                ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedBuilder(
+              animation: _searchAnim,
+              builder: (context, child) {
+                final maxWidth = MediaQuery.of(context).size.width - 80;
+                return SizedBox(
+                  width: _searchAnim.value * maxWidth,
+                  child: Opacity(
+                    opacity: _searchAnim.value,
+                    child: TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocus,
+                      autofocus: false,
+                      decoration: InputDecoration(
+                        hintText: 'Search items…',
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.small),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.small),
+                          borderSide: const BorderSide(color: AppColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.small),
+                          borderSide: const BorderSide(color: AppColors.primary),
+                        ),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 16),
+                                onPressed: () => _searchController.clear(),
+                              )
+                            : null,
+                      ),
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ),
+                );
+              },
+            ),
+            IconButton(
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: _searchExpanded
+                    ? const Icon(Icons.close, key: ValueKey('close'), size: 20)
+                    : const Icon(Icons.search, key: ValueKey('search'), size: 20),
               ),
-              IconButton(
-                icon: const Icon(Icons.logout_outlined, size: 20),
-                tooltip: 'Logout',
-                onPressed: _logout,
-                color: AppColors.textSecondary,
-              ),
-            ],
-          ),
+              color: AppColors.textSecondary,
+              onPressed: () {
+                setState(() => _searchExpanded = !_searchExpanded);
+                if (_searchExpanded) {
+                  _searchAnimCtrl.forward();
+                  Future.delayed(const Duration(milliseconds: 250), () {
+                    if (mounted) _searchFocus.requestFocus();
+                  });
+                } else {
+                  _searchAnimCtrl.reverse();
+                  _searchController.clear();
+                  _searchFocus.unfocus();
+                }
+              },
+            ),
+            const SizedBox(width: 4),
+          ],
         ),
       ],
     );
@@ -1030,7 +873,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return Stack(
         children: [
           _buildItemsPanel(),
-          if (widget.tableId != null)
+          if (count > 0 && widget.tableId == null)
+            Positioned(
+              bottom: AppSpacing.space16,
+              left: AppSpacing.space16,
+              child: Tooltip(
+                message: 'Clear selected items',
+                child: IconButton(
+                  onPressed: () => ref.read(cartProvider.notifier).clear(),
+                  icon: const Icon(Icons.remove_shopping_cart_outlined),
+                  color: AppColors.error,
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.errorLight,
+                    minimumSize: const Size(48, 48),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.small)),
+                  ),
+                ),
+              ),
+            ),
+          if (count > 0 && widget.tableId != null)
             Positioned(
               bottom: AppSpacing.space16,
               left: AppSpacing.space16,
@@ -1077,7 +940,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ],
               ),
             )
-          else
+          else if (count > 0)
             Positioned(
               bottom: AppSpacing.space16,
               right: AppSpacing.space16,
@@ -1120,6 +983,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               maxHeight: MediaQuery.of(sheetCtx).size.height * 0.88,
             ),
             child: SingleChildScrollView(
+              primary: false,
+              physics: const ClampingScrollPhysics(),
               child: _buildCartPanel(inSheet: true),
             ),
           ),
@@ -1133,147 +998,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // ---------------------------------------------------------------------------
 
   Widget _buildItemsPanel() {
-    return Column(
-      children: [
-        // Stale-cache warning — only shown when offline with outdated data
-        Consumer(builder: (context, ref, _) {
-          final cacheInfo = ref.watch(itemCacheInfoProvider);
-          final isOnline = ref.watch(connectivityProvider);
-          if (isOnline || !cacheInfo.isStale) return const SizedBox.shrink();
-
-          final isVeryStale =
-              cacheInfo.status == CacheStatus.veryStale;
-          return _StaleCacheBanner(
-            ageLabel: cacheInfo.ageLabel,
-            isVeryStale: isVeryStale,
-            onRefresh: () => ref.invalidate(itemsProvider),
-          );
-        }),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.space12,
-              6, AppSpacing.space12, AppSpacing.space4),
-          child: Consumer(builder: (context, ref, _) {
-            final cartCount = ref.watch(cartItemCountProvider);
-            return Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 40,
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search items…',
-                        isDense: true,
-                        prefixIcon: const Icon(Icons.search_outlined,
-                            size: 18, color: AppColors.textSecondary),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.space16, vertical: 0),
-                        suffixIcon: _searchController.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, size: 16),
-                                onPressed: () => _searchController.clear(),
-                              )
-                            : null,
-                      ),
-                    ),
-                  ),
-                ),
-                if (cartCount > 0) ...[
-                  const SizedBox(width: AppSpacing.space8),
-                  Tooltip(
-                    message: 'Clear selected items',
-                    child: IconButton(
-                      onPressed: () {
-                        ref.read(cartProvider.notifier).clear();
-                      },
-                      icon: const Icon(Icons.remove_shopping_cart_outlined),
-                      color: AppColors.error,
-                      style: IconButton.styleFrom(
-                        backgroundColor: AppColors.errorLight,
-                        minimumSize: const Size(40, 40),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadius.small),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            );
-          }),
-        ),
-        Consumer(builder: (context, ref, _) {
-          final cats = ref.watch(categoriesProvider).valueOrNull ?? [];
-          if (cats.isEmpty) return const SizedBox.shrink();
-          return SizedBox(
-            height: 44,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.space12),
-              itemCount: cats.length,
-              separatorBuilder: (_, __) =>
-                  const SizedBox(width: AppSpacing.space8),
-              itemBuilder: (_, i) {
-                final cat = cats[i];
-                final selected = _selectedCategory == cat;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  child: FilterChip(
-                    label: Text(cat),
-                    selected: selected,
-                    onSelected: (_) => setState(() {
-                      _selectedCategory =
-                          _selectedCategory == cat ? '' : cat;
-                    }),
-                    backgroundColor: AppColors.surfaceVariant,
-                    selectedColor: AppColors.primaryLight,
-                    checkmarkColor: AppColors.primary,
-                    labelStyle: TextStyle(
-                      color: selected
-                          ? AppColors.primary
-                          : AppColors.textSecondary,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.w500,
-                      fontSize: 13,
-                    ),
-                    side: BorderSide(
-                        color: selected
-                            ? AppColors.primary
-                            : AppColors.border),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 4),
-                    shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppRadius.small)),
-                  ),
-                );
-              },
-            ),
-          );
-        }),
-        const SizedBox(height: 4),
-        Expanded(child: _buildItemList()),
-      ],
-    );
+    return _buildItemList();
   }
 
   Widget _buildItemList() {
     return Consumer(builder: (context, ref, _) {
       final itemsAsync = ref.watch(itemsProvider);
       final cart = ref.watch(cartProvider);
+      final cacheInfo = ref.watch(itemCacheInfoProvider);
+      final isOnline = ref.watch(connectivityProvider);
+      final cats = ref.watch(categoriesProvider).valueOrNull ?? [];
+      final showStaleBanner = !isOnline && cacheInfo.isStale;
+
+      // Search + category header slivers — always scrollable
+      List<Widget> headerSlivers() => [
+        if (showStaleBanner)
+          SliverToBoxAdapter(
+            child: _StaleCacheBanner(
+              ageLabel: cacheInfo.ageLabel,
+              isVeryStale: cacheInfo.status == CacheStatus.veryStale,
+              onRefresh: () => ref.invalidate(itemsProvider),
+            ),
+          ),
+        if (cats.isNotEmpty)
+          SliverToBoxAdapter(
+            child: SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                primary: false,
+                physics: const ClampingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.space12),
+                itemCount: cats.length,
+                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.space8),
+                itemBuilder: (_, i) {
+                  final cat = cats[i];
+                  final selected = _selectedCategory == cat;
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    child: FilterChip(
+                      label: Text(cat),
+                      selected: selected,
+                      onSelected: (_) => setState(() {
+                        _selectedCategory = _selectedCategory == cat ? '' : cat;
+                      }),
+                      backgroundColor: AppColors.surfaceVariant,
+                      selectedColor: AppColors.primaryLight,
+                      checkmarkColor: AppColors.primary,
+                      labelStyle: TextStyle(
+                        color: selected ? AppColors.primary : AppColors.textSecondary,
+                        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                        fontSize: 13,
+                      ),
+                      side: BorderSide(color: selected ? AppColors.primary : AppColors.border),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.small)),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        const SliverToBoxAdapter(child: SizedBox(height: 4)),
+      ];
 
       return itemsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => NoInternetWidget(
-          onRetry: () => ref.invalidate(itemsProvider),
-        ),
+        error: (e, _) => NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider)),
         data: (allItems) {
           if (allItems.isEmpty && !ref.read(connectivityProvider)) {
-            return NoInternetWidget(
-              onRetry: () => ref.invalidate(itemsProvider),
-            );
+            return NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider));
           }
           final items = _filteredItems(allItems);
           if (items.isEmpty) {
@@ -1283,12 +1077,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ref.invalidate(categoriesProvider);
                 await ref.read(itemsProvider.future);
               },
-              child: ListView(children: const [
-                EmptyState(
-                  icon: Icons.search_off_outlined,
-                  message: 'No items found',
-                ),
-              ]),
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  ...headerSlivers(),
+                  const SliverFillRemaining(
+                    child: EmptyState(icon: Icons.search_off_outlined, message: 'No items found'),
+                  ),
+                ],
+              ),
             );
           }
 
@@ -1301,15 +1098,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             child: _ExcelItemTable(
               items: items,
               cart: cart,
-              onAdd: (item) {
-                ref.read(cartProvider.notifier).addItem(item);
-                      },
-              onDecrement: (item) =>
-                  ref.read(cartProvider.notifier).changeQty(item.id, -1),
-              onIncrement: (item) =>
-                  ref.read(cartProvider.notifier).changeQty(item.id, 1),
-              onSetQty: (item, qty) =>
-                  ref.read(cartProvider.notifier).setQty(item.id, qty),
+              headerSlivers: headerSlivers(),
+              onAdd: (item) => ref.read(cartProvider.notifier).addItem(item),
+              onDecrement: (item) => ref.read(cartProvider.notifier).changeQty(item.id, -1),
+              onIncrement: (item) => ref.read(cartProvider.notifier).changeQty(item.id, 1),
+              onSetQty: (item, qty) => ref.read(cartProvider.notifier).setQty(item.id, qty),
             ),
           );
         },
@@ -1697,12 +1490,68 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
 
             Padding(
-              padding: const EdgeInsets.all(AppSpacing.space16),
-              child: PrimaryButton(
-                text: 'Generate Bill',
-                icon: Icons.receipt_long_outlined,
-                onPressed: cart.isEmpty ? null : _generateBill,
-                isLoading: _generatingBill,
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.space16,
+                AppSpacing.space16,
+                AppSpacing.space16,
+                AppSpacing.space16 + MediaQuery.of(context).padding.bottom,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: Icon(
+                        Icons.message_outlined,
+                        size: 16,
+                        color: (cart.isEmpty || _generatingBill)
+                            ? AppColors.textSecondary
+                            : const Color(0xFF25D366),
+                      ),
+                      label: Text(
+                        'WhatsApp',
+                        style: TextStyle(
+                          color: (cart.isEmpty || _generatingBill)
+                              ? AppColors.textSecondary
+                              : const Color(0xFF25D366),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(
+                          color: (cart.isEmpty || _generatingBill)
+                              ? AppColors.textSecondary
+                              : const Color(0xFF25D366),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                            vertical: AppSpacing.space12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.small),
+                        ),
+                      ),
+                      onPressed: (cart.isEmpty || _generatingBill)
+                          ? null
+                          : () {
+                              if (inSheet) Navigator.pop(context);
+                              _generateBillAndWhatsApp();
+                            },
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.space12),
+                  Expanded(
+                    child: PrimaryButton(
+                      text: 'Print',
+                      icon: Icons.print_outlined,
+                      onPressed: (cart.isEmpty || _generatingBill)
+                          ? null
+                          : () {
+                              if (inSheet) Navigator.pop(context);
+                              _generateBillAndPrint();
+                            },
+                      isLoading: _generatingBill,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1953,6 +1802,7 @@ class _StaleCacheBanner extends StatelessWidget {
 class _ExcelItemTable extends StatelessWidget {
   final List<Item> items;
   final List<CartEntry> cart;
+  final List<Widget> headerSlivers;
   final void Function(Item) onAdd;
   final void Function(Item) onDecrement;
   final void Function(Item) onIncrement;
@@ -1961,6 +1811,7 @@ class _ExcelItemTable extends StatelessWidget {
   const _ExcelItemTable({
     required this.items,
     required this.cart,
+    required this.headerSlivers,
     required this.onAdd,
     required this.onDecrement,
     required this.onIncrement,
@@ -2016,21 +1867,32 @@ class _ExcelItemTable extends StatelessWidget {
     final twoColumns = screenWidth >= 1200;
 
     if (!twoColumns) {
-      return Column(
-        children: [
-          _header(),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.only(bottom: 80),
+      return CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          ...headerSlivers,
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _PinnedHeaderDelegate(
+              height: 29,
+              child: Column(
+                children: [
+                  _header(),
+                  const Divider(height: 1),
+                ],
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.only(bottom: 80),
+            sliver: SliverList.separated(
               itemCount: items.length,
               separatorBuilder: (_, __) =>
                   const Divider(height: 1, indent: 12, endIndent: 12),
               itemBuilder: (_, i) {
                 final item = items[i];
-                final entry =
-                    cart.where((e) => e.item.id == item.id).firstOrNull;
-                final qty = entry?.quantity ?? 0;
+                final qty =
+                    cart.where((e) => e.item.id == item.id).firstOrNull?.quantity ?? 0;
                 return _ExcelItemRow(
                   index: i + 1,
                   item: item,
@@ -2049,19 +1911,31 @@ class _ExcelItemTable extends StatelessWidget {
 
     final rowCount = (items.length / 2).ceil();
 
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(child: _header()),
-            Container(width: 1, color: AppColors.border),
-            Expanded(child: _header()),
-          ],
+    return CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        ...headerSlivers,
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _PinnedHeaderDelegate(
+            height: 29,
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: _header()),
+                    Container(width: 1, color: AppColors.border),
+                    Expanded(child: _header()),
+                  ],
+                ),
+                const Divider(height: 1),
+              ],
+            ),
+          ),
         ),
-        const Divider(height: 1),
-        Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.only(bottom: 80),
+        SliverPadding(
+          padding: const EdgeInsets.only(bottom: 80),
+          sliver: SliverList.separated(
             itemCount: rowCount,
             separatorBuilder: (_, __) =>
                 const Divider(height: 1, indent: 12, endIndent: 12),
@@ -2118,6 +1992,25 @@ class _ExcelItemTable extends StatelessWidget {
       ],
     );
   }
+}
+
+class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final double height;
+  final Widget child;
+
+  const _PinnedHeaderDelegate({required this.height, required this.child});
+
+  @override
+  double get minExtent => height;
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => child;
+
+  @override
+  bool shouldRebuild(_PinnedHeaderDelegate old) =>
+      old.height != height || old.child != child;
 }
 
 // ---------------------------------------------------------------------------

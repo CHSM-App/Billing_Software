@@ -28,6 +28,7 @@ class _MainShellState extends ConsumerState<MainShell>
   int _index = 0;
   late final AnimationController _railAnimController;
   late final Animation<double> _railFadeAnim;
+
   @override
   void initState() {
     super.initState();
@@ -103,6 +104,7 @@ class _MainShellState extends ConsumerState<MainShell>
         final graceDays = widget.licenseStatus?.graceDaysRemaining ?? 0;
 
         return Scaffold(
+          bottomNavigationBar: isWide ? null : _buildBottomNav(items, safeIndex),
           body: Column(
             children: [
               if (inGrace)
@@ -150,9 +152,6 @@ class _MainShellState extends ConsumerState<MainShell>
               ),
             ],
           ),
-          bottomNavigationBar: isWide
-              ? null
-              : _buildBottomNav(items, safeIndex),
         );
       },
     );
@@ -205,6 +204,7 @@ class _MainShellState extends ConsumerState<MainShell>
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
+        border: const Border(top: BorderSide(color: AppColors.border)),
         boxShadow: [
           BoxShadow(
             color: AppColors.textPrimary.withValues(alpha: 0.08),

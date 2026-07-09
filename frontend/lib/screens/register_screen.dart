@@ -73,7 +73,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     try {
       await sendOtp(ownerPhone, 'register');
     } on ApiException catch (e) {
-      setState(() => _errorMessage = e.message);
+      setState(() => _errorMessage = e.serverMessage ?? e.message);
       return;
     } catch (_) {
       setState(() => _errorMessage =

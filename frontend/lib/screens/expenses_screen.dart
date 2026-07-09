@@ -6,6 +6,7 @@ import '../api.dart' as api;
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/shell_app_bar.dart';
 
 final _fmt = NumberFormat('#,##0.00');
 final _dateFmt = DateFormat('dd MMM yyyy');
@@ -20,52 +21,47 @@ class ExpensesScreen extends ConsumerStatefulWidget {
 class _ExpensesScreenState extends ConsumerState<ExpensesScreen>
     with TickerProviderStateMixin {
   late final TabController _tabCtrl;
-  late final AnimationController _fadeCtrl;
-  late final Animation<double> _fade;
 
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
-    _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
-    _fade = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
-    _fadeCtrl.forward();
   }
 
   @override
   void dispose() {
     _tabCtrl.dispose();
-    _fadeCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return FadeTransition(
-      opacity: _fade,
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: AppBar(
-          title: const Text('Expenses'),
-          bottom: TabBar(
-            controller: _tabCtrl,
-            labelColor: AppColors.primary,
-            unselectedLabelColor: AppColors.textSecondary,
-            indicatorColor: AppColors.primary,
-            tabs: const [
-              Tab(text: 'This Month'),
-              Tab(text: 'Recurring'),
-            ],
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Column(children: [
+          ShellAppBar(
+            title: const Text('Expenses'),
+            bottom: TabBar(
+              controller: _tabCtrl,
+              labelColor: AppColors.primary,
+              unselectedLabelColor: AppColors.textSecondary,
+              indicatorColor: AppColors.primary,
+              tabs: const [
+                Tab(text: 'This Month'),
+                Tab(text: 'Recurring'),
+              ],
+            ),
           ),
-        ),
-        body: TabBarView(
-          controller: _tabCtrl,
-          children: [
-            _ThisMonthTab(onSwitchToRecurring: () => _tabCtrl.animateTo(1)),
-            const _RecurringTab(),
-          ],
-        ),
-      ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabCtrl,
+              children: [
+                _ThisMonthTab(onSwitchToRecurring: () => _tabCtrl.animateTo(1)),
+                const _RecurringTab(),
+              ],
+            ),
+          ),
+        ]),
     );
   }
 }
@@ -96,6 +92,7 @@ class _ThisMonthTab extends ConsumerWidget {
     }).toList();
 
     return CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
         // Filter bar
         SliverToBoxAdapter(
@@ -401,6 +398,7 @@ class _RecurringTab extends ConsumerWidget {
                     'No recurring expenses yet.\nAdd expenses that repeat every month\n(e.g. Rent, Salary).',
               )
             : ListView.separated(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
                 itemCount: list.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),

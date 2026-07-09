@@ -75,6 +75,11 @@ class AuthStorage {
     ]);
   }
 
+  Future<void> updateBusinessName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyBusinessName, name);
+  }
+
   Future<void> saveAccessToken(String accessToken) =>
       _secure.write(key: _keyAccessToken, value: accessToken);
 
@@ -155,6 +160,7 @@ Future<void> saveSession({
       hasBarcodeScanner: hasBarcodeScanner,
     );
 
+Future<void> updateBusinessName(String name)   => AuthStorage.instance.updateBusinessName(name);
 Future<String?> getToken()                     => AuthStorage.instance.getAccessToken();
 Future<String?> getRefreshToken()              => AuthStorage.instance.getRefreshToken();
 Future<void>    saveAccessToken(String token)  => AuthStorage.instance.saveAccessToken(token);

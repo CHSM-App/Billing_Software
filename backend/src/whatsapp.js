@@ -16,10 +16,12 @@ const crypto = require('crypto')
 const { pool, poolConnect, sql } = require('./db')
 const logger = require('./logger')
 
-const API_TOKEN     = process.env.WHATSAPP_API_TOKEN   || ''
-const ENABLED       = process.env.WHATSAPP_ENABLED === 'true'
-const OTP_TEMPLATE  = process.env.WHATSAPP_TPL_OTP     || ''
-const BILL_TEMPLATE = process.env.WHATSAPP_TPL_BILL    || ''
+const API_TOKEN           = process.env.WHATSAPP_API_TOKEN        || ''
+const ENABLED             = process.env.WHATSAPP_ENABLED === 'true'
+const OTP_TEMPLATE        = process.env.WHATSAPP_TPL_OTP           || ''
+const BILL_TEMPLATE       = process.env.WHATSAPP_TPL_BILL          || ''
+const ONBOARDING_TEMPLATE = process.env.WHATSAPP_TPL_ONBOARDING    || ''
+const ADMIN_PHONE         = process.env.WHATSAPP_ADMIN_PHONE        || ''
 
 // OTP config
 const OTP_EXPIRY_MINUTES = 10
@@ -314,4 +316,68 @@ async function sendBillLink({ phone, shopName, billNumber, receiptUrl }) {
     : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
 }
 
-module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink }
+// ─────────────────────────────────────────────────────────────────────────────
+// sendOnboardingAlert — notifies admin when a new business registers
+//
+// Template variables: {1} business_name  {2} owner_name  {3} phone  {4} business_type
+//
+// Never throws — failures are only logged.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendOnboardingAlert({ businessName, ownerName, phone, businessType }) {
+  if (!ENABLED) {
+    logger.info(`[WhatsApp] Disabled — onboarding alert for "${businessName}" skipped`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] API token not configured — skipping onboarding alert')
+    return { sent: false, error: 'API token not configured' }
+  }
+
+  if (!ONBOARDING_TEMPLATE || ONBOARDING_TEMPLATE.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] Onboarding template ID not configured — skipping')
+    return { sent: false, error: 'Onboarding template not configured' }
+  }
+
+  const normAdmin = normalisePhone(ADMIN_PHONE)
+  if (!normAdmin) {
+    logger.warn('[WhatsApp] WHATSAPP_ADMIN_PHONE not set — skipping onboarding alert')
+    return { sent: false, error: 'Admin phone not configured' }
+  }
+
+  const clean = (v) => String(v).replace(/,/g, '')
+  const sample = [
+    clean(businessName),
+    clean(ownerName),
+    clean(phone),
+    clean(businessType),
+  ].join(',')
+
+  let result
+  try {
+    result = await postForm('/whatsapp/SendMessage', {
+      ApiToken:     API_TOKEN,
+      TemplateId:   ONBOARDING_TEMPLATE,
+      QuickNumber:  normAdmin,
+      Sample:       sample,
+      CampaignName: 'onboarding_alert',
+    })
+  } catch (err) {
+    logger.error({ err }, `[WhatsApp] Network error sending onboarding alert for "${businessName}"`)
+    return { sent: false, error: err.message }
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  if (success) {
+    logger.info(`[WhatsApp] Onboarding alert sent for "${businessName}" — CampaignId: ${result.ReturnData}`)
+  } else {
+    logger.warn({ result }, `[WhatsApp] Onboarding alert failed for "${businessName}"`)
+  }
+
+  return success
+    ? { sent: true, campaignId: result.ReturnData }
+    : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
+}
+
+module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendOnboardingAlert }

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
+import '../providers/session_provider.dart';
+import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 
@@ -18,14 +21,14 @@ import '../widgets/app_widgets.dart';
 //   ));
 // ---------------------------------------------------------------------------
 
-class BusinessProfileScreen extends StatefulWidget {
+class BusinessProfileScreen extends ConsumerStatefulWidget {
   const BusinessProfileScreen({super.key});
 
   @override
-  State<BusinessProfileScreen> createState() => _BusinessProfileScreenState();
+  ConsumerState<BusinessProfileScreen> createState() => _BusinessProfileScreenState();
 }
 
-class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
+class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
   Map<String, dynamic>? _profile;
   bool _loading = true;
   bool _saving = false;
@@ -140,6 +143,11 @@ class _BusinessProfileScreenState extends State<BusinessProfileScreen> {
       final updated = await updateBusinessProfile(payload);
       _populateControllers(updated);
       setState(() => _profile = updated);
+
+      if (payload.containsKey('name') && updated['name'] != null) {
+        await updateBusinessName(updated['name'] as String);
+        await ref.read(sessionProvider.notifier).refresh();
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
