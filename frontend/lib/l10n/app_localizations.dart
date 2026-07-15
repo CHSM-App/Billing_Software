@@ -980,6 +980,102 @@ abstract class AppLocalizations {
   /// **'Back to Login'**
   String get registerBackToLogin;
 
+  /// No description provided for @receiptPhonePrefix.
+  ///
+  /// In en, this message translates to:
+  /// **'Ph:'**
+  String get receiptPhonePrefix;
+
+  /// No description provided for @receiptBillNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill#:'**
+  String get receiptBillNo;
+
+  /// No description provided for @receiptDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Date:'**
+  String get receiptDate;
+
+  /// No description provided for @receiptCustomer.
+  ///
+  /// In en, this message translates to:
+  /// **'Cust:'**
+  String get receiptCustomer;
+
+  /// No description provided for @receiptCustomerPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Ph:'**
+  String get receiptCustomerPhone;
+
+  /// No description provided for @receiptColItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Item'**
+  String get receiptColItem;
+
+  /// No description provided for @receiptColQty.
+  ///
+  /// In en, this message translates to:
+  /// **'Qty'**
+  String get receiptColQty;
+
+  /// No description provided for @receiptColPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get receiptColPrice;
+
+  /// No description provided for @receiptColTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get receiptColTotal;
+
+  /// No description provided for @receiptSubtotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Subtotal:'**
+  String get receiptSubtotal;
+
+  /// No description provided for @receiptTax.
+  ///
+  /// In en, this message translates to:
+  /// **'Tax:'**
+  String get receiptTax;
+
+  /// No description provided for @receiptDiscount.
+  ///
+  /// In en, this message translates to:
+  /// **'Discount:'**
+  String get receiptDiscount;
+
+  /// No description provided for @receiptTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'TOTAL:'**
+  String get receiptTotal;
+
+  /// No description provided for @receiptPayment.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment:'**
+  String get receiptPayment;
+
+  /// No description provided for @receiptThankYou.
+  ///
+  /// In en, this message translates to:
+  /// **'Thank you, visit again!'**
+  String get receiptThankYou;
+
+  /// No description provided for @receiptDefaultBusiness.
+  ///
+  /// In en, this message translates to:
+  /// **'BUSINESS'**
+  String get receiptDefaultBusiness;
+
   /// No description provided for @billingTitle.
   ///
   /// In en, this message translates to:

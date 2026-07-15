@@ -480,6 +480,54 @@ class AppLocalizationsMr extends AppLocalizations {
   String get registerBackToLogin => 'लॉगिनवर परत जा';
 
   @override
+  String get receiptPhonePrefix => 'फोन:';
+
+  @override
+  String get receiptBillNo => 'बिल क्र.:';
+
+  @override
+  String get receiptDate => 'दिनांक:';
+
+  @override
+  String get receiptCustomer => 'ग्राहक:';
+
+  @override
+  String get receiptCustomerPhone => 'फोन:';
+
+  @override
+  String get receiptColItem => 'वस्तू';
+
+  @override
+  String get receiptColQty => 'नग';
+
+  @override
+  String get receiptColPrice => 'दर';
+
+  @override
+  String get receiptColTotal => 'एकूण';
+
+  @override
+  String get receiptSubtotal => 'उप-बेरीज:';
+
+  @override
+  String get receiptTax => 'कर:';
+
+  @override
+  String get receiptDiscount => 'सूट:';
+
+  @override
+  String get receiptTotal => 'एकूण:';
+
+  @override
+  String get receiptPayment => 'पेमेंट:';
+
+  @override
+  String get receiptThankYou => 'धन्यवाद, पुन्हा भेट द्या!';
+
+  @override
+  String get receiptDefaultBusiness => 'व्यवसाय';
+
+  @override
   String get billingTitle => 'बिलिंग';
 
   @override

@@ -11,6 +11,9 @@ import 'package:flutter_thermal_printer/flutter_thermal_printer.dart'
 import 'package:flutter_thermal_printer/utils/printer.dart'
     as ftp show Printer, ConnectionType;
 
+import 'receipt_labels.dart';
+import 'receipt_image_builder.dart';
+
 // ---------------------------------------------------------------------------
 // Unified Printer model — wraps both BluetoothInfo and ftp.Printer
 // ---------------------------------------------------------------------------
@@ -166,32 +169,39 @@ class PrinterService {
   List<int> _buildReceiptRaw(Bill bill,
       {String? businessName,
       String? businessPhone,
-      String? businessAddress}) {
+      String? businessAddress,
+      ReceiptLabels? labels}) {
     final lines = <String>[];
 
     // Header
-    lines.add(_centre(businessName ?? 'BUSINESS', _cols));
+    lines.add(_centre(
+        businessName ?? labels?.defaultBusiness ?? 'BUSINESS', _cols));
     if (businessAddress != null && businessAddress.isNotEmpty) {
       lines.add(_centre(businessAddress, _cols));
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
-      lines.add(_centre('Ph: $businessPhone', _cols));
+      lines.add(_centre('${labels?.phonePrefix ?? 'Ph:'} $businessPhone', _cols));
     }
     lines.add('-' * _cols);
 
     // Bill info
-    lines.add('Bill#: ${bill.billNumber}');
-    lines.add('Date : ${_formatDate(bill.createdAt.toLocal())}');
+    lines.add('${labels?.billNo ?? 'Bill#:'} ${bill.billNumber}');
+    lines.add(
+        '${labels?.date ?? 'Date:'} ${_formatDate(bill.createdAt.toLocal())}');
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
-      lines.add('Cust : ${bill.customerName}');
+      lines.add('${labels?.customer ?? 'Cust:'} ${bill.customerName}');
     }
     if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty) {
-      lines.add('Ph   : ${bill.customerPhone}');
+      lines.add('${labels?.customerPhone ?? 'Ph:'} ${bill.customerPhone}');
     }
     lines.add('-' * _cols);
 
     // Items header
-    lines.add(_itemRow('Item', 'Qty', 'Price', 'Total'));
+    lines.add(_itemRow(
+        labels?.colItem ?? 'Item',
+        labels?.colQty ?? 'Qty',
+        labels?.colPrice ?? 'Price',
+        labels?.colTotal ?? 'Total'));
     lines.add('-' * _cols);
 
     // Items
@@ -213,13 +223,21 @@ class PrinterService {
 
     // Totals
     if (bill.taxAmount > 0) {
-      lines.add(_twoCol('Subtotal:', 'Rs.${bill.subtotal.toStringAsFixed(2)}'));
-      lines.add(_twoCol('Tax     :', 'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
+      lines.add(_twoCol(labels?.subtotal ?? 'Subtotal:',
+          'Rs.${bill.subtotal.toStringAsFixed(2)}'));
+      lines.add(_twoCol(
+          labels?.tax ?? 'Tax:', 'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
     }
-    lines.add(_twoCol('TOTAL   :', 'Rs.${bill.total.toStringAsFixed(2)}'));
-    lines.add(_twoCol('Payment :', bill.paymentMode.toUpperCase()));
+    if (bill.discountAmount > 0) {
+      lines.add(_twoCol(labels?.discount ?? 'Discount:',
+          'Rs.${bill.discountAmount.toStringAsFixed(2)}'));
+    }
+    lines.add(_twoCol(
+        labels?.total ?? 'TOTAL:', 'Rs.${bill.total.toStringAsFixed(2)}'));
+    lines.add(
+        _twoCol(labels?.payment ?? 'Payment:', bill.paymentMode.toUpperCase()));
     lines.add('-' * _cols);
-    lines.add(_centre('Thank you, visit again!', _cols));
+    lines.add(_centre(labels?.thankYou ?? 'Thank you, visit again!', _cols));
 
     // Build bytes: each line as ASCII + 0x0A
     final bytes = <int>[];
@@ -245,15 +263,31 @@ class PrinterService {
   Future<void> printBill(Bill bill,
       {String? businessName,
       String? businessPhone,
-      String? businessAddress}) async {
+      String? businessAddress,
+      ReceiptLabels? labels}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
 
-    // Raw byte approach works on both Android BT and Windows USB/BLE.
-    final bytes = _buildReceiptRaw(bill,
+    final List<int> bytes;
+    if (labels != null && labels.needsImageRendering) {
+      // Marathi: thermal printers have no Devanagari code page, so render the
+      // receipt to a bitmap and print it as an ESC/POS raster image.
+      bytes = await ReceiptImageBuilder.build(
+        bill,
+        labels,
         businessName: businessName,
         businessPhone: businessPhone,
-        businessAddress: businessAddress);
+        businessAddress: businessAddress,
+      );
+    } else {
+      // English (or unknown): fast plain-text path, works on Android BT and
+      // Windows USB/BLE alike.
+      bytes = _buildReceiptRaw(bill,
+          businessName: businessName,
+          businessPhone: businessPhone,
+          businessAddress: businessAddress,
+          labels: labels);
+    }
     await _printBytes(printer, bytes);
   }
 

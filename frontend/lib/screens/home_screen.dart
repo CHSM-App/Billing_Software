@@ -12,6 +12,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../services/printer_service.dart';
+import '../services/receipt_labels.dart';
 import '../services/offline_service.dart';
 import '../services/sync_service.dart';
 import '../storage.dart';
@@ -481,7 +482,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
           ],
         ),
-        content: Column(
+        content: SingleChildScrollView(
+          // The out-of-stock list is unbounded; scroll rather than overflow
+          // when many items (or longer Marathi labels) exceed the dialog.
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -539,6 +543,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               );
             }),
           ],
+        ),
         ),
         actions: [
           TextButton(
@@ -646,8 +651,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _autoPrint(Bill bill) async {
     final l10n = context.l10n;
     final businessName = ref.read(businessNameProvider);
+    final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
     try {
-      await PrinterService.instance.printBill(bill, businessName: businessName);
+      await PrinterService.instance
+          .printBill(bill, businessName: businessName, labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {
       // 'No printer configured' is an internal sentinel, not a user string.

@@ -479,6 +479,54 @@ class AppLocalizationsEn extends AppLocalizations {
   String get registerBackToLogin => 'Back to Login';
 
   @override
+  String get receiptPhonePrefix => 'Ph:';
+
+  @override
+  String get receiptBillNo => 'Bill#:';
+
+  @override
+  String get receiptDate => 'Date:';
+
+  @override
+  String get receiptCustomer => 'Cust:';
+
+  @override
+  String get receiptCustomerPhone => 'Ph:';
+
+  @override
+  String get receiptColItem => 'Item';
+
+  @override
+  String get receiptColQty => 'Qty';
+
+  @override
+  String get receiptColPrice => 'Price';
+
+  @override
+  String get receiptColTotal => 'Total';
+
+  @override
+  String get receiptSubtotal => 'Subtotal:';
+
+  @override
+  String get receiptTax => 'Tax:';
+
+  @override
+  String get receiptDiscount => 'Discount:';
+
+  @override
+  String get receiptTotal => 'TOTAL:';
+
+  @override
+  String get receiptPayment => 'Payment:';
+
+  @override
+  String get receiptThankYou => 'Thank you, visit again!';
+
+  @override
+  String get receiptDefaultBusiness => 'BUSINESS';
+
+  @override
   String get billingTitle => 'Billing';
 
   @override

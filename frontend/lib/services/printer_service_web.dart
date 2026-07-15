@@ -69,7 +69,8 @@ class PrinterService {
   Future<void> printBill(Bill bill,
       {String? businessName,
       String? businessPhone,
-      String? businessAddress}) async {
+      String? businessAddress,
+      dynamic labels}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
 

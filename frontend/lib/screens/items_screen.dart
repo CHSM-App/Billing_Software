@@ -459,6 +459,10 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
       ),
       content: SizedBox(
         width: 280,
+        // Scrollable so longer scripts (Marathi/Devanagari at large text
+        // scales) that exceed the dialog's bounded height scroll instead of
+        // overflowing.
+        child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -562,6 +566,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                       ?.copyWith(color: AppColors.textSecondary)),
             ],
           ],
+        ),
         ),
       ),
       actions: [

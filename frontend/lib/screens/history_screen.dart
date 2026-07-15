@@ -6,6 +6,7 @@ import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../services/printer_service.dart';
+import '../services/receipt_labels.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
@@ -439,8 +440,10 @@ class _BillDetailDialog extends StatelessWidget {
         TextButton(
           onPressed: () async {
             Navigator.pop(context);
+            final labels = ReceiptLabels.from(
+                l10n, Localizations.localeOf(context).languageCode);
             try {
-              await PrinterService.instance.printBill(bill);
+              await PrinterService.instance.printBill(bill, labels: labels);
             } on PrinterException catch (e) {
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
