@@ -965,13 +965,13 @@ abstract class AppLocalizations {
   /// No description provided for @registerSuccessTitle.
   ///
   /// In en, this message translates to:
-  /// **'Registration Submitted'**
+  /// **'Welcome to Vittam!'**
   String get registerSuccessTitle;
 
   /// No description provided for @registerSuccessBody.
   ///
   /// In en, this message translates to:
-  /// **'Registration successful. Your account is pending verification.\n\nPlease contact support to activate your account.'**
+  /// **'Registration successful. Your 4-day free trial has started.\n\nLog in now to start billing.'**
   String get registerSuccessBody;
 
   /// No description provided for @registerBackToLogin.

@@ -470,11 +470,11 @@ class AppLocalizationsMr extends AppLocalizations {
       'ओटीपी पाठवता आला नाही. तुमचे इंटरनेट कनेक्शन तपासा.';
 
   @override
-  String get registerSuccessTitle => 'नोंदणी सादर झाली';
+  String get registerSuccessTitle => 'वित्तममध्ये आपले स्वागत आहे!';
 
   @override
   String get registerSuccessBody =>
-      'नोंदणी यशस्वी झाली. तुमचे खाते पडताळणीच्या प्रतीक्षेत आहे.\n\nखाते सक्रिय करण्यासाठी सपोर्टशी संपर्क साधा.';
+      'नोंदणी यशस्वी झाली. तुमची ४ दिवसांची मोफत चाचणी सुरू झाली आहे.\n\nबिलिंग सुरू करण्यासाठी आता लॉगिन करा.';
 
   @override
   String get registerBackToLogin => 'लॉगिनवर परत जा';

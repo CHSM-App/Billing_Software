@@ -87,6 +87,27 @@ router.post('/register', registerLimiter, async (req, res) => {
           VALUES (@business_id, @name, @phone, @pin_hash, 'owner')
         `);
 
+      // --- Free trial: 96 hours from registration, no grace period ---
+      // Auto-provision an active trial subscription so the user can log in and
+      // use the app immediately. After 96h the GET /license auto-expire logic
+      // blocks them until a paid subscription is activated via /admin/activate.
+      const trialExpiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000);
+      await transaction.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .input('expires_at', sql.DateTime2, trialExpiresAt)
+        .query(`
+          INSERT INTO subscriptions
+            (business_id, status, expires_at, max_offline_days, grace_period_days, is_trial)
+          VALUES
+            (@business_id, 'active', @expires_at, 1, 0, 1)
+        `);
+
+      // Trial users skip manual approval — mark the business verified so the
+      // login gate (is_verified check) passes right away.
+      await transaction.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .query(`UPDATE businesses SET is_verified = 1 WHERE id = @business_id`);
+
       await transaction.commit();
 
       // Fire-and-forget — alert admin about new onboarding request
@@ -97,7 +118,11 @@ router.post('/register', registerLimiter, async (req, res) => {
         businessType: business_type,
       }).catch(err => logger.warn({ err }, 'Onboarding alert failed'));
 
-      return res.json({ success: true, message: 'Registration successful. Account pending verification.' });
+      return res.json({
+        success: true,
+        message: 'Registration successful. Your 4-day free trial has started.',
+        trial_expires_at: trialExpiresAt.toISOString(),
+      });
     } catch (err) {
       await transaction.rollback();
       throw err;

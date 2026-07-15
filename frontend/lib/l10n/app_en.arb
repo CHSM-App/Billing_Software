@@ -163,8 +163,8 @@
   "registerConfirmPin": "Confirm PIN",
   "registerCreateAccount": "Create Account",
   "registerOtpSendFailed": "Could not send OTP. Check your internet connection.",
-  "registerSuccessTitle": "Registration Submitted",
-  "registerSuccessBody": "Registration successful. Your account is pending verification.\n\nPlease contact support to activate your account.",
+  "registerSuccessTitle": "Welcome to Vittam!",
+  "registerSuccessBody": "Registration successful. Your 4-day free trial has started.\n\nLog in now to start billing.",
   "registerBackToLogin": "Back to Login",
 
   "receiptPhonePrefix": "Ph:",

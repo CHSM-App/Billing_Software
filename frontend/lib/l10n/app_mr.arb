@@ -163,8 +163,8 @@
   "registerConfirmPin": "पिनची खात्री करा",
   "registerCreateAccount": "खाते तयार करा",
   "registerOtpSendFailed": "ओटीपी पाठवता आला नाही. तुमचे इंटरनेट कनेक्शन तपासा.",
-  "registerSuccessTitle": "नोंदणी सादर झाली",
-  "registerSuccessBody": "नोंदणी यशस्वी झाली. तुमचे खाते पडताळणीच्या प्रतीक्षेत आहे.\n\nखाते सक्रिय करण्यासाठी सपोर्टशी संपर्क साधा.",
+  "registerSuccessTitle": "वित्तममध्ये आपले स्वागत आहे!",
+  "registerSuccessBody": "नोंदणी यशस्वी झाली. तुमची ४ दिवसांची मोफत चाचणी सुरू झाली आहे.\n\nबिलिंग सुरू करण्यासाठी आता लॉगिन करा.",
   "registerBackToLogin": "लॉगिनवर परत जा",
 
   "receiptPhonePrefix": "फोन:",

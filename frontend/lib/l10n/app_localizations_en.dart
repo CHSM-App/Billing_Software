@@ -469,11 +469,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'Could not send OTP. Check your internet connection.';
 
   @override
-  String get registerSuccessTitle => 'Registration Submitted';
+  String get registerSuccessTitle => 'Welcome to Vittam!';
 
   @override
   String get registerSuccessBody =>
-      'Registration successful. Your account is pending verification.\n\nPlease contact support to activate your account.';
+      'Registration successful. Your 4-day free trial has started.\n\nLog in now to start billing.';
 
   @override
   String get registerBackToLogin => 'Back to Login';
