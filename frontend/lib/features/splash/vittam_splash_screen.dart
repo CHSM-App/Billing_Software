@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:in_app_update/in_app_update.dart';
 
 import '../../core/update/update_provider.dart';
+import '../../l10n/l10n_ext.dart';
 import '../../theme/app_theme.dart';
 
 class VittamSplashScreen extends ConsumerStatefulWidget {
@@ -93,6 +93,7 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final size = MediaQuery.sizeOf(context);
     final versionAsync = ref.watch(appVersionProvider);
 
@@ -152,8 +153,8 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
 
                         // App name
                         Text(
-                          'Vittam',
-                          style: GoogleFonts.inter(
+                          l10n.appName,
+                          style: AppFont.style(
                             fontSize: 34,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary,
@@ -164,13 +165,19 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
                         const SizedBox(height: AppSpacing.space8),
 
                         // Tagline
-                        Text(
-                          'Smart Billing for Indian Businesses',
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.textSecondary,
-                            letterSpacing: 0.2,
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.space24,
+                          ),
+                          child: Text(
+                            l10n.splashTagline,
+                            textAlign: TextAlign.center,
+                            style: AppFont.style(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.textSecondary,
+                              letterSpacing: 0.2,
+                            ),
                           ),
                         ),
 
@@ -200,7 +207,7 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
                         versionAsync.when(
                           data: (v) => Text(
                             'v$v',
-                            style: GoogleFonts.inter(
+                            style: AppFont.style(
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                               color: AppColors.textDisabled,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:barcode_widget/barcode_widget.dart';
+import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
@@ -91,18 +92,20 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
   }
 
   Future<void> _deleteItem(Item item) async {
+    final l10n = context.l10n;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Delete item'),
-        content: Text('Delete "${item.name}"? It will no longer appear in billing.'),
+        title: Text(l10n.itemsDeleteTitle),
+        content: Text(l10n.itemsDeleteBody(item.name)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('Delete', style: TextStyle(color: AppColors.error)),
+            child: Text(l10n.commonDelete,
+                style: const TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -123,11 +126,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final userRole = ref.watch(userRoleProvider);
     final inventoryEnabled = ref.watch(inventoryEnabledProvider);
     final itemsAsync = ref.watch(itemsProvider);
+    final l10n = context.l10n;
 
     return Scaffold(
       body: Column(
         children: [
-          ShellAppBar(title: const Text('Items / Menu')),
+          ShellAppBar(title: Text(l10n.itemsTitle)),
           Expanded(child: _buildBody(itemsAsync, userRole, inventoryEnabled)),
         ],
       ),
@@ -135,7 +139,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
           ? FloatingActionButton.extended(
               onPressed: () => _showItemForm(),
               icon: const Icon(Icons.add),
-              label: const Text('Add Item'),
+              label: Text(l10n.itemsAddItem),
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
             )
@@ -151,12 +155,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             height: 40,
             child: TextField(
               controller: _searchController,
-              decoration: const InputDecoration(
-                hintText: 'Search items…',
+              decoration: InputDecoration(
+                hintText: context.l10n.itemsSearch,
                 isDense: true,
-                prefixIcon: Icon(Icons.search_outlined,
+                prefixIcon: const Icon(Icons.search_outlined,
                     size: 18, color: AppColors.textSecondary),
-                contentPadding: EdgeInsets.symmetric(
+                contentPadding: const EdgeInsets.symmetric(
                     horizontal: AppSpacing.space16, vertical: 0),
               ),
             ),
@@ -166,6 +170,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
 
   Widget _buildBody(
       AsyncValue<List<Item>> itemsAsync, String userRole, bool inventoryEnabled) {
+    final l10n = context.l10n;
     return itemsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => AppErrorWidget(
@@ -191,9 +196,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                 child: EmptyState(
                   icon: Icons.inventory_2_outlined,
                   message: userRole == 'owner'
-                      ? 'No items yet. Tap + to add your first item.'
-                      : 'No items found.',
-                  actionLabel: userRole == 'owner' ? 'Add Item' : null,
+                      ? l10n.itemsNoneYetOwner
+                      : l10n.itemsNoneFound,
+                  actionLabel: userRole == 'owner' ? l10n.itemsAddItem : null,
                   onAction: userRole == 'owner' ? () => _showItemForm() : null,
                 ),
               ),
@@ -237,10 +242,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
   }
 
   Widget _buildItemCard(Item item, String userRole, bool inventoryEnabled) {
+    final l10n = context.l10n;
     final subtitle = [
       if (item.category != null) item.category!,
       if (inventoryEnabled && item.stockQuantity != null)
-        'Stock: ${item.stockQuantity!.toStringAsFixed(0)}',
+        l10n.itemsStockLabel(item.stockQuantity!.toStringAsFixed(0)),
     ].join('  ·  ');
 
     return Container(
@@ -281,6 +287,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary,
+                          height: 1.2,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -295,6 +302,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                                   style: const TextStyle(
                                     fontSize: 12,
                                     color: AppColors.textSecondary,
+                                    height: 1.2,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -303,12 +311,17 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
                             if (inventoryEnabled && item.isLowStock) ...[
                               if (subtitle.isNotEmpty)
                                 const SizedBox(width: 6),
-                              const Text(
-                                '· Low stock',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.warning,
-                                  fontWeight: FontWeight.w600,
+                              Flexible(
+                                child: Text(
+                                  '· ${l10n.itemsLowStock}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppColors.warning,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.2,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],
@@ -425,6 +438,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
   Widget build(BuildContext context) {
     final item = widget.item;
     final hasInput = _adding > 0;
+    final l10n = context.l10n;
 
     return AlertDialog(
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 8, 0),
@@ -437,7 +451,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                 overflow: TextOverflow.ellipsis),
           ),
           IconButton(
-            tooltip: 'Edit item',
+            tooltip: l10n.itemsEditItemTooltip,
             icon: const Icon(Icons.edit_outlined, size: 20),
             onPressed: widget.onEditTapped,
           ),
@@ -459,13 +473,18 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                         )),
                 if (item.category != null) ...[
                   const SizedBox(width: 8),
-                  Text('·', style: const TextStyle(color: AppColors.textSecondary)),
+                  const Text('·',
+                      style: TextStyle(color: AppColors.textSecondary)),
                   const SizedBox(width: 8),
-                  Text(item.category!,
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: AppColors.textSecondary)),
+                  Flexible(
+                    child: Text(item.category!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.textSecondary)),
+                  ),
                 ],
               ],
             ),
@@ -475,10 +494,13 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Current stock',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.textSecondary,
-                          )),
+                  Flexible(
+                    child: Text(l10n.itemsCurrentStock,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.textSecondary,
+                            )),
+                  ),
+                  const SizedBox(width: 8),
                   Text(
                     _current.toStringAsFixed(0),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -489,7 +511,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
               ),
               const SizedBox(height: 12),
               AppTextField(
-                label: 'Add quantity',
+                label: l10n.itemsAddQuantity,
                 controller: _addCtrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
@@ -508,13 +530,17 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Total after adding',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: hasInput
-                                  ? AppColors.primaryDark
-                                  : AppColors.textSecondary,
-                              fontWeight: FontWeight.w500,
-                            )),
+                    Flexible(
+                      child: Text(l10n.itemsTotalAfterAdding,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: hasInput
+                                        ? AppColors.primaryDark
+                                        : AppColors.textSecondary,
+                                    fontWeight: FontWeight.w500,
+                                  )),
+                    ),
+                    const SizedBox(width: 8),
                     Text(
                       _total.toStringAsFixed(0),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
@@ -529,7 +555,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
               ),
             ] else ...[
               const SizedBox(height: 12),
-              Text('Inventory tracking is disabled.',
+              Text(l10n.itemsInventoryDisabled,
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -541,7 +567,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel')),
+            child: Text(l10n.commonCancel)),
         if (widget.inventoryEnabled)
           ElevatedButton(
             onPressed: (_saving || !hasInput) ? null : _save,
@@ -551,7 +577,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                     height: 16,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white))
-                : const Text('Update'),
+                : Text(l10n.commonUpdate),
           ),
       ],
     );
@@ -646,8 +672,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return AlertDialog(
-      title: Text(widget.item == null ? 'Add Item' : 'Edit Item'),
+      title: Text(widget.item == null ? l10n.itemsAddItem : l10n.itemsEditItem),
       content: SizedBox(
         width: 400,
         child: Form(
@@ -657,51 +684,54 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 AppTextField(
-                  label: 'Name',
+                  label: l10n.itemsFieldName,
                   controller: _nameCtrl,
-                  validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                  validator: (v) =>
+                      v == null || v.isEmpty ? l10n.commonRequired : null,
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 AppTextField(
-                    label: 'Category',
+                    label: l10n.itemsFieldCategory,
                     controller: _categoryCtrl,
-                    hint: 'e.g. Beverages'),
+                    hint: l10n.itemsFieldCategoryHint),
                 const SizedBox(height: AppSpacing.space12),
                 AppTextField(
-                  label: 'Price (₹)',
+                  label: l10n.itemsFieldPrice,
                   controller: _priceCtrl,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Required';
-                    if (double.tryParse(v) == null) return 'Enter a valid number';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: AppSpacing.space12),
-                AppTextField(
-                  label: 'Tax rate % (optional)',
-                  controller: _taxCtrl,
-                  hint: 'e.g. 5, 12, 18',
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) {
-                    if (v != null && v.isNotEmpty && double.tryParse(v) == null) {
-                      return 'Enter a valid number';
+                    if (v == null || v.isEmpty) return l10n.commonRequired;
+                    if (double.tryParse(v) == null) {
+                      return l10n.commonEnterValidNumber;
                     }
                     return null;
                   },
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 AppTextField(
-                  label: 'Barcode (optional)',
+                  label: l10n.itemsFieldTaxRate,
+                  controller: _taxCtrl,
+                  hint: l10n.itemsFieldTaxRateHint,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  validator: (v) {
+                    if (v != null && v.isNotEmpty && double.tryParse(v) == null) {
+                      return l10n.commonEnterValidNumber;
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: AppSpacing.space12),
+                AppTextField(
+                  label: l10n.itemsFieldBarcode,
                   controller: _barcodeCtrl,
                   keyboardType: TextInputType.number,
                 ),
                 if (widget.inventoryEnabled) ...[
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
-                    label: 'Stock quantity',
+                    label: l10n.itemsFieldStock,
                     controller: _stockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
@@ -714,7 +744,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonCancel)),
         ElevatedButton(
           onPressed: _saving ? null : _save,
           child: _saving
@@ -723,7 +754,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   height: 16,
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
-              : Text(widget.item == null ? 'Add' : 'Save'),
+              : Text(widget.item == null ? l10n.commonAdd : l10n.commonSave),
         ),
       ],
     );
@@ -792,6 +823,7 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
     final copies = int.tryParse(_copiesCtrl.text.trim()) ?? 1;
     if (copies < 1) return;
 
+    final sentMessage = context.l10n.itemsBarcodeSentToPrinter;
     setState(() => _printing = true);
     try {
       // If item had no barcode, save the generated one first
@@ -807,7 +839,7 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Barcode label sent to printer')),
+          SnackBar(content: Text(sentMessage)),
         );
         Navigator.pop(context);
       }
@@ -833,8 +865,11 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   @override
   Widget build(BuildContext context) {
     final isNew = widget.item.barcode == null;
+    final l10n = context.l10n;
     return AlertDialog(
-      title: Text(isNew ? 'Generate & Print Barcode' : 'Print Barcode'),
+      title: Text(isNew
+          ? l10n.itemsBarcodeGenerateTitle
+          : l10n.itemsBarcodePrintTitle),
       content: SizedBox(
         width: 360,
         child: SingleChildScrollView(
@@ -846,8 +881,7 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
-                    'This item has no barcode. A barcode has been generated. '
-                    'You can edit it before printing.',
+                    l10n.itemsBarcodeGeneratedNote,
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
@@ -884,13 +918,13 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
               ),
               const SizedBox(height: 16),
               AppTextField(
-                label: 'Barcode value',
+                label: l10n.itemsBarcodeValue,
                 controller: _barcodeCtrl,
                 keyboardType: TextInputType.text,
               ),
               const SizedBox(height: 12),
               AppTextField(
-                label: 'Copies',
+                label: l10n.itemsBarcodeCopies,
                 controller: _copiesCtrl,
                 keyboardType: TextInputType.number,
               ),
@@ -901,7 +935,7 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel')),
+            child: Text(l10n.commonCancel)),
         ElevatedButton.icon(
           onPressed: _printing ? null : _print,
           icon: _printing
@@ -911,7 +945,7 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
                   child:
                       CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
               : const Icon(Icons.print_outlined, size: 18),
-          label: const Text('Print'),
+          label: Text(l10n.commonPrint),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../services/sync_service.dart';
@@ -49,25 +50,26 @@ class _MainShellState extends ConsumerState<MainShell>
   }
 
   List<NavItem> _buildNavItems(String userRole, String businessType) {
+    final l10n = context.l10n;
     return [
-      const NavItem(Icons.receipt_long_outlined, Icons.receipt_long, 'Billing',
-          HomeScreen()),
+      NavItem(Icons.receipt_long_outlined, Icons.receipt_long, l10n.navBilling,
+          const HomeScreen()),
       if (userRole == 'owner')
-        const NavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Items',
-            ItemsScreen()),
+        NavItem(Icons.inventory_2_outlined, Icons.inventory_2, l10n.navItems,
+            const ItemsScreen()),
       if (businessType == 'restaurant_with_tables')
-        const NavItem(Icons.table_restaurant_outlined, Icons.table_restaurant,
-            'Tables', TablesScreen()),
-      const NavItem(
-          Icons.history_outlined, Icons.history, 'History', HistoryScreen()),
+        NavItem(Icons.table_restaurant_outlined, Icons.table_restaurant,
+            l10n.navTables, const TablesScreen()),
+      NavItem(Icons.history_outlined, Icons.history, l10n.navHistory,
+          const HistoryScreen()),
       if (userRole == 'owner')
-        const NavItem(Icons.bar_chart_outlined, Icons.bar_chart, 'Reports',
-            ReportsScreen()),
+        NavItem(Icons.bar_chart_outlined, Icons.bar_chart, l10n.navReports,
+            const ReportsScreen()),
       if (userRole == 'owner')
-        const NavItem(Icons.account_balance_wallet_outlined,
-            Icons.account_balance_wallet, 'Expenses', ExpensesScreen()),
-      const NavItem(
-          Icons.settings_outlined, Icons.settings, 'Settings', SettingsScreen()),
+        NavItem(Icons.account_balance_wallet_outlined,
+            Icons.account_balance_wallet, l10n.navExpenses, const ExpensesScreen()),
+      NavItem(Icons.settings_outlined, Icons.settings, l10n.navSettings,
+          const SettingsScreen()),
     ];
   }
 
@@ -121,8 +123,8 @@ class _MainShellState extends ConsumerState<MainShell>
                       Expanded(
                         child: Text(
                           graceDays <= 1
-                              ? 'Last day! Go online today to keep using the app.'
-                              : '$graceDays days left — go online soon to verify your subscription.',
+                              ? context.l10n.licenseGraceLastDay
+                              : context.l10n.licenseGraceDaysLeft(graceDays),
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,

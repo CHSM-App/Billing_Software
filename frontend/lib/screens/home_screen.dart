@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../models/cart_entry.dart';
 import '../providers.dart';
@@ -254,6 +255,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Future<void> _handleBarcodeScan(String barcode) async {
     if (barcode.isEmpty) return;
+    final l10n = context.l10n;
     try {
       final businessId = await getBusinessId();
       final cached = await OfflineService.instance
@@ -268,7 +270,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } on ApiException catch (e) {
       _showSnack(e.message, isError: true);
     } catch (_) {
-      _showSnack('Item not found for barcode: $barcode', isError: true);
+      _showSnack(l10n.billingItemNotFoundBarcode(barcode), isError: true);
     }
   }
 
@@ -282,20 +284,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _clearCart() async {
     // If this is a table with an active draft, offer to release the table.
     if (widget.activeBillId != null) {
+      final l10n = context.l10n;
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('Release Table?'),
-          content: const Text(
-              'Clearing all items will void the draft and mark the table as empty.'),
+          title: Text(l10n.billingReleaseTableTitle),
+          content: Text(l10n.billingReleaseTableBody),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel')),
+                child: Text(l10n.commonCancel)),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: Text('Release Table',
-                  style: TextStyle(color: AppColors.error)),
+              child: Text(l10n.billingReleaseTable,
+                  style: const TextStyle(color: AppColors.error)),
             ),
           ],
         ),
@@ -311,7 +313,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       } on ApiException catch (e) {
         _showSnack(e.message, isError: true);
       } catch (_) {
-        _showSnack('Failed to release table.', isError: true);
+        _showSnack(l10n.billingReleaseTableFailed, isError: true);
       }
     } else {
       ref.read(cartProvider.notifier).clear();
@@ -321,14 +323,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _saveDraft() async {
+    final l10n = context.l10n;
     final isOnline = ref.read(connectivityProvider);
     if (!isOnline) {
-      _showSnack('Cannot save table draft while offline', isError: true);
+      _showSnack(l10n.billingDraftOfflineError, isError: true);
       return;
     }
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) {
-      _showSnack('Add at least one item first', isError: true);
+      _showSnack(l10n.billingAddAtLeastOneItemFirst, isError: true);
       return;
     }
     setState(() => _savingDraft = true);
@@ -344,7 +347,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         });
       }
       if (!mounted) return;
-      _showSnack('Items saved. Table is now occupied.');
+      _showSnack(l10n.billingDraftSaved);
       if (widget.onBillDone != null) {
         widget.onBillDone!();
       } else {
@@ -353,7 +356,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } on ApiException catch (e) {
       _showSnack(e.message, isError: true);
     } catch (_) {
-      _showSnack('Failed to save. Check your connection.', isError: true);
+      _showSnack(l10n.billingSaveFailed, isError: true);
     } finally {
       if (mounted) setState(() => _savingDraft = false);
     }
@@ -362,7 +365,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Future<void> _generateBill({void Function(Bill)? onBillReady}) async {
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) {
-      _showSnack('Add at least one item to the cart', isError: true);
+      _showSnack(context.l10n.billingAddAtLeastOneItem, isError: true);
       return;
     }
     if (widget.activeBillId != null || widget.tableId != null) {
@@ -409,6 +412,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Future<void> _generateBillOnline(List<CartEntry> cart,
       {void Function(Bill)? onBillReady}) async {
+    final l10n = context.l10n;
     setState(() => _generatingBill = true);
     try {
       Map<String, dynamic> result;
@@ -452,47 +456,63 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _showSnack(e.serverMessage ?? e.message, isError: true);
       }
     } catch (_) {
-      _showSnack('Failed to generate bill. Check your connection.',
-          isError: true);
+      _showSnack(l10n.billingGenerateFailed, isError: true);
     } finally {
       if (mounted) setState(() => _generatingBill = false);
     }
   }
 
   void _showInsufficientStockDialog(List<Map<String, dynamic>> items) {
+    final l10n = context.l10n;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.inventory_2_outlined, color: AppColors.error, size: 20),
-            SizedBox(width: 8),
-            Text('Insufficient Stock'),
+            const Icon(Icons.inventory_2_outlined,
+                color: AppColors.error, size: 20),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                l10n.billingInsufficientStock,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'The following items do not have enough stock:',
-              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            Text(
+              l10n.billingInsufficientStockBody,
+              style: AppFont.style(
+                  fontSize: 13, color: AppColors.textSecondary),
             ),
             const SizedBox(height: 12),
             ...items.map((item) {
-              final name = item['item_name'] ?? item['name'] ?? 'Unknown';
+              final name = (item['item_name'] ?? item['name']) as String? ??
+                  l10n.billingUnknownItem;
               final available = item['available'];
               final requested = item['requested'];
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.circle, size: 6, color: AppColors.error),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 5),
+                      child:
+                          Icon(Icons.circle, size: 6, color: AppColors.error),
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         name,
-                        style: const TextStyle(
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppFont.style(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary,
@@ -500,11 +520,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       ),
                     ),
                     if (available != null)
-                      Text(
-                        'Available: $available${requested != null ? ' / Asked: $requested' : ''}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.error,
+                      Flexible(
+                        child: Text(
+                          requested != null
+                              ? l10n.billingStockAvailableAsked(
+                                  '$available', '$requested')
+                              : l10n.billingStockAvailable('$available'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppFont.style(
+                            fontSize: 12,
+                            color: AppColors.error,
+                          ),
                         ),
                       ),
                   ],
@@ -516,7 +543,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            child: Text(l10n.commonOk),
           ),
         ],
       ),
@@ -525,6 +552,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Future<void> _generateBillOffline(List<CartEntry> cart,
       {void Function(Bill)? onBillReady}) async {
+    final l10n = context.l10n;
     setState(() => _generatingBill = true);
     try {
       final businessId = await getBusinessId() ?? '';
@@ -609,33 +637,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _navigateAfterBill();
       }
     } catch (e) {
-      _showSnack('Failed to save bill offline: $e', isError: true);
+      _showSnack(l10n.billingSavedOffline('$e'), isError: true);
     } finally {
       if (mounted) setState(() => _generatingBill = false);
     }
   }
 
   Future<void> _autoPrint(Bill bill) async {
+    final l10n = context.l10n;
     final businessName = ref.read(businessNameProvider);
     try {
       await PrinterService.instance.printBill(bill, businessName: businessName);
-      if (mounted) _showSnack('Bill printed successfully');
+      if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {
+      // 'No printer configured' is an internal sentinel, not a user string.
       if (e.message == 'No printer configured') return;
-      if (mounted) _showSnack('Print failed: ${e.message}', isError: true);
+      if (mounted) _showSnack(l10n.billingPrintFailed(e.message), isError: true);
     } catch (e) {
-      if (mounted) _showSnack('Print failed: $e', isError: true);
+      if (mounted) _showSnack(l10n.billingPrintFailed('$e'), isError: true);
     }
   }
 
   Future<void> _sendBillWhatsApp(Bill bill) async {
+    final l10n = context.l10n;
     try {
       await sendBillWhatsApp(bill.id);
-      if (mounted) _showSnack('Receipt link sent to WhatsApp');
+      if (mounted) _showSnack(l10n.billingWhatsappSent);
     } on ApiException catch (e) {
-      if (mounted) _showSnack('WhatsApp failed: ${e.message}', isError: true);
+      if (mounted) {
+        _showSnack(l10n.billingWhatsappFailedWithError(e.message),
+            isError: true);
+      }
     } catch (_) {
-      if (mounted) _showSnack('Could not send WhatsApp message', isError: true);
+      if (mounted) _showSnack(l10n.billingWhatsappFailed, isError: true);
     }
   }
 
@@ -657,7 +691,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ));
   }
 
+  // ignore: unused_element
   Future<void> _logout() async {
+    final l10n = context.l10n;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => Dialog(
@@ -684,12 +720,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
               const SizedBox(height: AppSpacing.space16),
               Text(
-                'Logout?',
+                l10n.logoutConfirmTitle,
                 style: Theme.of(ctx).textTheme.titleLarge,
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: AppSpacing.space8),
               Text(
-                'Are you sure you want to log out of your account?',
+                l10n.logoutConfirmBody,
                 style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                       color: AppColors.textSecondary,
                     ),
@@ -704,7 +741,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size(0, 46),
                       ),
-                      child: const Text('Cancel'),
+                      child: Text(l10n.commonCancel,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),
                   ),
                   const SizedBox(width: AppSpacing.space12),
@@ -715,7 +753,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         backgroundColor: AppColors.error,
                         minimumSize: const Size(0, 46),
                       ),
-                      child: const Text('Logout'),
+                      child: Text(l10n.logout,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),
                   ),
                 ],
@@ -753,6 +792,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   ShellAppBar _buildAppBar(String businessName, String userName) {
+    final l10n = context.l10n;
     return ShellAppBar(
       title: AnimatedOpacity(
         opacity: _searchExpanded ? 0.0 : 1.0,
@@ -761,7 +801,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(businessName, style: Theme.of(context).textTheme.titleLarge),
+            Text(businessName,
+                style: Theme.of(context).textTheme.titleLarge,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
             if (widget.tableNumber != null)
               Container(
                 margin: const EdgeInsets.only(top: 2),
@@ -771,7 +814,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  'Table ${widget.tableNumber}',
+                  l10n.billingTableNumber(widget.tableNumber!),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w600,
@@ -799,7 +844,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       focusNode: _searchFocus,
                       autofocus: false,
                       decoration: InputDecoration(
-                        hintText: 'Search items…',
+                        hintText: l10n.billingSearchItems,
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         border: OutlineInputBorder(
@@ -869,6 +914,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _buildNarrowLayout() {
     return Consumer(builder: (context, ref, _) {
+      final l10n = context.l10n;
       final count = ref.watch(cartItemCountProvider);
       return Stack(
         children: [
@@ -878,7 +924,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               bottom: AppSpacing.space16,
               left: AppSpacing.space16,
               child: Tooltip(
-                message: 'Clear selected items',
+                message: l10n.billingClearCart,
                 child: IconButton(
                   onPressed: () => ref.read(cartProvider.notifier).clear(),
                   icon: const Icon(Icons.remove_shopping_cart_outlined),
@@ -915,8 +961,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             )
                           : const Icon(Icons.save_outlined, size: 20),
                       label: Text(
-                        _savingDraft ? 'Saving…' : 'Save Draft',
-                        style: const TextStyle(
+                        _savingDraft ? l10n.commonSaving : l10n.billingSaveDraft,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppFont.style(
                             fontWeight: FontWeight.w600, fontSize: 14),
                       ),
                     ),
@@ -931,8 +979,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       elevation: 4,
                       icon: const Icon(Icons.shopping_cart_outlined, size: 20),
                       label: Text(
-                        count == 0 ? 'Cart' : 'Cart ($count)',
-                        style: const TextStyle(
+                        count == 0 ? l10n.billingCart : l10n.billingCartWithCount(count),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppFont.style(
                             fontWeight: FontWeight.w600, fontSize: 14),
                       ),
                     ),
@@ -952,8 +1002,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 elevation: 4,
                 icon: const Icon(Icons.shopping_cart_outlined, size: 20),
                 label: Text(
-                  count == 0 ? 'Cart' : 'Cart ($count)',
-                  style: const TextStyle(
+                  count == 0 ? l10n.billingCart : l10n.billingCartWithCount(count),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.style(
                       fontWeight: FontWeight.w600, fontSize: 14),
                 ),
               ),
@@ -1081,8 +1133,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
                   ...headerSlivers(),
-                  const SliverFillRemaining(
-                    child: EmptyState(icon: Icons.search_off_outlined, message: 'No items found'),
+                  SliverFillRemaining(
+                    child: EmptyState(
+                        icon: Icons.search_off_outlined,
+                        message: context.l10n.billingNoItemsFound),
                   ),
                 ],
               ),
@@ -1117,6 +1171,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _buildCartPanel({bool inSheet = false}) {
     return Consumer(builder: (context, ref, _) {
+      final l10n = context.l10n;
       final cart = ref.watch(cartProvider);
       final subtotal = ref.watch(cartSubtotalProvider);
       final tax = ref.watch(cartTaxProvider);
@@ -1157,14 +1212,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         size: 18, color: Colors.white),
                   ),
                   const SizedBox(width: AppSpacing.space12),
-                  Text('Order',
-                      style: Theme.of(context).textTheme.titleLarge),
+                  Flexible(
+                    child: Text(l10n.billingOrder,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleLarge),
+                  ),
                   const Spacer(),
                   if (cart.isNotEmpty)
                     TextButton.icon(
                       onPressed: _clearCart,
                       icon: const Icon(Icons.delete_outline, size: 14),
-                      label: const Text('Clear'),
+                      label: Text(l10n.commonClear,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                       style: TextButton.styleFrom(
                         foregroundColor: AppColors.error,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1193,7 +1253,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           size: 28, color: AppColors.textDisabled),
                     ),
                     const SizedBox(height: AppSpacing.space12),
-                    Text('No items added yet',
+                    Text(l10n.billingNoItemsAddedYet,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: AppColors.textSecondary,
                             ),
@@ -1234,14 +1294,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           const Icon(Icons.person_outline,
                               size: 16, color: AppColors.textSecondary),
                           const SizedBox(width: AppSpacing.space8),
-                          Text(
-                            'Customer details (optional)',
-                            style:
-                                Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                          Expanded(
+                            child: Text(
+                              l10n.billingCustomerDetails,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style:
+                                  Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                            ),
                           ),
-                          const Spacer(),
                           AnimatedRotation(
                             turns: _showCustomerFields ? 0.5 : 0,
                             duration: const Duration(milliseconds: 200),
@@ -1268,7 +1331,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               children: [
                                 AppTextField(
                                   key: _customerNameKey,
-                                  label: 'Customer name',
+                                  label: l10n.billingCustomerNameLabel,
                                   controller: _customerNameController,
                                   focusNode: _customerNameFocus,
                                   prefixIcon: const Icon(Icons.person_outline,
@@ -1278,7 +1341,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 const SizedBox(height: AppSpacing.space8),
                                 AppTextField(
                                   key: _customerPhoneKey,
-                                  label: 'Customer phone',
+                                  label: l10n.billingCustomerPhoneLabel,
                                   controller: _customerPhoneController,
                                   focusNode: _customerPhoneFocus,
                                   keyboardType: TextInputType.phone,
@@ -1301,19 +1364,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.space16),
               child: DropdownButtonFormField<String>(
-                value: _paymentMode,
-                decoration: const InputDecoration(
-                  labelText: 'Payment mode',
-                  prefixIcon: Icon(Icons.payments_outlined,
+                initialValue: _paymentMode,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: l10n.billingPaymentMode,
+                  prefixIcon: const Icon(Icons.payments_outlined,
                       size: 18, color: AppColors.textSecondary),
                 ),
-                items: const [
-                  DropdownMenuItem(value: 'cash', child: Text('Cash')),
-                  DropdownMenuItem(value: 'upi', child: Text('UPI')),
-                  DropdownMenuItem(value: 'card', child: Text('Card')),
+                items: [
                   DropdownMenuItem(
-                      value: 'credit', child: Text('Credit')),
-                  DropdownMenuItem(value: 'other', child: Text('Other')),
+                      value: 'cash',
+                      child: Text(l10n.paymentCash,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(
+                      value: 'upi',
+                      child: Text(l10n.paymentUpi,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(
+                      value: 'card',
+                      child: Text(l10n.paymentCard,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(
+                      value: 'credit',
+                      child: Text(l10n.paymentCredit,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(
+                      value: 'other',
+                      child: Text(l10n.paymentOther,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: (v) => setState(() => _paymentMode = v!),
               ),
@@ -1328,7 +1406,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   Expanded(
                     child: AppTextField(
                       key: _discountPctKey,
-                      label: 'Discount %',
+                      label: l10n.billingDiscountPercent,
                       controller: _discountPctController,
                       focusNode: _discountPctFocus,
                       keyboardType: const TextInputType.numberWithOptions(
@@ -1341,7 +1419,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   Expanded(
                     child: AppTextField(
                       key: _discountAmtKey,
-                      label: 'Discount ₹',
+                      label: l10n.billingDiscountRupees,
                       controller: _discountAmtController,
                       focusNode: _discountAmtFocus,
                       keyboardType: const TextInputType.numberWithOptions(
@@ -1377,24 +1455,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               horizontal: AppSpacing.space12, vertical: 10),
                           child: Row(
                             children: [
-                              Text(
-                                'Total Amount',
-                                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                      color: AppColors.textSecondary,
-                                    ),
+                              Flexible(
+                                child: Text(
+                                  l10n.billingTotalAmount,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                        color: AppColors.textSecondary,
+                                      ),
+                                ),
                               ),
                               const Spacer(),
                               if (tax > 0)
-                                Text(
-                                  '₹${subtotal.toStringAsFixed(2)} + ₹${tax.toStringAsFixed(2)} GST',
-                                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                        color: AppColors.textSecondary,
-                                        fontSize: 11,
-                                      ),
+                                Flexible(
+                                  child: Text(
+                                    l10n.billingSubtotalPlusGst(
+                                        subtotal.toStringAsFixed(2),
+                                        tax.toStringAsFixed(2)),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                          color: AppColors.textSecondary,
+                                          fontSize: 11,
+                                        ),
+                                  ),
                                 ),
                               if (tax > 0) const SizedBox(width: 6),
                               Text(
                                 '₹${total.toStringAsFixed(2)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -1410,15 +1500,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 horizontal: AppSpacing.space12, vertical: 10),
                             child: Row(
                               children: [
-                                Text(
-                                  'Discount Applied',
-                                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                        color: AppColors.textSecondary,
-                                      ),
+                                Flexible(
+                                  child: Text(
+                                    l10n.billingDiscountApplied,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                          color: AppColors.textSecondary,
+                                        ),
+                                  ),
                                 ),
                                 const Spacer(),
                                 Text(
                                   '− ₹${discountAmt.toStringAsFixed(2)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                                         fontWeight: FontWeight.w600,
                                         color: const Color(0xFF16A34A),
@@ -1449,17 +1545,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               horizontal: AppSpacing.space12, vertical: 11),
                           child: Row(
                             children: [
-                              Text(
-                                'Net Payable',
-                                style: Theme.of(ctx).textTheme.bodyMedium
-                                    ?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.primaryDark,
+                              Flexible(
+                                child: Text(
+                                  l10n.billingNetPayable,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(ctx).textTheme.bodyMedium
+                                      ?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.primaryDark,
+                                  ),
                                 ),
                               ),
                               const Spacer(),
                               Text(
                                 '₹${netPayable.toStringAsFixed(2)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: Theme.of(ctx)
                                     .textTheme
                                     .titleMedium
@@ -1482,7 +1584,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                     AppSpacing.space12, AppSpacing.space16, 0),
                 child: SecondaryButton(
-                  text: _savingDraft ? 'Saving…' : 'Save Draft',
+                  text: _savingDraft ? l10n.commonSaving : l10n.billingSaveDraft,
                   icon: Icons.save_outlined,
                   onPressed:
                       (cart.isEmpty || _savingDraft) ? null : _saveDraft,
@@ -1508,8 +1610,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             : const Color(0xFF25D366),
                       ),
                       label: Text(
-                        'WhatsApp',
-                        style: TextStyle(
+                        l10n.billingWhatsapp,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppFont.style(
                           color: (cart.isEmpty || _generatingBill)
                               ? AppColors.textSecondary
                               : const Color(0xFF25D366),
@@ -1540,7 +1644,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   const SizedBox(width: AppSpacing.space12),
                   Expanded(
                     child: PrimaryButton(
-                      text: 'Print',
+                      text: l10n.commonPrint,
                       icon: Icons.print_outlined,
                       onPressed: (cart.isEmpty || _generatingBill)
                           ? null
@@ -1748,14 +1852,17 @@ class _StaleCacheBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final color = isVeryStale ? AppColors.error : AppColors.warning;
     final bg = isVeryStale ? AppColors.errorLight : AppColors.warningLight;
     final icon =
         isVeryStale ? Icons.error_outline : Icons.warning_amber_rounded;
-    final label = ageLabel != null ? 'Prices from $ageLabel' : 'Stale prices';
+    final label = ageLabel != null
+        ? l10n.billingStalePricesFrom(ageLabel!)
+        : l10n.billingStalePrices;
     final detail = isVeryStale
-        ? 'Very old cache — prices may be inaccurate'
-        : 'Connect to refresh pricing';
+        ? l10n.billingStaleVeryOld
+        : l10n.billingStaleConnectToRefresh;
 
     return Container(
       width: double.infinity,
@@ -1772,7 +1879,9 @@ class _StaleCacheBanner extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: TextStyle(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.style(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: color,
@@ -1780,7 +1889,9 @@ class _StaleCacheBanner extends StatelessWidget {
                 ),
                 Text(
                   detail,
-                  style: TextStyle(fontSize: 11, color: color),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.style(fontSize: 11, color: color),
                 ),
               ],
             ),
@@ -1818,7 +1929,7 @@ class _ExcelItemTable extends StatelessWidget {
     required this.onSetQty,
   });
 
-  Widget _header() => Container(
+  Widget _header(AppLocalizations l10n) => Container(
         height: 28,
         color: AppColors.surfaceVariant,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1827,8 +1938,10 @@ class _ExcelItemTable extends StatelessWidget {
             const SizedBox(width: 24),
             const SizedBox(width: 8),
             Expanded(
-              child: Text('Item',
-                  style: TextStyle(
+              child: Text(l10n.billingColItem,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.style(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textSecondary,
@@ -1836,9 +1949,11 @@ class _ExcelItemTable extends StatelessWidget {
             ),
             SizedBox(
               width: 72,
-              child: Text('Price',
+              child: Text(l10n.billingColPrice,
                   textAlign: TextAlign.right,
-                  style: TextStyle(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.style(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textSecondary,
@@ -1847,9 +1962,11 @@ class _ExcelItemTable extends StatelessWidget {
             const SizedBox(width: 8),
             SizedBox(
               width: 112,
-              child: Text('Qty',
+              child: Text(l10n.billingColQty,
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.style(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textSecondary,
@@ -1861,6 +1978,7 @@ class _ExcelItemTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     // Two item columns only on large screens (≥1200px total) where the
     // items panel is wide enough to comfortably fit two side-by-side tables.
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1877,7 +1995,7 @@ class _ExcelItemTable extends StatelessWidget {
               height: 29,
               child: Column(
                 children: [
-                  _header(),
+                  _header(l10n),
                   const Divider(height: 1),
                 ],
               ),
@@ -1923,9 +2041,9 @@ class _ExcelItemTable extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Expanded(child: _header()),
+                    Expanded(child: _header(l10n)),
                     Container(width: 1, color: AppColors.border),
-                    Expanded(child: _header()),
+                    Expanded(child: _header(l10n)),
                   ],
                 ),
                 const Divider(height: 1),

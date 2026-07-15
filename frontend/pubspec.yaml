@@ -1,13 +1,15 @@
 name: Vittam
 description: "Billing app for small Indian businesses."
 publish_to: 'none'
-version: 1.0.7+8
+version: 1.0.8+9
 
 environment:
   sdk: ^3.5.0
 
 dependencies:
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
 
   flutter_riverpod: ^2.5.1
@@ -19,7 +21,7 @@ dependencies:
   sqflite_common_ffi: ^2.3.0
   path_provider: ^2.1.0
   path: ^1.9.0
-  intl: ^0.19.0
+  intl: ^0.20.2
   google_fonts: ^6.1.0
   flutter_thermal_printer: 2.0.0
   print_bluetooth_thermal: ^1.0.0
@@ -44,6 +46,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true
 
   assets:
     - assets/logo.png

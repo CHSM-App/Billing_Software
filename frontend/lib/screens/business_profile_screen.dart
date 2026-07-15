@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../providers/session_provider.dart';
 import '../storage.dart';
 import '../theme/app_theme.dart';
@@ -108,6 +109,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final l10n = context.l10n;
     setState(() => _saving = true);
     try {
       final payload = <String, dynamic>{};
@@ -134,7 +136,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
       if (payload.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No changes to save')),
+            SnackBar(content: Text(l10n.businessProfileNoChanges)),
           );
         }
         return;
@@ -152,7 +154,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Profile updated successfully'),
+            content: Text(l10n.businessProfileUpdated),
             backgroundColor: AppColors.success,
             behavior: SnackBarBehavior.floating,
           ),
@@ -179,10 +181,11 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Business Profile'),
+        title: Text(l10n.businessProfileTitle),
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
@@ -201,9 +204,9 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                   )
                 : TextButton(
                     onPressed: _save,
-                    child: const Text(
-                      'Save',
-                      style: TextStyle(
+                    child: Text(
+                      l10n.commonSave,
+                      style: AppFont.style(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w600,
                         fontSize: 15,
@@ -229,28 +232,31 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                         children: [
                           _buildSection(
                             context,
-                            label: 'BASIC INFO',
+                            label: l10n.businessProfileSectionBasic,
                             icon: Icons.storefront_outlined,
                             iconColor: AppColors.primary,
                             children: [
                               _buildField(
                                 controller: _nameCtrl,
-                                label: 'Business Name',
-                                hint: 'e.g. Kamble Provisions',
-                                validator: (v) =>
-                                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+                                label: l10n.businessProfileNameLabel,
+                                hint: l10n.businessProfileNameHint,
+                                validator: (v) => (v == null || v.trim().isEmpty)
+                                    ? l10n.commonRequired
+                                    : null,
                               ),
                               const SizedBox(height: AppSpacing.space12),
                               _buildField(
                                 controller: _phoneCtrl,
-                                label: 'Phone',
-                                hint: '10-digit mobile number',
+                                label: l10n.businessProfilePhone,
+                                hint: l10n.businessProfilePhoneHint,
                                 keyboardType: TextInputType.phone,
                                 maxLength: 10,
                                 validator: (v) {
-                                  if (v == null || v.trim().isEmpty) return 'Required';
+                                  if (v == null || v.trim().isEmpty) {
+                                    return l10n.commonRequired;
+                                  }
                                   if (!RegExp(r'^\d{10}$').hasMatch(v.trim())) {
-                                    return 'Must be 10 digits';
+                                    return l10n.businessProfilePhoneInvalid;
                                   }
                                   return null;
                                 },
@@ -258,14 +264,14 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                               const SizedBox(height: AppSpacing.space12),
                               _buildField(
                                 controller: _emailCtrl,
-                                label: 'Email (optional)',
-                                hint: 'owner@example.com',
+                                label: l10n.businessProfileEmail,
+                                hint: l10n.businessProfileEmailHint,
                                 keyboardType: TextInputType.emailAddress,
                                 validator: (v) {
                                   if (v == null || v.trim().isEmpty) return null;
                                   if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
                                       .hasMatch(v.trim())) {
-                                    return 'Invalid email address';
+                                    return l10n.businessProfileEmailInvalid;
                                   }
                                   return null;
                                 },
@@ -273,15 +279,16 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                               const SizedBox(height: AppSpacing.space12),
                               _buildField(
                                 controller: _websiteCtrl,
-                                label: 'Website (optional)',
-                                hint: 'https://example.com',
+                                label: l10n.businessProfileWebsite,
+                                hint: l10n.businessProfileWebsiteHint,
                                 keyboardType: TextInputType.url,
                               ),
                               const SizedBox(height: AppSpacing.space12),
                               _buildReadOnly(
                                 context,
-                                label: 'Business Type',
-                                value: _formatType(_profile?['business_type'] ?? ''),
+                                label: l10n.businessProfileType,
+                                value: _formatType(
+                                    l10n, _profile?['business_type'] ?? ''),
                               ),
                             ],
                           ),
@@ -289,14 +296,14 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
 
                           _buildSection(
                             context,
-                            label: 'ADDRESS',
+                            label: l10n.businessProfileSectionAddress,
                             icon: Icons.location_on_outlined,
                             iconColor: const Color(0xFF0EA5E9),
                             children: [
                               _buildField(
                                 controller: _addressCtrl,
-                                label: 'Street Address',
-                                hint: 'Shop No. 5, Market Road',
+                                label: l10n.businessProfileStreet,
+                                hint: l10n.businessProfileStreetHint,
                                 maxLines: 2,
                               ),
                               const SizedBox(height: AppSpacing.space12),
@@ -305,16 +312,16 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                   Expanded(
                                     child: _buildField(
                                       controller: _cityCtrl,
-                                      label: 'City',
-                                      hint: 'Vengurla',
+                                      label: l10n.businessProfileCity,
+                                      hint: l10n.businessProfileCityHint,
                                     ),
                                   ),
                                   const SizedBox(width: AppSpacing.space12),
                                   Expanded(
                                     child: _buildField(
                                       controller: _stateCtrl,
-                                      label: 'State',
-                                      hint: 'Maharashtra',
+                                      label: l10n.businessProfileState,
+                                      hint: l10n.businessProfileStateHint,
                                     ),
                                   ),
                                 ],
@@ -322,14 +329,14 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                               const SizedBox(height: AppSpacing.space12),
                               _buildField(
                                 controller: _pincodeCtrl,
-                                label: 'Pincode',
-                                hint: '416523',
+                                label: l10n.businessProfilePincode,
+                                hint: l10n.businessProfilePincodeHint,
                                 keyboardType: TextInputType.number,
                                 maxLength: 6,
                                 validator: (v) {
                                   if (v == null || v.trim().isEmpty) return null;
                                   if (!RegExp(r'^\d{6}$').hasMatch(v.trim())) {
-                                    return '6-digit pincode';
+                                    return l10n.businessProfilePincodeInvalid;
                                   }
                                   return null;
                                 },
@@ -340,21 +347,21 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
 
                           _buildSection(
                             context,
-                            label: 'TAX INFO',
+                            label: l10n.businessProfileSectionTax,
                             icon: Icons.receipt_outlined,
                             iconColor: const Color(0xFF7C3AED),
                             children: [
                               _buildField(
                                 controller: _gstCtrl,
-                                label: 'GSTIN (optional)',
-                                hint: '27ABCDE1234F1Z5',
+                                label: l10n.businessProfileGst,
+                                hint: l10n.businessProfileGstHint,
                                 textCapitalization: TextCapitalization.characters,
                                 maxLength: 15,
                                 validator: (v) {
                                   if (v == null || v.trim().isEmpty) return null;
                                   if (!RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$')
                                       .hasMatch(v.trim())) {
-                                    return 'Invalid GSTIN format';
+                                    return l10n.businessProfileGstInvalid;
                                   }
                                   return null;
                                 },
@@ -362,15 +369,15 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                               const SizedBox(height: AppSpacing.space12),
                               _buildField(
                                 controller: _panCtrl,
-                                label: 'PAN (optional)',
-                                hint: 'ABCDE1234F',
+                                label: l10n.businessProfilePan,
+                                hint: l10n.businessProfilePanHint,
                                 textCapitalization: TextCapitalization.characters,
                                 maxLength: 10,
                                 validator: (v) {
                                   if (v == null || v.trim().isEmpty) return null;
                                   if (!RegExp(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$')
                                       .hasMatch(v.trim())) {
-                                    return 'Invalid PAN format';
+                                    return l10n.businessProfilePanInvalid;
                                   }
                                   return null;
                                 },
@@ -381,20 +388,20 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
 
                           // _buildSection(
                           //   context,
-                          //   label: 'BILLING',
+                          //   label: l10n.businessProfileSectionBilling,
                           //   icon: Icons.print_outlined,
                           //   iconColor: AppColors.warning,
                           //   children: [
                           //     _buildField(
                           //       controller: _billPrefixCtrl,
-                          //       label: 'Bill Number Prefix',
+                          //       label: l10n.businessProfileBillPrefix,
                           //       hint: 'INV',
                           //       maxLength: 10,
-                          //       helperText: 'Bills will be numbered INV-0001, INV-0002, …',
+                          //       helperText: l10n.businessProfileBillPrefixHelper,
                           //       validator: (v) {
-                          //         if (v == null || v.trim().isEmpty) return 'Required';
+                          //         if (v == null || v.trim().isEmpty) return l10n.commonRequired;
                           //         if (!RegExp(r'^[A-Za-z0-9\-/]+$').hasMatch(v.trim())) {
-                          //           return 'Letters, numbers, hyphens, slashes only';
+                          //           return l10n.businessProfileBillPrefixInvalid;
                           //         }
                           //         return null;
                           //       },
@@ -402,8 +409,8 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                           //     const SizedBox(height: AppSpacing.space12),
                           //     _buildField(
                           //       controller: _footerNoteCtrl,
-                          //       label: 'Bill Footer Note (optional)',
-                          //       hint: 'Thank you for shopping with us!',
+                          //       label: l10n.businessProfileFooterNote,
+                          //       hint: l10n.businessProfileFooterNoteHint,
                           //       maxLines: 3,
                           //       maxLength: 500,
                           //     ),
@@ -412,7 +419,9 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                           // const SizedBox(height: AppSpacing.space32),
 
                           PrimaryButton(
-                            text: _saving ? 'Saving…' : 'Save Profile',
+                            text: _saving
+                                ? l10n.commonSaving
+                                : l10n.businessProfileSaveButton,
                             onPressed: _saving ? null : _save,
                           ),
                           const SizedBox(height: AppSpacing.space32),
@@ -450,13 +459,17 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
               child: Icon(icon, size: 16, color: iconColor),
             ),
             const SizedBox(width: AppSpacing.space8),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppColors.textSecondary,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.0,
-                  ),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.0,
+                    ),
+              ),
             ),
           ],
         ),
@@ -498,8 +511,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
       maxLines: maxLines,
       maxLength: maxLength,
       validator: validator,
-      style: const TextStyle(
-        fontFamily: 'Inter',
+      style: AppFont.style(
         fontSize: 14,
         color: AppColors.textPrimary,
       ),
@@ -533,8 +545,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
           borderRadius: BorderRadius.circular(AppRadius.small),
           borderSide: const BorderSide(color: AppColors.error, width: 2),
         ),
-        labelStyle: const TextStyle(
-          fontFamily: 'Inter',
+        labelStyle: AppFont.style(
           color: AppColors.textSecondary,
           fontSize: 13,
         ),
@@ -551,8 +562,9 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
       children: [
         Text(
           label,
-          style: const TextStyle(
-            fontFamily: 'Inter',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: AppFont.style(
             fontSize: 12,
             color: AppColors.textSecondary,
           ),
@@ -569,8 +581,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
           ),
           child: Text(
             value,
-            style: const TextStyle(
-              fontFamily: 'Inter',
+            style: AppFont.style(
               fontSize: 14,
               color: AppColors.textSecondary,
             ),
@@ -580,11 +591,12 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     );
   }
 
-  String _formatType(String type) {
+  /// Maps the raw API business_type value to a localized display label.
+  String _formatType(AppLocalizations l10n, String type) {
     return switch (type) {
-      'retail'                  => 'Retail Shop',
-      'restaurant_with_tables'  => 'Restaurant (with tables)',
-      'restaurant_no_tables'    => 'Restaurant (takeaway)',
+      'retail'                  => l10n.businessTypeRetail,
+      'restaurant_with_tables'  => l10n.businessTypeRestaurantTables,
+      'restaurant_no_tables'    => l10n.businessTypeRestaurantTakeaway,
       _                         => type,
     };
   }

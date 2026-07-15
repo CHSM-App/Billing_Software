@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../services/printer_service.dart';
@@ -15,6 +16,33 @@ class HistoryScreen extends ConsumerStatefulWidget {
   @override
   ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
 }
+
+/// Maps a raw bill status value from the API to a localized display label.
+String _billStatusLabel(AppLocalizations l10n, String status) {
+  return switch (status) {
+    'finalized' => l10n.historyStatusFinalized,
+    'voided' => l10n.historyStatusVoided,
+    'draft' => l10n.historyStatusDraft,
+    _ => status,
+  };
+}
+
+/// Maps a raw payment mode value from the API to a localized display label.
+String _paymentModeLabel(AppLocalizations l10n, String mode) {
+  return switch (mode) {
+    'cash' => l10n.paymentCash,
+    'upi' => l10n.paymentUpi,
+    'card' => l10n.paymentCard,
+    'credit' => l10n.paymentCredit,
+    _ => l10n.paymentOther,
+  };
+}
+
+StatusType _billStatusType(String status) => switch (status) {
+      'finalized' => StatusType.success,
+      'voided' => StatusType.error,
+      _ => StatusType.warning,
+    };
 
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   final _dateFmt = DateFormat('dd MMM yyyy');
@@ -56,20 +84,22 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final filter = ref.watch(billFilterProvider);
     final billsAsync = ref.watch(billsProvider);
 
     return Scaffold(
       body: Column(
         children: [
-          ShellAppBar(title: const Text('Bill History')),
-          Expanded(child: _buildBody(billsAsync, filter)),
+          ShellAppBar(title: Text(l10n.historyBillHistoryTitle)),
+          Expanded(child: _buildBody(l10n, billsAsync, filter)),
         ],
       ),
     );
   }
 
-  SliverToBoxAdapter _filterRowSliver(BillFilterState filter) =>
+  SliverToBoxAdapter _filterRowSliver(
+          AppLocalizations l10n, BillFilterState filter) =>
       SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -81,12 +111,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 child: SizedBox(
                   height: 40,
                   child: TextField(
-                    decoration: const InputDecoration(
-                      hintText: 'Search bill no. or phone…',
+                    decoration: InputDecoration(
+                      hintText: l10n.historySearchBillOrPhone,
                       isDense: true,
-                      prefixIcon: Icon(Icons.search_outlined,
+                      prefixIcon: const Icon(Icons.search_outlined,
                           size: 18, color: AppColors.textSecondary),
-                      contentPadding: EdgeInsets.symmetric(
+                      contentPadding: const EdgeInsets.symmetric(
                           horizontal: AppSpacing.space16, vertical: 0),
                     ),
                     onChanged: (v) =>
@@ -103,7 +133,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           filter.from.isAtSameMomentAs(filter.to)
                       ? _dateFmt.format(filter.from)
                       : '${_dateFmt.format(filter.from)} – ${_dateFmt.format(filter.to)}',
-                  style: const TextStyle(fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.style(fontSize: 12),
                 ),
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size(0, 40),
@@ -119,7 +151,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         ),
       );
 
-  Widget _buildBody(AsyncValue<List<Bill>> billsAsync, BillFilterState filter) {
+  Widget _buildBody(AppLocalizations l10n, AsyncValue<List<Bill>> billsAsync,
+      BillFilterState filter) {
     return billsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => RefreshIndicator(
@@ -128,7 +161,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           await ref.read(billsProvider.future);
         },
         child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-          _filterRowSliver(filter),
+          _filterRowSliver(l10n, filter),
           SliverFillRemaining(
             child: AppErrorWidget(
               error: e,
@@ -145,11 +178,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               await ref.read(billsProvider.future);
             },
             child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-              _filterRowSliver(filter),
-              const SliverFillRemaining(
+              _filterRowSliver(l10n, filter),
+              SliverFillRemaining(
                 child: EmptyState(
                   icon: Icons.receipt_long_outlined,
-                  message: 'No bills found for this period.',
+                  message: l10n.historyNoBillsForPeriod,
                 ),
               ),
             ]),
@@ -162,7 +195,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             await ref.read(billsProvider.future);
           },
           child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-            _filterRowSliver(filter),
+            _filterRowSliver(l10n, filter),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(
                   AppSpacing.space16, 0, AppSpacing.space16, AppSpacing.space32),
@@ -184,22 +217,29 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                         children: [
                           Row(
                             children: [
-                              Text(bill.billNumber,
-                                  style: Theme.of(context).textTheme.titleMedium),
+                              Flexible(
+                                child: Text(bill.billNumber,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style:
+                                        Theme.of(context).textTheme.titleMedium),
+                              ),
                               const SizedBox(width: AppSpacing.space8),
                               StatusBadge(
-                                label: bill.status,
-                                status: bill.status == 'finalized'
-                                    ? StatusType.success
-                                    : bill.status == 'voided'
-                                        ? StatusType.error
-                                        : StatusType.warning,
+                                label: _billStatusLabel(l10n, bill.status),
+                                status: _billStatusType(bill.status),
                               ),
                             ],
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '${_timeFmt.format(bill.createdAt.toLocal())}  ·  ${bill.paymentMode.toUpperCase()}  ·  ${bill.items.length} item${bill.items.length == 1 ? '' : 's'}',
+                            l10n.historyBillMeta(
+                              _timeFmt.format(bill.createdAt.toLocal()),
+                              _paymentModeLabel(l10n, bill.paymentMode),
+                              l10n.historyItemCount(bill.items.length),
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: Theme.of(context)
                                 .textTheme
                                 .bodySmall
@@ -207,6 +247,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                           ),
                           if (bill.customerName != null)
                             Text(bill.customerName!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
@@ -262,18 +304,20 @@ class _BillDetailDialog extends StatelessWidget {
   });
 
   Future<void> _void(BuildContext context) async {
+    final l10n = context.l10n;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Void Bill'),
-        content: Text('Void bill ${bill.billNumber}? This cannot be undone.'),
+        title: Text(l10n.historyVoidBill),
+        content: Text(l10n.historyVoidConfirmBody(bill.billNumber)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('Void', style: TextStyle(color: AppColors.error)),
+            child: Text(l10n.historyVoid,
+                style: const TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -293,17 +337,17 @@ class _BillDetailDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return AlertDialog(
       title: Row(
         children: [
-          Expanded(child: Text(bill.billNumber)),
+          Expanded(
+            child: Text(bill.billNumber,
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
           StatusBadge(
-            label: bill.status,
-            status: bill.status == 'finalized'
-                ? StatusType.success
-                : bill.status == 'voided'
-                    ? StatusType.error
-                    : StatusType.warning,
+            label: _billStatusLabel(l10n, bill.status),
+            status: _billStatusType(bill.status),
           ),
         ],
       ),
@@ -325,10 +369,14 @@ class _BillDetailDialog extends StatelessWidget {
               if (bill.customerName != null) ...[
                 const SizedBox(height: AppSpacing.space4),
                 Text(bill.customerName!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyMedium),
               ],
               if (bill.customerPhone != null)
                 Text(bill.customerPhone!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
@@ -341,6 +389,8 @@ class _BillDetailDialog extends StatelessWidget {
                         Expanded(
                           child: Text(
                             '${item.itemName} × ${item.quantity % 1 == 0 ? item.quantity.toInt() : item.quantity}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ),
@@ -356,31 +406,36 @@ class _BillDetailDialog extends StatelessWidget {
                   )),
               const Divider(height: AppSpacing.space24),
               if (bill.taxAmount > 0) ...[
-                _row(context, 'Subtotal', '₹${bill.subtotal.toStringAsFixed(2)}'),
-                _row(context, 'Tax', '₹${bill.taxAmount.toStringAsFixed(2)}'),
+                _row(context, l10n.billingSubtotal,
+                    '₹${bill.subtotal.toStringAsFixed(2)}'),
+                _row(context, l10n.billingTax,
+                    '₹${bill.taxAmount.toStringAsFixed(2)}'),
                 const SizedBox(height: AppSpacing.space4),
               ],
-              _row(context, 'Total Amount', '₹${bill.total.toStringAsFixed(2)}',
+              _row(context, l10n.billingTotalAmount,
+                  '₹${bill.total.toStringAsFixed(2)}',
                   bold: bill.discountAmount == 0),
               if (bill.discountAmount > 0) ...[
                 const SizedBox(height: 4),
-                _row(context, 'Discount',
+                _row(context, l10n.billingDiscount,
                     '− ₹${bill.discountAmount.toStringAsFixed(2)}',
                     valueColor: const Color(0xFF16A34A)),
                 const Divider(height: AppSpacing.space12),
-                _row(context, 'Net Payable',
+                _row(context, l10n.billingNetPayable,
                     '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
                     bold: true),
               ],
               const SizedBox(height: AppSpacing.space4),
-              _row(context, 'Payment', bill.paymentMode.toUpperCase()),
+              _row(context, l10n.historyPayment,
+                  _paymentModeLabel(l10n, bill.paymentMode)),
             ],
           ),
         ),
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context), child: const Text('Close')),
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonClose)),
         TextButton(
           onPressed: () async {
             Navigator.pop(context);
@@ -390,18 +445,19 @@ class _BillDetailDialog extends StatelessWidget {
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                 content: Text(e.message == 'No printer configured'
-                    ? 'No printer configured. Set one up in Settings.'
-                    : 'Print failed: ${e.message}'),
+                    ? l10n.historyNoPrinterConfigured
+                    : l10n.billingPrintFailed(e.message)),
                 backgroundColor: AppColors.error,
               ));
             }
           },
-          child: const Text('Reprint'),
+          child: Text(l10n.historyReprint),
         ),
         if (userRole == 'owner' && bill.status != 'voided')
           TextButton(
             onPressed: () => _void(context),
-            child: Text('Void', style: TextStyle(color: AppColors.error)),
+            child: Text(l10n.historyVoid,
+                style: const TextStyle(color: AppColors.error)),
           ),
       ],
     );
@@ -415,6 +471,8 @@ class _BillDetailDialog extends StatelessWidget {
         children: [
           Expanded(
               child: Text(label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context)
                       .textTheme
                       .bodyMedium

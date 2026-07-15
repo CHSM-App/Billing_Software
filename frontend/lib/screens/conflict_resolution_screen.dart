@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../l10n/l10n_ext.dart';
 import '../services/offline_service.dart';
 import '../services/sync_service.dart';
 import '../theme/app_theme.dart';
@@ -61,26 +62,29 @@ class _ConflictResolutionScreenState extends State<ConflictResolutionScreen>
   // ── Actions ───────────────────────────────────────────────────────────────
 
   Future<void> _requeue(String localId) async {
+    final l10n = context.l10n;
     await OfflineService.instance.requeueConflictedBill(localId);
     await _load();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Bill queued for retry')),
+      SnackBar(content: Text(l10n.conflictQueuedForRetry)),
     );
   }
 
   Future<void> _dismiss(String localId) async {
+    final l10n = context.l10n;
     final confirmed = await _confirmDismiss();
     if (!confirmed) return;
     await OfflineService.instance.dismissBill(localId);
     await _load();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Bill dismissed')),
+      SnackBar(content: Text(l10n.conflictDismissed)),
     );
   }
 
   Future<void> _retryAll() async {
+    final l10n = context.l10n;
     setState(() => _syncing = true);
     // Requeue all conflicted bills then sync immediately.
     for (final row in _conflicts) {
@@ -93,33 +97,31 @@ class _ConflictResolutionScreenState extends State<ConflictResolutionScreen>
     setState(() => _syncing = false);
 
     final msg = result.synced > 0
-        ? '${result.synced} bill(s) synced'
+        ? l10n.conflictSyncedCount(result.synced)
         : result.conflicted > 0
-            ? '${result.conflicted} conflict(s) remain'
-            : 'Nothing synced';
+            ? l10n.conflictRemainCount(result.conflicted)
+            : l10n.conflictNothingSynced;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Future<bool> _confirmDismiss() async {
+    final l10n = context.l10n;
     return await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
-            title: const Text('Dismiss bill?'),
-            content: const Text(
-              'This bill will be permanently removed from the queue. '
-              'It will not be recorded in the system.',
-            ),
+            title: Text(l10n.conflictDismissTitle),
+            content: Text(l10n.conflictDismissBody),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
+                child: Text(l10n.commonCancel),
               ),
               TextButton(
                 style: TextButton.styleFrom(
                     foregroundColor: AppColors.error),
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Dismiss'),
+                child: Text(l10n.conflictDismiss),
               ),
             ],
           ),
@@ -131,10 +133,11 @@ class _ConflictResolutionScreenState extends State<ConflictResolutionScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Unsynced Bills'),
+        title: Text(l10n.conflictTitle),
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
@@ -145,10 +148,14 @@ class _ConflictResolutionScreenState extends State<ConflictResolutionScreen>
           indicatorColor: AppColors.primary,
           tabs: [
             Tab(
-              text: 'Conflicts${_conflicts.isEmpty ? '' : ' (${_conflicts.length})'}',
+              text: _conflicts.isEmpty
+                  ? l10n.conflictTabConflicts
+                  : l10n.conflictTabConflictsCount(_conflicts.length),
             ),
             Tab(
-              text: 'Failed${_exhausted.isEmpty ? '' : ' (${_exhausted.length})'}',
+              text: _exhausted.isEmpty
+                  ? l10n.conflictTabFailed
+                  : l10n.conflictTabFailedCount(_exhausted.length),
             ),
           ],
         ),
@@ -168,7 +175,8 @@ class _ConflictResolutionScreenState extends State<ConflictResolutionScreen>
                 : TextButton.icon(
                     onPressed: _retryAll,
                     icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Retry All'),
+                    label: Text(l10n.conflictRetryAll,
+                        overflow: TextOverflow.ellipsis),
                     style: TextButton.styleFrom(
                         foregroundColor: AppColors.primary),
                   ),
@@ -181,7 +189,7 @@ class _ConflictResolutionScreenState extends State<ConflictResolutionScreen>
               children: [
                 _BillList(
                   rows: _conflicts,
-                  emptyMessage: 'No stock conflicts — all clear.',
+                  emptyMessage: l10n.conflictNoConflicts,
                   emptyIcon: Icons.check_circle_outline,
                   onRequeue: _requeue,
                   onDismiss: _dismiss,
@@ -189,7 +197,7 @@ class _ConflictResolutionScreenState extends State<ConflictResolutionScreen>
                 ),
                 _BillList(
                   rows: _exhausted,
-                  emptyMessage: 'No permanently failed bills.',
+                  emptyMessage: l10n.conflictNoFailed,
                   emptyIcon: Icons.check_circle_outline,
                   onRequeue: _requeue,
                   onDismiss: _dismiss,
@@ -268,10 +276,11 @@ class _BillCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n       = context.l10n;
     final localId    = row['local_id']    as String;
     final total      = (row['total']      as num).toDouble();
     final payMode    = row['payment_mode'] as String;
-    final error      = row['sync_error']  as String? ?? 'Unknown error';
+    final error      = row['sync_error']  as String? ?? l10n.conflictUnknownError;
     final retryCount = (row['retry_count'] as int?) ?? 0;
     final createdMs  = row['created_at']  as int;
     final createdAt  = DateTime.fromMillisecondsSinceEpoch(createdMs);
@@ -316,16 +325,20 @@ class _BillCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    isConflict ? 'Stock conflict' : 'Failed after $retryCount retries',
+                    isConflict
+                        ? l10n.conflictStockConflict
+                        : l10n.conflictFailedAfterRetries(retryCount),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: isConflict ? AppColors.warning : AppColors.error,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                const SizedBox(width: 6),
                 Text(
-                  _formatDate(createdAt),
+                  _formatDate(l10n, createdAt),
                   style: const TextStyle(
                       fontSize: 11, color: AppColors.textSecondary),
                 ),
@@ -352,7 +365,7 @@ class _BillCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        _payModeLabel(payMode),
+                        _payModeLabel(l10n, payMode),
                         style: const TextStyle(
                             fontSize: 12, color: AppColors.textSecondary),
                       ),
@@ -392,7 +405,7 @@ class _BillCard extends StatelessWidget {
                   ),
                 if (items.length > 3)
                   Text(
-                    '+${items.length - 3} more item(s)',
+                    l10n.conflictMoreItems(items.length - 3),
                     style: const TextStyle(
                         fontSize: 12, color: AppColors.textSecondary),
                   ),
@@ -442,7 +455,8 @@ class _BillCard extends StatelessWidget {
                       side: const BorderSide(color: AppColors.error),
                       padding: const EdgeInsets.symmetric(vertical: 8),
                     ),
-                    child: const Text('Dismiss'),
+                    child: Text(l10n.conflictDismiss,
+                        overflow: TextOverflow.ellipsis),
                   ),
                 ),
                 if (onRequeue != null) ...[
@@ -457,7 +471,8 @@ class _BillCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         elevation: 0,
                       ),
-                      child: const Text('Retry'),
+                      child: Text(l10n.commonRetry,
+                          overflow: TextOverflow.ellipsis),
                     ),
                   ),
                 ],
@@ -469,24 +484,30 @@ class _BillCard extends StatelessWidget {
     );
   }
 
-  String _formatDate(DateTime dt) {
+  String _formatDate(AppLocalizations l10n, DateTime dt) {
     final now = DateTime.now();
     final diff = now.difference(dt);
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inMinutes < 1) return l10n.conflictJustNow;
+    if (diff.inMinutes < 60) return l10n.conflictMinutesAgo(diff.inMinutes);
+    if (diff.inHours < 24) return l10n.conflictHoursAgo(diff.inHours);
     return '${dt.day}/${dt.month} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
-  String _payModeLabel(String mode) {
-    const labels = {
-      'cash': 'Cash',
-      'upi': 'UPI',
-      'card': 'Card',
-      'credit': 'Credit',
-      'other': 'Other',
-    };
-    return labels[mode] ?? mode;
+  String _payModeLabel(AppLocalizations l10n, String mode) {
+    switch (mode) {
+      case 'cash':
+        return l10n.paymentCash;
+      case 'upi':
+        return l10n.paymentUpi;
+      case 'card':
+        return l10n.paymentCard;
+      case 'credit':
+        return l10n.paymentCredit;
+      case 'other':
+        return l10n.paymentOther;
+      default:
+        return mode;
+    }
   }
 }
 
@@ -507,7 +528,7 @@ class _ItemCountBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        '$count item${count == 1 ? '' : 's'}',
+        context.l10n.conflictItemCount(count),
         style: const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,

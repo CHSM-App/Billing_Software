@@ -1,6 +1,45 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+/// Inter has no Devanagari glyphs, so Marathi text would render as tofu boxes.
+/// [AppFont] routes every text style through the right family for the active
+/// locale: Inter for Latin scripts, Noto Sans Devanagari for Marathi.
+class AppFont {
+  static bool _devanagari = false;
+
+  static bool get isDevanagari => _devanagari;
+
+  /// Called by [buildAppTheme] before any style in the theme is built.
+  static void useDevanagari(bool value) => _devanagari = value;
+
+  /// Locale-correct text style. Use this anywhere a font family would
+  /// otherwise be named directly, so Marathi picks up Devanagari glyphs.
+  static TextStyle style({
+    double? fontSize,
+    FontWeight? fontWeight,
+    Color? color,
+    double? letterSpacing,
+    double? height,
+  }) {
+    final builder = _devanagari
+        ? GoogleFonts.notoSansDevanagari
+        : GoogleFonts.inter;
+    return builder(
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      // Devanagari stacks matras above and below the baseline; the tight
+      // letter-spacing tuned for Inter crowds them, so drop it.
+      letterSpacing: _devanagari ? null : letterSpacing,
+      height: height,
+    );
+  }
+
+  static TextTheme textTheme([TextTheme? base]) => _devanagari
+      ? GoogleFonts.notoSansDevanagariTextTheme(base)
+      : GoogleFonts.interTextTheme(base);
+}
+
 class AppColors {
   // Primary - Deep Indigo-Blue
   static const Color primary = Color(0xFF4F46E5);
@@ -106,7 +145,14 @@ class AppShadow {
       ];
 }
 
-final ThemeData appTheme = ThemeData(
+/// Builds the theme for [languageCode]. Marathi ('mr') swaps the whole type
+/// scale to Noto Sans Devanagari; every other locale keeps Inter.
+ThemeData buildAppTheme(String languageCode) {
+  AppFont.useDevanagari(languageCode == 'mr');
+  return _themeData();
+}
+
+ThemeData _themeData() => ThemeData(
   useMaterial3: true,
   scaffoldBackgroundColor: AppColors.background,
   colorScheme: const ColorScheme.light(
@@ -120,50 +166,50 @@ final ThemeData appTheme = ThemeData(
     onError: Colors.white,
     surfaceContainerHighest: AppColors.surfaceVariant,
   ),
-  textTheme: GoogleFonts.interTextTheme().copyWith(
-    displayLarge: GoogleFonts.inter(
+  textTheme: AppFont.textTheme().copyWith(
+    displayLarge: AppFont.style(
       fontSize: 30,
       fontWeight: FontWeight.w800,
       color: AppColors.textPrimary,
       letterSpacing: -0.5,
       height: 1.2,
     ),
-    headlineMedium: GoogleFonts.inter(
+    headlineMedium: AppFont.style(
       fontSize: 22,
       fontWeight: FontWeight.w700,
       color: AppColors.textPrimary,
       letterSpacing: -0.3,
     ),
-    titleLarge: GoogleFonts.inter(
+    titleLarge: AppFont.style(
       fontSize: 18,
       fontWeight: FontWeight.w600,
       color: AppColors.textPrimary,
       letterSpacing: -0.2,
     ),
-    titleMedium: GoogleFonts.inter(
+    titleMedium: AppFont.style(
       fontSize: 16,
       fontWeight: FontWeight.w600,
       color: AppColors.textPrimary,
     ),
-    bodyLarge: GoogleFonts.inter(
+    bodyLarge: AppFont.style(
       fontSize: 16,
       fontWeight: FontWeight.w400,
       color: AppColors.textPrimary,
       height: 1.5,
     ),
-    bodyMedium: GoogleFonts.inter(
+    bodyMedium: AppFont.style(
       fontSize: 14,
       fontWeight: FontWeight.w400,
       color: AppColors.textPrimary,
       height: 1.5,
     ),
-    bodySmall: GoogleFonts.inter(
+    bodySmall: AppFont.style(
       fontSize: 12,
       fontWeight: FontWeight.w400,
       color: AppColors.textSecondary,
       height: 1.4,
     ),
-    labelLarge: GoogleFonts.inter(
+    labelLarge: AppFont.style(
       fontSize: 14,
       fontWeight: FontWeight.w600,
       color: AppColors.textPrimary,
@@ -175,7 +221,7 @@ final ThemeData appTheme = ThemeData(
     foregroundColor: AppColors.textPrimary,
     elevation: 0,
     scrolledUnderElevation: 0,
-    titleTextStyle: GoogleFonts.inter(
+    titleTextStyle: AppFont.style(
       fontSize: 18,
       fontWeight: FontWeight.w700,
       color: AppColors.textPrimary,
@@ -194,7 +240,7 @@ final ThemeData appTheme = ThemeData(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.all(Radius.circular(AppRadius.medium)),
       ),
-      textStyle: GoogleFonts.inter(
+      textStyle: AppFont.style(
         fontSize: 15,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.2,
@@ -209,7 +255,7 @@ final ThemeData appTheme = ThemeData(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.all(Radius.circular(AppRadius.medium)),
       ),
-      textStyle: GoogleFonts.inter(
+      textStyle: AppFont.style(
         fontSize: 15,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.2,
@@ -219,7 +265,7 @@ final ThemeData appTheme = ThemeData(
   textButtonTheme: TextButtonThemeData(
     style: TextButton.styleFrom(
       foregroundColor: AppColors.primary,
-      textStyle: GoogleFonts.inter(
+      textStyle: AppFont.style(
         fontSize: 14,
         fontWeight: FontWeight.w600,
       ),
@@ -252,20 +298,20 @@ final ThemeData appTheme = ThemeData(
       borderRadius: BorderRadius.circular(AppRadius.small),
       borderSide: const BorderSide(color: AppColors.error, width: 2),
     ),
-    labelStyle: GoogleFonts.inter(
+    labelStyle: AppFont.style(
       fontSize: 14,
       color: AppColors.textSecondary,
       fontWeight: FontWeight.w500,
     ),
-    hintStyle: GoogleFonts.inter(
+    hintStyle: AppFont.style(
       fontSize: 14,
       color: AppColors.textDisabled,
     ),
-    errorStyle: GoogleFonts.inter(
+    errorStyle: AppFont.style(
       fontSize: 12,
       color: AppColors.error,
     ),
-    floatingLabelStyle: GoogleFonts.inter(
+    floatingLabelStyle: AppFont.style(
       fontSize: 13,
       color: AppColors.primary,
       fontWeight: FontWeight.w600,
@@ -283,7 +329,7 @@ final ThemeData appTheme = ThemeData(
   chipTheme: ChipThemeData(
     backgroundColor: AppColors.surfaceVariant,
     selectedColor: AppColors.primaryLight,
-    labelStyle: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500),
+    labelStyle: AppFont.style(fontSize: 13, fontWeight: FontWeight.w500),
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(AppRadius.small),
@@ -292,7 +338,7 @@ final ThemeData appTheme = ThemeData(
   snackBarTheme: SnackBarThemeData(
     behavior: SnackBarBehavior.floating,
     backgroundColor: const Color(0xFF0F172A),
-    contentTextStyle: GoogleFonts.inter(
+    contentTextStyle: AppFont.style(
       fontSize: 14,
       color: Colors.white,
       fontWeight: FontWeight.w500,
@@ -309,12 +355,12 @@ final ThemeData appTheme = ThemeData(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(AppRadius.large),
     ),
-    titleTextStyle: GoogleFonts.inter(
+    titleTextStyle: AppFont.style(
       fontSize: 18,
       fontWeight: FontWeight.w700,
       color: AppColors.textPrimary,
     ),
-    contentTextStyle: GoogleFonts.inter(
+    contentTextStyle: AppFont.style(
       fontSize: 14,
       color: AppColors.textSecondary,
       height: 1.5,
@@ -338,13 +384,13 @@ final ThemeData appTheme = ThemeData(
     indicatorColor: AppColors.primaryLight,
     labelTextStyle: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.selected)) {
-        return GoogleFonts.inter(
+        return AppFont.style(
           fontSize: 11,
           fontWeight: FontWeight.w600,
           color: AppColors.primary,
         );
       }
-      return GoogleFonts.inter(
+      return AppFont.style(
         fontSize: 11,
         fontWeight: FontWeight.w500,
         color: AppColors.textSecondary,
@@ -365,12 +411,12 @@ final ThemeData appTheme = ThemeData(
     selectedIconTheme: const IconThemeData(color: AppColors.primary, size: 22),
     unselectedIconTheme:
         const IconThemeData(color: AppColors.textSecondary, size: 22),
-    selectedLabelTextStyle: GoogleFonts.inter(
+    selectedLabelTextStyle: AppFont.style(
       color: AppColors.primary,
       fontSize: 12,
       fontWeight: FontWeight.w600,
     ),
-    unselectedLabelTextStyle: GoogleFonts.inter(
+    unselectedLabelTextStyle: AppFont.style(
       color: AppColors.textSecondary,
       fontSize: 12,
       fontWeight: FontWeight.w500,

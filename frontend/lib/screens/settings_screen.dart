@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb; // used to hide printer tile on web
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/language_selector.dart';
 import '../widgets/shell_app_bar.dart';
 import 'login_screen.dart';
 // Printer screens use native-only packages — excluded on web.
@@ -74,6 +76,7 @@ class _SettingsContentState extends State<_SettingsContent>
   }
 
   Future<void> _logout() async {
+    final l10n = context.l10n;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -90,19 +93,18 @@ class _SettingsContentState extends State<_SettingsContent>
                   size: 18, color: AppColors.error),
             ),
             const SizedBox(width: AppSpacing.space12),
-            const Text('Logout'),
+            Text(l10n.logout),
           ],
         ),
-        content: const Text(
-            'Are you sure you want to logout from your account?'),
+        content: Text(l10n.logoutConfirmBody),
         actions: [
           SecondaryButton(
-            text: 'Cancel',
+            text: l10n.commonCancel,
             onPressed: () => Navigator.pop(context, false),
           ),
           const SizedBox(height: AppSpacing.space8),
           DestructiveButton(
-            text: 'Logout',
+            text: l10n.logout,
             onPressed: () => Navigator.pop(context, true),
           ),
         ],
@@ -122,11 +124,13 @@ class _SettingsContentState extends State<_SettingsContent>
   Widget build(BuildContext context) {
     final session = widget.session;
     final isOwner = session.userRole == 'owner';
+    final l10n = context.l10n;
+    final language = widget.ref.watch(localeProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(children: [
-        ShellAppBar(title: const Text('Settings')),
+        ShellAppBar(title: Text(l10n.settingsTitle)),
         Expanded(child: FadeTransition(
         opacity: _fadeAnim,
         child: RefreshIndicator(
@@ -146,14 +150,14 @@ class _SettingsContentState extends State<_SettingsContent>
                     const SizedBox(height: AppSpacing.space24),
 
                     if (isOwner) ...[
-                      _sectionLabel(context, 'BUSINESS'),
+                      _sectionLabel(context, l10n.settingsSectionBusiness),
                       const SizedBox(height: AppSpacing.space8),
                       _buildNavCard(
                         context,
                         icon: Icons.storefront_outlined,
                         iconColor: AppColors.primary,
-                        title: 'Business Profile',
-                        subtitle: 'Name, address, GST, billing settings',
+                        title: l10n.settingsBusinessProfile,
+                        subtitle: l10n.settingsBusinessProfileSubtitle,
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -162,14 +166,14 @@ class _SettingsContentState extends State<_SettingsContent>
                       ),
                       const SizedBox(height: AppSpacing.space24),
 
-                      _sectionLabel(context, 'TEAM'),
+                      _sectionLabel(context, l10n.settingsSectionTeam),
                       const SizedBox(height: AppSpacing.space8),
                       _buildNavCard(
                         context,
                         icon: Icons.people_outline,
                         iconColor: const Color(0xFF0EA5E9),
-                        title: 'Manage Staff',
-                        subtitle: 'Add, edit or remove cashiers',
+                        title: l10n.settingsManageStaff,
+                        subtitle: l10n.settingsManageStaffSubtitle,
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -178,21 +182,33 @@ class _SettingsContentState extends State<_SettingsContent>
                       ),
                       const SizedBox(height: AppSpacing.space24),
 
-                      _sectionLabel(context, 'SYNC'),
+                      _sectionLabel(context, l10n.settingsSectionSync),
                       const SizedBox(height: AppSpacing.space8),
                       const _SyncConflictTile(),
                       const SizedBox(height: AppSpacing.space24),
                     ],
 
+                    _sectionLabel(context, l10n.settingsSectionPreferences),
+                    const SizedBox(height: AppSpacing.space8),
+                    _buildNavCard(
+                      context,
+                      icon: Icons.language_outlined,
+                      iconColor: const Color(0xFF0891B2),
+                      title: l10n.settingsLanguage,
+                      subtitle: language.nativeLabel,
+                      onTap: () => showLanguagePicker(context),
+                    ),
+
                     if (!kIsWeb) ...[
-                      _sectionLabel(context, 'HARDWARE'),
+                      const SizedBox(height: AppSpacing.space24),
+                      _sectionLabel(context, l10n.settingsSectionHardware),
                       const SizedBox(height: AppSpacing.space8),
                       _buildNavCard(
                         context,
                         icon: Icons.print_outlined,
                         iconColor: const Color(0xFF7C3AED),
-                        title: 'Printer Setup',
-                        subtitle: 'Configure your thermal printer',
+                        title: l10n.settingsPrinterSetup,
+                        subtitle: l10n.settingsPrinterSetupSubtitle,
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
@@ -234,7 +250,7 @@ class _SettingsContentState extends State<_SettingsContent>
                     // App version footer
                     Center(
                       child: Text(
-                        'Vittam Billing v$_appVersion',
+                        l10n.settingsAppVersion(_appVersion),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: AppColors.textDisabled,
                             ),
@@ -281,7 +297,7 @@ class _SettingsContentState extends State<_SettingsContent>
                         ? session.userName[0].toUpperCase()
                         : '?',
                     style: const TextStyle(
-                      fontFamily: 'Inter',
+                      
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
@@ -297,7 +313,7 @@ class _SettingsContentState extends State<_SettingsContent>
                     Text(
                       session.userName,
                       style: const TextStyle(
-                        fontFamily: 'Inter',
+                        
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
                         color: Colors.white,
@@ -314,7 +330,7 @@ class _SettingsContentState extends State<_SettingsContent>
                       child: Text(
                         session.userRole.toUpperCase(),
                         style: TextStyle(
-                          fontFamily: 'Inter',
+                          
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
                           color: Colors.white.withValues(alpha: 0.9),
@@ -342,7 +358,7 @@ class _SettingsContentState extends State<_SettingsContent>
                 child: Text(
                   session.businessName,
                   style: const TextStyle(
-                    fontFamily: 'Inter',
+                    
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: Colors.white,
@@ -360,7 +376,7 @@ class _SettingsContentState extends State<_SettingsContent>
               Text(
                 _formatType(session.businessType),
                 style: TextStyle(
-                  fontFamily: 'Inter',
+                  
                   fontSize: 13,
                   color: Colors.white.withValues(alpha: 0.8),
                 ),
@@ -436,10 +452,9 @@ class _SettingsContentState extends State<_SettingsContent>
             const Icon(Icons.logout_outlined,
                 size: 18, color: AppColors.error),
             const SizedBox(width: AppSpacing.space8),
-            const Text(
-              'Logout',
-              style: TextStyle(
-                fontFamily: 'Inter',
+            Text(
+              context.l10n.logout,
+              style: AppFont.style(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
                 color: AppColors.error,
@@ -463,10 +478,11 @@ class _SettingsContentState extends State<_SettingsContent>
   }
 
   String _formatType(String type) {
+    final l10n = context.l10n;
     return switch (type) {
-      'retail' => 'Retail Shop',
-      'restaurant_with_tables' => 'Restaurant (with tables)',
-      'restaurant_no_tables' => 'Restaurant (takeaway)',
+      'retail' => l10n.businessTypeRetail,
+      'restaurant_with_tables' => l10n.businessTypeRestaurantTables,
+      'restaurant_no_tables' => l10n.businessTypeRestaurantTakeaway,
       _ => type,
     };
   }
@@ -534,12 +550,12 @@ class _SyncConflictTileState extends State<_SyncConflictTile> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Unsynced Bills',
+                Text(context.l10n.settingsUnsyncedBills,
                     style: Theme.of(context).textTheme.titleMedium),
                 Text(
                   _attentionCount > 0
-                      ? '$_attentionCount bill(s) need attention'
-                      : 'All bills synced',
+                      ? context.l10n.settingsBillsNeedAttention(_attentionCount)
+                      : context.l10n.settingsAllBillsSynced,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: _attentionCount > 0
                             ? AppColors.warning

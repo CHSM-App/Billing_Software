@@ -7,9 +7,51 @@ import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../l10n/l10n_ext.dart';
 
 final _fmt = NumberFormat('#,##0.00');
 final _dateFmt = DateFormat('dd MMM yyyy');
+
+/// Display label for a category value. The value sent to the API stays the
+/// original English string; only the label shown to the user is localised.
+String _categoryLabel(AppLocalizations l10n, String cat) {
+  switch (cat) {
+    case 'Rent':
+      return l10n.expensesCatRent;
+    case 'Salary':
+      return l10n.expensesCatSalary;
+    case 'Utilities':
+      return l10n.expensesCatUtilities;
+    case 'Stock Purchase':
+      return l10n.expensesCatStockPurchase;
+    case 'Transport':
+      return l10n.expensesCatTransport;
+    case 'Marketing':
+      return l10n.expensesCatMarketing;
+    case 'Maintenance':
+      return l10n.expensesCatMaintenance;
+    case 'Taxes':
+      return l10n.expensesCatTaxes;
+    case 'Other':
+      return l10n.expensesCatOther;
+    default:
+      return cat;
+  }
+}
+
+/// Localised label for a payment mode value ('cash', 'upi', 'card', 'other').
+String _paymentLabel(AppLocalizations l10n, String mode) {
+  switch (mode) {
+    case 'upi':
+      return l10n.paymentUpi;
+    case 'card':
+      return l10n.paymentCard;
+    case 'other':
+      return l10n.paymentOther;
+    default:
+      return l10n.paymentCash;
+  }
+}
 
 class ExpensesScreen extends ConsumerStatefulWidget {
   const ExpensesScreen({super.key});
@@ -36,19 +78,20 @@ class _ExpensesScreenState extends ConsumerState<ExpensesScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(children: [
           ShellAppBar(
-            title: const Text('Expenses'),
+            title: Text(l10n.expensesTitle),
             bottom: TabBar(
               controller: _tabCtrl,
               labelColor: AppColors.primary,
               unselectedLabelColor: AppColors.textSecondary,
               indicatorColor: AppColors.primary,
-              tabs: const [
-                Tab(text: 'This Month'),
-                Tab(text: 'Recurring'),
+              tabs: [
+                Tab(text: l10n.expensesTabThisMonth),
+                Tab(text: l10n.expensesTabRecurring),
               ],
             ),
           ),
@@ -125,7 +168,7 @@ class _ThisMonthTab extends ConsumerWidget {
               ? SliverFillRemaining(
                   child: EmptyState(
                     icon: Icons.receipt_long_outlined,
-                    message: 'No expenses this month.\nTap + to add one.',
+                    message: context.l10n.expensesNoneThisMonth,
                   ),
                 )
               : SliverPadding(
@@ -255,6 +298,7 @@ class _RecurringBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       padding: const EdgeInsets.all(12),
@@ -272,7 +316,7 @@ class _RecurringBanner extends ConsumerWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '${pending.length} recurring expense${pending.length > 1 ? 's' : ''} not yet added this month',
+                  l10n.expensesPendingRecurring(pending.length),
                   style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: AppColors.textPrimary),
@@ -289,11 +333,14 @@ class _RecurringBanner extends ConsumerWidget {
                     const SizedBox(width: 24),
                     Expanded(
                       child: Text(
-                        '${r.category}${r.description != null ? ' – ${r.description}' : ''}',
+                        '${_categoryLabel(l10n, r.category)}${r.description != null ? ' – ${r.description}' : ''}',
                         style: const TextStyle(
                             fontSize: 12, color: AppColors.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       'Rs. ${_fmt.format(r.amount)}',
                       style: const TextStyle(
@@ -314,7 +361,10 @@ class _RecurringBanner extends ConsumerWidget {
                     side: const BorderSide(color: AppColors.warning),
                     foregroundColor: AppColors.warning,
                   ),
-                  child: const Text('Manage', style: TextStyle(fontSize: 12)),
+                  child: Text(l10n.commonManage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -327,8 +377,10 @@ class _RecurringBanner extends ConsumerWidget {
                     backgroundColor: AppColors.warning,
                     foregroundColor: Colors.white,
                   ),
-                  child: const Text('Add All to This Month',
-                      style: TextStyle(fontSize: 12)),
+                  child: Text(l10n.expensesAddAllToMonth,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12)),
                 ),
               ),
             ],
@@ -339,6 +391,7 @@ class _RecurringBanner extends ConsumerWidget {
   }
 
   Future<void> _addAll(BuildContext context, WidgetRef ref) async {
+    final l10n = context.l10n;
     final today = DateTime.now();
     // Use last day of selected month if today is beyond it, else today
     final expDate = today.year == filter.from.year && today.month == filter.from.month
@@ -360,13 +413,13 @@ class _RecurringBanner extends ConsumerWidget {
       onAdded();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${pending.length} recurring expense${pending.length > 1 ? 's' : ''} added')),
+          SnackBar(content: Text(l10n.expensesRecurringAdded(pending.length))),
         );
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.commonErrorWithMessage('$e'))));
       }
     }
   }
@@ -381,6 +434,7 @@ class _RecurringTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final recurringAsync = ref.watch(recurringExpensesProvider);
 
     return Scaffold(
@@ -394,8 +448,7 @@ class _RecurringTab extends ConsumerWidget {
         data: (list) => list.isEmpty
             ? EmptyState(
                 icon: Icons.repeat_rounded,
-                message:
-                    'No recurring expenses yet.\nAdd expenses that repeat every month\n(e.g. Rent, Salary).',
+                message: l10n.expensesNoRecurringYet,
               )
             : ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -410,7 +463,7 @@ class _RecurringTab extends ConsumerWidget {
         heroTag: 'addRecurring',
         onPressed: () => _showForm(context, ref),
         icon: const Icon(Icons.add),
-        label: const Text('Add Recurring'),
+        label: Text(l10n.expensesAddRecurring),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
       ),
@@ -438,6 +491,7 @@ class _RecurringCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final color = _categoryColor(recurring.category);
     return AppCard(
       onTap: () => _showOptions(context),
@@ -458,7 +512,9 @@ class _RecurringCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(recurring.category,
+                Text(_categoryLabel(l10n, recurring.category),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontSize: 14, fontWeight: FontWeight.w600,
                         color: AppColors.textPrimary)),
@@ -473,20 +529,31 @@ class _RecurringCard extends StatelessWidget {
                     Icon(_paymentIcon(recurring.paymentMode),
                         size: 12, color: AppColors.textDisabled),
                     const SizedBox(width: 4),
-                    Text(recurring.paymentMode.toUpperCase(),
-                        style: const TextStyle(
-                            fontSize: 11, color: AppColors.textDisabled)),
+                    Flexible(
+                      child: Text(
+                          _paymentLabel(l10n, recurring.paymentMode)
+                              .toUpperCase(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 11, color: AppColors.textDisabled)),
+                    ),
                     const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(4),
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(l10n.expensesMonthly,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 10, color: AppColors.primary,
+                                fontWeight: FontWeight.w600)),
                       ),
-                      child: const Text('Monthly',
-                          style: TextStyle(
-                              fontSize: 10, color: AppColors.primary,
-                              fontWeight: FontWeight.w600)),
                     ),
                   ],
                 ),
@@ -506,6 +573,7 @@ class _RecurringCard extends StatelessWidget {
   }
 
   void _showOptions(BuildContext context) {
+    final l10n = context.l10n;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -527,7 +595,7 @@ class _RecurringCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(2))),
               ListTile(
                 leading: const Icon(Icons.edit_outlined, color: AppColors.primary),
-                title: const Text('Edit'),
+                title: Text(l10n.commonEdit),
                 onTap: () {
                   Navigator.pop(ctx);
                   showModalBottomSheet(
@@ -543,24 +611,25 @@ class _RecurringCard extends StatelessWidget {
               ),
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: AppColors.error),
-                title: const Text('Delete',
-                    style: TextStyle(color: AppColors.error)),
+                title: Text(l10n.commonDelete,
+                    style: const TextStyle(color: AppColors.error)),
                 onTap: () async {
                   Navigator.pop(ctx);
                   final confirmed = await showDialog<bool>(
                     context: context,
                     builder: (_) => AlertDialog(
-                      title: const Text('Remove Recurring Expense?'),
-                      content: Text(
-                          'Remove "${recurring.category}" from recurring list? This won\'t delete past entries.'),
+                      title: Text(l10n.expensesRemoveRecurringTitle),
+                      content: Text(l10n.expensesRemoveRecurringBody(
+                          _categoryLabel(l10n, recurring.category))),
                       actions: [
                         TextButton(
                             onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Cancel')),
+                            child: Text(l10n.commonCancel)),
                         TextButton(
                             onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Remove',
-                                style: TextStyle(color: AppColors.error))),
+                            child: Text(l10n.commonRemove,
+                                style:
+                                    const TextStyle(color: AppColors.error))),
                       ],
                     ),
                   );
@@ -570,8 +639,9 @@ class _RecurringCard extends StatelessWidget {
                       ref.invalidate(recurringExpensesProvider);
                     } catch (e) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error: $e')));
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content:
+                                Text(l10n.commonErrorWithMessage('$e'))));
                       }
                     }
                   }
@@ -648,6 +718,7 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final categoriesAsync = ref.watch(expenseCategoriesProvider);
     final categories = categoriesAsync.valueOrNull ?? kDefaultExpenseCategories;
     final bottom = MediaQuery.of(context).viewInsets.bottom;
@@ -679,24 +750,29 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
                   const Icon(Icons.repeat_rounded,
                       color: AppColors.primary, size: 20),
                   const SizedBox(width: 8),
-                  Text(
-                    _isEdit ? 'Edit Recurring Expense' : 'Add Recurring Expense',
-                    style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary),
+                  Expanded(
+                    child: Text(
+                      _isEdit
+                          ? l10n.expensesEditRecurringExpense
+                          : l10n.expensesAddRecurringExpense,
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 6),
-              const Text(
-                'These appear every month as a reminder.',
-                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              Text(
+                l10n.expensesRecurringNote,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 20),
 
               // Category
-              const Text('Category',
-                  style: TextStyle(
+              Text(l10n.expensesCategory,
+                  style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: AppColors.textSecondary)),
               const SizedBox(height: 8),
@@ -705,12 +781,12 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
                 runSpacing: 8,
                 children: [
                   ...categories.map((cat) => _CategoryChip(
-                        label: cat,
+                        label: _categoryLabel(l10n, cat),
                         selected: _category == cat,
                         onTap: () => setState(() => _category = cat),
                       )),
                   _CategoryChip(
-                    label: '+ Custom',
+                    label: l10n.expensesCustomChip,
                     selected: false,
                     onTap: () => _showCustomDialog(context),
                     color: AppColors.accent,
@@ -724,14 +800,14 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
                 controller: _amountCtrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Amount (Rs.)',
-                  prefixIcon: Icon(Icons.currency_rupee_outlined),
+                decoration: InputDecoration(
+                  labelText: l10n.expensesAmount,
+                  prefixIcon: const Icon(Icons.currency_rupee_outlined),
                 ),
                 validator: (v) {
-                  if (v == null || v.isEmpty) return 'Amount is required';
+                  if (v == null || v.isEmpty) return l10n.expensesAmountRequired;
                   if (double.tryParse(v) == null || double.parse(v) <= 0) {
-                    return 'Enter a valid amount';
+                    return l10n.expensesAmountInvalid;
                   }
                   return null;
                 },
@@ -742,39 +818,35 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
               TextFormField(
                 controller: _descCtrl,
                 maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Description (optional)',
-                  prefixIcon: Icon(Icons.notes_outlined),
+                decoration: InputDecoration(
+                  labelText: l10n.expensesDescription,
+                  prefixIcon: const Icon(Icons.notes_outlined),
                 ),
               ),
               const SizedBox(height: 12),
 
               // Payment mode
-              const Text('Payment Mode',
-                  style: TextStyle(
+              Text(l10n.billingPaymentMode,
+                  style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: AppColors.textSecondary)),
               const SizedBox(height: 8),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: ['cash', 'upi', 'card', 'other'].map((mode) {
                   final selected = _paymentMode == mode;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(mode.toUpperCase()),
-                      selected: selected,
-                      onSelected: (_) =>
-                          setState(() => _paymentMode = mode),
-                      selectedColor:
-                          AppColors.primary.withValues(alpha: 0.15),
-                      labelStyle: TextStyle(
-                          color: selected
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.normal),
-                    ),
+                  return ChoiceChip(
+                    label: Text(_paymentLabel(l10n, mode).toUpperCase()),
+                    selected: selected,
+                    onSelected: (_) => setState(() => _paymentMode = mode),
+                    selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                    labelStyle: TextStyle(
+                        color: selected
+                            ? AppColors.primary
+                            : AppColors.textSecondary,
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.normal),
                   );
                 }).toList(),
               ),
@@ -784,8 +856,10 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
                 width: double.infinity,
                 child: PrimaryButton(
                   text: _saving
-                      ? 'Saving…'
-                      : (_isEdit ? 'Update' : 'Save Recurring Expense'),
+                      ? l10n.commonSaving
+                      : (_isEdit
+                          ? l10n.commonUpdate
+                          : l10n.expensesSaveRecurring),
                   onPressed: _saving ? null : _save,
                 ),
               ),
@@ -797,24 +871,26 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
   }
 
   Future<void> _showCustomDialog(BuildContext context) async {
+    final l10n = context.l10n;
     final ctrl = TextEditingController();
     final result = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Custom Category'),
+        title: Text(l10n.expensesCustomCategory),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(hintText: 'e.g. Insurance'),
+          decoration:
+              InputDecoration(hintText: l10n.expensesCustomCategoryHint),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(context, ctrl.text.trim()),
-              child: const Text('Add')),
+              child: Text(l10n.commonAdd)),
         ],
       ),
     );
@@ -825,6 +901,7 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    final l10n = context.l10n;
     setState(() => _saving = true);
     try {
       final data = {
@@ -844,8 +921,8 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.commonErrorWithMessage('$e'))));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -865,6 +942,7 @@ class _ExpenseCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final categoryColor = _categoryColor(expense.category);
     return AppCard(
       onTap: () => _showOptions(context),
@@ -878,8 +956,8 @@ class _ExpenseCard extends ConsumerWidget {
             ),
             child: Center(
               child: Text(
-                expense.category.isNotEmpty
-                    ? expense.category[0].toUpperCase()
+                _categoryLabel(l10n, expense.category).isNotEmpty
+                    ? _categoryLabel(l10n, expense.category)[0].toUpperCase()
                     : 'E',
                 style: TextStyle(
                     fontSize: 18,
@@ -893,7 +971,9 @@ class _ExpenseCard extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(expense.category,
+                Text(_categoryLabel(l10n, expense.category),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontSize: 14, fontWeight: FontWeight.w600,
                         color: AppColors.textPrimary)),
@@ -910,13 +990,23 @@ class _ExpenseCard extends ConsumerWidget {
                     Icon(_paymentIcon(expense.paymentMode),
                         size: 12, color: AppColors.textDisabled),
                     const SizedBox(width: 4),
-                    Text(expense.paymentMode.toUpperCase(),
-                        style: const TextStyle(
-                            fontSize: 11, color: AppColors.textDisabled)),
+                    Flexible(
+                      child: Text(
+                          _paymentLabel(l10n, expense.paymentMode)
+                              .toUpperCase(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 11, color: AppColors.textDisabled)),
+                    ),
                     const SizedBox(width: 8),
-                    Text(_dateFmt.format(expense.expenseDate),
-                        style: const TextStyle(
-                            fontSize: 11, color: AppColors.textDisabled)),
+                    Flexible(
+                      child: Text(_dateFmt.format(expense.expenseDate),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 11, color: AppColors.textDisabled)),
+                    ),
                   ],
                 ),
               ],
@@ -936,6 +1026,7 @@ class _ExpenseCard extends ConsumerWidget {
   }
 
   void _showOptions(BuildContext context) {
+    final l10n = context.l10n;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -958,7 +1049,7 @@ class _ExpenseCard extends ConsumerWidget {
               ListTile(
                 leading:
                     const Icon(Icons.edit_outlined, color: AppColors.primary),
-                title: const Text('Edit'),
+                title: Text(l10n.commonEdit),
                 onTap: () {
                   Navigator.pop(ctx);
                   showModalBottomSheet(
@@ -973,24 +1064,26 @@ class _ExpenseCard extends ConsumerWidget {
               ListTile(
                 leading:
                     const Icon(Icons.delete_outline, color: AppColors.error),
-                title: const Text('Delete',
-                    style: TextStyle(color: AppColors.error)),
+                title: Text(l10n.commonDelete,
+                    style: const TextStyle(color: AppColors.error)),
                 onTap: () async {
                   Navigator.pop(ctx);
                   final confirmed = await showDialog<bool>(
                     context: context,
                     builder: (_) => AlertDialog(
-                      title: const Text('Delete Expense?'),
-                      content: Text(
-                          'Delete ${expense.category} of Rs. ${_fmt.format(expense.amount)}?'),
+                      title: Text(l10n.expensesDeleteTitle),
+                      content: Text(l10n.expensesDeleteBody(
+                          _categoryLabel(l10n, expense.category),
+                          _fmt.format(expense.amount))),
                       actions: [
                         TextButton(
                             onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Cancel')),
+                            child: Text(l10n.commonCancel)),
                         TextButton(
                             onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Delete',
-                                style: TextStyle(color: AppColors.error))),
+                            child: Text(l10n.commonDelete,
+                                style:
+                                    const TextStyle(color: AppColors.error))),
                       ],
                     ),
                   );
@@ -1000,8 +1093,9 @@ class _ExpenseCard extends ConsumerWidget {
                       onChanged();
                     } catch (e) {
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error: $e')));
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content:
+                                Text(l10n.commonErrorWithMessage('$e'))));
                       }
                     }
                   }
@@ -1080,6 +1174,7 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final categoriesAsync = ref.watch(expenseCategoriesProvider);
     final categories = categoriesAsync.valueOrNull ?? kDefaultExpenseCategories;
     final bottom = MediaQuery.of(context).viewInsets.bottom;
@@ -1106,15 +1201,15 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
                         borderRadius: BorderRadius.circular(2))),
               ),
               const SizedBox(height: 16),
-              Text(_isEdit ? 'Edit Expense' : 'Add Expense',
+              Text(_isEdit ? l10n.expensesEditExpense : l10n.expensesAddExpense,
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary)),
               const SizedBox(height: 20),
 
               // Category
-              const Text('Category',
-                  style: TextStyle(
+              Text(l10n.expensesCategory,
+                  style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: AppColors.textSecondary)),
               const SizedBox(height: 8),
@@ -1123,12 +1218,12 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
                 runSpacing: 8,
                 children: [
                   ...categories.map((cat) => _CategoryChip(
-                        label: cat,
+                        label: _categoryLabel(l10n, cat),
                         selected: _category == cat,
                         onTap: () => setState(() => _category = cat),
                       )),
                   _CategoryChip(
-                    label: '+ Custom',
+                    label: l10n.expensesCustomChip,
                     selected: false,
                     onTap: () => _showCustomCategoryDialog(context),
                     color: AppColors.accent,
@@ -1141,14 +1236,14 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
                 controller: _amountCtrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                  labelText: 'Amount (Rs.)',
-                  prefixIcon: Icon(Icons.currency_rupee_outlined),
+                decoration: InputDecoration(
+                  labelText: l10n.expensesAmount,
+                  prefixIcon: const Icon(Icons.currency_rupee_outlined),
                 ),
                 validator: (v) {
-                  if (v == null || v.isEmpty) return 'Amount is required';
+                  if (v == null || v.isEmpty) return l10n.expensesAmountRequired;
                   if (double.tryParse(v) == null || double.parse(v) <= 0) {
-                    return 'Enter a valid amount';
+                    return l10n.expensesAmountInvalid;
                   }
                   return null;
                 },
@@ -1158,38 +1253,34 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
               TextFormField(
                 controller: _descCtrl,
                 maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Description (optional)',
-                  prefixIcon: Icon(Icons.notes_outlined),
+                decoration: InputDecoration(
+                  labelText: l10n.expensesDescription,
+                  prefixIcon: const Icon(Icons.notes_outlined),
                 ),
               ),
               const SizedBox(height: 12),
 
-              const Text('Payment Mode',
-                  style: TextStyle(
+              Text(l10n.billingPaymentMode,
+                  style: const TextStyle(
                       fontSize: 13, fontWeight: FontWeight.w600,
                       color: AppColors.textSecondary)),
               const SizedBox(height: 8),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: ['cash', 'upi', 'card', 'other'].map((mode) {
                   final selected = _paymentMode == mode;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(mode.toUpperCase()),
-                      selected: selected,
-                      onSelected: (_) =>
-                          setState(() => _paymentMode = mode),
-                      selectedColor:
-                          AppColors.primary.withValues(alpha: 0.15),
-                      labelStyle: TextStyle(
-                          color: selected
-                              ? AppColors.primary
-                              : AppColors.textSecondary,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.normal),
-                    ),
+                  return ChoiceChip(
+                    label: Text(_paymentLabel(l10n, mode).toUpperCase()),
+                    selected: selected,
+                    onSelected: (_) => setState(() => _paymentMode = mode),
+                    selectedColor: AppColors.primary.withValues(alpha: 0.15),
+                    labelStyle: TextStyle(
+                        color: selected
+                            ? AppColors.primary
+                            : AppColors.textSecondary,
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.normal),
                   );
                 }).toList(),
               ),
@@ -1210,10 +1301,13 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
                       const Icon(Icons.calendar_today_outlined,
                           size: 18, color: AppColors.textSecondary),
                       const SizedBox(width: 12),
-                      Text(_dateFmt.format(_expenseDate),
-                          style: const TextStyle(
-                              fontSize: 14, color: AppColors.textPrimary)),
-                      const Spacer(),
+                      Expanded(
+                        child: Text(_dateFmt.format(_expenseDate),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 14, color: AppColors.textPrimary)),
+                      ),
                       const Icon(Icons.chevron_right,
                           color: AppColors.textDisabled),
                     ],
@@ -1226,8 +1320,10 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
                 width: double.infinity,
                 child: PrimaryButton(
                   text: _saving
-                      ? 'Saving…'
-                      : (_isEdit ? 'Update Expense' : 'Add Expense'),
+                      ? l10n.commonSaving
+                      : (_isEdit
+                          ? l10n.expensesUpdateExpense
+                          : l10n.expensesAddExpense),
                   onPressed: _saving ? null : _save,
                 ),
               ),
@@ -1254,24 +1350,26 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
   }
 
   Future<void> _showCustomCategoryDialog(BuildContext context) async {
+    final l10n = context.l10n;
     final ctrl = TextEditingController();
     final result = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Custom Category'),
+        title: Text(l10n.expensesCustomCategory),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(hintText: 'e.g. Insurance'),
+          decoration:
+              InputDecoration(hintText: l10n.expensesCustomCategoryHint),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(context, ctrl.text.trim()),
-              child: const Text('Add')),
+              child: Text(l10n.commonAdd)),
         ],
       ),
     );
@@ -1282,6 +1380,7 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    final l10n = context.l10n;
     setState(() => _saving = true);
     try {
       final data = {
@@ -1303,8 +1402,8 @@ class _ExpenseFormState extends ConsumerState<_ExpenseForm> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.commonErrorWithMessage('$e'))));
       }
     } finally {
       if (mounted) setState(() => _saving = false);

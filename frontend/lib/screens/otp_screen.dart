@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 
@@ -73,9 +74,10 @@ class _OtpScreenState extends State<OtpScreen> {
   String get _otp => _otpCtrls.map((c) => c.text).join();
 
   Future<void> _verify() async {
+    final l10n = context.l10n;
     final otp = _otp;
     if (otp.length < 6) {
-      setState(() => _error = 'Please enter all 6 digits');
+      setState(() => _error = l10n.otpEnterAllDigits);
       return;
     }
     setState(() {
@@ -94,7 +96,7 @@ class _OtpScreenState extends State<OtpScreen> {
       setState(() => _error = e.message);
       _clearOtp();
     } catch (_) {
-      setState(() => _error = 'Verification failed. Check your connection.');
+      setState(() => _error = l10n.otpVerifyFailed);
       _clearOtp();
     } finally {
       if (mounted) setState(() => _isVerifying = false);
@@ -102,6 +104,7 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   Future<void> _resend() async {
+    final l10n = context.l10n;
     setState(() {
       _isResending = true;
       _error = null;
@@ -112,12 +115,12 @@ class _OtpScreenState extends State<OtpScreen> {
       _startCooldown();
       _clearOtp();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('OTP resent successfully')),
+        SnackBar(content: Text(l10n.otpResendSuccess)),
       );
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } catch (_) {
-      setState(() => _error = 'Failed to resend OTP. Try again.');
+      setState(() => _error = l10n.otpResendFailed);
     } finally {
       if (mounted) setState(() => _isResending = false);
     }
@@ -152,14 +155,16 @@ class _OtpScreenState extends State<OtpScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final maskedPhone =
         '${widget.phone.substring(0, 2)}XXXXXX${widget.phone.substring(8)}';
 
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text(
-            widget.purpose == 'forgot_pin' ? 'Verify Identity' : 'Verify Phone'),
+        title: Text(widget.purpose == 'forgot_pin'
+            ? l10n.otpAppBarVerifyIdentity
+            : l10n.otpAppBarVerifyPhone),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
           onPressed: () => Navigator.pop(context),
@@ -190,13 +195,13 @@ class _OtpScreenState extends State<OtpScreen> {
 
                 // Title
                 Text(
-                  'Enter OTP',
+                  l10n.otpEnterCode,
                   style: Theme.of(context).textTheme.displayLarge,
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: AppSpacing.space8),
                 Text(
-                  'We sent a 6-digit OTP to\n+91 $maskedPhone via WhatsApp',
+                  l10n.otpSentTo(maskedPhone),
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.textSecondary,
                       ),
@@ -246,7 +251,7 @@ class _OtpScreenState extends State<OtpScreen> {
                 const SizedBox(height: AppSpacing.space24),
 
                 PrimaryButton(
-                  text: 'Verify OTP',
+                  text: l10n.otpVerifyButton,
                   onPressed: _verify,
                   isLoading: _isVerifying,
                   icon: Icons.verified_outlined,
@@ -258,7 +263,8 @@ class _OtpScreenState extends State<OtpScreen> {
                 Center(
                   child: _resendCooldown > 0
                       ? Text(
-                          'Resend OTP in ${_resendCooldown}s',
+                          l10n.otpResendCooldown(_resendCooldown),
+                          textAlign: TextAlign.center,
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: AppColors.textSecondary,
@@ -273,7 +279,7 @@ class _OtpScreenState extends State<OtpScreen> {
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2),
                                 )
-                              : const Text('Resend OTP'),
+                              : Text(l10n.otpResend),
                         ),
                 ),
               ],

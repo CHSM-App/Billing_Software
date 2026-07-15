@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../utils/platform_utils.dart' as platform;
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/language_selector.dart';
 import 'otp_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -63,6 +65,7 @@ class _RegisterScreenState extends State<RegisterScreen>
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final l10n = context.l10n;
     final ownerPhone = _ownerPhoneController.text.trim();
 
     // Step 1 — send OTP to owner's phone
@@ -76,8 +79,7 @@ class _RegisterScreenState extends State<RegisterScreen>
       setState(() => _errorMessage = e.serverMessage ?? e.message);
       return;
     } catch (_) {
-      setState(() => _errorMessage =
-          'Could not send OTP. Check your internet connection.');
+      setState(() => _errorMessage = l10n.registerOtpSendFailed);
       return;
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -100,6 +102,7 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   Future<void> _submitRegistration() async {
+    final l10n = context.l10n;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -137,15 +140,13 @@ class _RegisterScreenState extends State<RegisterScreen>
                     size: 20, color: AppColors.success),
               ),
               const SizedBox(width: AppSpacing.space12),
-              const Text('Registration Submitted'),
+              Expanded(child: Text(l10n.registerSuccessTitle)),
             ],
           ),
-          content: const Text(
-            'Registration successful. Your account is pending verification.\n\nPlease contact support to activate your account.',
-          ),
+          content: Text(l10n.registerSuccessBody),
           actions: [
             PrimaryButton(
-              text: 'Back to Login',
+              text: l10n.registerBackToLogin,
               onPressed: () {
                 Navigator.pop(context);
                 Navigator.pop(context);
@@ -157,8 +158,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     } on ApiException catch (e) {
       setState(() => _errorMessage = e.message);
     } catch (_) {
-      setState(() => _errorMessage =
-          'Could not connect to server. Check your internet connection.');
+      setState(() => _errorMessage = l10n.loginConnectionError);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -166,10 +166,11 @@ class _RegisterScreenState extends State<RegisterScreen>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Register Business'),
+        title: Text(l10n.registerAppBarTitle),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
           onPressed: () => Navigator.pop(context),
@@ -187,42 +188,50 @@ class _RegisterScreenState extends State<RegisterScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const Align(
+                      alignment: Alignment.center,
+                      child: LanguageToggle(),
+                    ),
+                    const SizedBox(height: AppSpacing.space16),
                     _buildSectionCard(
                       icon: Icons.storefront_outlined,
-                      title: 'Business Details',
+                      title: l10n.registerSectionBusinessDetails,
                       color: AppColors.primary,
                       children: [
                         AppTextField(
-                          label: 'Business name',
+                          label: l10n.registerBusinessName,
                           controller: _businessNameController,
-                          hint: 'e.g. Sharma General Store',
+                          hint: l10n.registerBusinessNameHint,
                           prefixIcon: const Icon(Icons.store_outlined,
                               size: 18, color: AppColors.textSecondary),
-                          validator: (v) =>
-                              v == null || v.isEmpty ? 'Required' : null,
+                          validator: (v) => v == null || v.isEmpty
+                              ? l10n.commonRequired
+                              : null,
                         ),
                         const SizedBox(height: AppSpacing.space16),
                         AppTextField(
-                          label: 'Business phone',
+                          label: l10n.registerBusinessPhone,
                           controller: _businessPhoneController,
-                          hint: '10-digit number',
+                          hint: l10n.registerBusinessPhoneHint,
                           keyboardType: TextInputType.phone,
                           maxLength: 10,
                           prefixIcon: const Icon(Icons.phone_outlined,
                               size: 18, color: AppColors.textSecondary),
                           validator: (v) {
-                            if (v == null || v.isEmpty) return 'Required';
+                            if (v == null || v.isEmpty) {
+                              return l10n.commonRequired;
+                            }
                             if (!RegExp(r'^\d{10}$').hasMatch(v)) {
-                              return 'Enter a valid 10-digit number';
+                              return l10n.loginPhoneInvalid;
                             }
                             return null;
                           },
                         ),
                         const SizedBox(height: AppSpacing.space16),
                         AppTextField(
-                          label: 'Address (optional)',
+                          label: l10n.registerAddress,
                           controller: _addressController,
-                          hint: 'Shop address',
+                          hint: l10n.registerAddressHint,
                           prefixIcon: const Icon(Icons.location_on_outlined,
                               size: 18, color: AppColors.textSecondary),
                         ),
@@ -231,17 +240,17 @@ class _RegisterScreenState extends State<RegisterScreen>
                     const SizedBox(height: AppSpacing.space16),
                     _buildSectionCard(
                       icon: Icons.category_outlined,
-                      title: 'Business Type',
+                      title: l10n.registerSectionBusinessType,
                       color: AppColors.accent,
                       children: [
                         ...([
-                          ('retail', 'Retail Shop',
+                          ('retail', l10n.businessTypeRetail,
                               Icons.shopping_bag_outlined),
                           ('restaurant_with_tables',
-                              'Restaurant (with tables)',
+                              l10n.businessTypeRestaurantTables,
                               Icons.table_restaurant_outlined),
                           ('restaurant_no_tables',
-                              'Restaurant (takeaway / counter)',
+                              l10n.registerTypeRestaurantTakeaway,
                               Icons.fastfood_outlined),
                         ].map((entry) => _buildTypeOption(
                               entry.$1,
@@ -254,8 +263,8 @@ class _RegisterScreenState extends State<RegisterScreen>
                           const SizedBox(height: AppSpacing.space8),
                           _buildToggleTile(
                             icon: Icons.inventory_2_outlined,
-                            title: 'Enable inventory tracking',
-                            subtitle: 'Track stock quantities per item',
+                            title: l10n.registerInventoryTitle,
+                            subtitle: l10n.registerInventorySubtitle,
                             value: _inventoryEnabled,
                             onChanged: (v) =>
                                 setState(() => _inventoryEnabled = v),
@@ -264,8 +273,8 @@ class _RegisterScreenState extends State<RegisterScreen>
                             const SizedBox(height: AppSpacing.space8),
                             _buildToggleTile(
                               icon: Icons.barcode_reader,
-                              title: 'Has USB barcode scanner',
-                              subtitle: 'Auto-add items via scanner',
+                              title: l10n.registerScannerTitle,
+                              subtitle: l10n.registerScannerSubtitle,
                               value: _hasBarcodeScanner,
                               onChanged: (v) =>
                                   setState(() => _hasBarcodeScanner = v),
@@ -277,67 +286,74 @@ class _RegisterScreenState extends State<RegisterScreen>
                     const SizedBox(height: AppSpacing.space16),
                     _buildSectionCard(
                       icon: Icons.person_outlined,
-                      title: 'Owner Details',
+                      title: l10n.registerSectionOwnerDetails,
                       color: const Color(0xFF7C3AED),
                       children: [
                         AppTextField(
-                          label: 'Your name',
+                          label: l10n.registerOwnerName,
                           controller: _ownerNameController,
-                          hint: 'Full name',
+                          hint: l10n.registerOwnerNameHint,
                           prefixIcon: const Icon(Icons.person_outline,
                               size: 18, color: AppColors.textSecondary),
-                          validator: (v) =>
-                              v == null || v.isEmpty ? 'Required' : null,
+                          validator: (v) => v == null || v.isEmpty
+                              ? l10n.commonRequired
+                              : null,
                         ),
                         const SizedBox(height: AppSpacing.space16),
                         AppTextField(
-                          label: 'Your phone number',
+                          label: l10n.registerOwnerPhone,
                           controller: _ownerPhoneController,
-                          hint: '10-digit number (used to log in)',
+                          hint: l10n.registerOwnerPhoneHint,
                           keyboardType: TextInputType.phone,
                           maxLength: 10,
                           prefixIcon: const Icon(Icons.phone_outlined,
                               size: 18, color: AppColors.textSecondary),
                           validator: (v) {
-                            if (v == null || v.isEmpty) return 'Required';
+                            if (v == null || v.isEmpty) {
+                              return l10n.commonRequired;
+                            }
                             if (!RegExp(r'^\d{10}$').hasMatch(v)) {
-                              return 'Enter a valid 10-digit number';
+                              return l10n.loginPhoneInvalid;
                             }
                             return null;
                           },
                         ),
                         const SizedBox(height: AppSpacing.space16),
                         AppTextField(
-                          label: 'PIN',
+                          label: l10n.loginPin,
                           controller: _pinController,
-                          hint: '4-digit PIN',
+                          hint: l10n.loginPinHint,
                           keyboardType: TextInputType.number,
                           obscureText: true,
                           maxLength: 4,
                           prefixIcon: const Icon(Icons.lock_outline,
                               size: 18, color: AppColors.textSecondary),
                           validator: (v) {
-                            if (v == null || v.isEmpty) return 'Required';
+                            if (v == null || v.isEmpty) {
+                              return l10n.commonRequired;
+                            }
                             if (!RegExp(r'^\d{4}$').hasMatch(v)) {
-                              return 'PIN must be 4 digits';
+                              return l10n.loginPinInvalid;
                             }
                             return null;
                           },
                         ),
                         const SizedBox(height: AppSpacing.space16),
                         AppTextField(
-                          label: 'Confirm PIN',
+                          label: l10n.registerConfirmPin,
                           controller: _confirmPinController,
-                          hint: 'Re-enter PIN',
+                          hint: l10n.forgotPinConfirmHint,
                           keyboardType: TextInputType.number,
                           obscureText: true,
                           maxLength: 4,
                           prefixIcon: const Icon(Icons.lock_outline,
                               size: 18, color: AppColors.textSecondary),
                           validator: (v) {
-                            if (v == null || v.isEmpty) return 'Required';
+                            if (v == null || v.isEmpty) {
+                              return l10n.commonRequired;
+                            }
                             if (v != _pinController.text) {
-                              return 'PINs do not match';
+                              return l10n.forgotPinMismatch;
                             }
                             return null;
                           },
@@ -377,7 +393,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                     ],
                     const SizedBox(height: AppSpacing.space24),
                     PrimaryButton(
-                      text: 'Create Account',
+                      text: l10n.registerCreateAccount,
                       onPressed: _register,
                       isLoading: _isLoading,
                       icon: Icons.rocket_launch_outlined,
@@ -424,7 +440,10 @@ class _RegisterScreenState extends State<RegisterScreen>
                   child: Icon(icon, size: 18, color: color),
                 ),
                 const SizedBox(width: AppSpacing.space12),
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
+                Expanded(
+                  child: Text(title,
+                      style: Theme.of(context).textTheme.titleMedium),
+                ),
               ],
             ),
           ),

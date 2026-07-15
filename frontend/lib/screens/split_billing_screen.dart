@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers/cart_provider.dart';
 import '../providers/tables_provider.dart';
@@ -114,18 +115,36 @@ class _TablePickerPanel extends ConsumerWidget {
     required this.onTableSelected,
   });
 
+  /// Human-readable label for a table's status. The raw values ('empty',
+  /// 'occupied', 'billed') stay untranslated — they are API values.
+  String _statusLabel(AppLocalizations l10n, String status) => switch (status) {
+        'occupied' => l10n.tablesOccupied,
+        'billed' => l10n.tablesBilled,
+        _ => l10n.tablesEmpty,
+      };
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final tablesAsync = ref.watch(tablesProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('Select Second Table')),
+      appBar: AppBar(
+        title: Text(l10n.splitSelectSecondTable,
+            maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
       body: tablesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(
-          child: Text(e.toString(),
-              style: const TextStyle(color: AppColors.textSecondary)),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.space16),
+            child: Text(
+              l10n.commonErrorWithMessage(e.toString()),
+              textAlign: TextAlign.center,
+              style: AppFont.style(color: AppColors.textSecondary),
+            ),
+          ),
         ),
         data: (tables) {
           final available = tables
@@ -135,20 +154,24 @@ class _TablePickerPanel extends ConsumerWidget {
 
           if (available.isEmpty) {
             return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.table_restaurant_outlined,
-                      size: 48, color: AppColors.textDisabled),
-                  const SizedBox(height: AppSpacing.space16),
-                  Text(
-                    'No other available tables',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodyMedium
-                        ?.copyWith(color: AppColors.textSecondary),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.space16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.table_restaurant_outlined,
+                        size: 48, color: AppColors.textDisabled),
+                    const SizedBox(height: AppSpacing.space16),
+                    Text(
+                      l10n.splitNoOtherTables,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
               ),
             );
           }
@@ -180,18 +203,29 @@ class _TablePickerPanel extends ConsumerWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        t.tableNumber,
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: color,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          t.tableNumber,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppFont.style(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: color,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        t.status,
-                        style: TextStyle(fontSize: 11, color: color),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          _statusLabel(l10n, t.status),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: AppFont.style(fontSize: 11, color: color),
+                        ),
                       ),
                     ],
                   ),

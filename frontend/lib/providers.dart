@@ -6,3 +6,4 @@ export 'providers/bills_provider.dart';
 export 'providers/report_provider.dart';
 export 'providers/connectivity_provider.dart';
 export 'providers/expenses_provider.dart';
+export 'providers/locale_provider.dart';

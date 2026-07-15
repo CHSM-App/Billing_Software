@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/update/update_state.dart';
+import '../../l10n/l10n_ext.dart';
 
 class VittamUpdateDialog extends StatelessWidget {
   static const _packageId = 'com.vengurlatech.vittam';
@@ -32,14 +33,22 @@ class VittamUpdateDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final textTheme = Theme.of(context).textTheme;
+
+    // dialogTitle/dialogMessage are optional remote-config overrides; when the
+    // server does not supply them fall back to the localized defaults.
+    final title =
+        state.dialogTitle.isEmpty ? l10n.updateTitle : state.dialogTitle;
+    final message =
+        state.dialogMessage.isEmpty ? l10n.updateBody : state.dialogMessage;
 
     return PopScope(
       canPop: !state.forceUpdate,
       child: AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
-          state.dialogTitle,
+          title,
           style: textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.bold,
             color: _brandGreen,
@@ -49,7 +58,7 @@ class VittamUpdateDialog extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(state.dialogMessage, style: textTheme.bodyMedium),
+            Text(message, style: textTheme.bodyMedium),
             const SizedBox(height: 12),
             Center(
               child: Container(
@@ -72,7 +81,7 @@ class VittamUpdateDialog extends StatelessWidget {
             if (state.forceUpdate) ...[
               const SizedBox(height: 12),
               Text(
-                'यह अपडेट जरूरी है। कृपया अपडेट करके जारी रखें।',
+                l10n.updateForceNote,
                 style: textTheme.bodySmall?.copyWith(
                   color: Colors.red.shade700,
                   fontStyle: FontStyle.italic,
@@ -85,7 +94,7 @@ class VittamUpdateDialog extends StatelessWidget {
           if (!state.forceUpdate)
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('बाद में'),
+              child: Text(l10n.updateLater),
             ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: _brandGreen),
@@ -95,7 +104,7 @@ class VittamUpdateDialog extends StatelessWidget {
                 Navigator.pop(context, true);
               }
             },
-            child: const Text('अभी अपडेट करें'),
+            child: Text(l10n.updateNow),
           ),
         ],
       ),

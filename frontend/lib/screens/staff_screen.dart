@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 
@@ -29,8 +30,11 @@ class _StaffScreenState extends State<StaffScreen> {
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _loading = false);
-      _showSnack('Failed to load staff: $e', isError: true);
+      // Read l10n here (not at the top): _loadStaff is called from initState,
+      // where the InheritedWidget lookup for context.l10n isn't safe yet.
+      _showSnack(context.l10n.staffLoadFailed('$e'), isError: true);
     }
   }
 
@@ -45,16 +49,20 @@ class _StaffScreenState extends State<StaffScreen> {
   }
 
   Future<void> _deleteMember(Map<String, dynamic> member) async {
+    final l10n = context.l10n;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Remove Staff'),
-        content: Text('Remove "${member['name']}"?'),
+        title: Text(l10n.staffRemoveTitle),
+        content: Text(l10n.staffRemoveBody('${member['name']}')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l10n.commonCancel)),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('Remove', style: TextStyle(color: AppColors.error)),
+            child: Text(l10n.commonRemove,
+                style: const TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -77,15 +85,16 @@ class _StaffScreenState extends State<StaffScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: const Text('Manage Staff')),
+      appBar: AppBar(title: Text(l10n.staffTitle)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _staff.isEmpty
               ? EmptyState(
                   icon: Icons.people_outline,
-                  message: 'No cashiers added yet.',
-                  actionLabel: 'Add Staff',
+                  message: l10n.staffNoCashiers,
+                  actionLabel: l10n.staffAddStaff,
                   onAction: () => _showStaffForm(),
                 )
               : ListView.separated(
@@ -103,8 +112,9 @@ class _StaffScreenState extends State<StaffScreen> {
                             backgroundColor: AppColors.primaryLight,
                             child: Text(
                               (m['name'] as String).substring(0, 1).toUpperCase(),
-                              style: const TextStyle(
-                                  color: AppColors.primary, fontWeight: FontWeight.w600),
+                              style: AppFont.style(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w600),
                             ),
                           ),
                           const SizedBox(width: AppSpacing.space12),
@@ -113,8 +123,12 @@ class _StaffScreenState extends State<StaffScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(m['name'],
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: Theme.of(context).textTheme.titleMedium),
                                 Text(m['phone'],
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodySmall
@@ -127,6 +141,7 @@ class _StaffScreenState extends State<StaffScreen> {
                                 color: AppColors.error, size: 20),
                             onPressed: () => _deleteMember(m),
                             visualDensity: VisualDensity.compact,
+                            tooltip: l10n.commonRemove,
                           ),
                         ],
                       ),
@@ -136,7 +151,7 @@ class _StaffScreenState extends State<StaffScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showStaffForm(),
         icon: const Icon(Icons.person_add_outlined),
-        label: const Text('Add Staff'),
+        label: Text(l10n.staffAddStaff),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
       ),
@@ -211,9 +226,10 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final isEdit = widget.member != null;
     return AlertDialog(
-      title: Text(isEdit ? 'Edit Staff' : 'Add Staff'),
+      title: Text(isEdit ? l10n.staffEditStaff : l10n.staffAddStaff),
       content: SizedBox(
         width: 360,
         child: Form(
@@ -222,33 +238,38 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               AppTextField(
-                label: 'Name',
+                label: l10n.staffName,
                 controller: _nameCtrl,
-                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                validator: (v) =>
+                    v == null || v.isEmpty ? l10n.commonRequired : null,
               ),
               const SizedBox(height: AppSpacing.space12),
               AppTextField(
-                label: 'Phone',
+                label: l10n.staffPhone,
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
                 maxLength: 10,
                 validator: (v) {
-                  if (v == null || v.isEmpty) return 'Required';
-                  if (!RegExp(r'^\d{10}$').hasMatch(v)) return '10-digit number required';
+                  if (v == null || v.isEmpty) return l10n.commonRequired;
+                  if (!RegExp(r'^\d{10}$').hasMatch(v)) {
+                    return l10n.staffPhoneInvalid;
+                  }
                   return null;
                 },
               ),
               const SizedBox(height: AppSpacing.space12),
               AppTextField(
-                label: isEdit ? 'New PIN (leave blank to keep)' : 'PIN (4 digits)',
+                label: isEdit ? l10n.staffPinNew : l10n.staffPinNewLabel,
                 controller: _pinCtrl,
                 keyboardType: TextInputType.number,
                 obscureText: true,
                 maxLength: 4,
                 validator: (v) {
-                  if (!isEdit && (v == null || v.isEmpty)) return 'Required';
+                  if (!isEdit && (v == null || v.isEmpty)) {
+                    return l10n.commonRequired;
+                  }
                   if (v != null && v.isNotEmpty && !RegExp(r'^\d{4}$').hasMatch(v)) {
-                    return 'PIN must be 4 digits';
+                    return l10n.staffPinInvalid;
                   }
                   return null;
                 },
@@ -258,14 +279,16 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonCancel)),
         ElevatedButton(
           onPressed: _saving ? null : _save,
           child: _saving
               ? const SizedBox(
                   width: 16, height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : Text(isEdit ? 'Save' : 'Add'),
+              : Text(isEdit ? l10n.commonSave : l10n.commonAdd),
         ),
       ],
     );

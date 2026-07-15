@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../services/license_service.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
@@ -42,6 +43,7 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
   }
 
   Future<void> _retry() async {
+    final l10n = context.l10n;
     setState(() {
       _checking = true;
       _errorMessage = null;
@@ -67,34 +69,35 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
       }
       setState(() {
         _errorMessage = rawError == null
-            ? _messageForState(status.state)
+            ? _messageForState(l10n, status.state)
             : sanitizeUiErrorMessage(rawError);
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = 'Could not connect. Check your internet and try again.';
+        _errorMessage = l10n.licenseConnectFailed;
       });
     } finally {
       if (mounted) setState(() => _checking = false);
     }
   }
 
-  String _messageForState(LicenseState state) {
+  String _messageForState(AppLocalizations l10n, LicenseState state) {
     switch (state) {
       case LicenseState.blockedSubscription:
-        return 'Your subscription has expired or been suspended. Please contact support.';
+        return l10n.licenseMsgSubscription;
       case LicenseState.blockedPending:
-        return 'Your account is pending activation. Please contact support.';
+        return l10n.licenseMsgPending;
       case LicenseState.blockedOffline:
-        return 'Still offline. Connect to the internet and try again.';
+        return l10n.licenseMsgStillOffline;
       default:
-        return 'Could not verify subscription. Please try again.';
+        return l10n.licenseMsgVerifyFailed;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final isOfflineBlock = widget.reason == LicenseState.blockedOffline;
     final isPending = widget.reason == LicenseState.blockedPending;
 
@@ -105,16 +108,16 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
             : Icons.lock_outline_rounded;
 
     final title = isOfflineBlock
-        ? 'Go Online to Continue'
+        ? l10n.licenseTitleOffline
         : isPending
-            ? 'Account Pending Activation'
-            : 'Subscription Expired';
+            ? l10n.licenseTitlePending
+            : l10n.licenseTitleExpired;
 
     final subtitle = isOfflineBlock
-        ? "You've been offline too long.\nConnect to the internet to verify your subscription."
+        ? l10n.licenseSubtitleOffline
         : isPending
-            ? "Your account is under review.\nContact support to activate your subscription."
-            : "Your subscription has expired or been suspended.\nContact support to renew.";
+            ? l10n.licenseSubtitlePending
+            : l10n.licenseSubtitleExpired;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -143,8 +146,7 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
                 const SizedBox(height: 24),
                 Text(
                   title,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
+                  style: AppFont.style(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
@@ -154,8 +156,7 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
                 const SizedBox(height: 12),
                 Text(
                   subtitle,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
+                  style: AppFont.style(
                     fontSize: 14,
                     color: AppColors.textSecondary,
                     height: 1.5,
@@ -194,7 +195,8 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
                                   strokeWidth: 2, color: Colors.white),
                             )
                           : const Icon(Icons.refresh_rounded),
-                      label: Text(_checking ? 'Checking…' : 'Retry'),
+                      label: Text(
+                          _checking ? l10n.licenseChecking : l10n.commonRetry),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -211,7 +213,7 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _logout,
                     icon: const Icon(Icons.logout_outlined),
-                    label: const Text('Logout'),
+                    label: Text(l10n.logout),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textPrimary,
                       side: BorderSide(color: AppColors.border),
@@ -224,8 +226,8 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Vittam Billing',
-                  style: TextStyle(
+                  l10n.licenseBrandFooter,
+                  style: const TextStyle(
                     fontSize: 12,
                     color: AppColors.textDisabled,
                   ),

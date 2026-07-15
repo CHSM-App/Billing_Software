@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../storage.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/language_selector.dart';
 import 'register_screen.dart';
 import 'otp_screen.dart';
 import 'main_shell.dart';
@@ -61,26 +63,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     bool sending = false;
     // Capture messenger before dialog opens so snackbars appear above the dialog
     final messenger = ScaffoldMessenger.of(context);
+    final l10n = context.l10n;
 
     // Step 1 — ask for phone number
     final phone = await showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Forgot PIN'),
+          title: Text(l10n.forgotPinTitle),
           content: Form(
             key: formKey,
             child: AppTextField(
-              label: 'Registered phone number',
+              label: l10n.forgotPinPhoneLabel,
               controller: phoneCtrl,
-              hint: '10-digit number',
+              hint: l10n.forgotPinPhoneHint,
               keyboardType: TextInputType.phone,
               maxLength: 10,
               prefixIcon: const Icon(Icons.phone_outlined,
                   size: 18, color: AppColors.textSecondary),
               validator: (v) {
-                if (v == null || v.isEmpty) return 'Required';
-                if (!RegExp(r'^\d{10}$').hasMatch(v)) return 'Enter 10-digit number';
+                if (v == null || v.isEmpty) return l10n.commonRequired;
+                if (!RegExp(r'^\d{10}$').hasMatch(v)) {
+                  return l10n.forgotPinPhoneInvalid;
+                }
                 return null;
               },
             ),
@@ -88,10 +93,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
+              child: Text(l10n.commonCancel),
             ),
             PrimaryButton(
-              text: 'Send OTP',
+              text: l10n.forgotPinSendOtp,
               isLoading: sending,
               onPressed: () async {
                 if (!formKey.currentState!.validate()) return;
@@ -103,7 +108,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   messenger.showSnackBar(SnackBar(content: Text(e.message)));
                 } catch (_) {
                   messenger.showSnackBar(
-                    const SnackBar(content: Text('Failed to send OTP. Try again.')),
+                    SnackBar(content: Text(l10n.forgotPinSendFailed)),
                   );
                 } finally {
                   setS(() => sending = false);
@@ -140,40 +145,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          title: const Text('Set New PIN'),
+          title: Text(l10n.forgotPinSetNewTitle),
           content: Form(
             key: pinFormKey,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 AppTextField(
-                  label: 'New PIN',
+                  label: l10n.forgotPinNewLabel,
                   controller: newPinCtrl,
-                  hint: '4-digit PIN',
+                  hint: l10n.loginPinHint,
                   keyboardType: TextInputType.number,
                   obscureText: true,
                   maxLength: 4,
                   prefixIcon: const Icon(Icons.lock_outline,
                       size: 18, color: AppColors.textSecondary),
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Required';
-                    if (!RegExp(r'^\d{4}$').hasMatch(v)) return 'PIN must be 4 digits';
+                    if (v == null || v.isEmpty) return l10n.commonRequired;
+                    if (!RegExp(r'^\d{4}$').hasMatch(v)) {
+                      return l10n.loginPinInvalid;
+                    }
                     return null;
                   },
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 AppTextField(
-                  label: 'Confirm PIN',
+                  label: l10n.forgotPinConfirmLabel,
                   controller: confirmPinCtrl,
-                  hint: 'Re-enter PIN',
+                  hint: l10n.forgotPinConfirmHint,
                   keyboardType: TextInputType.number,
                   obscureText: true,
                   maxLength: 4,
                   prefixIcon: const Icon(Icons.lock_outline,
                       size: 18, color: AppColors.textSecondary),
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Required';
-                    if (v != newPinCtrl.text) return 'PINs do not match';
+                    if (v == null || v.isEmpty) return l10n.commonRequired;
+                    if (v != newPinCtrl.text) return l10n.forgotPinMismatch;
                     return null;
                   },
                 ),
@@ -182,7 +189,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ),
           actions: [
             PrimaryButton(
-              text: 'Reset PIN',
+              text: l10n.forgotPinReset,
               isLoading: resetting,
               onPressed: () async {
                 if (!pinFormKey.currentState!.validate()) return;
@@ -191,8 +198,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   await resetPin(verifiedToken, newPinCtrl.text.trim());
                   if (ctx.mounted) Navigator.pop(ctx);
                   pinMessenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('PIN reset successfully. Please log in.'),
+                    SnackBar(
+                      content: Text(l10n.forgotPinResetSuccess),
                       backgroundColor: AppColors.success,
                     ),
                   );
@@ -200,7 +207,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   pinMessenger.showSnackBar(SnackBar(content: Text(e.message)));
                 } catch (_) {
                   pinMessenger.showSnackBar(
-                    const SnackBar(content: Text('Reset failed. Try again.')),
+                    SnackBar(content: Text(l10n.forgotPinResetFailed)),
                   );
                 } finally {
                   setS(() => resetting = false);
@@ -276,20 +283,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       Navigator.pushReplacement(
           context, MaterialPageRoute(builder: (_) => MainShell(licenseStatus: licenseStatus)));
     } on ApiException catch (e) {
+      final l10n = context.l10n;
       if (e.statusCode == 403) {
         setState(() => _isPendingActivation = true);
       } else if (e.statusCode == 404) {
-        setState(() => _errorMessage = 'No account found with this phone number.');
+        setState(() => _errorMessage = l10n.loginNoAccountFound);
       } else if (e.statusCode == 401) {
-        setState(() => _errorMessage = 'Incorrect PIN. Please try again.');
+        setState(() => _errorMessage = l10n.loginIncorrectPin);
       } else if (e.statusCode == 423) {
-        setState(() => _errorMessage = e.serverMessage ?? 'Account temporarily locked. Try again in 15 minutes.');
+        setState(() =>
+            _errorMessage = e.serverMessage ?? l10n.loginAccountLocked);
       } else {
-        setState(() => _errorMessage = e.serverMessage ?? 'Something went wrong. Please try again.');
+        setState(() =>
+            _errorMessage = e.serverMessage ?? l10n.loginGenericError);
       }
     } catch (e) {
-      setState(() => _errorMessage =
-          'Could not connect to server. Check your internet connection.');
+      setState(() => _errorMessage = context.l10n.loginConnectionError);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -380,9 +389,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ),
           SizedBox(height: large ? AppSpacing.space16 : AppSpacing.space12),
           Text(
-            'Vittam',
-            style: TextStyle(
-              fontFamily: 'Inter',
+            context.l10n.appName,
+            style: AppFont.style(
               fontSize: large ? 28 : 22,
               fontWeight: FontWeight.w800,
               color: Colors.white,
@@ -391,14 +399,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ),
           const SizedBox(height: 4),
           Text(
-            'Smart Billing Solution',
-            style: TextStyle(
-              fontFamily: 'Inter',
+            context.l10n.appTagline,
+            textAlign: TextAlign.center,
+            style: AppFont.style(
               fontSize: large ? 15 : 13,
               fontWeight: FontWeight.w400,
               color: Colors.white.withValues(alpha: 0.75),
             ),
           ),
+          SizedBox(height: large ? AppSpacing.space24 : AppSpacing.space16),
+          const LanguageToggle(),
         ],
       ),
     );
@@ -433,52 +443,53 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   }
 
   Widget _buildFormContent() {
+    final l10n = context.l10n;
     return Form(
       key: _formKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Welcome back',
+            l10n.loginTitle,
             style: Theme.of(context).textTheme.displayLarge,
           ),
           const SizedBox(height: AppSpacing.space8),
           Text(
-            'Sign in to your billing account',
+            l10n.loginSubtitle,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppColors.textSecondary,
                 ),
           ),
           const SizedBox(height: AppSpacing.space32),
           AppTextField(
-            label: 'Phone number',
+            label: l10n.loginPhone,
             controller: _phoneController,
-            hint: '10-digit mobile number',
+            hint: l10n.loginPhoneHint,
             keyboardType: TextInputType.phone,
             maxLength: 10,
             prefixIcon: const Icon(Icons.phone_outlined,
                 size: 18, color: AppColors.textSecondary),
             validator: (v) {
-              if (v == null || v.isEmpty) return 'Phone is required';
+              if (v == null || v.isEmpty) return l10n.loginPhoneRequired;
               if (!RegExp(r'^\d{10}$').hasMatch(v)) {
-                return 'Enter a valid 10-digit number';
+                return l10n.loginPhoneInvalid;
               }
               return null;
             },
           ),
           const SizedBox(height: AppSpacing.space16),
           AppTextField(
-            label: 'PIN',
+            label: l10n.loginPin,
             controller: _pinController,
-            hint: '4-digit PIN',
+            hint: l10n.loginPinHint,
             keyboardType: TextInputType.number,
             obscureText: true,
             maxLength: 4,
             prefixIcon: const Icon(Icons.lock_outline,
                 size: 18, color: AppColors.textSecondary),
             validator: (v) {
-              if (v == null || v.isEmpty) return 'PIN is required';
-              if (!RegExp(r'^\d{4}$').hasMatch(v)) return 'PIN must be 4 digits';
+              if (v == null || v.isEmpty) return l10n.loginPinRequired;
+              if (!RegExp(r'^\d{4}$').hasMatch(v)) return l10n.loginPinInvalid;
               return null;
             },
           ),
@@ -500,7 +511,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           size: 16, color: AppColors.warning),
                       const SizedBox(width: AppSpacing.space8),
                       Text(
-                        'Account not activated',
+                        l10n.loginPendingTitle,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: AppColors.warning,
                               fontWeight: FontWeight.w700,
@@ -510,14 +521,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Your account is pending activation. Please contact our support team to activate your account.',
+                    l10n.loginPendingBody,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.warning,
                         ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'support@vengurlatech.com',
+                    l10n.loginSupportEmail,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppColors.warning,
                           fontWeight: FontWeight.w600,
@@ -558,7 +569,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ],
           const SizedBox(height: AppSpacing.space24),
           PrimaryButton(
-            text: 'Sign In',
+            text: l10n.loginSignIn,
             onPressed: _login,
             isLoading: _isLoading,
             icon: Icons.login_rounded,
@@ -573,7 +584,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
               child: Text(
-                'Forgot PIN?',
+                l10n.loginForgotPin,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.primary,
                       fontWeight: FontWeight.w500,
@@ -585,11 +596,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                "Don't have an account? ",
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
+              Flexible(
+                child: Text(
+                  l10n.loginNoAccount,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                ),
               ),
               TextButton(
                 onPressed: () => Navigator.push(
@@ -601,7 +614,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                child: const Text('Register'),
+                child: Text(l10n.loginRegister),
               ),
             ],
           ),

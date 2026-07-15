@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../l10n/l10n_ext.dart';
 import '../services/printer_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
@@ -29,6 +30,7 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
   }
 
   Future<void> _scan() async {
+    final l10n = context.l10n;
     // Request Bluetooth permissions on Android before listing paired devices
     final statuses = await [
       Permission.bluetoothConnect,
@@ -38,7 +40,7 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
 
     final denied = statuses.values.any((s) => s.isDenied || s.isPermanentlyDenied);
     if (denied) {
-      _showSnack('Bluetooth permission denied. Grant it in app settings.', isError: true);
+      _showSnack(l10n.printerSetupPermissionDenied, isError: true);
       return;
     }
 
@@ -50,36 +52,40 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
       final found = await PrinterService.instance.listPrinters();
       setState(() => _printers = found);
       if (found.isEmpty) {
-        _showSnack('No paired printers found. Pair your printer in phone Bluetooth settings first.');
+        _showSnack(l10n.printerSetupNoPaired);
       }
     } catch (e) {
-      _showSnack('Failed to load printers: $e', isError: true);
+      _showSnack(l10n.printerSetupLoadFailed('$e'), isError: true);
     } finally {
       setState(() => _scanning = false);
     }
   }
 
   Future<void> _select(Printer printer) async {
+    final l10n = context.l10n;
     await PrinterService.instance.setActivePrinter(printer);
     setState(() => _activePrinter = printer);
-    _showSnack('Printer "${printer.name}" selected');
+    _showSnack(l10n.printerSetupSelectedSnack(
+        printer.name ?? l10n.printerSetupUnknownPrinter));
   }
 
   Future<void> _clearPrinter() async {
+    final l10n = context.l10n;
     await PrinterService.instance.clearActivePrinter();
     setState(() => _activePrinter = null);
-    _showSnack('Printer cleared');
+    _showSnack(l10n.printerSetupCleared);
   }
 
   Future<void> _testPrint() async {
+    final l10n = context.l10n;
     setState(() => _testing = true);
     try {
       await PrinterService.instance.testPrint();
-      _showSnack('Test page sent!');
+      _showSnack(l10n.printerSetupTestSent);
     } on PrinterException catch (e) {
       _showSnack(e.message, isError: true);
     } catch (e) {
-      _showSnack('Print failed: $e', isError: true);
+      _showSnack(l10n.printerSetupPrintFailed('$e'), isError: true);
     } finally {
       setState(() => _testing = false);
     }
@@ -94,13 +100,14 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
-      appBar: AppBar(title: const Text('Printer Setup')),
+      appBar: AppBar(title: Text(l10n.printerSetupTitle)),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.space16),
         children: [
           // Active printer card
-          _sectionHeader('Active Printer'),
+          _sectionHeader(l10n.printerSetupActivePrinter),
           const SizedBox(height: AppSpacing.space8),
           AppCard(
             child: _activePrinter == null
@@ -109,11 +116,13 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                       const Icon(Icons.print_disabled_outlined,
                           color: AppColors.textDisabled, size: 20),
                       const SizedBox(width: AppSpacing.space12),
-                      Text('No printer configured',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(color: AppColors.textSecondary)),
+                      Expanded(
+                        child: Text(l10n.printerSetupNotConfigured,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: AppColors.textSecondary)),
+                      ),
                     ],
                   )
                 : Row(
@@ -125,8 +134,11 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(_activePrinter!.name ?? 'Unknown',
-                                style: Theme.of(context).textTheme.titleMedium),
+                            Text(
+                                _activePrinter!.name ??
+                                    l10n.printerSetupUnknown,
+                                style: Theme.of(context).textTheme.titleMedium,
+                                overflow: TextOverflow.ellipsis),
                             Text(
                               '${_activePrinter!.connectionType?.name ?? ''}'
                               '${_activePrinter!.address != null ? ' · ${_activePrinter!.address}' : ''}',
@@ -134,11 +146,15 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                                   .textTheme
                                   .bodySmall
                                   ?.copyWith(color: AppColors.textSecondary),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
                       ),
-                      StatusBadge(label: 'Active', status: StatusType.success),
+                      const SizedBox(width: AppSpacing.space8),
+                      StatusBadge(
+                          label: l10n.printerSetupActiveBadge,
+                          status: StatusType.success),
                     ],
                   ),
           ),
@@ -156,7 +172,8 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                             height: 14,
                             child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.print_outlined, size: 16),
-                    label: const Text('Test Print'),
+                    label: Text(l10n.printerSetupTestPrint,
+                        overflow: TextOverflow.ellipsis),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.space8),
@@ -164,7 +181,8 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                   child: OutlinedButton.icon(
                     onPressed: _clearPrinter,
                     icon: const Icon(Icons.clear_outlined, size: 16),
-                    label: const Text('Remove'),
+                    label: Text(l10n.commonRemove,
+                        overflow: TextOverflow.ellipsis),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.error,
                       side: const BorderSide(color: AppColors.error),
@@ -178,16 +196,18 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
           const SizedBox(height: AppSpacing.space24),
 
           // Scan section
-          _sectionHeader('Available Printers'),
+          _sectionHeader(l10n.printerSetupAvailablePrinters),
           const SizedBox(height: AppSpacing.space8),
           PrimaryButton(
-            text: _scanning ? 'Scanning…' : 'Scan for Printers',
+            text: _scanning
+                ? l10n.printerSetupScanning
+                : l10n.printerSetupScanButton,
             onPressed: _scanning ? null : _scan,
             isLoading: _scanning,
           ),
           const SizedBox(height: AppSpacing.space4),
           Text(
-            'Shows printers already paired in your phone\'s Bluetooth settings. Pair the printer there first, then tap Scan.',
+            l10n.printerSetupScanHint,
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
@@ -202,11 +222,13 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                   const Icon(Icons.bluetooth_searching_outlined,
                       color: AppColors.textDisabled, size: 20),
                   const SizedBox(width: AppSpacing.space12),
-                  Text('Tap "Scan" to find printers',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodyMedium
-                          ?.copyWith(color: AppColors.textSecondary)),
+                  Expanded(
+                    child: Text(l10n.printerSetupTapScan,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: AppColors.textSecondary)),
+                  ),
                 ],
               ),
             )
@@ -231,23 +253,28 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(printer.name ?? 'Unknown Printer',
-                                style: Theme.of(context).textTheme.titleMedium),
+                            Text(printer.name ?? l10n.printerSetupUnknownPrinter,
+                                style: Theme.of(context).textTheme.titleMedium,
+                                overflow: TextOverflow.ellipsis),
                             if (printer.address != null)
                               Text(printer.address!,
                                   style: Theme.of(context)
                                       .textTheme
                                       .bodySmall
-                                      ?.copyWith(color: AppColors.textSecondary)),
+                                      ?.copyWith(color: AppColors.textSecondary),
+                                  overflow: TextOverflow.ellipsis),
                           ],
                         ),
                       ),
+                      const SizedBox(width: AppSpacing.space8),
                       if (isActive)
-                        const StatusBadge(label: 'Selected', status: StatusType.success)
+                        StatusBadge(
+                            label: l10n.printerSetupSelectedBadge,
+                            status: StatusType.success)
                       else
                         TextButton(
                             onPressed: () => _select(printer),
-                            child: const Text('Select')),
+                            child: Text(l10n.printerSetupSelect)),
                     ],
                   ),
                 ),
@@ -255,19 +282,20 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
             }),
 
           const SizedBox(height: AppSpacing.space32),
-          _sectionHeader('Notes'),
+          _sectionHeader(l10n.printerSetupNotes),
           const SizedBox(height: AppSpacing.space8),
           AppCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _noteRow(Icons.bluetooth_outlined, 'Android/iPhone: pair the printer in phone Bluetooth settings first, then tap Scan here'),
+                _noteRow(Icons.bluetooth_outlined,
+                    l10n.printerSetupNoteBluetooth),
                 const SizedBox(height: AppSpacing.space8),
-                _noteRow(Icons.laptop_outlined, 'Windows: uses BLE or USB — printer must be powered on during scan'),
+                _noteRow(Icons.laptop_outlined, l10n.printerSetupNoteWindows),
                 const SizedBox(height: AppSpacing.space8),
-                _noteRow(Icons.usb_outlined, 'USB on Windows requires WinUSB driver installed for the printer'),
+                _noteRow(Icons.usb_outlined, l10n.printerSetupNoteUsb),
                 const SizedBox(height: AppSpacing.space8),
-                _noteRow(Icons.info_outline, 'Only 80mm thermal printers are supported'),
+                _noteRow(Icons.info_outline, l10n.printerSetupNoteThermal),
               ],
             ),
           ),

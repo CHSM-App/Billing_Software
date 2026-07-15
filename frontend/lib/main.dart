@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'firebase_options.dart';
 import 'api.dart';
+import 'l10n/l10n_ext.dart';
 import 'providers.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
@@ -36,15 +37,22 @@ void main() async {
   runApp(const ProviderScope(child: BillingApp()));
 }
 
-class BillingApp extends StatelessWidget {
+class BillingApp extends ConsumerWidget {
   const BillingApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final language = ref.watch(localeProvider);
+
     return MaterialApp(
       title: 'Vittam',
       debugShowCheckedModeBanner: false,
-      theme: appTheme,
+      // Rebuilt on language change — Marathi swaps the type scale to a
+      // Devanagari-capable font.
+      theme: buildAppTheme(language.code),
+      locale: language.locale,
+      supportedLocales: AppLocalizations.supportedLocales,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
       initialRoute: '/',
       routes: {
         '/': (_) => const VittamSplashScreen(),

@@ -123,11 +123,25 @@ class AuthStorage {
   // Clear — wipes both stores completely on logout
   // -------------------------------------------------------------------------
 
+  /// Prefs keys that are device preferences, not session data. These are read
+  /// back and restored after the wipe so logging out doesn't reset them.
+  static const _keysSurvivingLogout = ['app_language'];
+
   Future<void> clearSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final preserved = <String, String>{
+      for (final key in _keysSurvivingLogout)
+        if (prefs.getString(key) != null) key: prefs.getString(key)!,
+    };
+
     await Future.wait([
       _secure.deleteAll(),
-      SharedPreferences.getInstance().then((p) => p.clear()),
+      prefs.clear(),
     ]);
+
+    for (final entry in preserved.entries) {
+      await prefs.setString(entry.key, entry.value);
+    }
   }
 }
 

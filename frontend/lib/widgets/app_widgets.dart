@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../theme/app_theme.dart';
 
 // Animated primary button with gradient and press effect
@@ -90,14 +91,16 @@ class _PrimaryButtonState extends State<PrimaryButton>
                           Icon(widget.icon, size: 18, color: Colors.white),
                           const SizedBox(width: AppSpacing.space8),
                         ],
-                        Text(
-                          widget.text,
-                          style: const TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                            letterSpacing: 0.2,
+                        Flexible(
+                          child: Text(
+                            widget.text,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppFont.style(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                              letterSpacing: 0.2,
+                            ),
                           ),
                         ),
                       ],
@@ -136,7 +139,7 @@ class SecondaryButton extends StatelessWidget {
               Icon(icon, size: 17),
               const SizedBox(width: AppSpacing.space8),
             ],
-            Text(text),
+            Flexible(child: Text(text, overflow: TextOverflow.ellipsis)),
           ],
         ),
       ),
@@ -168,8 +171,8 @@ class DestructiveButton extends StatelessWidget {
         ),
         child: Text(
           text,
-          style: const TextStyle(
-            fontFamily: 'Inter',
+          overflow: TextOverflow.ellipsis,
+          style: AppFont.style(
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
@@ -419,8 +422,8 @@ class StatusBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontFamily: 'Inter',
+        overflow: TextOverflow.ellipsis,
+        style: AppFont.style(
           fontSize: 11,
           fontWeight: FontWeight.w600,
           color: color,
@@ -468,6 +471,7 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.space48),
@@ -489,13 +493,13 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
             ),
             const SizedBox(height: AppSpacing.space24),
             Text(
-              'No Internet Connection',
+              l10n.noInternetTitle,
               style: Theme.of(context).textTheme.titleLarge,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.space8),
             Text(
-              'Connect to the network to get started.\nYour data will load automatically.',
+              l10n.noInternetBody,
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme
@@ -506,7 +510,8 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
               const SizedBox(height: AppSpacing.space24),
               SizedBox(
                 width: 160,
-                child: PrimaryButton(text: 'Retry', onPressed: widget.onRetry),
+                child: PrimaryButton(
+                    text: l10n.commonRetry, onPressed: widget.onRetry),
               ),
             ],
           ],
@@ -531,6 +536,7 @@ class AppErrorWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.space48),
@@ -552,7 +558,7 @@ class AppErrorWidget extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.space16),
             Text(
-              title ?? 'Something went wrong',
+              title ?? l10n.errorSomethingWentWrong,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium,
             ),
@@ -571,7 +577,8 @@ class AppErrorWidget extends StatelessWidget {
               const SizedBox(height: AppSpacing.space24),
               SizedBox(
                 width: 160,
-                child: PrimaryButton(text: 'Retry', onPressed: onRetry),
+                child:
+                    PrimaryButton(text: l10n.commonRetry, onPressed: onRetry),
               ),
             ],
           ],

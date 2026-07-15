@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
+import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
@@ -23,6 +24,15 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       'occupied' => AppColors.tableOccupied,
       'billed' => AppColors.tableBilled,
       _ => AppColors.tableEmpty,
+    };
+  }
+
+  /// Maps the raw API status value to a localized display label.
+  static String tableStatusLabel(AppLocalizations l10n, String status) {
+    return switch (status) {
+      'occupied' => l10n.tablesOccupied,
+      'billed' => l10n.tablesBilled,
+      _ => l10n.tablesEmpty,
     };
   }
 
@@ -69,22 +79,22 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   }
 
   void _showBilledOptions(TableModel table, String userRole) {
+    final l10n = context.l10n;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Table ${table.tableNumber}'),
-        content: const Text(
-            'This table has a billed order. What would you like to do?'),
+        title: Text(l10n.tablesTableLabel(table.tableNumber)),
+        content: Text(l10n.tablesBilledOrderBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
               await _markTableEmpty(table);
             },
-            child: const Text('Mark as Paid / Empty'),
+            child: Text(l10n.tablesMarkPaidEmpty),
           ),
           if (table.activeBillId != null)
             TextButton(
@@ -92,7 +102,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                 Navigator.pop(context);
                 await _voidTableBill(table);
               },
-              child: Text('Void Bill', style: TextStyle(color: AppColors.error)),
+              child: Text(l10n.tablesVoidBill,
+                  style: const TextStyle(color: AppColors.error)),
             ),
         ],
       ),
@@ -118,24 +129,25 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   }
 
   Future<void> _addTable() async {
+    final l10n = context.l10n;
     final ctrl = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Add Table'),
+        title: Text(l10n.tablesAddTable),
         content: TextField(
           controller: ctrl,
           decoration:
-              const InputDecoration(labelText: 'Table number (e.g. T1, A2)'),
+              InputDecoration(labelText: l10n.tablesTableNumberLabel),
           autofocus: true,
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Add'),
+            child: Text(l10n.commonAdd),
           ),
         ],
       ),
@@ -153,18 +165,20 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   }
 
   Future<void> _deleteTable(TableModel table) async {
+    final l10n = context.l10n;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Delete Table'),
-        content: Text('Delete table "${table.tableNumber}"?'),
+        title: Text(l10n.tablesDeleteTitle),
+        content: Text(l10n.tablesDeleteBody(table.tableNumber)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.commonCancel)),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('Delete', style: TextStyle(color: AppColors.error)),
+            child: Text(l10n.commonDelete,
+                style: const TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -186,18 +200,19 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final userRole = ref.watch(userRoleProvider);
     final tablesAsync = ref.watch(tablesProvider);
 
     return Scaffold(
       body: Column(children: [
         ShellAppBar(
-          title: const Text('Tables'),
+          title: Text(l10n.tablesTitle),
           actions: [
             IconButton(
               icon: const Icon(Icons.refresh_outlined),
               onPressed: () => ref.invalidate(tablesProvider),
-              tooltip: 'Refresh',
+              tooltip: l10n.commonRefresh,
             ),
           ],
         ),
@@ -216,7 +231,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                     const Icon(Icons.table_restaurant_outlined,
                         size: 48, color: AppColors.textDisabled),
                     const SizedBox(height: AppSpacing.space16),
-                    Text('No tables yet',
+                    Text(l10n.tablesNoTablesYet,
+                        textAlign: TextAlign.center,
                         style: Theme.of(context)
                             .textTheme
                             .bodyMedium
@@ -226,7 +242,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                       ElevatedButton.icon(
                         onPressed: _addTable,
                         icon: const Icon(Icons.add),
-                        label: const Text('Add Table'),
+                        label: Text(l10n.tablesAddTable),
                       ),
                     ],
                   ],
@@ -242,7 +258,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           ? FloatingActionButton.extended(
               onPressed: _addTable,
               icon: const Icon(Icons.add),
-              label: const Text('Add Table'),
+              label: Text(l10n.tablesAddTable),
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
             )
@@ -320,9 +336,11 @@ class _TableWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Container(
       width: 80,
       height: 80,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.15),
         border: Border.all(color: color, width: 2),
@@ -333,14 +351,22 @@ class _TableWidget extends StatelessWidget {
         children: [
           Text(
             table.tableNumber,
-            style: TextStyle(
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppFont.style(
               fontSize: 16,
               fontWeight: FontWeight.w700,
               color: color,
             ),
           ),
           const SizedBox(height: 2),
-          Text(table.status, style: TextStyle(fontSize: 10, color: color)),
+          Text(
+            _TablesScreenState.tableStatusLabel(l10n, table.status),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: AppFont.style(fontSize: 10, color: color),
+          ),
         ],
       ),
     );

@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../l10n/l10n_ext.dart';
 
 final _amt = NumberFormat('#,##0.00');
 final _dateFmt = DateFormat('dd MMM yyyy');
@@ -22,6 +23,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final filter = ref.watch(reportSummaryFilterProvider);
     final summaryAsync = ref.watch(reportSummaryProvider);
     final isWide = MediaQuery.of(context).size.width >= 720;
@@ -30,16 +32,16 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       backgroundColor: AppColors.background,
       body: Column(children: [
           ShellAppBar(
-            title: const Text('Reports'),
+            title: Text(l10n.reportsTitle),
             actions: [
               IconButton(
                 icon: const Icon(Icons.calendar_month_outlined),
-                tooltip: 'Change period',
+                tooltip: l10n.reportsChangePeriod,
                 onPressed: () => _showPeriodPicker(context, filter),
               ),
               IconButton(
                 icon: const Icon(Icons.refresh_outlined),
-                tooltip: 'Refresh',
+                tooltip: l10n.commonRefresh,
                 onPressed: () => ref.invalidate(reportSummaryProvider),
               ),
             ],
@@ -54,18 +56,18 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
             children: [
-              _buildPeriodBar(filter),
+              _buildPeriodBar(l10n, filter),
               const SizedBox(height: 12),
-              _buildSummaryCards(summary, isWide),
+              _buildSummaryCards(l10n, summary, isWide),
               const SizedBox(height: 20),
-              _buildPaymentBreakdown(summary),
+              _buildPaymentBreakdown(l10n, summary),
               const SizedBox(height: 20),
               if (summary.expensesByCategory.isNotEmpty) ...[
-                _buildExpenseByCategory(summary),
+                _buildExpenseByCategory(l10n, summary),
                 const SizedBox(height: 20),
               ],
               if (summary.daily.isNotEmpty) ...[
-                _buildDailyBreakdown(summary),
+                _buildDailyBreakdown(l10n, summary),
                 const SizedBox(height: 20),
               ],
             ],
@@ -76,7 +78,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 
   // ── Period bar ─────────────────────────────────────────────────────────────
-  Widget _buildPeriodBar(ReportSummaryFilter filter) {
+  Widget _buildPeriodBar(AppLocalizations l10n, ReportSummaryFilter filter) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -104,11 +106,20 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
-              _PeriodChip(label: 'Today', onTap: () => _setToday()),
+              Flexible(
+                child: _PeriodChip(
+                    label: l10n.reportsToday, onTap: () => _setToday()),
+              ),
               const SizedBox(width: 6),
-              _PeriodChip(label: 'Month', onTap: () => _setThisMonth()),
+              Flexible(
+                child: _PeriodChip(
+                    label: l10n.reportsMonth, onTap: () => _setThisMonth()),
+              ),
               const SizedBox(width: 6),
-              _PeriodChip(label: 'Year', onTap: () => _setThisYear()),
+              Flexible(
+                child: _PeriodChip(
+                    label: l10n.reportsYear, onTap: () => _setThisYear()),
+              ),
             ],
           ),
         ],
@@ -154,26 +165,28 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 
   // ── Summary cards ──────────────────────────────────────────────────────────
-  Widget _buildSummaryCards(ReportSummary s, bool isWide) {
+  Widget _buildSummaryCards(
+      AppLocalizations l10n, ReportSummary s, bool isWide) {
     final netRevenue = s.totalRevenue - s.totalDiscount;
     final cards = [
       _StatCard(
-        label: 'Net Revenue',
+        label: l10n.reportsNetRevenue,
         value: 'Rs. ${_amt.format(netRevenue)}',
         icon: Icons.trending_up_rounded,
         gradient: AppColors.primaryGradient,
         sub: s.totalDiscount > 0
-            ? '${s.billCount} bills · −Rs. ${_amt.format(s.totalDiscount)} disc'
-            : '${s.billCount} bills',
+            ? l10n.reportsBillsWithDiscount(
+                l10n.reportsBills(s.billCount), _amt.format(s.totalDiscount))
+            : l10n.reportsBills(s.billCount),
       ),
       _StatCard(
-        label: 'Expenses',
+        label: l10n.reportsExpenses,
         value: 'Rs. ${_amt.format(s.totalExpenses)}',
         icon: Icons.trending_down_rounded,
         gradient: LinearGradient(colors: [AppColors.error, const Color(0xFFFF6B6B)]),
         sub: s.expensesByCategory.isNotEmpty
-            ? '${s.expensesByCategory.length} categories'
-            : 'No expenses',
+            ? l10n.reportsCategoryCount(s.expensesByCategory.length)
+            : l10n.reportsNoExpenses,
       ),
     ];
 
@@ -196,7 +209,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 
   // ── Payment mode breakdown ─────────────────────────────────────────────────
-  Widget _buildPaymentBreakdown(ReportSummary s) {
+  Widget _buildPaymentBreakdown(AppLocalizations l10n, ReportSummary s) {
     final modes = s.byPaymentMode.entries
         .where((e) => e.value > 0)
         .toList()
@@ -204,13 +217,13 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     final total = modes.fold(0.0, (sum, e) => sum + e.value);
 
     return _SectionCard(
-      title: 'Revenue by Payment Mode',
+      title: l10n.reportsRevenueByPaymentMode,
       icon: Icons.payments_outlined,
       child: Column(
         children: modes.map((e) {
           final pct = total > 0 ? e.value / total : 0.0;
           return _BarRow(
-            label: e.key.toUpperCase(),
+            label: _paymentLabel(l10n, e.key).toUpperCase(),
             value: 'Rs. ${_amt.format(e.value)}',
             percent: pct,
             color: _paymentColor(e.key),
@@ -220,17 +233,59 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     );
   }
 
+  /// Display label for a default expense category. Custom categories entered by
+  /// the user are shown as-is.
+  String _expenseCategoryLabel(AppLocalizations l10n, String cat) {
+    switch (cat) {
+      case 'Rent':
+        return l10n.expensesCatRent;
+      case 'Salary':
+        return l10n.expensesCatSalary;
+      case 'Utilities':
+        return l10n.expensesCatUtilities;
+      case 'Stock Purchase':
+        return l10n.expensesCatStockPurchase;
+      case 'Transport':
+        return l10n.expensesCatTransport;
+      case 'Marketing':
+        return l10n.expensesCatMarketing;
+      case 'Maintenance':
+        return l10n.expensesCatMaintenance;
+      case 'Taxes':
+        return l10n.expensesCatTaxes;
+      case 'Other':
+        return l10n.expensesCatOther;
+      default:
+        return cat;
+    }
+  }
+
+  String _paymentLabel(AppLocalizations l10n, String mode) {
+    switch (mode) {
+      case 'cash':
+        return l10n.paymentCash;
+      case 'upi':
+        return l10n.paymentUpi;
+      case 'card':
+        return l10n.paymentCard;
+      case 'other':
+        return l10n.paymentOther;
+      default:
+        return mode;
+    }
+  }
+
   // ── Expense by category ────────────────────────────────────────────────────
-  Widget _buildExpenseByCategory(ReportSummary s) {
+  Widget _buildExpenseByCategory(AppLocalizations l10n, ReportSummary s) {
     final total = s.expensesByCategory.fold(0.0, (sum, e) => sum + e.value);
     return _SectionCard(
-      title: 'Expenses by Category',
+      title: l10n.reportsExpensesByCategory,
       icon: Icons.pie_chart_outline_rounded,
       child: Column(
         children: s.expensesByCategory.map((e) {
           final pct = total > 0 ? e.value / total : 0.0;
           return _BarRow(
-            label: e.key,
+            label: _expenseCategoryLabel(l10n, e.key),
             value: 'Rs. ${_amt.format(e.value)}',
             percent: pct,
             color: _categoryColor(e.key),
@@ -242,10 +297,10 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 
   // ── Daily breakdown ────────────────────────────────────────────────────────
-  Widget _buildDailyBreakdown(ReportSummary s) {
+  Widget _buildDailyBreakdown(AppLocalizations l10n, ReportSummary s) {
     final maxRevenue = s.daily.fold(0.0, (m, d) => d.revenue > m ? d.revenue : m);
     return _SectionCard(
-      title: 'Daily Breakdown',
+      title: l10n.reportsDailyBreakdown,
       icon: Icons.calendar_view_week_outlined,
       child: Column(
         children: s.daily.map((d) {
