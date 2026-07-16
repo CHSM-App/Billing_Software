@@ -38,6 +38,100 @@ function ownerOnly(req, res, next) {
   next();
 }
 
+// Load the variants referenced by a set of request line items, scoped to the
+// business (via the parent item). Returns a map keyed by variant id. Line items
+// without a variant_id are ignored. Runs inside the caller's transaction so the
+// rows are locked consistently with the stock updates that follow.
+async function loadVariantMap(transaction, businessId, items) {
+  const variantIds = [...new Set(items.map((i) => i.variant_id).filter(Boolean))];
+  if (variantIds.length === 0) return {};
+  const { clause, bind } = inParams(variantIds);
+  const result = await bind(transaction.request())
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .query(`
+      SELECT v.id, v.item_id, v.label, v.price, v.stock_quantity, v.low_stock_threshold
+      FROM item_variants v
+      JOIN items i ON i.id = v.item_id
+      WHERE v.id IN (${clause}) AND i.business_id = @business_id AND v.is_active = 1
+    `);
+  const map = {};
+  for (const row of result.recordset) map[row.id] = row;
+  return map;
+}
+
+// Atomically decrement stock for one line item. When the line references a
+// variant, the variant's stock is the target; otherwise the item's. Returns
+// true if a row was updated (or stock is untracked/NULL), false on shortfall.
+async function decrementLineStock(transaction, businessId, li, itemMap, variantMap) {
+  if (li.variant_id) {
+    const variant = variantMap[li.variant_id];
+    if (!variant || variant.stock_quantity == null) return true; // untracked
+    const r = await transaction.request()
+      .input('variant_id', sql.UniqueIdentifier, li.variant_id)
+      .input('qty', sql.Decimal(10, 2), li.quantity)
+      .query(`
+        UPDATE item_variants
+        SET stock_quantity = stock_quantity - @qty
+        WHERE id = @variant_id AND stock_quantity >= @qty
+      `);
+    return r.rowsAffected[0] > 0;
+  }
+  if (itemMap[li.item_id].stock_quantity == null) return true; // untracked
+  const r = await transaction.request()
+    .input('item_id', sql.UniqueIdentifier, li.item_id)
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .input('qty', sql.Decimal(10, 2), li.quantity)
+    .query(`
+      UPDATE items
+      SET stock_quantity = stock_quantity - @qty
+      WHERE id = @item_id AND business_id = @business_id AND stock_quantity >= @qty
+    `);
+  return r.rowsAffected[0] > 0;
+}
+
+// Restore stock for a line item (used when voiding/replacing bill items).
+async function restoreLineStock(transaction, businessId, li, variantMap) {
+  if (li.variant_id) {
+    await transaction.request()
+      .input('variant_id', sql.UniqueIdentifier, li.variant_id)
+      .input('qty', sql.Decimal(10, 2), li.quantity)
+      .query('UPDATE item_variants SET stock_quantity = stock_quantity + @qty WHERE id = @variant_id AND stock_quantity IS NOT NULL');
+    return;
+  }
+  await transaction.request()
+    .input('item_id', sql.UniqueIdentifier, li.item_id)
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .input('qty', sql.Decimal(10, 2), li.quantity)
+    .query('UPDATE items SET stock_quantity = stock_quantity + @qty WHERE id = @item_id AND business_id = @business_id AND stock_quantity IS NOT NULL');
+}
+
+// Build the low-stock notification list: which stock targets crossed from
+// above-threshold to at/below-threshold on this bill. Variant lines use the
+// variant's own stock/threshold; plain lines use the item's. `requested` is the
+// per-target aggregated quantity (keyed by variant id when present, else item id).
+function collectLowStock(lineItems, itemMap, variantMap, requested) {
+  const lowItems = [];
+  const seen = new Set();
+  for (const li of lineItems) {
+    const isVariant = !!li.variant_id;
+    const key = li.variant_id || li.item_id;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+
+    const src = isVariant ? variantMap[li.variant_id] : itemMap[li.item_id];
+    if (!src || src.stock_quantity == null || src.low_stock_threshold == null) continue;
+
+    const stockBefore = parseFloat(src.stock_quantity);
+    const threshold   = parseFloat(src.low_stock_threshold);
+    const stockAfter  = stockBefore - (requested[key] || 0);
+    if (stockBefore > threshold && stockAfter <= threshold) {
+      // Variant rows carry the "Name (Label)" snapshot on li.item_name.
+      lowItems.push({ name: li.item_name, remaining: stockAfter });
+    }
+  }
+  return lowItems;
+}
+
 // Generate bill number: INV-0001, INV-0002, ...
 async function generateBillNumber(transaction, businessId) {
   const result = await transaction.request()
@@ -66,7 +160,7 @@ async function fetchBill(billId, businessId) {
   const itemsResult = await pool.request()
     .input('bill_id', sql.UniqueIdentifier, billId)
     .query(`
-      SELECT id, bill_id, item_id, item_name, quantity, unit_price, tax_rate, line_total
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total
       FROM bill_items
       WHERE bill_id = @bill_id
     `);
@@ -151,13 +245,28 @@ router.post('/', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Item not found: ${missingItems[0].item_id}` });
       }
 
+      // Load referenced variants (sizes) and validate they belong to their item.
+      const variantMap = await loadVariantMap(transaction, req.user.business_id, items);
+      const badVariant = items.find(
+        (i) => i.variant_id && (!variantMap[i.variant_id] || variantMap[i.variant_id].item_id !== i.item_id),
+      );
+      if (badVariant) {
+        await transaction.rollback();
+        return res.status(400).json({ error: `Variant not found: ${badVariant.variant_id}` });
+      }
+
       // Calculate totals
       let subtotal = 0;
       let taxAmount = 0;
       const lineItems = items.map((i) => {
         const dbItem = itemMap[i.item_id];
+        const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
-        const unitPrice = parseFloat(dbItem.price);
+        // Variant price overrides item price when set; otherwise fall back.
+        const unitPrice = variant && variant.price != null
+          ? parseFloat(variant.price)
+          : parseFloat(dbItem.price);
+        const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const taxRate = dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         const lineTotal = qty * unitPrice + lineTax;
@@ -165,7 +274,8 @@ router.post('/', requireAuth, async (req, res) => {
         taxAmount += lineTax;
         return {
           item_id: dbItem.id,
-          item_name: dbItem.name,
+          variant_id: variant ? variant.id : null,
+          item_name: itemName,
           quantity: qty,
           unit_price: unitPrice,
           tax_rate: taxRate,
@@ -188,22 +298,31 @@ router.post('/', requireAuth, async (req, res) => {
       // at once rather than discovering them one-by-one mid-write.
       // Aggregate requested quantities per item — used for both stock validation
       // and the post-commit low-stock notification check below.
+      // Aggregate requested quantities per stock target. The target is the
+      // variant when present, otherwise the item — so a size's stock is checked
+      // independently of the base item and its other sizes.
+      const stockKey = (li) => li.variant_id || li.item_id;
+      const availableFor = (li) => li.variant_id
+        ? variantMap[li.variant_id]?.stock_quantity
+        : itemMap[li.item_id].stock_quantity;
+
       const requested = {};
       for (const li of lineItems) {
-        requested[li.item_id] = (requested[li.item_id] || 0) + li.quantity;
+        requested[stockKey(li)] = (requested[stockKey(li)] || 0) + li.quantity;
       }
 
       if (inventoryEnabled) {
         const insufficient = lineItems
-          .filter((li) => itemMap[li.item_id].stock_quantity != null && requested[li.item_id] > itemMap[li.item_id].stock_quantity)
+          .filter((li) => availableFor(li) != null && requested[stockKey(li)] > availableFor(li))
           .map((li) => ({
             item_id: li.item_id,
+            variant_id: li.variant_id,
             item_name: li.item_name,
-            requested: requested[li.item_id],
-            available: itemMap[li.item_id].stock_quantity,
+            requested: requested[stockKey(li)],
+            available: availableFor(li),
           }))
-          // De-duplicate (same item_id can appear on multiple lines)
-          .filter((v, i, arr) => arr.findIndex((x) => x.item_id === v.item_id) === i);
+          // De-duplicate (same stock target can appear on multiple lines)
+          .filter((v, i, arr) => arr.findIndex((x) => (x.variant_id || x.item_id) === (v.variant_id || v.item_id)) === i);
 
         if (insufficient.length > 0) {
           await transaction.rollback();
@@ -250,14 +369,15 @@ router.post('/', requireAuth, async (req, res) => {
         await transaction.request()
           .input('bill_id', sql.UniqueIdentifier, billId)
           .input('item_id', sql.UniqueIdentifier, li.item_id)
+          .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
           .input('item_name', sql.NVarChar(200), li.item_name)
           .input('quantity', sql.Decimal(10, 2), li.quantity)
           .input('unit_price', sql.Decimal(10, 2), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
           .query(`
-            INSERT INTO bill_items (bill_id, item_id, item_name, quantity, unit_price, tax_rate, line_total)
-            VALUES (@bill_id, @item_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
+            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total)
+            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
           `);
       }
 
@@ -279,23 +399,12 @@ router.post('/', requireAuth, async (req, res) => {
       // consumed inventory between our read above and this write.
       if (inventoryEnabled) {
         for (const li of lineItems) {
-          // Skip items with NULL stock — treated as unlimited/untracked
-          if (itemMap[li.item_id].stock_quantity == null) continue;
-          const stockResult = await transaction.request()
-            .input('item_id', sql.UniqueIdentifier, li.item_id)
-            .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-            .input('qty', sql.Decimal(10, 2), li.quantity)
-            .query(`
-              UPDATE items
-              SET stock_quantity = stock_quantity - @qty
-              WHERE id = @item_id AND business_id = @business_id
-                AND stock_quantity >= @qty
-            `);
-          if (stockResult.rowsAffected[0] === 0) {
+          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap);
+          if (!ok) {
             await transaction.rollback();
             return res.status(409).json({
               error: 'Insufficient stock',
-              items: [{ item_name: li.item_name, item_id: li.item_id }],
+              items: [{ item_name: li.item_name, item_id: li.item_id, variant_id: li.variant_id }],
             });
           }
         }
@@ -303,26 +412,13 @@ router.post('/', requireAuth, async (req, res) => {
 
       await transaction.commit();
 
-      // Collect items that just crossed below their threshold (stock was above before, at/below after).
-      // Bundle into one notification so 50 items = 1 alert, not 50.
+      // Collect stock targets that just crossed below their threshold (stock was
+      // above before, at/below after). Bundle into one notification. For variant
+      // lines the variant's own stock/threshold is used; otherwise the item's.
       if (inventoryEnabled) {
         (async () => {
           try {
-            const lowItems = [];
-            const seen = new Set();
-            for (const li of lineItems) {
-              if (!li.item_id || seen.has(li.item_id)) continue;
-              seen.add(li.item_id);
-              const item = itemMap[li.item_id];
-              if (!item || item.stock_quantity == null || item.low_stock_threshold == null) continue;
-              const stockBefore = parseFloat(item.stock_quantity);
-              const threshold   = parseFloat(item.low_stock_threshold);
-              const stockAfter  = stockBefore - (requested[li.item_id] || 0);
-              logger.info({ item: item.name, stockBefore, stockAfter, threshold }, '[FCM] stock check');
-              if (stockBefore > threshold && stockAfter <= threshold) {
-                lowItems.push({ name: item.name, remaining: stockAfter });
-              }
-            }
+            const lowItems = collectLowStock(lineItems, itemMap, variantMap, requested);
             logger.info({ lowItems }, '[FCM] sending low-stock notification');
             await sendLowStockNotification(pool, sql, req.user.business_id, lowItems);
           } catch (err) {
@@ -407,7 +503,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT id, bill_id, item_id, item_name, quantity, unit_price, tax_rate, line_total
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total
       FROM bill_items
       WHERE bill_id IN (${billClause})
     `);
@@ -541,15 +637,29 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Item not found: ${missingItems2[0].item_id}` });
       }
 
+      const variantMap = await loadVariantMap(transaction, req.user.business_id, items);
+      const badVariant2 = items.find(
+        (i) => i.variant_id && (!variantMap[i.variant_id] || variantMap[i.variant_id].item_id !== i.item_id),
+      );
+      if (badVariant2) {
+        await transaction.rollback();
+        return res.status(400).json({ error: `Variant not found: ${badVariant2.variant_id}` });
+      }
+
       const lineItems = items.map((i) => {
         const dbItem = itemMap[i.item_id];
+        const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
-        const unitPrice = parseFloat(dbItem.price);
+        const unitPrice = variant && variant.price != null
+          ? parseFloat(variant.price)
+          : parseFloat(dbItem.price);
+        const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const taxRate = dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
           item_id: dbItem.id,
-          item_name: dbItem.name,
+          variant_id: variant ? variant.id : null,
+          item_name: itemName,
           quantity: qty,
           unit_price: unitPrice,
           tax_rate: taxRate,
@@ -557,21 +667,27 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         };
       });
 
+      const stockKey2 = (li) => li.variant_id || li.item_id;
+      const availableFor2 = (li) => li.variant_id
+        ? variantMap[li.variant_id]?.stock_quantity
+        : itemMap[li.item_id].stock_quantity;
+
       // Centralized stock pre-check — report all insufficient items before any writes.
+      const requested2 = {};
+      for (const li of lineItems) {
+        requested2[stockKey2(li)] = (requested2[stockKey2(li)] || 0) + li.quantity;
+      }
       if (inventoryEnabled) {
-        const requested2 = {};
-        for (const li of lineItems) {
-          requested2[li.item_id] = (requested2[li.item_id] || 0) + li.quantity;
-        }
         const insufficient2 = lineItems
-          .filter((li) => requested2[li.item_id] > itemMap[li.item_id].stock_quantity)
+          .filter((li) => availableFor2(li) != null && requested2[stockKey2(li)] > availableFor2(li))
           .map((li) => ({
             item_id: li.item_id,
+            variant_id: li.variant_id,
             item_name: li.item_name,
-            requested: requested2[li.item_id],
-            available: itemMap[li.item_id].stock_quantity,
+            requested: requested2[stockKey2(li)],
+            available: availableFor2(li),
           }))
-          .filter((v, i, arr) => arr.findIndex((x) => x.item_id === v.item_id) === i);
+          .filter((v, i, arr) => arr.findIndex((x) => (x.variant_id || x.item_id) === (v.variant_id || v.item_id)) === i);
 
         if (insufficient2.length > 0) {
           await transaction.rollback();
@@ -583,14 +699,15 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         await transaction.request()
           .input('bill_id', sql.UniqueIdentifier, req.params.id)
           .input('item_id', sql.UniqueIdentifier, li.item_id)
+          .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
           .input('item_name', sql.NVarChar(200), li.item_name)
           .input('quantity', sql.Decimal(10, 2), li.quantity)
           .input('unit_price', sql.Decimal(10, 2), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
           .query(`
-            INSERT INTO bill_items (bill_id, item_id, item_name, quantity, unit_price, tax_rate, line_total)
-            VALUES (@bill_id, @item_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
+            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total)
+            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
           `);
       }
 
@@ -608,23 +725,12 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       // Atomic decrement — final concurrency guard.
       if (inventoryEnabled) {
         for (const li of lineItems) {
-          // Skip items with NULL stock — treated as unlimited/untracked
-          if (itemMap[li.item_id].stock_quantity == null) continue;
-          const stockResult = await transaction.request()
-            .input('item_id', sql.UniqueIdentifier, li.item_id)
-            .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-            .input('qty', sql.Decimal(10, 2), li.quantity)
-            .query(`
-              UPDATE items
-              SET stock_quantity = stock_quantity - @qty
-              WHERE id = @item_id AND business_id = @business_id
-                AND stock_quantity >= @qty
-            `);
-          if (stockResult.rowsAffected[0] === 0) {
+          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap);
+          if (!ok) {
             await transaction.rollback();
             return res.status(409).json({
               error: 'Insufficient stock',
-              items: [{ item_name: li.item_name, item_id: li.item_id }],
+              items: [{ item_name: li.item_name, item_id: li.item_id, variant_id: li.variant_id }],
             });
           }
         }
@@ -633,23 +739,12 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       addedLineItems = lineItems;
       await transaction.commit();
 
-      // Collect items that just crossed below their threshold, send one notification.
+      // Collect targets that just crossed below their threshold, send one
+      // notification. Handles variant lines via their own stock/threshold.
       if (inventoryEnabled) {
         (async () => {
           try {
-            const lowItems = [];
-            const seen = new Set();
-            for (const li of lineItems) {
-              if (!li.item_id || seen.has(li.item_id)) continue;
-              seen.add(li.item_id);
-              const item = itemMap[li.item_id];
-              if (!item || item.stock_quantity == null || item.low_stock_threshold == null) continue;
-              const stockBefore = item.stock_quantity;
-              const stockAfter  = stockBefore - (requested2[li.item_id] || 0);
-              if (stockBefore > item.low_stock_threshold && stockAfter <= item.low_stock_threshold) {
-                lowItems.push({ name: item.name, remaining: stockAfter });
-              }
-            }
+            const lowItems = collectLowStock(lineItems, itemMap, variantMap, requested2);
             await sendLowStockNotification(pool, sql, req.user.business_id, lowItems);
           } catch (_) {}
         })();
@@ -731,21 +826,40 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Item not found: ${missingItems3[0].item_id}` });
       }
 
+      const variantMap = await loadVariantMap(transaction, req.user.business_id, items);
+      const badVariant3 = items.find(
+        (i) => i.variant_id && (!variantMap[i.variant_id] || variantMap[i.variant_id].item_id !== i.item_id),
+      );
+      if (badVariant3) {
+        await transaction.rollback();
+        return res.status(400).json({ error: `Variant not found: ${badVariant3.variant_id}` });
+      }
+
       const lineItems = items.map((i) => {
         const dbItem = itemMap[i.item_id];
+        const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
-        const unitPrice = parseFloat(dbItem.price);
+        const unitPrice = variant && variant.price != null
+          ? parseFloat(variant.price)
+          : parseFloat(dbItem.price);
+        const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const taxRate = dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
           item_id: dbItem.id,
-          item_name: dbItem.name,
+          variant_id: variant ? variant.id : null,
+          item_name: itemName,
           quantity: qty,
           unit_price: unitPrice,
           tax_rate: taxRate,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
         };
       });
+
+      const stockKey3 = (li) => li.variant_id || li.item_id;
+      const availableFor3 = (li) => li.variant_id
+        ? variantMap[li.variant_id]?.stock_quantity
+        : itemMap[li.item_id].stock_quantity;
 
       // Centralized stock pre-check for new items.
       // Note: old-item stock will be restored below before the new decrements,
@@ -754,17 +868,18 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       if (inventoryEnabled) {
         const requested3 = {};
         for (const li of lineItems) {
-          requested3[li.item_id] = (requested3[li.item_id] || 0) + li.quantity;
+          requested3[stockKey3(li)] = (requested3[stockKey3(li)] || 0) + li.quantity;
         }
         const insufficient3 = lineItems
-          .filter((li) => requested3[li.item_id] > itemMap[li.item_id].stock_quantity)
+          .filter((li) => availableFor3(li) != null && requested3[stockKey3(li)] > availableFor3(li))
           .map((li) => ({
             item_id: li.item_id,
+            variant_id: li.variant_id,
             item_name: li.item_name,
-            requested: requested3[li.item_id],
-            available: itemMap[li.item_id].stock_quantity,
+            requested: requested3[stockKey3(li)],
+            available: availableFor3(li),
           }))
-          .filter((v, i, arr) => arr.findIndex((x) => x.item_id === v.item_id) === i);
+          .filter((v, i, arr) => arr.findIndex((x) => (x.variant_id || x.item_id) === (v.variant_id || v.item_id)) === i);
 
         if (insufficient3.length > 0) {
           await transaction.rollback();
@@ -775,17 +890,14 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       // Snapshot old items for audit + stock restore
       const oldItemsResult = await transaction.request()
         .input('bill_id', sql.UniqueIdentifier, req.params.id)
-        .query('SELECT item_id, item_name, quantity, unit_price FROM bill_items WHERE bill_id = @bill_id');
+        .query('SELECT item_id, variant_id, item_name, quantity, unit_price FROM bill_items WHERE bill_id = @bill_id');
       previousLineItems = oldItemsResult.recordset;
 
       // Restore inventory for old items — increment is always safe, no guard needed.
+      // Targets the variant's stock when the old line had one.
       if (inventoryEnabled) {
-        for (const li of previousLineItems.filter((x) => x.item_id)) {
-          await transaction.request()
-            .input('item_id', sql.UniqueIdentifier, li.item_id)
-            .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-            .input('qty', sql.Decimal(10, 2), li.quantity)
-            .query('UPDATE items SET stock_quantity = stock_quantity + @qty WHERE id = @item_id AND business_id = @business_id');
+        for (const li of previousLineItems.filter((x) => x.item_id || x.variant_id)) {
+          await restoreLineStock(transaction, req.user.business_id, li, variantMap);
         }
       }
 
@@ -799,14 +911,15 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         await transaction.request()
           .input('bill_id', sql.UniqueIdentifier, req.params.id)
           .input('item_id', sql.UniqueIdentifier, li.item_id)
+          .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
           .input('item_name', sql.NVarChar(200), li.item_name)
           .input('quantity', sql.Decimal(10, 2), li.quantity)
           .input('unit_price', sql.Decimal(10, 2), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
           .query(`
-            INSERT INTO bill_items (bill_id, item_id, item_name, quantity, unit_price, tax_rate, line_total)
-            VALUES (@bill_id, @item_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
+            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total)
+            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
           `);
       }
 
@@ -824,23 +937,12 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       // Atomic decrement for new items — final concurrency guard.
       if (inventoryEnabled) {
         for (const li of lineItems) {
-          // Skip items with NULL stock — treated as unlimited/untracked
-          if (itemMap[li.item_id].stock_quantity == null) continue;
-          const stockResult = await transaction.request()
-            .input('item_id', sql.UniqueIdentifier, li.item_id)
-            .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-            .input('qty', sql.Decimal(10, 2), li.quantity)
-            .query(`
-              UPDATE items
-              SET stock_quantity = stock_quantity - @qty
-              WHERE id = @item_id AND business_id = @business_id
-                AND stock_quantity >= @qty
-            `);
-          if (stockResult.rowsAffected[0] === 0) {
+          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap);
+          if (!ok) {
             await transaction.rollback();
             return res.status(409).json({
               error: 'Insufficient stock',
-              items: [{ item_name: li.item_name, item_id: li.item_id }],
+              items: [{ item_name: li.item_name, item_id: li.item_id, variant_id: li.variant_id }],
             });
           }
         }
@@ -917,20 +1019,14 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
 
       // Restore stock — only runs when the status flip above succeeded,
       // so it is impossible for stock to be restored more than once per bill.
+      // Variant lines restore the variant's stock; plain lines the item's.
       if (bill.inventory_enabled) {
         const lineItems = await transaction.request()
           .input('bill_id', sql.UniqueIdentifier, req.params.id)
-          .query('SELECT item_id, item_name, quantity FROM bill_items WHERE bill_id = @bill_id AND item_id IS NOT NULL');
+          .query('SELECT item_id, variant_id, item_name, quantity FROM bill_items WHERE bill_id = @bill_id AND (item_id IS NOT NULL OR variant_id IS NOT NULL)');
 
         for (const li of lineItems.recordset) {
-          await transaction.request()
-            .input('item_id', sql.UniqueIdentifier, li.item_id)
-            .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-            .input('qty', sql.Decimal(10, 2), li.quantity)
-            .query(`
-              UPDATE items SET stock_quantity = stock_quantity + @qty
-              WHERE id = @item_id AND business_id = @business_id
-            `);
+          await restoreLineStock(transaction, req.user.business_id, li, {});
         }
       }
 

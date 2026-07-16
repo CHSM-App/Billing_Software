@@ -6,24 +6,31 @@ class CartNotifier extends Notifier<List<CartEntry>> {
   @override
   List<CartEntry> build() => [];
 
-  void addItem(Item item) {
-    final idx = state.indexWhere((e) => e.item.id == item.id);
+  /// Cart key for an item + optional variant — mirrors [CartEntry.key].
+  static String keyFor(String itemId, [String? variantId]) =>
+      variantId == null ? itemId : '$itemId:$variantId';
+
+  /// Add one unit of an item (optionally a specific variant/size). Same
+  /// item+variant stacks; a different variant of the same item is a new line.
+  void addItem(Item item, {ItemVariant? variant}) {
+    final k = variant == null ? item.id : '${item.id}:${variant.id}';
+    final idx = state.indexWhere((e) => e.key == k);
     if (idx >= 0) {
       state = [
         for (int i = 0; i < state.length; i++)
           i == idx ? state[i].copyWith(quantity: state[i].quantity + 1) : state[i]
       ];
     } else {
-      state = [...state, CartEntry(item: item, quantity: 1)];
+      state = [...state, CartEntry(item: item, variant: variant, quantity: 1)];
     }
   }
 
-  void changeQty(String itemId, int delta) {
-    final idx = state.indexWhere((e) => e.item.id == itemId);
+  void changeQty(String key, double delta) {
+    final idx = state.indexWhere((e) => e.key == key);
     if (idx < 0) return;
     final newQty = state[idx].quantity + delta;
     if (newQty <= 0) {
-      state = state.where((e) => e.item.id != itemId).toList();
+      state = state.where((e) => e.key != key).toList();
     } else {
       state = [
         for (int i = 0; i < state.length; i++)
@@ -32,11 +39,11 @@ class CartNotifier extends Notifier<List<CartEntry>> {
     }
   }
 
-  void setQty(String itemId, int qty) {
+  void setQty(String key, double qty) {
     if (qty <= 0) {
-      state = state.where((e) => e.item.id != itemId).toList();
+      state = state.where((e) => e.key != key).toList();
     } else {
-      final idx = state.indexWhere((e) => e.item.id == itemId);
+      final idx = state.indexWhere((e) => e.key == key);
       if (idx < 0) return;
       state = [
         for (int i = 0; i < state.length; i++)
@@ -60,8 +67,29 @@ class CartNotifier extends Notifier<List<CartEntry>> {
           isActive: true,
         ),
       );
-      return CartEntry(item: catalogItem, quantity: bi.quantity.toInt());
+      // Resolve the variant from the catalog item when the bill line carries
+      // one; fall back to a synthetic variant so price/label survive round-trips.
+      ItemVariant? variant;
+      if (bi.variantId != null) {
+        variant = catalogItem.variants
+            .where((v) => v.id == bi.variantId)
+            .cast<ItemVariant?>()
+            .firstWhere((v) => v != null, orElse: () => null);
+        variant ??= ItemVariant(
+          id: bi.variantId!,
+          itemId: catalogItem.id,
+          // Recover the label from "Name (Label)" when possible.
+          label: _labelFromName(bi.itemName),
+          price: bi.unitPrice,
+        );
+      }
+      return CartEntry(item: catalogItem, variant: variant, quantity: bi.quantity);
     }).toList();
+  }
+
+  static String _labelFromName(String itemName) {
+    final match = RegExp(r'\(([^)]+)\)\s*$').firstMatch(itemName);
+    return match != null ? match.group(1)! : '';
   }
 }
 
@@ -70,18 +98,20 @@ final cartProvider =
 
 // Fine-grained computed providers — only affected widgets rebuild
 final cartSubtotalProvider = Provider<double>((ref) {
-  return ref.watch(cartProvider).fold(0.0, (s, e) => s + e.item.price * e.quantity);
+  return ref.watch(cartProvider).fold(0.0, (s, e) => s + e.effectivePrice * e.quantity);
 });
 
 final cartTaxProvider = Provider<double>((ref) {
   return ref.watch(cartProvider).fold(0.0, (s, e) {
     if (e.item.taxRate == null) return s;
-    return s + e.item.price * e.quantity * (e.item.taxRate! / 100);
+    return s + e.effectivePrice * e.quantity * (e.item.taxRate! / 100);
   });
 });
 
 final cartTotalProvider = Provider<double>((ref) =>
     ref.watch(cartSubtotalProvider) + ref.watch(cartTaxProvider));
 
+// Number of distinct line entries in the cart (used for the cart badge).
+// Not a sum of quantities — a 1.5 kg line still counts as one entry.
 final cartItemCountProvider = Provider<int>((ref) =>
-    ref.watch(cartProvider).fold(0, (s, e) => s + e.quantity));
+    ref.watch(cartProvider).length);

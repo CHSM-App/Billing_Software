@@ -105,6 +105,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (widget.activeBillId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _tryLoadDraft());
     }
+    // Silently refresh item prices/stock on open so the cache never goes stale
+    // enough to warrant a warning. Keeps current items visible meanwhile.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(itemsProvider.notifier).refreshInBackground();
+    });
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
   }
 
@@ -278,7 +283,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   List<Map<String, dynamic>> get _cartPayload {
     final cart = ref.read(cartProvider);
     return cart
-        .map((e) => {'item_id': e.item.id, 'quantity': e.quantity})
+        .map((e) => {
+              'item_id': e.item.id,
+              if (e.variant != null) 'variant_id': e.variant!.id,
+              'quantity': e.quantity,
+            })
         .toList();
   }
 
@@ -566,16 +575,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       double subtotal = 0;
       double taxAmount = 0;
       final lineItems = cart.map((e) {
-        final lineSub = e.item.price * e.quantity;
+        final lineSub = e.effectivePrice * e.quantity;
         final lineTax =
             e.item.taxRate != null ? lineSub * (e.item.taxRate! / 100) : 0.0;
         subtotal += lineSub;
         taxAmount += lineTax;
         return {
           'item_id': e.item.id,
-          'item_name': e.item.name,
-          'quantity': e.quantity.toDouble(),
-          'unit_price': e.item.price,
+          'variant_id': e.variant?.id,
+          'item_name': e.displayName,
+          'quantity': e.quantity,
+          'unit_price': e.effectivePrice,
           'tax_rate': e.item.taxRate,
           'line_total':
               double.parse((lineSub + lineTax).toStringAsFixed(2)),
@@ -620,6 +630,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   id: li['item_id'] as String,
                   billId: localId,
                   itemId: li['item_id'] as String,
+                  variantId: li['variant_id'] as String?,
                   itemName: li['item_name'] as String,
                   quantity: (li['quantity'] as double),
                   unitPrice: (li['unit_price'] as double),
@@ -1022,6 +1033,88 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
+  // Size picker — shown when a variant item is tapped or swiped. Each size has
+  // its own − / + stepper and stays open so multiple sizes and quantities can
+  // be set in one go. Each size is a separate cart line (independent stock).
+  void _showVariantPicker(Item item) {
+    final l10n = context.l10n;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+      ),
+      builder: (sheetCtx) {
+        // Watch the cart so per-size quantities update live. Each size is
+        // rendered with the SAME _ExcelItemRow used on the billing page, so it
+        // gets the identical − / + stepper and left/right swipe gestures.
+        return Consumer(builder: (context, ref, _) {
+          final cart = ref.watch(cartProvider);
+          final notifier = ref.read(cartProvider.notifier);
+          double qtyOf(ItemVariant v) => cart
+              .where((e) => e.key == '${item.id}:${v.id}')
+              .fold(0.0, (s, e) => s + e.quantity);
+
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 10, bottom: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                  child: Text(
+                    l10n.billingChooseSize(item.name),
+                    style: Theme.of(sheetCtx).textTheme.titleMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Divider(height: 1),
+                for (int idx = 0; idx < item.variants.length; idx++) ...[
+                  if (idx > 0)
+                    const Divider(height: 1, indent: 12, endIndent: 12),
+                  Builder(builder: (_) {
+                    final v = item.variants[idx];
+                    final key = '${item.id}:${v.id}';
+                    return _ExcelItemRow(
+                      index: idx + 1,
+                      item: item,
+                      variant: v,
+                      qty: qtyOf(v),
+                      onAdd: () => notifier.addItem(item, variant: v),
+                      onIncrement: () => notifier.addItem(item, variant: v),
+                      onDecrement: () => notifier.changeQty(key, -1),
+                      onSetQty: (q) => notifier.setQty(key, q),
+                    );
+                  }),
+                ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: PrimaryButton(
+                    text: l10n.commonDone,
+                    onPressed: () => Navigator.pop(sheetCtx),
+                  ),
+                ),
+              ],
+            ),
+          );
+        });
+      },
+    );
+  }
+
   void _openCartSheet() {
     showModalBottomSheet(
       context: context,
@@ -1064,21 +1157,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return Consumer(builder: (context, ref, _) {
       final itemsAsync = ref.watch(itemsProvider);
       final cart = ref.watch(cartProvider);
-      final cacheInfo = ref.watch(itemCacheInfoProvider);
-      final isOnline = ref.watch(connectivityProvider);
       final cats = ref.watch(categoriesProvider).valueOrNull ?? [];
-      final showStaleBanner = !isOnline && cacheInfo.isStale;
 
-      // Search + category header slivers — always scrollable
+      // Search + category header slivers — always scrollable.
+      // (Stale-cache banner removed: items auto-refresh on app open instead.)
       List<Widget> headerSlivers() => [
-        if (showStaleBanner)
-          SliverToBoxAdapter(
-            child: _StaleCacheBanner(
-              ageLabel: cacheInfo.ageLabel,
-              isVeryStale: cacheInfo.status == CacheStatus.veryStale,
-              onRefresh: () => ref.invalidate(itemsProvider),
-            ),
-          ),
         if (cats.isNotEmpty)
           SliverToBoxAdapter(
             child: SizedBox(
@@ -1160,10 +1243,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               items: items,
               cart: cart,
               headerSlivers: headerSlivers(),
-              onAdd: (item) => ref.read(cartProvider.notifier).addItem(item),
-              onDecrement: (item) => ref.read(cartProvider.notifier).changeQty(item.id, -1),
-              onIncrement: (item) => ref.read(cartProvider.notifier).changeQty(item.id, 1),
-              onSetQty: (item, qty) => ref.read(cartProvider.notifier).setQty(item.id, qty),
+              // Variant items can't map a single stepper to one of several
+              // sizes, so every qty action (+/-/set) opens the size picker.
+              onAdd: (item) {
+                if (item.hasVariants) {
+                  _showVariantPicker(item);
+                } else {
+                  ref.read(cartProvider.notifier).addItem(item);
+                }
+              },
+              onDecrement: (item) {
+                if (item.hasVariants) {
+                  _showVariantPicker(item);
+                } else {
+                  ref
+                      .read(cartProvider.notifier)
+                      .changeQty(CartNotifier.keyFor(item.id), -1);
+                }
+              },
+              onIncrement: (item) {
+                if (item.hasVariants) {
+                  _showVariantPicker(item);
+                } else {
+                  ref
+                      .read(cartProvider.notifier)
+                      .changeQty(CartNotifier.keyFor(item.id), 1);
+                }
+              },
+              onSetQty: (item, qty) {
+                if (item.hasVariants) {
+                  _showVariantPicker(item);
+                } else {
+                  ref
+                      .read(cartProvider.notifier)
+                      .setQty(CartNotifier.keyFor(item.id), qty);
+                }
+              },
             ),
           );
         },
@@ -1390,10 +1505,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   DropdownMenuItem(
                       value: 'card',
                       child: Text(l10n.paymentCard,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(
-                      value: 'credit',
-                      child: Text(l10n.paymentCredit,
                           maxLines: 1, overflow: TextOverflow.ellipsis)),
                   DropdownMenuItem(
                       value: 'other',
@@ -1681,7 +1792,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(entry.item.name,
+                Text(entry.displayName,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w500,
                         ),
@@ -1709,20 +1820,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 _qtyButton(Icons.remove, () {
                   ref
                       .read(cartProvider.notifier)
-                      .changeQty(entry.item.id, -1);
+                      .changeQty(entry.key, -1);
                 }),
-                SizedBox(
-                  width: 32,
-                  child: Text('${entry.quantity}',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          )),
+                _CartQtyField(
+                  key: ValueKey('qty-${entry.key}'),
+                  quantity: entry.quantity,
+                  allowDecimal: entry.item.isMeasured,
+                  onSubmitted: (q) =>
+                      ref.read(cartProvider.notifier).setQty(entry.key, q),
                 ),
                 _qtyButton(Icons.add, () {
                   ref
                       .read(cartProvider.notifier)
-                      .changeQty(entry.item.id, 1);
+                      .changeQty(entry.key, 1);
                 }),
               ],
             ),
@@ -1743,6 +1853,99 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+}
+
+// ---------------------------------------------------------------------------
+// Editable quantity field for a cart row — tap to type an exact quantity.
+// Self-contained controller so it survives cart-row rebuilds; commits on
+// submit / focus-loss and reflects external +/- changes when not being edited.
+// ---------------------------------------------------------------------------
+class _CartQtyField extends StatefulWidget {
+  final double quantity;
+  final bool allowDecimal;
+  final void Function(double) onSubmitted;
+
+  const _CartQtyField({
+    super.key,
+    required this.quantity,
+    required this.allowDecimal,
+    required this.onSubmitted,
+  });
+
+  @override
+  State<_CartQtyField> createState() => _CartQtyFieldState();
+}
+
+class _CartQtyFieldState extends State<_CartQtyField> {
+  late final TextEditingController _ctrl;
+  final _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: formatQty(widget.quantity));
+    _focus.addListener(() {
+      if (_focus.hasFocus) {
+        // Select all on focus so typing replaces the value.
+        _ctrl.selection =
+            TextSelection(baseOffset: 0, extentOffset: _ctrl.text.length);
+      } else {
+        _commit();
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(_CartQtyField old) {
+    super.didUpdateWidget(old);
+    // Reflect external +/- changes, but don't fight the user while editing.
+    if (!_focus.hasFocus && widget.quantity != old.quantity) {
+      _ctrl.text = formatQty(widget.quantity);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _commit() {
+    final v = double.tryParse(_ctrl.text.trim());
+    if (v == null) {
+      // Invalid input — restore the last known good quantity.
+      _ctrl.text = formatQty(widget.quantity);
+      return;
+    }
+    if (v != widget.quantity) widget.onSubmitted(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: widget.allowDecimal ? 48 : 36,
+      height: 30,
+      child: TextField(
+        controller: _ctrl,
+        focusNode: _focus,
+        textAlign: TextAlign.center,
+        keyboardType: widget.allowDecimal
+            ? const TextInputType.numberWithOptions(decimal: true)
+            : TextInputType.number,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+        decoration: const InputDecoration(
+          isDense: true,
+          contentPadding: EdgeInsets.symmetric(vertical: 4),
+          border: InputBorder.none,
+        ),
+        onSubmitted: (_) => _commit(),
+        onTapOutside: (_) => _focus.unfocus(),
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1843,77 +2046,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 // }
 
 // ---------------------------------------------------------------------------
-// Stale-cache banner — shown when offline with outdated item prices
-// ---------------------------------------------------------------------------
-
-class _StaleCacheBanner extends StatelessWidget {
-  final String? ageLabel;
-  final bool isVeryStale;
-  final VoidCallback onRefresh;
-
-  const _StaleCacheBanner({
-    required this.ageLabel,
-    required this.isVeryStale,
-    required this.onRefresh,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final color = isVeryStale ? AppColors.error : AppColors.warning;
-    final bg = isVeryStale ? AppColors.errorLight : AppColors.warningLight;
-    final icon =
-        isVeryStale ? Icons.error_outline : Icons.warning_amber_rounded;
-    final label = ageLabel != null
-        ? l10n.billingStalePricesFrom(ageLabel!)
-        : l10n.billingStalePrices;
-    final detail = isVeryStale
-        ? l10n.billingStaleVeryOld
-        : l10n.billingStaleConnectToRefresh;
-
-    return Container(
-      width: double.infinity,
-      color: bg,
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.space12, vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: AppSpacing.space8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.style(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: color,
-                  ),
-                ),
-                Text(
-                  detail,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.style(fontSize: 11, color: color),
-                ),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: onRefresh,
-            child: Icon(Icons.refresh, size: 18, color: color),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
 // NEW: Excel-style table — one item per row, minimal height
 // ---------------------------------------------------------------------------
 
@@ -1924,7 +2056,7 @@ class _ExcelItemTable extends StatelessWidget {
   final void Function(Item) onAdd;
   final void Function(Item) onDecrement;
   final void Function(Item) onIncrement;
-  final void Function(Item, int) onSetQty;
+  final void Function(Item, double) onSetQty;
 
   const _ExcelItemTable({
     required this.items,
@@ -1983,6 +2115,10 @@ class _ExcelItemTable extends StatelessWidget {
         ),
       );
 
+  // Total quantity for an item across all its cart lines (sums variants).
+  double _qtyFor(String itemId) =>
+      cart.where((e) => e.item.id == itemId).fold(0.0, (s, e) => s + e.quantity);
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -2016,8 +2152,7 @@ class _ExcelItemTable extends StatelessWidget {
                   const Divider(height: 1, indent: 12, endIndent: 12),
               itemBuilder: (_, i) {
                 final item = items[i];
-                final qty =
-                    cart.where((e) => e.item.id == item.id).firstOrNull?.quantity ?? 0;
+                final qty = _qtyFor(item.id);
                 return _ExcelItemRow(
                   index: i + 1,
                   item: item,
@@ -2079,11 +2214,7 @@ class _ExcelItemTable extends StatelessWidget {
                       child: _ExcelItemRow(
                         index: leftIndex + 1,
                         item: leftItem,
-                        qty: cart
-                                .where((e) => e.item.id == leftItem.id)
-                                .firstOrNull
-                                ?.quantity ??
-                            0,
+                        qty: _qtyFor(leftItem.id),
                         onAdd: () => onAdd(leftItem),
                         onDecrement: () => onDecrement(leftItem),
                         onIncrement: () => onIncrement(leftItem),
@@ -2097,11 +2228,7 @@ class _ExcelItemTable extends StatelessWidget {
                           : _ExcelItemRow(
                               index: rightIndex + 1,
                               item: rightItem,
-                              qty: cart
-                                      .where((e) => e.item.id == rightItem.id)
-                                      .firstOrNull
-                                      ?.quantity ??
-                                  0,
+                              qty: _qtyFor(rightItem.id),
                               onAdd: () => onAdd(rightItem),
                               onDecrement: () => onDecrement(rightItem),
                               onIncrement: () => onIncrement(rightItem),
@@ -2145,11 +2272,14 @@ class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
 class _ExcelItemRow extends StatefulWidget {
   final int index;
   final Item item;
-  final int qty;
+  final double qty;
   final VoidCallback onAdd;
   final VoidCallback onDecrement;
   final VoidCallback onIncrement;
-  final void Function(int) onSetQty;
+  final void Function(double) onSetQty;
+  // When set, the row represents a single size of [item]: it shows the size
+  // label + price and uses the normal stepper/swipe (never the size picker).
+  final ItemVariant? variant;
 
   const _ExcelItemRow({
     required this.index,
@@ -2159,7 +2289,15 @@ class _ExcelItemRow extends StatefulWidget {
     required this.onDecrement,
     required this.onIncrement,
     required this.onSetQty,
+    this.variant,
   });
+
+  // Effective flags/labels — a variant row behaves like a plain (non-variant)
+  // item so it gets the inline stepper and swipe gestures.
+  bool get isVariantRow => variant != null;
+  bool get treatAsVariantItem => variant == null && item.hasVariants;
+  String get rowName => variant != null ? variant!.label : item.name;
+  double get rowPrice => variant?.price ?? item.price;
 
   @override
   State<_ExcelItemRow> createState() => _ExcelItemRowState();
@@ -2184,8 +2322,8 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
-    _qtyTextCtrl =
-        TextEditingController(text: widget.qty > 0 ? '${widget.qty}' : '');
+    _qtyTextCtrl = TextEditingController(
+        text: widget.qty > 0 ? formatQty(widget.qty) : '');
   }
 
   @override
@@ -2197,7 +2335,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
         _editing = false;
         _qtyTextCtrl.text = '';
       } else if (!_editing) {
-        _qtyTextCtrl.text = '${widget.qty}';
+        _qtyTextCtrl.text = formatQty(widget.qty);
       }
     }
   }
@@ -2212,7 +2350,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
 
   void _commitText() {
     _editing = false;
-    final v = int.tryParse(_qtyTextCtrl.text.trim()) ?? 0;
+    final v = double.tryParse(_qtyTextCtrl.text.trim()) ?? 0.0;
     widget.onSetQty(v);
     if (v <= 0) _qtyTextCtrl.text = '';
   }
@@ -2331,10 +2469,10 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                       ),
                     ),
                     const SizedBox(width: 8),
-                    // Item name
+                    // Item name (or size label for a variant row)
                     Expanded(
                       child: Text(
-                        widget.item.name,
+                        widget.rowName,
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight:
@@ -2347,11 +2485,13 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    // Price
+                    // Price (with /unit suffix for measured items)
                     SizedBox(
                       width: 72,
                       child: Text(
-                        '₹${widget.item.price.toStringAsFixed(2)}',
+                        (widget.item.isMeasured && !widget.isVariantRow)
+                            ? '₹${widget.rowPrice.toStringAsFixed(2)}/${widget.item.unit}'
+                            : '₹${widget.rowPrice.toStringAsFixed(2)}',
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           fontSize: 12,
@@ -2361,7 +2501,9 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                       ),
                     ),
                     const SizedBox(width: 8),
-                    // Qty controls
+                    // Qty controls — same − / + stepper for all rows. A parent
+                    // variant item (not a size row) has a read-only qty and
+                    // opens the size picker; size rows and plain items edit inline.
                     SizedBox(
                       width: 112,
                       child: Row(
@@ -2373,52 +2515,73 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                             enabled: inCart,
                             onTap: widget.onDecrement,
                           ),
-                          // Editable qty field
+                          // Editable qty field (read-only for a parent variant item)
                           Expanded(
                             child: GestureDetector(
                               onTap: () {
-                                if (!inCart) widget.onAdd();
+                                if (widget.treatAsVariantItem) {
+                                  widget.onAdd();
+                                } else if (!inCart) {
+                                  widget.onAdd();
+                                }
                               },
                               child: SizedBox(
                                 height: 28,
-                                child: TextField(
-                                  controller: _qtyTextCtrl,
-                                  enabled: inCart,
-                                  textAlign: TextAlign.center,
-                                  keyboardType: TextInputType.number,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: inCart
-                                        ? AppColors.primary
-                                        : AppColors.textDisabled,
-                                  ),
-                                  decoration: InputDecoration(
-                                    isDense: true,
-                                    contentPadding:
-                                        const EdgeInsets.symmetric(vertical: 4),
-                                    border: InputBorder.none,
-                                    hintText: inCart ? '' : '—',
-                                    hintStyle: TextStyle(
-                                      fontSize: 13,
-                                      color: AppColors.textDisabled,
-                                    ),
-                                  ),
-                                  onTap: () => _editing = true,
-                                  onChanged: (val) {
-                                    _debounce?.cancel();
-                                    // Don't commit while field is empty —
-                                    // user may be mid-edit (erased to retype)
-                                    if (val.trim().isEmpty) return;
-                                    _debounce = Timer(
-                                      const Duration(milliseconds: 400),
-                                      _commitText,
-                                    );
-                                  },
-                                  onSubmitted: (_) => _commitText(),
-                                  onEditingComplete: _commitText,
-                                  onTapOutside: (_) => _commitText(),
-                                ),
+                                child: widget.treatAsVariantItem
+                                    ? Center(
+                                        child: Text(
+                                          inCart ? formatQty(widget.qty) : '—',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            color: inCart
+                                                ? AppColors.primary
+                                                : AppColors.textDisabled,
+                                          ),
+                                        ),
+                                      )
+                                    : TextField(
+                                        controller: _qtyTextCtrl,
+                                        enabled: inCart,
+                                        textAlign: TextAlign.center,
+                                        keyboardType: widget.item.isMeasured
+                                            ? const TextInputType
+                                                .numberWithOptions(decimal: true)
+                                            : TextInputType.number,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: inCart
+                                              ? AppColors.primary
+                                              : AppColors.textDisabled,
+                                        ),
+                                        decoration: InputDecoration(
+                                          isDense: true,
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                  vertical: 4),
+                                          border: InputBorder.none,
+                                          hintText: inCart ? '' : '—',
+                                          hintStyle: TextStyle(
+                                            fontSize: 13,
+                                            color: AppColors.textDisabled,
+                                          ),
+                                        ),
+                                        onTap: () => _editing = true,
+                                        onChanged: (val) {
+                                          _debounce?.cancel();
+                                          // Don't commit while field is empty —
+                                          // user may be mid-edit (erased to retype)
+                                          if (val.trim().isEmpty) return;
+                                          _debounce = Timer(
+                                            const Duration(milliseconds: 400),
+                                            _commitText,
+                                          );
+                                        },
+                                        onSubmitted: (_) => _commitText(),
+                                        onEditingComplete: _commitText,
+                                        onTapOutside: (_) => _commitText(),
+                                      ),
                               ),
                             ),
                           ),

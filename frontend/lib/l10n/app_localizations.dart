@@ -1268,6 +1268,18 @@ abstract class AppLocalizations {
   /// **'Could not send WhatsApp message'**
   String get billingWhatsappFailed;
 
+  /// No description provided for @billingChooseSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose size — {name}'**
+  String billingChooseSize(String name);
+
+  /// No description provided for @billingOutOfStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Out of stock'**
+  String get billingOutOfStock;
+
   /// No description provided for @billingInsufficientStock.
   ///
   /// In en, this message translates to:
@@ -1585,6 +1597,120 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stock quantity'**
   String get itemsFieldStock;
+
+  /// No description provided for @itemsFieldUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'Unit'**
+  String get itemsFieldUnit;
+
+  /// No description provided for @itemsUnitPiece.
+  ///
+  /// In en, this message translates to:
+  /// **'Piece'**
+  String get itemsUnitPiece;
+
+  /// No description provided for @itemsUnitKg.
+  ///
+  /// In en, this message translates to:
+  /// **'Kilogram (kg)'**
+  String get itemsUnitKg;
+
+  /// No description provided for @itemsUnitGram.
+  ///
+  /// In en, this message translates to:
+  /// **'Gram (g)'**
+  String get itemsUnitGram;
+
+  /// No description provided for @itemsUnitLitre.
+  ///
+  /// In en, this message translates to:
+  /// **'Litre (L)'**
+  String get itemsUnitLitre;
+
+  /// No description provided for @itemsUnitMl.
+  ///
+  /// In en, this message translates to:
+  /// **'Millilitre (ml)'**
+  String get itemsUnitMl;
+
+  /// No description provided for @itemsUnitMetre.
+  ///
+  /// In en, this message translates to:
+  /// **'Metre (m)'**
+  String get itemsUnitMetre;
+
+  /// No description provided for @itemsUnitDozen.
+  ///
+  /// In en, this message translates to:
+  /// **'Dozen'**
+  String get itemsUnitDozen;
+
+  /// No description provided for @itemsUnitPlate.
+  ///
+  /// In en, this message translates to:
+  /// **'Plate'**
+  String get itemsUnitPlate;
+
+  /// No description provided for @itemsManageSizes.
+  ///
+  /// In en, this message translates to:
+  /// **'Add sizes / variants'**
+  String get itemsManageSizes;
+
+  /// No description provided for @itemsManageSizesCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage sizes ({count})'**
+  String itemsManageSizesCount(int count);
+
+  /// No description provided for @itemsSizesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sizes — {name}'**
+  String itemsSizesTitle(String name);
+
+  /// No description provided for @itemsSizeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Size label (e.g. XL)'**
+  String get itemsSizeLabel;
+
+  /// No description provided for @itemsSizePrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price (blank = item price)'**
+  String get itemsSizePrice;
+
+  /// No description provided for @itemsSizeStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Stock'**
+  String get itemsSizeStock;
+
+  /// No description provided for @itemsAddSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Add size'**
+  String get itemsAddSize;
+
+  /// No description provided for @itemsNoSizesYet.
+  ///
+  /// In en, this message translates to:
+  /// **'No sizes yet. Add one below.'**
+  String get itemsNoSizesYet;
+
+  /// No description provided for @itemsStockPerSizeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Stock is tracked per size. Tap the item to update each size\'s stock.'**
+  String get itemsStockPerSizeHint;
+
+  /// No description provided for @itemsSizeDeleteConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove size \"{label}\"?'**
+  String itemsSizeDeleteConfirm(String label);
 
   /// No description provided for @itemsStockLabel.
   ///

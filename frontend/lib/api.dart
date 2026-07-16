@@ -5,7 +5,7 @@ import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
 const String baseUrl = 'https://vittam.vengurlatech.com/api';
-// const String baseUrl = 'http://192.168.1.4:5000/api';
+// const String baseUrl = 'http://192.168.1.7:5000/api';
 const String _genericApiErrorMessage = 'Something went wrong';
 
 String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
@@ -441,6 +441,25 @@ Future<Map<String, dynamic>> updateItem(String id, Map<String, dynamic> data) as
 
 Future<void> deleteItem(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/items/$id')));
+}
+
+// Variants (sizes) — nested under an item.
+Future<Map<String, dynamic>> createVariant(
+    String itemId, Map<String, dynamic> data) async {
+  return _parse(await _authPost(Uri.parse('$baseUrl/items/$itemId/variants'),
+      body: jsonEncode(data)));
+}
+
+Future<Map<String, dynamic>> updateVariant(
+    String itemId, String variantId, Map<String, dynamic> data) async {
+  return _parse(await _authPut(
+      Uri.parse('$baseUrl/items/$itemId/variants/$variantId'),
+      body: jsonEncode(data)));
+}
+
+Future<void> deleteVariant(String itemId, String variantId) async {
+  _parse(await _authDelete(
+      Uri.parse('$baseUrl/items/$itemId/variants/$variantId')));
 }
 
 // ---------------------------------------------------------------------------

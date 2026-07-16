@@ -60,6 +60,7 @@ CREATE TABLE items (
     price           DECIMAL(10,2)    NOT NULL,
     tax_rate        DECIMAL(5,2)     NULL,
     stock_quantity  DECIMAL(10,2)    NULL,
+    unit            NVARCHAR(20)     NOT NULL DEFAULT 'piece',
     is_active       BIT              NOT NULL DEFAULT 1,
     created_at      DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
 
@@ -73,6 +74,30 @@ CREATE INDEX IX_items_business_id ON items (business_id);
 -- Partial unique index: one barcode per business, NULLs excluded.
 CREATE UNIQUE INDEX UQ_items_business_barcode
     ON items (business_id, barcode)
+    WHERE barcode IS NOT NULL;
+
+-- Product variants (e.g. sizes S/M/L/XL) with independent stock.
+CREATE TABLE item_variants (
+    id                  UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    item_id             UNIQUEIDENTIFIER NOT NULL,
+    label               NVARCHAR(50)     NOT NULL,
+    price               DECIMAL(10,2)    NULL,
+    barcode             NVARCHAR(100)    NULL,
+    stock_quantity      DECIMAL(10,2)    NULL,
+    low_stock_threshold DECIMAL(10,2)    NULL,
+    sort_order          INT              NOT NULL DEFAULT 0,
+    is_active           BIT              NOT NULL DEFAULT 1,
+    created_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
+
+    CONSTRAINT FK_item_variants_item
+        FOREIGN KEY (item_id) REFERENCES items (id)
+        ON UPDATE NO ACTION ON DELETE CASCADE
+);
+
+CREATE INDEX IX_item_variants_item_id ON item_variants (item_id);
+
+CREATE UNIQUE INDEX UQ_item_variants_item_barcode
+    ON item_variants (item_id, barcode)
     WHERE barcode IS NOT NULL;
 
 CREATE TABLE tables (
@@ -137,6 +162,7 @@ CREATE TABLE bill_items (
     id          UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
     bill_id     UNIQUEIDENTIFIER NOT NULL,
     item_id     UNIQUEIDENTIFIER NULL,
+    variant_id  UNIQUEIDENTIFIER NULL,
     item_name   NVARCHAR(200)    NOT NULL,
     quantity    DECIMAL(10,2)    NOT NULL,
     unit_price  DECIMAL(10,2)    NOT NULL,
@@ -151,11 +177,17 @@ CREATE TABLE bill_items (
     -- SET NULL: items are soft-deleted (is_active=0); item_name snapshot is preserved.
     CONSTRAINT FK_bill_items_item
         FOREIGN KEY (item_id) REFERENCES items (id)
-        ON UPDATE NO ACTION ON DELETE SET NULL
+        ON UPDATE NO ACTION ON DELETE SET NULL,
+
+    -- NO ACTION: variant stock target; item_name snapshot preserved on delete.
+    CONSTRAINT FK_bill_items_variant
+        FOREIGN KEY (variant_id) REFERENCES item_variants (id)
+        ON UPDATE NO ACTION ON DELETE NO ACTION
 );
 
 CREATE INDEX IX_bill_items_bill_id ON bill_items (bill_id);
 CREATE INDEX IX_bill_items_item_id ON bill_items (item_id) WHERE item_id IS NOT NULL;
+CREATE INDEX IX_bill_items_variant_id ON bill_items (variant_id) WHERE variant_id IS NOT NULL;
 
 CREATE TABLE recurring_expenses (
     id           UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,

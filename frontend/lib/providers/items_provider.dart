@@ -117,6 +117,19 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     state = await AsyncValue.guard(_fetch);
   }
 
+  /// Re-fetch items in the background WITHOUT showing a loading spinner — the
+  /// current (possibly stale) list stays visible until fresh data arrives.
+  /// Called on app open so prices refresh silently instead of warning the user.
+  /// Network failures are swallowed; the cached list simply remains.
+  Future<void> refreshInBackground() async {
+    try {
+      final fresh = await _fetch();
+      state = AsyncData(fresh);
+    } catch (_) {
+      // Offline or transient error — keep whatever is currently shown.
+    }
+  }
+
   Future<void> addItem(Map<String, dynamic> data) async {
     final result = await api.createItem(data);
     final newItem = Item.fromJson(result);
@@ -137,6 +150,38 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     await api.deleteItem(id);
     final current = state.valueOrNull ?? [];
     state = AsyncData(current.where((i) => i.id != id).toList());
+  }
+
+  /// Replace the variant list of a single item in place — no network refetch,
+  /// no loading spinner. Used by the size manager so add/delete feel instant.
+  /// Also refreshes the offline cache in the background.
+  void setItemVariants(String itemId, List<ItemVariant> variants) {
+    final current = state.valueOrNull ?? [];
+    final updated = current.map((i) {
+      if (i.id != itemId) return i;
+      return Item(
+        id: i.id,
+        businessId: i.businessId,
+        name: i.name,
+        barcode: i.barcode,
+        category: i.category,
+        price: i.price,
+        taxRate: i.taxRate,
+        stockQuantity: i.stockQuantity,
+        lowStockThreshold: i.lowStockThreshold,
+        unit: i.unit,
+        variants: variants,
+        isActive: i.isActive,
+      );
+    }).toList();
+    state = AsyncData(updated);
+
+    // Keep the offline cache consistent — fire and forget.
+    getBusinessId().then((businessId) {
+      if (businessId != null) {
+        unawaited(OfflineService.instance.replaceItemCache(updated, businessId));
+      }
+    });
   }
 }
 

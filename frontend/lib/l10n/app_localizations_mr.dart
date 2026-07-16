@@ -635,6 +635,14 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingWhatsappFailed => 'व्हॉट्सअ‍ॅप संदेश पाठवता आला नाही';
 
   @override
+  String billingChooseSize(String name) {
+    return 'आकार निवडा — $name';
+  }
+
+  @override
+  String get billingOutOfStock => 'स्टॉक संपला';
+
+  @override
   String get billingInsufficientStock => 'स्टॉक अपुरा आहे';
 
   @override
@@ -809,6 +817,70 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsFieldStock => 'स्टॉक संख्या';
+
+  @override
+  String get itemsFieldUnit => 'एकक';
+
+  @override
+  String get itemsUnitPiece => 'नग';
+
+  @override
+  String get itemsUnitKg => 'किलोग्रॅम (kg)';
+
+  @override
+  String get itemsUnitGram => 'ग्रॅम (g)';
+
+  @override
+  String get itemsUnitLitre => 'लिटर (L)';
+
+  @override
+  String get itemsUnitMl => 'मिलिलिटर (ml)';
+
+  @override
+  String get itemsUnitMetre => 'मीटर (m)';
+
+  @override
+  String get itemsUnitDozen => 'डझन';
+
+  @override
+  String get itemsUnitPlate => 'प्लेट';
+
+  @override
+  String get itemsManageSizes => 'आकार / प्रकार जोडा';
+
+  @override
+  String itemsManageSizesCount(int count) {
+    return 'आकार व्यवस्थापित करा ($count)';
+  }
+
+  @override
+  String itemsSizesTitle(String name) {
+    return 'आकार — $name';
+  }
+
+  @override
+  String get itemsSizeLabel => 'आकार नाव (उदा. XL)';
+
+  @override
+  String get itemsSizePrice => 'किंमत (रिक्त = वस्तूची किंमत)';
+
+  @override
+  String get itemsSizeStock => 'स्टॉक';
+
+  @override
+  String get itemsAddSize => 'आकार जोडा';
+
+  @override
+  String get itemsNoSizesYet => 'अद्याप आकार नाहीत. खाली एक जोडा.';
+
+  @override
+  String get itemsStockPerSizeHint =>
+      'स्टॉक आकारानुसार ठेवला जातो. प्रत्येक आकाराचा स्टॉक अद्ययावत करण्यासाठी वस्तूवर टॅप करा.';
+
+  @override
+  String itemsSizeDeleteConfirm(String label) {
+    return '\"$label\" आकार काढायचा?';
+  }
 
   @override
   String itemsStockLabel(String qty) {

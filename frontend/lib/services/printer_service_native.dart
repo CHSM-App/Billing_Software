@@ -269,9 +269,10 @@ class PrinterService {
     if (printer == null) throw PrinterException('No printer configured');
 
     final List<int> bytes;
-    if (labels != null && labels.needsImageRendering) {
-      // Marathi: thermal printers have no Devanagari code page, so render the
-      // receipt to a bitmap and print it as an ESC/POS raster image.
+    // Marathi renders to an ESC * bit-image (no Devanagari code page exists) and
+    // MUST be sent slowly so the printer buffer doesn't drop raster rows.
+    final bool marathi = labels != null && labels.needsImageRendering;
+    if (marathi) {
       bytes = await ReceiptImageBuilder.build(
         bill,
         labels,
@@ -288,7 +289,17 @@ class PrinterService {
           businessAddress: businessAddress,
           labels: labels);
     }
-    await _printBytes(printer, bytes);
+    await _printBytes(printer, bytes, slow: marathi);
+  }
+
+  /// Send a pre-built ESC/POS byte stream to the active printer as-is.
+  /// Used by the Marathi print-test page to compare rendering strategies.
+  /// [slow] uses smaller BT chunks with longer delays so the printer's buffer
+  /// doesn't overrun (which drops raster rows → faint/partial images).
+  Future<void> printRawBytes(List<int> bytes, {bool slow = false}) async {
+    final printer = await getActivePrinter();
+    if (printer == null) throw PrinterException('No printer configured');
+    await _printBytes(printer, bytes, slow: slow);
   }
 
   Future<void> testPrint() async {
@@ -362,15 +373,17 @@ class PrinterService {
   // Low-level send
   // -------------------------------------------------------------------------
 
-  Future<void> _printBytes(Printer printer, List<int> bytes) async {
+  Future<void> _printBytes(Printer printer, List<int> bytes,
+      {bool slow = false}) async {
     if (_isWindows) {
       await _printWindows(printer, bytes);
     } else {
-      await _printClassicBt(printer, bytes);
+      await _printClassicBt(printer, bytes, slow: slow);
     }
   }
 
-  Future<void> _printClassicBt(Printer printer, List<int> bytes) async {
+  Future<void> _printClassicBt(Printer printer, List<int> bytes,
+      {bool slow = false}) async {
     if (printer.address == null) {
       throw PrinterException('Printer address not set');
     }
@@ -397,13 +410,16 @@ class PrinterService {
 
       await Future.delayed(const Duration(seconds: 2));
 
-      const chunkSize = 512;
+      // Slow mode: small chunks + longer pauses so the printer's limited buffer
+      // can keep up with raster data (prevents dropped rows / faint output).
+      final chunkSize = slow ? 128 : 512;
+      final gapMs = slow ? 60 : 50;
       for (var i = 0; i < bytes.length; i += chunkSize) {
         final end = (i + chunkSize).clamp(0, bytes.length);
         final result = await PrintBluetoothThermal.writeBytes(bytes.sublist(i, end));
         if (!result) throw PrinterException('Write failed at chunk $i');
         if (end < bytes.length) {
-          await Future.delayed(const Duration(milliseconds: 50));
+          await Future.delayed(Duration(milliseconds: gapMs));
         }
       }
     } catch (e) {

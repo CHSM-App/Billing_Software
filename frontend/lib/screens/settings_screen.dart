@@ -12,6 +12,7 @@ import 'login_screen.dart';
 // Printer screens use native-only packages — excluded on web.
 import 'printer_setup_screen.dart'
     if (dart.library.html) 'printer_setup_screen_web.dart';
+import 'marathi_print_test_screen.dart';
 import 'printer_test_screen.dart'
     if (dart.library.html) 'printer_test_screen_web.dart';
 import 'printer_test_windows_screen.dart'
@@ -215,6 +216,19 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const PrinterSetupScreen()),
                         ),
                       ),
+                      // const SizedBox(height: AppSpacing.space8),
+                      // _buildNavCard(
+                      //   context,
+                      //   icon: Icons.translate_outlined,
+                      //   iconColor: AppColors.warning,
+                      //   title: 'Marathi Print Test',
+                      //   subtitle: 'Try different Marathi bill-printing methods',
+                      //   onTap: () => Navigator.push(
+                      //     context,
+                      //     MaterialPageRoute(
+                      //         builder: (_) => const MarathiPrintTestScreen()),
+                      //   ),
+                      // ),
                     ],
                     // const SizedBox(height: AppSpacing.space8),
                     // _buildNavCard(

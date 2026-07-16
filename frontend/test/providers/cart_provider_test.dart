@@ -10,6 +10,7 @@ Item makeItem({
   double price = 50.0,
   double? taxRate,
   double? stockQuantity,
+  List<ItemVariant> variants = const [],
 }) =>
     Item(
       id: id,
@@ -18,7 +19,23 @@ Item makeItem({
       price: price,
       taxRate: taxRate,
       stockQuantity: stockQuantity,
+      variants: variants,
       isActive: true,
+    );
+
+ItemVariant makeVariant({
+  String id = 'var-1',
+  String itemId = 'item-1',
+  String label = 'XL',
+  double? price,
+  double? stockQuantity,
+}) =>
+    ItemVariant(
+      id: id,
+      itemId: itemId,
+      label: label,
+      price: price,
+      stockQuantity: stockQuantity,
     );
 
 ProviderContainer makeContainer() => ProviderContainer();
@@ -113,6 +130,17 @@ void main() {
       notifier.addItem(makeItem());
       notifier.setQty('item-1', 10);
       expect(container.read(cartProvider).first.quantity, 10);
+    });
+
+    test('sets a fractional (weight) quantity', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      notifier.addItem(makeItem(price: 80.0)); // e.g. ₹80/kg
+      notifier.setQty('item-1', 1.5);
+      final entry = container.read(cartProvider).first;
+      expect(entry.quantity, 1.5);
+      // 1.5 kg × ₹80 = ₹120 subtotal
+      expect(container.read(cartSubtotalProvider), closeTo(120.0, 0.001));
     });
 
     test('removes item when qty set to 0', () {
@@ -213,14 +241,22 @@ void main() {
       expect(container.read(cartItemCountProvider), 0);
     });
 
-    test('sums quantities across all items', () {
+    test('counts distinct line entries, not summed quantities', () {
       final container = makeContainer();
       final notifier = container.read(cartProvider.notifier);
       notifier.addItem(makeItem(id: 'item-1'));
       notifier.addItem(makeItem(id: 'item-1'));
       notifier.addItem(makeItem(id: 'item-2'));
-      // item-1 qty = 2, item-2 qty = 1 → total = 3
-      expect(container.read(cartItemCountProvider), 3);
+      // item-1 (qty 2) + item-2 (qty 1) → 2 distinct lines
+      expect(container.read(cartItemCountProvider), 2);
+    });
+
+    test('measured items count as one line each', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      notifier.addItem(makeItem(id: 'item-1'));
+      notifier.setQty('item-1', 1.5);
+      expect(container.read(cartItemCountProvider), 1);
     });
   });
 
@@ -321,6 +357,81 @@ void main() {
 
       notifier.loadFromBill(bill, []);
       expect(container.read(cartProvider), isEmpty);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Variants (sizes)
+  // ─────────────────────────────────────────────────────────────
+  group('CartNotifier variants', () {
+    test('two sizes of one item are separate cart lines', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      final item = makeItem(variants: [
+        makeVariant(id: 'v-m', label: 'M', price: 500),
+        makeVariant(id: 'v-xl', label: 'XL', price: 550),
+      ]);
+      notifier.addItem(item, variant: item.variants[0]);
+      notifier.addItem(item, variant: item.variants[1]);
+      final cart = container.read(cartProvider);
+      expect(cart.length, 2);
+      expect(cart.map((e) => e.key).toSet(), {'item-1:v-m', 'item-1:v-xl'});
+    });
+
+    test('same size stacks quantity', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      final item = makeItem(variants: [makeVariant(id: 'v-xl', label: 'XL')]);
+      notifier.addItem(item, variant: item.variants[0]);
+      notifier.addItem(item, variant: item.variants[0]);
+      final cart = container.read(cartProvider);
+      expect(cart.length, 1);
+      expect(cart.first.quantity, 2);
+    });
+
+    test('variant price overrides item price in subtotal', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      final item = makeItem(price: 500, variants: [
+        makeVariant(id: 'v-xl', label: 'XL', price: 550),
+      ]);
+      notifier.addItem(item, variant: item.variants[0]);
+      expect(container.read(cartSubtotalProvider), 550.0);
+    });
+
+    test('variant with null price falls back to item price', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      final item = makeItem(price: 500, variants: [
+        makeVariant(id: 'v-m', label: 'M', price: null),
+      ]);
+      notifier.addItem(item, variant: item.variants[0]);
+      expect(container.read(cartSubtotalProvider), 500.0);
+    });
+
+    test('changeQty by variant key targets the right line', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      final item = makeItem(variants: [
+        makeVariant(id: 'v-m', label: 'M'),
+        makeVariant(id: 'v-xl', label: 'XL'),
+      ]);
+      notifier.addItem(item, variant: item.variants[0]);
+      notifier.addItem(item, variant: item.variants[1]);
+      notifier.changeQty('item-1:v-xl', 2);
+      final cart = container.read(cartProvider);
+      expect(cart.firstWhere((e) => e.key == 'item-1:v-m').quantity, 1);
+      expect(cart.firstWhere((e) => e.key == 'item-1:v-xl').quantity, 3);
+    });
+
+    test('displayName includes the size label', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      final item = makeItem(name: 'T-Shirt', variants: [
+        makeVariant(id: 'v-xl', label: 'XL'),
+      ]);
+      notifier.addItem(item, variant: item.variants[0]);
+      expect(container.read(cartProvider).first.displayName, 'T-Shirt (XL)');
     });
   });
 }

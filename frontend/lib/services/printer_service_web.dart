@@ -78,6 +78,10 @@ class PrinterService {
     throw PrinterException('Printing is not supported in the browser.');
   }
 
+  Future<void> printRawBytes(List<int> bytes, {bool slow = false}) async {
+    throw PrinterException('Printing is not supported in the browser.');
+  }
+
   Future<void> printBarcodeLabel({
     required String barcodeValue,
     required String itemName,

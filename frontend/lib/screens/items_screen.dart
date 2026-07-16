@@ -54,6 +54,26 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
 
   void _showStockPopup(Item item) {
     final inventoryEnabled = ref.read(inventoryEnabledProvider);
+
+    // Items with sizes track stock per size — show a per-size stock editor
+    // instead of the item-level one.
+    if (inventoryEnabled && item.hasVariants) {
+      showDialog(
+        context: context,
+        builder: (_) => _VariantStockDialog(
+          item: item,
+          onSaved: (variants) {
+            ref.read(itemsProvider.notifier).setItemVariants(item.id, variants);
+          },
+          onEditTapped: () {
+            Navigator.pop(context);
+            _showItemForm(item: item);
+          },
+        ),
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (_) => _StockPopupDialog(
@@ -86,6 +106,23 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
             await ref.read(itemsProvider.notifier).updateItem(item.id, data);
           }
           await ref.read(categoriesProvider.notifier).reload();
+        },
+        onManageSizes:
+            item != null ? () => _showVariantManager(item) : null,
+      ),
+    );
+  }
+
+  void _showVariantManager(Item item) {
+    final inventoryEnabled = ref.read(inventoryEnabledProvider);
+    showDialog(
+      context: context,
+      builder: (_) => _VariantManagerDialog(
+        item: item,
+        inventoryEnabled: inventoryEnabled,
+        onChanged: (variants) {
+          // Patch this item's variants locally — instant, no network refetch.
+          ref.read(itemsProvider.notifier).setItemVariants(item.id, variants);
         },
       ),
     );
@@ -246,7 +283,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final subtitle = [
       if (item.category != null) item.category!,
       if (inventoryEnabled && item.stockQuantity != null)
-        l10n.itemsStockLabel(item.stockQuantity!.toStringAsFixed(0)),
+        l10n.itemsStockLabel(formatQty(item.stockQuantity!)),
     ].join('  ·  ');
 
     return Container(
@@ -506,7 +543,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    _current.toStringAsFixed(0),
+                    formatQty(_current),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -546,7 +583,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      _total.toStringAsFixed(0),
+                      formatQty(_total),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                             color: hasInput
@@ -596,9 +633,13 @@ class _ItemFormDialog extends StatefulWidget {
   final Item? item;
   final bool inventoryEnabled;
   final Future<void> Function(Map<String, dynamic> data) onSaved;
+  final VoidCallback? onManageSizes;
 
   const _ItemFormDialog(
-      {this.item, required this.inventoryEnabled, required this.onSaved});
+      {this.item,
+      required this.inventoryEnabled,
+      required this.onSaved,
+      this.onManageSizes});
 
   @override
   State<_ItemFormDialog> createState() => _ItemFormDialogState();
@@ -612,7 +653,19 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _taxCtrl = TextEditingController();
   final _barcodeCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
+  String _unit = 'piece';
   bool _saving = false;
+
+  static const _units = [
+    'piece',
+    'kg',
+    'g',
+    'litre',
+    'ml',
+    'metre',
+    'dozen',
+    'plate',
+  ];
 
   @override
   void initState() {
@@ -625,6 +678,29 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _taxCtrl.text = item.taxRate?.toString() ?? '';
       _barcodeCtrl.text = item.barcode ?? '';
       _stockCtrl.text = item.stockQuantity?.toString() ?? '';
+      _unit = _units.contains(item.unit) ? item.unit : 'piece';
+    }
+  }
+
+  String _unitLabel(BuildContext context, String unit) {
+    final l10n = context.l10n;
+    switch (unit) {
+      case 'kg':
+        return l10n.itemsUnitKg;
+      case 'g':
+        return l10n.itemsUnitGram;
+      case 'litre':
+        return l10n.itemsUnitLitre;
+      case 'ml':
+        return l10n.itemsUnitMl;
+      case 'metre':
+        return l10n.itemsUnitMetre;
+      case 'dozen':
+        return l10n.itemsUnitDozen;
+      case 'plate':
+        return l10n.itemsUnitPlate;
+      default:
+        return l10n.itemsUnitPiece;
     }
   }
 
@@ -650,6 +726,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         ? DateTime.now().millisecondsSinceEpoch.toString().substring(1, 13)
         : null;
 
+    // Items with sizes track stock per size — force item-level stock to null so
+    // it is never considered.
+    final hasVariants = widget.item?.hasVariants ?? false;
+
     final data = {
       'name': _nameCtrl.text.trim(),
       if (_categoryCtrl.text.trim().isNotEmpty) 'category': _categoryCtrl.text.trim(),
@@ -657,7 +737,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       if (_taxCtrl.text.trim().isNotEmpty)
         'tax_rate': double.parse(_taxCtrl.text.trim()),
       'barcode': barcodeInput.isNotEmpty ? barcodeInput : autoBarcode,
-      if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
+      'unit': _unit,
+      if (widget.inventoryEnabled && hasVariants)
+        'stock_quantity': null
+      else if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
         'stock_quantity': double.parse(_stockCtrl.text.trim()),
     };
 
@@ -714,6 +797,25 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   },
                 ),
                 const SizedBox(height: AppSpacing.space12),
+                DropdownButtonFormField<String>(
+                  initialValue: _unit,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: l10n.itemsFieldUnit,
+                    prefixIcon: const Icon(Icons.straighten_outlined,
+                        size: 18, color: AppColors.textSecondary),
+                  ),
+                  items: [
+                    for (final u in _units)
+                      DropdownMenuItem(
+                        value: u,
+                        child: Text(_unitLabel(context, u),
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() => _unit = v ?? 'piece'),
+                ),
+                const SizedBox(height: AppSpacing.space12),
                 AppTextField(
                   label: l10n.itemsFieldTaxRate,
                   controller: _taxCtrl,
@@ -733,13 +835,65 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   controller: _barcodeCtrl,
                   keyboardType: TextInputType.number,
                 ),
-                if (widget.inventoryEnabled) ...[
+                // Item-level stock is only meaningful when the item has NO
+                // sizes. With sizes, stock is tracked per size, so hide it and
+                // show a hint pointing to the size manager.
+                if (widget.inventoryEnabled &&
+                    !(widget.item?.hasVariants ?? false)) ...[
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
                     label: l10n.itemsFieldStock,
                     controller: _stockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                ] else if (widget.inventoryEnabled &&
+                    (widget.item?.hasVariants ?? false)) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceVariant,
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline,
+                            size: 16, color: AppColors.textSecondary),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            l10n.itemsStockPerSizeHint,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: AppColors.textSecondary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (widget.onManageSizes != null) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      widget.onManageSizes!();
+                    },
+                    icon: const Icon(Icons.straighten_outlined, size: 18),
+                    label: Text(
+                      widget.item != null && widget.item!.hasVariants
+                          ? l10n.itemsManageSizesCount(
+                              widget.item!.variants.length)
+                          : l10n.itemsManageSizes,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    ),
                   ),
                 ],
               ],
@@ -955,6 +1109,376 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Variant (sizes) manager — list, add and delete sizes for an existing item.
+// Talks to the API directly; calls onChanged() to reload the catalog.
+// ---------------------------------------------------------------------------
+class _VariantManagerDialog extends StatefulWidget {
+  final Item item;
+  final bool inventoryEnabled;
+  final void Function(List<ItemVariant> variants) onChanged;
+
+  const _VariantManagerDialog({
+    required this.item,
+    required this.inventoryEnabled,
+    required this.onChanged,
+  });
+
+  @override
+  State<_VariantManagerDialog> createState() => _VariantManagerDialogState();
+}
+
+class _VariantManagerDialogState extends State<_VariantManagerDialog> {
+  late List<ItemVariant> _variants;
+  final _labelCtrl = TextEditingController();
+  final _priceCtrl = TextEditingController();
+  final _stockCtrl = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _variants = [...widget.item.variants];
+  }
+
+  @override
+  void dispose() {
+    _labelCtrl.dispose();
+    _priceCtrl.dispose();
+    _stockCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _add() async {
+    final label = _labelCtrl.text.trim();
+    if (label.isEmpty) return;
+    setState(() => _busy = true);
+    try {
+      final data = <String, dynamic>{
+        'label': label,
+        if (_priceCtrl.text.trim().isNotEmpty)
+          'price': double.tryParse(_priceCtrl.text.trim()),
+        if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
+          'stock_quantity': double.tryParse(_stockCtrl.text.trim()),
+        'sort_order': _variants.length,
+      };
+      final created = await createVariant(widget.item.id, data);
+      setState(() {
+        _variants.add(ItemVariant.fromJson(created));
+        _labelCtrl.clear();
+        _priceCtrl.clear();
+        _stockCtrl.clear();
+      });
+      widget.onChanged(List.unmodifiable(_variants));
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _delete(ItemVariant v) async {
+    final l10n = context.l10n;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        content: Text(l10n.itemsSizeDeleteConfirm(v.label)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l10n.commonCancel)),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.commonDelete,
+                style: const TextStyle(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _busy = true);
+    try {
+      await deleteVariant(widget.item.id, v.id);
+      setState(() => _variants.removeWhere((x) => x.id == v.id));
+      widget.onChanged(List.unmodifiable(_variants));
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: AppColors.error));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      title: Text(l10n.itemsSizesTitle(widget.item.name),
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+      content: SizedBox(
+        width: 400,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_variants.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(l10n.itemsNoSizesYet,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.textSecondary)),
+                )
+              else
+                ..._variants.map((v) {
+                  final price = v.price ?? widget.item.price;
+                  final sub = [
+                    '₹${price.toStringAsFixed(2)}',
+                    if (widget.inventoryEnabled && v.stockQuantity != null)
+                      l10n.itemsStockLabel(formatQty(v.stockQuantity!)),
+                  ].join('  ·  ');
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(v.label,
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(sub),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline,
+                          size: 18, color: AppColors.error),
+                      onPressed: _busy ? null : () => _delete(v),
+                    ),
+                  );
+                }),
+              const Divider(height: 20),
+              AppTextField(
+                  label: l10n.itemsSizeLabel, controller: _labelCtrl),
+              const SizedBox(height: AppSpacing.space8),
+              AppTextField(
+                label: l10n.itemsSizePrice,
+                controller: _priceCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
+              if (widget.inventoryEnabled) ...[
+                const SizedBox(height: AppSpacing.space8),
+                AppTextField(
+                  label: l10n.itemsSizeStock,
+                  controller: _stockCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonClose)),
+        ElevatedButton.icon(
+          onPressed: _busy ? null : _add,
+          icon: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.add, size: 18),
+          label: Text(l10n.itemsAddSize),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-size stock editor — shown for items that have sizes. Each size has its
+// own editable stock field; Update saves only the sizes that changed.
+// ---------------------------------------------------------------------------
+class _VariantStockDialog extends StatefulWidget {
+  final Item item;
+  final void Function(List<ItemVariant> variants) onSaved;
+  final VoidCallback onEditTapped;
+
+  const _VariantStockDialog({
+    required this.item,
+    required this.onSaved,
+    required this.onEditTapped,
+  });
+
+  @override
+  State<_VariantStockDialog> createState() => _VariantStockDialogState();
+}
+
+class _VariantStockDialogState extends State<_VariantStockDialog> {
+  late final List<ItemVariant> _variants;
+  late final Map<String, TextEditingController> _ctrls;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _variants = [...widget.item.variants];
+    // Fields hold the quantity to ADD to the current stock — start empty.
+    _ctrls = {
+      for (final v in _variants) v.id: TextEditingController(),
+    };
+    for (final c in _ctrls.values) {
+      c.addListener(() => setState(() {}));
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _ctrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  // Quantity being added for a size (0 when blank/invalid).
+  double _adding(ItemVariant v) =>
+      double.tryParse(_ctrls[v.id]!.text.trim()) ?? 0;
+
+  bool get _anyInput => _variants.any((v) => _adding(v) > 0);
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      final updated = <ItemVariant>[];
+      for (final v in _variants) {
+        final adding = _adding(v);
+        // Skip sizes with no quantity added.
+        if (adding <= 0) {
+          updated.add(v);
+          continue;
+        }
+        final newStock = (v.stockQuantity ?? 0) + adding;
+        final result = await updateVariant(
+          widget.item.id,
+          v.id,
+          {'stock_quantity': newStock},
+        );
+        updated.add(ItemVariant.fromJson(result));
+      }
+      widget.onSaved(List.unmodifiable(updated));
+      if (mounted) Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 8, 0),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(l10n.itemsSizesTitle(widget.item.name),
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          IconButton(
+            tooltip: l10n.itemsEditItemTooltip,
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: widget.onEditTapped,
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 360,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final v in _variants)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.space12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(v.label,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600)),
+                            Text(
+                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? formatQty(v.stockQuantity!) : '—'}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: AppColors.textSecondary),
+                            ),
+                            // Live preview of the resulting stock after adding.
+                            if (_adding(v) > 0)
+                              Text(
+                                '${l10n.itemsTotalAfterAdding}: ${formatQty((v.stockQuantity ?? 0) + _adding(v))}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: 110,
+                        child: AppTextField(
+                          label: l10n.itemsAddQuantity,
+                          controller: _ctrls[v.id]!,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonCancel)),
+        ElevatedButton(
+          onPressed: (_saving || !_anyInput) ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : Text(l10n.commonUpdate),
         ),
       ],
     );

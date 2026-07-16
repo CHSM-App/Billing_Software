@@ -26,8 +26,7 @@ List<Override> _cartOverrides() => [
             ref.watch(cartSubtotalProvider) + ref.watch(cartTaxProvider),
       ),
       cartItemCountProvider.overrideWith(
-        (ref) =>
-            ref.watch(cartProvider).fold(0, (s, e) => s + e.quantity),
+        (ref) => ref.watch(cartProvider).length,
       ),
     ];
 

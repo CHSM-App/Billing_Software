@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
-import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 
@@ -25,12 +24,20 @@ class ReceiptImageBuilder {
   static const int _paperDots = 384;
 
   static const double _hPad = 6; // left/right margin in dots
-  static const double _fontSize = 22;
-  static const double _smallFont = 19;
-  static const double _lineGap = 10; // vertical gap between rows
-  static const double _dividerHeight = 14; // reserved band for a rule
+  // Compact sizing — keeps Marathi legible while using far less paper.
+  static const double _fontSize = 18; // header
+  static const double _smallFont = 16; // body / items
+  static const double _lineGap = 4; // vertical gap between rows
+  static const double _dividerHeight = 10; // reserved band for a rule
 
-  /// Builds the full ESC/POS byte stream (raster image + feed) for [bill].
+  /// Builds the full ESC/POS byte stream for [bill].
+  ///
+  /// Verified on real 58mm handheld BT hardware: the single-block `GS v 0`
+  /// raster comes out faint/squished, and 24-dot `ESC *` bands leave white
+  /// stripes. **8-dot single-density `ESC *` bands with a bolded font** print
+  /// clean, fully-legible Devanagari — so that is the production path. Callers
+  /// should send these bytes with `slow: true` (small BT chunks) so the
+  /// printer's buffer keeps up.
   ///
   /// Must run on the UI isolate — it uses `dart:ui` canvas APIs.
   static Future<List<int>> build(
@@ -46,19 +53,100 @@ class ReceiptImageBuilder {
       businessName: businessName,
       businessPhone: businessPhone,
       businessAddress: businessAddress,
+      threshold: 150,
+      boldBoost: true,
     );
 
-    final profile = await CapabilityProfile.load();
-    // 58mm paper → 384-dot head. Must match [_paperDots].
-    final generator = Generator(PaperSize.mm58, profile);
+    final bytes = <int>[
+      0x1B, 0x40, // ESC @  reset
+      0x1B, 0x61, 0x01, // ESC a 1  centre
+    ];
+    // 8-dot single-density bands — the format that prints cleanly here.
+    bytes.addAll(escStarBitImage(image, doubleDensity: false));
+    bytes.addAll([0x0A, 0x0A, 0x0A, 0x0A]); // feed to tear
+    return bytes;
+  }
 
+  /// Renders just the receipt bitmap (no ESC/POS wrapping) with tunable knobs so
+  /// a test harness can compare Marathi rendering strategies. Returns a 1-bit
+  /// black/white [img.Image] at [_paperDots] wide.
+  ///
+  /// - [threshold]     luminance cut for black (lower = keeps thin strokes).
+  /// - [scale]         supersample factor; painted at scale× then downsized.
+  /// - [boldBoost]     add weight to every glyph (thin Devanagari matras survive).
+  /// - [fontScale]     multiply all font sizes (bigger = more dots per glyph).
+  /// - [dither]        Floyd–Steinberg instead of a hard threshold.
+  static Future<img.Image> renderBitmap(
+    Bill bill,
+    ReceiptLabels labels, {
+    String? businessName,
+    String? businessPhone,
+    String? businessAddress,
+    int threshold = 160,
+    int scale = 1,
+    bool boldBoost = false,
+    double fontScale = 1.0,
+    bool dither = false,
+  }) {
+    return _paintReceipt(
+      bill,
+      labels,
+      businessName: businessName,
+      businessPhone: businessPhone,
+      businessAddress: businessAddress,
+      threshold: threshold,
+      scale: scale,
+      boldBoost: boldBoost,
+      fontScale: fontScale,
+      dither: dither,
+    );
+  }
+
+  /// Encode a 1-bit [image] as **ESC \* 33** (24-dot double-density) bit-image
+  /// bands — the most compatible raster method for cheap 58mm handheld BT
+  /// printers, which often mis-handle the single-block GS v 0 raster.
+  ///
+  /// Each 24-pixel-tall band is emitted as `ESC * 33 nL nH <3 bytes/col>` then a
+  /// line feed. Set the line spacing to 24 dots first (`ESC 3 24`) so bands butt
+  /// together with no gaps, and restore default spacing at the end.
+  /// [doubleDensity] true → mode 33 (24-dot, densest, default). false → mode 1
+  /// (8-dot single density) for printers that don't support 24-dot mode.
+  static List<int> escStarBitImage(img.Image image,
+      {bool doubleDensity = true}) {
+    final width = image.width;
+    final height = image.height;
     final bytes = <int>[];
-    // GS v 0 raster at the true 384-dot width (verified: widthBytes=48).
-    // This is the clean path: one raster block, honest width, no 24-dot band
-    // mechanics. The earlier squish was only because the image was 576px wide
-    // being sent to a 384-dot head — fixed by matching _paperDots to 58mm.
-    bytes.addAll(generator.imageRaster(image));
-    bytes.addAll(generator.feed(3));
+
+    final bandH = doubleDensity ? 24 : 8;
+    final m = doubleDensity ? 33 : 1;
+    final bytesPerCol = doubleDensity ? 3 : 1;
+
+    // ESC 3 n — set line spacing to the band height so bands butt together.
+    bytes.addAll([0x1B, 0x33, bandH]);
+
+    final nL = width & 0xFF;
+    final nH = (width >> 8) & 0xFF;
+
+    for (int y = 0; y < height; y += bandH) {
+      bytes.addAll([0x1B, 0x2A, m, nL, nH]);
+      for (int x = 0; x < width; x++) {
+        for (int k = 0; k < bytesPerCol; k++) {
+          int b = 0;
+          for (int bit = 0; bit < 8; bit++) {
+            final py = y + k * 8 + bit;
+            if (py < height) {
+              final lum = image.getPixel(x, py).r;
+              if (lum < 128) b |= (0x80 >> bit); // dark pixel → dot on
+            }
+          }
+          bytes.add(b);
+        }
+      }
+      bytes.add(0x0A); // advance to next band
+    }
+
+    // ESC 2 — restore default line spacing.
+    bytes.addAll([0x1B, 0x32]);
     return bytes;
   }
 
@@ -72,6 +160,11 @@ class ReceiptImageBuilder {
     String? businessName,
     String? businessPhone,
     String? businessAddress,
+    int threshold = 160,
+    int scale = 1,
+    bool boldBoost = false,
+    double fontScale = 1.0,
+    bool dither = false,
   }) async {
     // First pass: lay out every paragraph to measure total height.
     final rows = _buildRows(bill, labels,
@@ -79,70 +172,126 @@ class ReceiptImageBuilder {
         businessPhone: businessPhone,
         businessAddress: businessAddress);
 
-    final contentWidth = _paperDots - _hPad * 2;
+    final s = scale.clamp(1, 4);
+    final dotW = _paperDots * s; // painting width (downsized to _paperDots later)
+    final contentWidth = dotW - _hPad * s * 2;
     final laid = <_LaidOut>[];
     // Extra top leading so the print head doesn't clip the first line.
-    double y = _hPad + 12;
+    double y = (_hPad + 6) * s;
     for (final row in rows) {
       if (row.kind == _RowKind.divider) {
         // Dividers are drawn as a solid rule, not a paragraph.
         laid.add(_LaidOut(null, y, row));
-        y += _dividerHeight;
+        y += _dividerHeight * s;
         continue;
       }
-      final p = row.layout(contentWidth, labels.languageCode);
+      // Item rows are painted as aligned column paragraphs; everything else as
+      // a single paragraph.
+      if (row.kind == _RowKind.itemRow) {
+        final effSize = row.fontSize * fontScale * s;
+        final effW = boldBoost && row.weight.index < FontWeight.w700.index
+            ? FontWeight.w700
+            : row.weight;
+        final cols = row.buildItemColumns(
+            contentWidth, _Row._family(labels.languageCode), effSize, effW,
+            _hPad * s);
+        laid.add(_LaidOut(null, y, row, columns: cols));
+        y += effSize * 1.35 + _lineGap * s;
+        continue;
+      }
+      final p = row.layout(contentWidth, labels.languageCode,
+          boldBoost: boldBoost, fontScale: fontScale * s);
       laid.add(_LaidOut(p, y, row));
-      // Advance by a GUARANTEED fixed pitch (not the measured paragraph
-      // height, which under-reports for Devanagari and let lines overprint).
-      // Two-line rows (wrapped) get a second slot.
-      final measured = p.height;
-      final oneLine = row.fontSize * 1.55 + _lineGap;
-      y += measured > oneLine ? measured + _lineGap : oneLine;
+      // Fixed pitch per LINE, derived from the font size (not p.height, whose
+      // built-in Devanagari line-height inflates every row and bloats the
+      // receipt). One-line pitch = fontSize*1.35 + gap. Only genuinely wrapped
+      // paragraphs (p.height ≳ 1.8 lines) get a second slot.
+      final onePx = row.fontSize * fontScale * 1.35 * s;
+      final lines = p.height > onePx * 1.8 ? 2 : 1;
+      y += onePx * lines + _lineGap * s;
     }
-    final totalHeight = (y + _hPad).ceil();
+    final paintedHeight = (y + _hPad * s).ceil();
 
     // Second pass: paint onto a white canvas.
     final recorder = ui.PictureRecorder();
     final canvas = ui.Canvas(recorder);
     canvas.drawRect(
-      Rect.fromLTWH(0, 0, _paperDots.toDouble(), totalHeight.toDouble()),
+      Rect.fromLTWH(0, 0, dotW.toDouble(), paintedHeight.toDouble()),
       Paint()..color = const Color(0xFFFFFFFF),
     );
     final rulePaint = Paint()
       ..color = const Color(0xFF000000)
-      ..strokeWidth = 2;
+      ..strokeWidth = (2 * s).toDouble();
     for (final lo in laid) {
-      if (lo.paragraph == null) {
-        // Solid divider line centred in its reserved band.
-        final ry = lo.y + _dividerHeight / 2;
+      if (lo.columns != null) {
+        // Item row: each column paragraph is pre-positioned at its absolute x.
+        for (final col in lo.columns!) {
+          canvas.drawParagraph(col.paragraph, Offset(col.x, lo.y));
+        }
+      } else if (lo.paragraph == null) {
+        final ry = lo.y + _dividerHeight * s / 2;
         canvas.drawLine(
-          Offset(_hPad, ry),
-          Offset(_paperDots - _hPad, ry),
+          Offset(_hPad * s, ry),
+          Offset(dotW - _hPad * s, ry),
           rulePaint,
         );
       } else {
-        canvas.drawParagraph(lo.paragraph!, Offset(_hPad, lo.y));
+        canvas.drawParagraph(lo.paragraph!, Offset(_hPad * s, lo.y));
       }
     }
     final picture = recorder.endRecording();
-    final uiImage = await picture.toImage(_paperDots, totalHeight);
+    final uiImage = await picture.toImage(dotW, paintedHeight);
     final byteData =
         await uiImage.toByteData(format: ui.ImageByteFormat.rawRgba);
     picture.dispose();
     uiImage.dispose();
 
-    // Convert RGBA → grayscale → the image package's Image, then threshold to
-    // pure black/white so the thermal head prints crisp text.
+    // Build a grayscale image at painted size, downscale to head width if we
+    // supersampled, then convert to 1-bit via threshold or dithering.
     final rgba = byteData!.buffer.asUint8List();
-    final out = img.Image(width: _paperDots, height: totalHeight);
-    for (int py = 0; py < totalHeight; py++) {
-      for (int px = 0; px < _paperDots; px++) {
-        final i = (py * _paperDots + px) * 4;
-        final r = rgba[i], g = rgba[i + 1], b = rgba[i + 2];
-        // Luminance; anything darker than mid-gray becomes black.
-        final lum = (0.299 * r + 0.587 * g + 0.114 * b);
-        final v = lum < 160 ? 0 : 255;
-        out.setPixelRgb(px, py, v, v, v);
+    var gray = img.Image(width: dotW, height: paintedHeight);
+    for (int py = 0; py < paintedHeight; py++) {
+      for (int px = 0; px < dotW; px++) {
+        final i = (py * dotW + px) * 4;
+        final lum =
+            (0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2])
+                .round();
+        gray.setPixelRgb(px, py, lum, lum, lum);
+      }
+    }
+    if (s > 1) {
+      gray = img.copyResize(gray,
+          width: _paperDots,
+          interpolation: img.Interpolation.average);
+    }
+
+    final w = gray.width, h = gray.height;
+    final out = img.Image(width: w, height: h);
+    if (dither) {
+      // Floyd–Steinberg error diffusion for smoother glyph edges.
+      final err = List<double>.filled(w * h, 0);
+      for (int py = 0; py < h; py++) {
+        for (int px = 0; px < w; px++) {
+          final p = gray.getPixel(px, py);
+          final old = p.r.toDouble() + err[py * w + px];
+          final nv = old < 128 ? 0 : 255;
+          out.setPixelRgb(px, py, nv, nv, nv);
+          final e = old - nv;
+          if (px + 1 < w) err[py * w + px + 1] += e * 7 / 16;
+          if (py + 1 < h) {
+            if (px > 0) err[(py + 1) * w + px - 1] += e * 3 / 16;
+            err[(py + 1) * w + px] += e * 5 / 16;
+            if (px + 1 < w) err[(py + 1) * w + px + 1] += e * 1 / 16;
+          }
+        }
+      }
+    } else {
+      for (int py = 0; py < h; py++) {
+        for (int px = 0; px < w; px++) {
+          final lum = gray.getPixel(px, py).r;
+          final v = lum < threshold ? 0 : 255;
+          out.setPixelRgb(px, py, v, v, v);
+        }
       }
     }
     return out;
@@ -274,22 +423,28 @@ class _Row {
   static String? _family(String lang) =>
       lang == 'mr' ? 'Noto Sans Devanagari' : null;
 
-  ui.Paragraph layout(double width, String lang) {
+  static FontWeight _bump(FontWeight w) =>
+      w.index >= FontWeight.w700.index ? FontWeight.w900 : FontWeight.w700;
+
+  ui.Paragraph layout(double width, String lang,
+      {bool boldBoost = false, double fontScale = 1.0}) {
     final family = _family(lang);
+    final size = fontSize * fontScale;
+    final w = boldBoost ? _bump(weight) : weight;
     switch (kind) {
       case _RowKind.divider:
         // Dividers are painted as a drawn line by the builder; this branch
         // isn't reached, but the switch must be exhaustive.
-        return _simple('', ReceiptImageBuilder._smallFont, FontWeight.w400,
-            ui.TextAlign.left, width, family);
+        return _simple('', size, FontWeight.w400, ui.TextAlign.left, width,
+            family);
       case _RowKind.centered:
-        return _simple(a, fontSize, weight, ui.TextAlign.center, width, family);
+        return _simple(a, size, w, ui.TextAlign.center, width, family);
       case _RowKind.left:
-        return _simple(a, fontSize, weight, ui.TextAlign.left, width, family);
+        return _simple(a, size, w, ui.TextAlign.left, width, family);
       case _RowKind.twoCol:
-        return _twoColumns(a, b, width, family);
+        return _twoColumns(a, b, width, family, size, w);
       case _RowKind.itemRow:
-        return _fourColumns(a, b, c, d, width, family);
+        return _fourColumns(a, b, c, d, width, family, size, w);
     }
   }
 
@@ -310,21 +465,17 @@ class _Row {
 
   /// Label left, value right-aligned, on one line.
   ui.Paragraph _twoColumns(String label, String value, double width,
-      String? family) {
+      String? family, double size, FontWeight w) {
     final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
-      fontSize: fontSize,
-      fontWeight: weight,
+      fontSize: size,
+      fontWeight: w,
       fontFamily: family,
       maxLines: 1,
       ellipsis: '…',
     ))
       ..pushStyle(ui.TextStyle(color: const Color(0xFF000000)));
-    // Use a tab-like layout via placeholder-free spacing: two runs separated by
-    // an expanding gap isn't supported directly, so right-align the value with
-    // a full-width paragraph and let alignment place each piece.
     builder.addText(label);
-    // Pad with spaces to push value right — measured cheaply below.
-    final gap = _computeGap(label, value, width, fontSize, weight, family);
+    final gap = _computeGap(label, value, width, size, w, family);
     builder.addText(gap);
     builder.addText(value);
     return builder.build()..layout(ui.ParagraphConstraints(width: width));
@@ -333,12 +484,10 @@ class _Row {
   /// Item(60%) Qty(10%) Price(15%) Total(15%) using space padding.
   ui.Paragraph _fourColumns(
       String name, String qty, String price, String total,
-      double width, String? family) {
-    // Columns are measured in dots; build one string with computed gaps so the
-    // numeric columns line up regardless of script width.
+      double width, String? family, double size, FontWeight w) {
     final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
-      fontSize: fontSize,
-      fontWeight: weight,
+      fontSize: size,
+      fontWeight: w,
       fontFamily: family,
       maxLines: 1,
       ellipsis: '…',
@@ -348,14 +497,11 @@ class _Row {
     final nameW = width * 0.52;
     final qtyW = width * 0.12;
     final priceW = width * 0.18;
-    // Name left-truncated to its column, then right-aligned numeric columns via
-    // padded runs. We approximate with a single line and tab stops emulated by
-    // padding spaces computed from measured widths.
     final line = _composeColumns(
       [name, qty, price, total],
       [nameW, qtyW, priceW, width - nameW - qtyW - priceW],
-      fontSize,
-      weight,
+      size,
+      w,
       family,
     );
     builder.addText(line);
@@ -389,7 +535,52 @@ class _Row {
     return ' ' * count;
   }
 
+  /// Build the item row as 4 separately-positioned paragraphs so columns align
+  /// exactly regardless of the (proportional, Devanagari) font — the reliable
+  /// alternative to space-padding, which drifts and looks garbled on thermal.
+  /// [contentWidth] is the drawable width; [dx] is the left margin already
+  /// applied by the caller (so returned x offsets are absolute on the canvas).
+  List<_Col> buildItemColumns(double contentWidth, String? family, double size,
+      FontWeight w, double dx) {
+    final nameW = contentWidth * 0.50;
+    final qtyW = contentWidth * 0.14;
+    final priceW = contentWidth * 0.18;
+    final totalW = contentWidth - nameW - qtyW - priceW;
+    final xs = [
+      dx, // name
+      dx + nameW, // qty box
+      dx + nameW + qtyW, // price box
+      dx + nameW + qtyW + priceW, // total box
+    ];
+    final ws = [nameW, qtyW, priceW, totalW];
+    final aligns = [
+      ui.TextAlign.left,
+      ui.TextAlign.right,
+      ui.TextAlign.right,
+      ui.TextAlign.right,
+    ];
+    final cells = [a, b, c, d];
+    final cols = <_Col>[];
+    for (int i = 0; i < 4; i++) {
+      final p = (ui.ParagraphBuilder(ui.ParagraphStyle(
+        fontSize: size,
+        fontWeight: w,
+        fontFamily: i == 0 ? family : null, // numbers are ASCII → default font
+        maxLines: 1,
+        ellipsis: i == 0 ? '…' : null,
+        textAlign: aligns[i],
+      ))
+            ..pushStyle(ui.TextStyle(color: const Color(0xFF000000)))
+            ..addText(cells[i]))
+          .build()
+        ..layout(ui.ParagraphConstraints(width: ws[i]));
+      cols.add(_Col(p, xs[i]));
+    }
+    return cols;
+  }
+
   /// Right-align each numeric column inside its box by left-padding with spaces.
+  // ignore: unused_element
   String _composeColumns(List<String> cells, List<double> widths, double size,
       FontWeight w, String? family) {
     final sw = _spaceWidth(size, w, family);
@@ -424,9 +615,18 @@ class _Row {
 }
 
 class _LaidOut {
-  /// Null for divider rows, which are drawn as a line rather than text.
+  /// Null for divider rows (drawn as a line) and for column rows (which use
+  /// [columns] instead — each a paragraph pre-positioned at an absolute x).
   final ui.Paragraph? paragraph;
   final double y;
   final _Row row;
-  _LaidOut(this.paragraph, this.y, this.row);
+  final List<_Col>? columns;
+  _LaidOut(this.paragraph, this.y, this.row, {this.columns});
+}
+
+/// A single positioned column paragraph within an item row.
+class _Col {
+  final ui.Paragraph paragraph;
+  final double x; // absolute left offset in dots
+  _Col(this.paragraph, this.x);
 }

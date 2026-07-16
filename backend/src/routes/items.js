@@ -13,6 +13,36 @@ function ownerOnly(req, res, next) {
   next();
 }
 
+// Attach active variants to a list of item rows (mutates rows in place).
+// Each item gets a `variants` array (empty when none). One round-trip.
+async function attachVariants(businessId, itemRows) {
+  if (itemRows.length === 0) return itemRows;
+  const ids = itemRows.map((r) => r.id);
+  const request = pool.request().input('business_id', sql.UniqueIdentifier, businessId);
+  const params = ids.map((id, i) => {
+    request.input(`v${i}`, sql.UniqueIdentifier, id);
+    return `@v${i}`;
+  });
+  const result = await request.query(`
+    SELECT v.id, v.item_id, v.label, v.price, v.barcode,
+           v.stock_quantity, v.low_stock_threshold, v.sort_order, v.is_active
+    FROM item_variants v
+    JOIN items i ON i.id = v.item_id
+    WHERE i.business_id = @business_id
+      AND v.item_id IN (${params.join(', ')})
+      AND v.is_active = 1
+    ORDER BY v.sort_order ASC, v.label ASC
+  `);
+  const byItem = {};
+  for (const v of result.recordset) {
+    (byItem[v.item_id] = byItem[v.item_id] || []).push(v);
+  }
+  for (const row of itemRows) {
+    row.variants = byItem[row.id] || [];
+  }
+  return itemRows;
+}
+
 // GET /api/items/top-sold — must be before /:id to avoid being caught by it
 // Returns item_ids ordered by total quantity sold (finalized bills only)
 router.get('/top-sold', requireAuth, async (req, res) => {
@@ -89,7 +119,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, is_active, created_at
+      SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, unit, is_active, created_at
       FROM items
       WHERE ${where}
       ORDER BY name ASC
@@ -100,9 +130,11 @@ router.get('/', requireAuth, async (req, res) => {
       if (result.recordset.length === 0) {
         return res.status(404).json({ error: 'Item not found' });
       }
+      await attachVariants(req.user.business_id, result.recordset);
       return res.json(result.recordset[0]);
     }
 
+    await attachVariants(req.user.business_id, result.recordset);
     return res.json(result.recordset);
   } catch (err) {
     logger.error({ err }, 'Get items error');
@@ -118,7 +150,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, is_active, created_at
+        SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, unit, is_active, created_at
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -126,6 +158,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: 'Item not found' });
     }
+    await attachVariants(req.user.business_id, result.recordset);
     return res.json(result.recordset[0]);
   } catch (err) {
     logger.error({ err }, 'Get item error');
@@ -135,7 +168,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 
 // POST /api/items
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
-  const { name, barcode, category, price, tax_rate, stock_quantity } = req.body;
+  const { name, barcode, category, price, tax_rate, stock_quantity, unit } = req.body;
 
   if (!name || price === undefined || price === null) {
     return res.status(400).json({ error: 'name and price are required' });
@@ -154,11 +187,12 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('price', sql.Decimal(10, 2), parseFloat(price))
       .input('tax_rate', sql.Decimal(5, 2), tax_rate != null ? parseFloat(tax_rate) : null)
       .input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null)
+      .input('unit', sql.NVarChar(20), unit || 'piece')
       .query(`
-        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold)
+        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, stock_quantity, unit, low_stock_threshold)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
-               INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @stock_quantity, 50)
+               INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
+        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @stock_quantity, @unit, 50)
       `);
 
     const created = result.recordset[0];
@@ -177,9 +211,9 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
 // PUT /api/items/:id
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
-  const { name, barcode, category, price, tax_rate, stock_quantity } = req.body;
+  const { name, barcode, category, price, tax_rate, stock_quantity, unit } = req.body;
 
-  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && stock_quantity === undefined) {
+  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && stock_quantity === undefined && unit === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   if (price !== undefined && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
@@ -228,11 +262,15 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       sets.push('stock_quantity = @stock_quantity');
       request.input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null);
     }
+    if (unit !== undefined) {
+      sets.push('unit = @unit');
+      request.input('unit', sql.NVarChar(20), unit || 'piece');
+    }
     const result = await request.query(`
       UPDATE items
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
-             INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.is_active, INSERTED.created_at
+             INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);
 
@@ -282,6 +320,151 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
   } catch (err) {
     logger.error({ err }, 'Delete item error');
     return res.status(500).json({ error: 'Failed to delete item' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Variants — sizes (S/M/L/XL) with independent stock, nested under an item.
+// ---------------------------------------------------------------------------
+
+// Verify the parent item exists and belongs to the caller's business.
+async function loadOwnedItem(itemId, businessId) {
+  const result = await pool.request()
+    .input('id', sql.UniqueIdentifier, itemId)
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .query('SELECT id FROM items WHERE id = @id AND business_id = @business_id AND is_active = 1');
+  return result.recordset.length > 0;
+}
+
+const VARIANT_OUTPUT =
+  'INSERTED.id, INSERTED.item_id, INSERTED.label, INSERTED.price, INSERTED.barcode, ' +
+  'INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.sort_order, INSERTED.is_active';
+
+// POST /api/items/:id/variants
+router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
+  const { label, price, barcode, stock_quantity, low_stock_threshold, sort_order } = req.body;
+
+  if (!label || !String(label).trim()) {
+    return res.status(400).json({ error: 'label is required' });
+  }
+  if (price !== undefined && price !== null && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
+    return res.status(400).json({ error: 'price must be a non-negative number' });
+  }
+
+  try {
+    await poolConnect;
+    if (!(await loadOwnedItem(req.params.id, req.user.business_id))) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    const result = await pool.request()
+      .input('item_id', sql.UniqueIdentifier, req.params.id)
+      .input('label', sql.NVarChar(50), String(label).trim())
+      .input('price', sql.Decimal(10, 2), price != null ? parseFloat(price) : null)
+      .input('barcode', sql.NVarChar(100), barcode || null)
+      .input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null)
+      .input('low_stock_threshold', sql.Decimal(10, 2), low_stock_threshold != null ? parseFloat(low_stock_threshold) : null)
+      .input('sort_order', sql.Int, sort_order != null ? parseInt(sort_order, 10) : 0)
+      .query(`
+        INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, sort_order)
+        OUTPUT ${VARIANT_OUTPUT}
+        VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @sort_order)
+      `);
+
+    // Once an item has sizes, its own stock is meaningless — stock is tracked
+    // per size. Null the parent's stock so it is never considered or alerted on.
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.id)
+      .query('UPDATE items SET stock_quantity = NULL, low_stock_threshold = NULL WHERE id = @id');
+
+    return res.status(201).json(result.recordset[0]);
+  } catch (err) {
+    logger.error({ err }, 'Create variant error');
+    return res.status(500).json({ error: 'Failed to create variant' });
+  }
+});
+
+// PUT /api/items/:id/variants/:variantId
+router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) => {
+  const { label, price, barcode, stock_quantity, low_stock_threshold, sort_order } = req.body;
+
+  if (label === undefined && price === undefined && barcode === undefined &&
+      stock_quantity === undefined && low_stock_threshold === undefined && sort_order === undefined) {
+    return res.status(400).json({ error: 'Provide at least one field to update' });
+  }
+
+  try {
+    await poolConnect;
+    if (!(await loadOwnedItem(req.params.id, req.user.business_id))) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    const sets = [];
+    const request = pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.variantId)
+      .input('item_id', sql.UniqueIdentifier, req.params.id);
+
+    if (label !== undefined) {
+      sets.push('label = @label');
+      request.input('label', sql.NVarChar(50), String(label).trim());
+    }
+    if (price !== undefined) {
+      sets.push('price = @price');
+      request.input('price', sql.Decimal(10, 2), price != null ? parseFloat(price) : null);
+    }
+    if (barcode !== undefined) {
+      sets.push('barcode = @barcode');
+      request.input('barcode', sql.NVarChar(100), barcode || null);
+    }
+    if (stock_quantity !== undefined) {
+      sets.push('stock_quantity = @stock_quantity');
+      request.input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null);
+    }
+    if (low_stock_threshold !== undefined) {
+      sets.push('low_stock_threshold = @low_stock_threshold');
+      request.input('low_stock_threshold', sql.Decimal(10, 2), low_stock_threshold != null ? parseFloat(low_stock_threshold) : null);
+    }
+    if (sort_order !== undefined) {
+      sets.push('sort_order = @sort_order');
+      request.input('sort_order', sql.Int, sort_order != null ? parseInt(sort_order, 10) : 0);
+    }
+
+    const result = await request.query(`
+      UPDATE item_variants
+      SET ${sets.join(', ')}
+      OUTPUT ${VARIANT_OUTPUT}
+      WHERE id = @id AND item_id = @item_id
+    `);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ error: 'Variant not found' });
+    }
+    return res.json(result.recordset[0]);
+  } catch (err) {
+    logger.error({ err }, 'Update variant error');
+    return res.status(500).json({ error: 'Failed to update variant' });
+  }
+});
+
+// DELETE /api/items/:id/variants/:variantId — soft delete
+router.delete('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) => {
+  try {
+    await poolConnect;
+    if (!(await loadOwnedItem(req.params.id, req.user.business_id))) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    const result = await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.variantId)
+      .input('item_id', sql.UniqueIdentifier, req.params.id)
+      .query('UPDATE item_variants SET is_active = 0 WHERE id = @id AND item_id = @item_id');
+
+    if (result.rowsAffected[0] === 0) {
+      return res.status(404).json({ error: 'Variant not found' });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Delete variant error');
+    return res.status(500).json({ error: 'Failed to delete variant' });
   }
 });
 

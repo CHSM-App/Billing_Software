@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Allow cleartext (HTTP) traffic ONLY to local development hosts. Production
+  traffic to vittam.vengurlatech.com still requires HTTPS. Add/adjust the
+  local IP below to match your dev machine's LAN address in api.dart.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>       <!-- Android emulator -> host localhost -->
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">192.168.1.6</domain>    <!-- dev machine LAN IP (see api.dart) -->
+    </domain-config>
+</network-security-config>

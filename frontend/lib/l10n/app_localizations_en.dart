@@ -634,6 +634,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingWhatsappFailed => 'Could not send WhatsApp message';
 
   @override
+  String billingChooseSize(String name) {
+    return 'Choose size — $name';
+  }
+
+  @override
+  String get billingOutOfStock => 'Out of stock';
+
+  @override
   String get billingInsufficientStock => 'Insufficient Stock';
 
   @override
@@ -806,6 +814,70 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsFieldStock => 'Stock quantity';
+
+  @override
+  String get itemsFieldUnit => 'Unit';
+
+  @override
+  String get itemsUnitPiece => 'Piece';
+
+  @override
+  String get itemsUnitKg => 'Kilogram (kg)';
+
+  @override
+  String get itemsUnitGram => 'Gram (g)';
+
+  @override
+  String get itemsUnitLitre => 'Litre (L)';
+
+  @override
+  String get itemsUnitMl => 'Millilitre (ml)';
+
+  @override
+  String get itemsUnitMetre => 'Metre (m)';
+
+  @override
+  String get itemsUnitDozen => 'Dozen';
+
+  @override
+  String get itemsUnitPlate => 'Plate';
+
+  @override
+  String get itemsManageSizes => 'Add sizes / variants';
+
+  @override
+  String itemsManageSizesCount(int count) {
+    return 'Manage sizes ($count)';
+  }
+
+  @override
+  String itemsSizesTitle(String name) {
+    return 'Sizes — $name';
+  }
+
+  @override
+  String get itemsSizeLabel => 'Size label (e.g. XL)';
+
+  @override
+  String get itemsSizePrice => 'Price (blank = item price)';
+
+  @override
+  String get itemsSizeStock => 'Stock';
+
+  @override
+  String get itemsAddSize => 'Add size';
+
+  @override
+  String get itemsNoSizesYet => 'No sizes yet. Add one below.';
+
+  @override
+  String get itemsStockPerSizeHint =>
+      'Stock is tracked per size. Tap the item to update each size\'s stock.';
+
+  @override
+  String itemsSizeDeleteConfirm(String label) {
+    return 'Remove size \"$label\"?';
+  }
 
   @override
   String itemsStockLabel(String qty) {

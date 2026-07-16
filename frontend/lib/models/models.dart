@@ -1,3 +1,14 @@
+/// Formats a quantity for display: whole numbers show without a decimal
+/// (`2`), fractional weights show up to three trimmed decimals (`1.5`,
+/// `0.25`). Used for cart rows, receipts, and history.
+String formatQty(double qty) {
+  if (qty % 1 == 0) return qty.toInt().toString();
+  return qty
+      .toStringAsFixed(3)
+      .replaceAll(RegExp(r'0+$'), '')
+      .replaceAll(RegExp(r'\.$'), '');
+}
+
 class User {
   final String id;
   final String name;
@@ -41,6 +52,51 @@ class Business {
       );
 }
 
+/// A sellable variant of an item (e.g. a size S/M/L/XL) with its own stock and
+/// optional price. When [price] is null the parent item's price applies.
+class ItemVariant {
+  final String id;
+  final String itemId;
+  final String label;
+  final double? price;
+  final String? barcode;
+  final double? stockQuantity;
+  final double? lowStockThreshold;
+  final int sortOrder;
+  final bool isActive;
+
+  ItemVariant({
+    required this.id,
+    required this.itemId,
+    required this.label,
+    this.price,
+    this.barcode,
+    this.stockQuantity,
+    this.lowStockThreshold,
+    this.sortOrder = 0,
+    this.isActive = true,
+  });
+
+  factory ItemVariant.fromJson(Map<String, dynamic> j) => ItemVariant(
+        id: j['id'],
+        itemId: j['item_id'],
+        label: j['label'],
+        price: j['price'] != null ? double.parse(j['price'].toString()) : null,
+        barcode: j['barcode'],
+        stockQuantity: j['stock_quantity'] != null
+            ? double.parse(j['stock_quantity'].toString())
+            : null,
+        lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
+        sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
+        isActive: j['is_active'] == true || j['is_active'] == 1,
+      );
+
+  bool get isLowStock =>
+      stockQuantity != null &&
+      lowStockThreshold != null &&
+      stockQuantity! <= lowStockThreshold!;
+}
+
 class Item {
   final String id;
   final String businessId;
@@ -51,6 +107,8 @@ class Item {
   final double? taxRate;
   final double? stockQuantity;
   final double? lowStockThreshold;
+  final String unit;
+  final List<ItemVariant> variants;
   final bool isActive;
 
   Item({
@@ -63,6 +121,8 @@ class Item {
     this.taxRate,
     this.stockQuantity,
     this.lowStockThreshold,
+    this.unit = 'piece',
+    this.variants = const [],
     required this.isActive,
   });
 
@@ -76,8 +136,19 @@ class Item {
         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
         stockQuantity: j['stock_quantity'] != null ? double.parse(j['stock_quantity'].toString()) : null,
         lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
+        unit: (j['unit'] as String?) ?? 'piece',
+        variants: (j['variants'] as List? ?? [])
+            .map((v) => ItemVariant.fromJson(v))
+            .toList(),
         isActive: j['is_active'] == true || j['is_active'] == 1,
       );
+
+  /// Whether this item is sold by a divisible measure (kg, g, litre, ...)
+  /// rather than as whole pieces. Drives decimal-quantity entry in the cart.
+  bool get isMeasured => unit != 'piece';
+
+  /// Whether the cashier must pick a size before this item can be added.
+  bool get hasVariants => variants.isNotEmpty;
 
   bool get isLowStock =>
       stockQuantity != null &&
@@ -89,6 +160,7 @@ class BillItem {
   final String id;
   final String billId;
   final String? itemId;
+  final String? variantId;
   final String itemName;
   final double quantity;
   final double unitPrice;
@@ -99,6 +171,7 @@ class BillItem {
     required this.id,
     required this.billId,
     this.itemId,
+    this.variantId,
     required this.itemName,
     required this.quantity,
     required this.unitPrice,
@@ -110,6 +183,7 @@ class BillItem {
         id: j['id'],
         billId: j['bill_id'],
         itemId: j['item_id'],
+        variantId: j['variant_id'],
         itemName: j['item_name'],
         quantity: double.parse(j['quantity'].toString()),
         unitPrice: double.parse(j['unit_price'].toString()),
