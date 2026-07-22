@@ -37,6 +37,11 @@ void main() async {
   runApp(const ProviderScope(child: BillingApp()));
 }
 
+/// App-wide messenger key so background tasks can surface a SnackBar even after
+/// the originating screen has been popped (e.g. optimistic draft-save failures).
+final GlobalKey<ScaffoldMessengerState> rootMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
 class BillingApp extends ConsumerWidget {
   const BillingApp({super.key});
 
@@ -46,6 +51,7 @@ class BillingApp extends ConsumerWidget {
 
     return MaterialApp(
       title: 'Vittam',
+      scaffoldMessengerKey: rootMessengerKey,
       debugShowCheckedModeBanner: false,
       // Rebuilt on language change — Marathi swaps the type scale to a
       // Devanagari-capable font.

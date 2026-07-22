@@ -40,6 +40,14 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
   // for cheap 58mm BT printers) and slow chunking. The old GS v 0 variants are
   // kept lower down for comparison.
   late final List<_Approach> _approaches = [
+    _Approach('0a. MANGAL font (bold)',
+        'Mangal Devanagari, ESC * single density + bold. Compare vs Noto.',
+        threshold: 150, bold: true, mode: _SendMode.escStarSingle,
+        slowSend: true, fontFamily: 'Mangal'),
+    _Approach('0b. MANGAL font (regular)',
+        'Mangal Devanagari, ESC * single density, no bold boost.',
+        threshold: 150, mode: _SendMode.escStarSingle, slowSend: true,
+        fontFamily: 'Mangal'),
     _Approach('1. ESC * bands (RECOMMENDED)',
         'ESC * 33 24-dot bands, sent slowly. Best path for 58mm BT printers.',
         threshold: 150, mode: _SendMode.escStar, slowSend: true),
@@ -106,6 +114,7 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
         boldBoost: a.bold,
         fontScale: a.fontScale,
         dither: a.dither,
+        fontFamilyOverride: a.fontFamily,
       );
 
   // Build the ESC/POS byte stream for an approach using its chosen send mode.
@@ -426,6 +435,9 @@ class _Approach {
   final _SendMode mode;
   final bool slowSend;
 
+  /// Devanagari font family override (null → default Noto Sans Devanagari).
+  final String? fontFamily;
+
   _Approach(
     this.title,
     this.description, {
@@ -436,5 +448,6 @@ class _Approach {
     this.dither = false,
     this.mode = _SendMode.raster,
     this.slowSend = false,
+    this.fontFamily,
   });
 }

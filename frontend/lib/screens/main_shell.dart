@@ -10,9 +10,7 @@ import '../widgets/bottom_nav_bar.dart';
 import 'home_screen.dart';
 import 'items_screen.dart';
 import 'tables_screen.dart';
-import 'history_screen.dart';
-import 'reports_screen.dart';
-import 'expenses_screen.dart';
+import 'kitchen_screen.dart';
 import 'settings_screen.dart';
 
 class MainShell extends ConsumerStatefulWidget {
@@ -51,6 +49,20 @@ class _MainShellState extends ConsumerState<MainShell>
 
   List<NavItem> _buildNavItems(String userRole, String businessType) {
     final l10n = context.l10n;
+    final isRestaurant = businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
+
+    // Kitchen chef only sees the Kitchen Display and Settings (for logout /
+    // language). No billing, items, reports or history.
+    if (userRole == 'kitchen') {
+      return [
+        NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu,
+            l10n.navKitchen, const KitchenScreen()),
+        NavItem(Icons.person_outline, Icons.person, l10n.navProfile,
+            const SettingsScreen()),
+      ];
+    }
+
     return [
       NavItem(Icons.receipt_long_outlined, Icons.receipt_long, l10n.navBilling,
           const HomeScreen()),
@@ -60,15 +72,12 @@ class _MainShellState extends ConsumerState<MainShell>
       if (businessType == 'restaurant_with_tables')
         NavItem(Icons.table_restaurant_outlined, Icons.table_restaurant,
             l10n.navTables, const TablesScreen()),
-      NavItem(Icons.history_outlined, Icons.history, l10n.navHistory,
-          const HistoryScreen()),
-      if (userRole == 'owner')
-        NavItem(Icons.bar_chart_outlined, Icons.bar_chart, l10n.navReports,
-            const ReportsScreen()),
-      if (userRole == 'owner')
-        NavItem(Icons.account_balance_wallet_outlined,
-            Icons.account_balance_wallet, l10n.navExpenses, const ExpensesScreen()),
-      NavItem(Icons.settings_outlined, Icons.settings, l10n.navSettings,
+      // Waiters and owners at a restaurant can watch the kitchen queue.
+      if (isRestaurant)
+        NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu,
+            l10n.navKitchen, const KitchenScreen()),
+      // History, Reports and Expenses moved into the Profile screen.
+      NavItem(Icons.person_outline, Icons.person, l10n.navProfile,
           const SettingsScreen()),
     ];
   }

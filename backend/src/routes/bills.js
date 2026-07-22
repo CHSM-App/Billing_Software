@@ -6,7 +6,7 @@ const logger = require('../logger');
 const audit = require('../audit');
 const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUtils');
 const { sendBillLink, normalisePhone } = require('../whatsapp');
-const { sendLowStockNotification } = require('../fcm');
+const { sendLowStockNotification, sendKitchenNotification } = require('../fcm');
 
 // Base URL used in receipt links — no trailing slash
 const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
@@ -160,7 +160,8 @@ async function fetchBill(billId, businessId) {
   const itemsResult = await pool.request()
     .input('bill_id', sql.UniqueIdentifier, billId)
     .query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total,
+             kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id = @bill_id
     `);
@@ -429,6 +430,30 @@ router.post('/', requireAuth, async (req, res) => {
 
       const created = await fetchBill(billId, req.user.business_id);
 
+      // Notify the kitchen when a new order (draft bill) is placed. Fire-and-forget;
+      // sendKitchenNotification is a no-op when no kitchen users/tokens exist.
+      if (billStatus === 'draft') {
+        (async () => {
+          try {
+            let tableLabel = created.customer_name || null;
+            if (created.table_id) {
+              const t = await pool.request()
+                .input('table_id', sql.UniqueIdentifier, created.table_id)
+                .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+                .query('SELECT table_number FROM tables WHERE id = @table_id AND business_id = @business_id');
+              if (t.recordset[0]) tableLabel = `Table ${t.recordset[0].table_number}`;
+            }
+            await sendKitchenNotification(pool, sql, req.user.business_id, {
+              tableLabel,
+              itemCount: lineItems.length,
+              isNew: true,
+            });
+          } catch (err) {
+            logger.error({ err }, '[FCM] kitchen new-order notification error');
+          }
+        })();
+      }
+
       // Audit — fire-and-forget after the transaction commits
       audit.logBillCreated(
         { user_id: req.user.user_id, user_name: req.user.name || null },
@@ -503,7 +528,8 @@ router.get('/', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total,
+             kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id IN (${billClause})
     `);
@@ -755,6 +781,29 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
     }
 
     const bill = await fetchBill(req.params.id, req.user.business_id);
+
+    // Notify the kitchen that dishes were added to an existing order.
+    if (bill && bill.status === 'draft' && addedLineItems.length > 0) {
+      (async () => {
+        try {
+          let tableLabel = bill.customer_name || null;
+          if (bill.table_id) {
+            const t = await pool.request()
+              .input('table_id', sql.UniqueIdentifier, bill.table_id)
+              .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+              .query('SELECT table_number FROM tables WHERE id = @table_id AND business_id = @business_id');
+            if (t.recordset[0]) tableLabel = `Table ${t.recordset[0].table_number}`;
+          }
+          await sendKitchenNotification(pool, sql, req.user.business_id, {
+            tableLabel,
+            itemCount: addedLineItems.length,
+            isNew: false,
+          });
+        } catch (err) {
+          logger.error({ err }, '[FCM] kitchen add-items notification error');
+        }
+      })();
+    }
 
     audit.logBillItemsAdded(
       { user_id: req.user.user_id, user_name: req.user.name || null },

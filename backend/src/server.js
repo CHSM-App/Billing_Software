@@ -161,6 +161,7 @@ app.use('/api/items', require('./routes/items'));
 app.use('/api/bills', require('./routes/bills'));
 app.use('/receipt',  require('./routes/receipt'));
 app.use('/api/tables', require('./routes/tables'));
+app.use('/api/kitchen', require('./routes/kitchen'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/expenses/recurring', require('./routes/recurring_expenses'));
 app.use('/api/expenses', require('./routes/expenses'));

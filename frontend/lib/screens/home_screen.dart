@@ -16,6 +16,7 @@ import '../services/receipt_labels.dart';
 import '../services/offline_service.dart';
 import '../services/sync_service.dart';
 import '../storage.dart';
+import '../main.dart' show rootMessengerKey;
 import 'login_screen.dart';
 
 extension _StringEx on String {
@@ -344,32 +345,56 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _showSnack(l10n.billingAddAtLeastOneItemFirst, isError: true);
       return;
     }
+    if (_savingDraft) return; // guard against a double-tap before we pop
     setState(() => _savingDraft = true);
-    try {
-      if (widget.activeBillId != null) {
-        await updateBillItems(widget.activeBillId!, _cartPayload);
-      } else {
-        await createBill({
-          'items': _cartPayload,
-          'table_id': widget.tableId,
-          'payment_mode': _paymentMode,
-          'status': 'draft',
-        });
-      }
-      if (!mounted) return;
-      _showSnack(l10n.billingDraftSaved);
-      if (widget.onBillDone != null) {
-        widget.onBillDone!();
-      } else {
-        Navigator.pop(context);
-      }
-    } on ApiException catch (e) {
-      _showSnack(e.message, isError: true);
-    } catch (_) {
-      _showSnack(l10n.billingSaveFailed, isError: true);
-    } finally {
-      if (mounted) setState(() => _savingDraft = false);
+
+    // Snapshot everything the network call needs before we close the screen.
+    final payload = _cartPayload;
+    final activeBillId = widget.activeBillId;
+    final tableId = widget.tableId;
+
+    // ── Optimistic UI ────────────────────────────────────────────────────────
+    // Flip the table to "occupied" locally and close the billing screen
+    // immediately. The actual API call runs in the background and the tables
+    // list reconciles with the server when it returns. This removes the
+    // save→close→refresh wait the user was seeing.
+    if (tableId != null) {
+      ref.read(tablesProvider.notifier).applyDraftSaved(
+            tableId,
+            billId: activeBillId,
+          );
     }
+    _showSnack(l10n.billingDraftSaved);
+    if (widget.onBillDone != null) {
+      widget.onBillDone!();
+    } else {
+      Navigator.pop(context);
+    }
+
+    // ── Background persistence + reconcile ───────────────────────────────────
+    unawaited(() async {
+      try {
+        if (activeBillId != null) {
+          await updateBillItems(activeBillId, payload);
+        } else {
+          await createBill({
+            'items': payload,
+            'table_id': tableId,
+            'payment_mode': _paymentMode,
+            'status': 'draft',
+          });
+        }
+        // Pull the authoritative table state + bill cache (fills in the real
+        // bill id for a brand-new draft). Silent — no spinner.
+        await ref.read(tablesProvider.notifier).refreshSilently();
+      } catch (e) {
+        // The save failed after we already closed the screen — undo the
+        // optimistic change by reloading the true server state and warn.
+        await ref.read(tablesProvider.notifier).refreshSilently();
+        final msg = e is ApiException ? e.message : l10n.billingSaveFailed;
+        _showGlobalSnack(msg, isError: true);
+      }
+    }());
   }
 
   Future<void> _generateBill({void Function(Bill)? onBillReady}) async {
@@ -706,6 +731,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ),
       backgroundColor:
           isError ? AppColors.error : const Color(0xFF0F172A),
+    ));
+  }
+
+  /// Like [_showSnack] but routed through the app-wide messenger, so it still
+  /// appears when this screen has already been popped (background save reconcile).
+  void _showGlobalSnack(String message, {bool isError = false}) {
+    rootMessengerKey.currentState?.showSnackBar(SnackBar(
+      content: Row(
+        children: [
+          Icon(
+            isError ? Icons.error_outline : Icons.check_circle_outline,
+            size: 16,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(message)),
+        ],
+      ),
+      backgroundColor: isError ? AppColors.error : const Color(0xFF0F172A),
     ));
   }
 

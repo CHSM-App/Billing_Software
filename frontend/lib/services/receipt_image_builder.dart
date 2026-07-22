@@ -24,11 +24,12 @@ class ReceiptImageBuilder {
   static const int _paperDots = 384;
 
   static const double _hPad = 6; // left/right margin in dots
-  // Compact sizing — keeps Marathi legible while using far less paper.
-  static const double _fontSize = 18; // header
-  static const double _smallFont = 16; // body / items
-  static const double _lineGap = 4; // vertical gap between rows
-  static const double _dividerHeight = 10; // reserved band for a rule
+  // Sizing tuned to mirror the printer's NATIVE text bill (English path): every
+  // row occupies one uniform line of [_linePitch] dots — no per-row gaps, no
+  // separate divider band — so Marathi prints as tight as the ASCII receipt.
+  static const double _fontSize = 20; // header
+  static const double _smallFont = 17; // body / items
+  static const double _linePitch = 26; // fixed dots per row (≈ native line)
 
   /// Builds the full ESC/POS byte stream for [bill].
   ///
@@ -87,6 +88,7 @@ class ReceiptImageBuilder {
     bool boldBoost = false,
     double fontScale = 1.0,
     bool dither = false,
+    String? fontFamilyOverride,
   }) {
     return _paintReceipt(
       bill,
@@ -99,6 +101,7 @@ class ReceiptImageBuilder {
       boldBoost: boldBoost,
       fontScale: fontScale,
       dither: dither,
+      fontFamilyOverride: fontFamilyOverride,
     );
   }
 
@@ -165,6 +168,7 @@ class ReceiptImageBuilder {
     bool boldBoost = false,
     double fontScale = 1.0,
     bool dither = false,
+    String? fontFamilyOverride,
   }) async {
     // First pass: lay out every paragraph to measure total height.
     final rows = _buildRows(bill, labels,
@@ -175,40 +179,41 @@ class ReceiptImageBuilder {
     final s = scale.clamp(1, 4);
     final dotW = _paperDots * s; // painting width (downsized to _paperDots later)
     final contentWidth = dotW - _hPad * s * 2;
+    // Devanagari font family: caller override (e.g. Mangal) or the default.
+    final family = fontFamilyOverride ?? _Row._family(labels.languageCode);
+
     final laid = <_LaidOut>[];
-    // Extra top leading so the print head doesn't clip the first line.
-    double y = (_hPad + 6) * s;
+    final pitch = _linePitch * s; // uniform dots per row
+    // Small top leading so the head doesn't clip the first line.
+    double y = (_hPad + 2) * s;
     for (final row in rows) {
       if (row.kind == _RowKind.divider) {
-        // Dividers are drawn as a solid rule, not a paragraph.
+        // Divider occupies exactly one line; the rule is centred in it.
         laid.add(_LaidOut(null, y, row));
-        y += _dividerHeight * s;
+        y += pitch;
         continue;
       }
       // Item rows are painted as aligned column paragraphs; everything else as
-      // a single paragraph.
+      // a single paragraph. Both advance by the SAME uniform line pitch, so the
+      // receipt has the tight, even rhythm of the native ASCII bill.
       if (row.kind == _RowKind.itemRow) {
         final effSize = row.fontSize * fontScale * s;
         final effW = boldBoost && row.weight.index < FontWeight.w700.index
             ? FontWeight.w700
             : row.weight;
         final cols = row.buildItemColumns(
-            contentWidth, _Row._family(labels.languageCode), effSize, effW,
-            _hPad * s);
+            contentWidth, family, effSize, effW, _hPad * s);
         laid.add(_LaidOut(null, y, row, columns: cols));
-        y += effSize * 1.35 + _lineGap * s;
+        y += pitch;
         continue;
       }
       final p = row.layout(contentWidth, labels.languageCode,
-          boldBoost: boldBoost, fontScale: fontScale * s);
+          boldBoost: boldBoost,
+          fontScale: fontScale * s,
+          familyOverride: fontFamilyOverride);
       laid.add(_LaidOut(p, y, row));
-      // Fixed pitch per LINE, derived from the font size (not p.height, whose
-      // built-in Devanagari line-height inflates every row and bloats the
-      // receipt). One-line pitch = fontSize*1.35 + gap. Only genuinely wrapped
-      // paragraphs (p.height ≳ 1.8 lines) get a second slot.
-      final onePx = row.fontSize * fontScale * 1.35 * s;
-      final lines = p.height > onePx * 1.8 ? 2 : 1;
-      y += onePx * lines + _lineGap * s;
+      // A wrapped 2-line paragraph (rare) needs a second line slot.
+      y += p.height > pitch * 1.7 ? pitch * 2 : pitch;
     }
     final paintedHeight = (y + _hPad * s).ceil();
 
@@ -222,21 +227,24 @@ class ReceiptImageBuilder {
     final rulePaint = Paint()
       ..color = const Color(0xFF000000)
       ..strokeWidth = (2 * s).toDouble();
+    // Small top inset so glyphs sit centred within the fixed line pitch.
+    final textDy = 2.0 * s;
     for (final lo in laid) {
       if (lo.columns != null) {
         // Item row: each column paragraph is pre-positioned at its absolute x.
         for (final col in lo.columns!) {
-          canvas.drawParagraph(col.paragraph, Offset(col.x, lo.y));
+          canvas.drawParagraph(col.paragraph, Offset(col.x, lo.y + textDy));
         }
       } else if (lo.paragraph == null) {
-        final ry = lo.y + _dividerHeight * s / 2;
+        // Centre the rule within the row's line height.
+        final ry = lo.y + _linePitch * s / 2;
         canvas.drawLine(
           Offset(_hPad * s, ry),
           Offset(dotW - _hPad * s, ry),
           rulePaint,
         );
       } else {
-        canvas.drawParagraph(lo.paragraph!, Offset(_hPad * s, lo.y));
+        canvas.drawParagraph(lo.paragraph!, Offset(_hPad * s, lo.y + textDy));
       }
     }
     final picture = recorder.endRecording();
@@ -427,8 +435,10 @@ class _Row {
       w.index >= FontWeight.w700.index ? FontWeight.w900 : FontWeight.w700;
 
   ui.Paragraph layout(double width, String lang,
-      {bool boldBoost = false, double fontScale = 1.0}) {
-    final family = _family(lang);
+      {bool boldBoost = false,
+      double fontScale = 1.0,
+      String? familyOverride}) {
+    final family = familyOverride ?? _family(lang);
     final size = fontSize * fontScale;
     final w = boldBoost ? _bump(weight) : weight;
     switch (kind) {

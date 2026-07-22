@@ -74,7 +74,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
               FadeTransition(opacity: animation, child: child),
         ),
       );
-      ref.invalidate(tablesProvider);
+      // Reconcile with the server in the background. The screen keeps its
+      // current (optimistically updated) list instead of flashing a spinner.
+      ref.read(tablesProvider.notifier).refreshSilently();
     }
   }
 

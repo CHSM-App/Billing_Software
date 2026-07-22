@@ -290,17 +290,101 @@ abstract class AppLocalizations {
   /// **'Expenses'**
   String get navExpenses;
 
+  /// No description provided for @navKitchen.
+  ///
+  /// In en, this message translates to:
+  /// **'Kitchen'**
+  String get navKitchen;
+
   /// No description provided for @navSettings.
   ///
   /// In en, this message translates to:
   /// **'Settings'**
   String get navSettings;
 
+  /// No description provided for @navProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile'**
+  String get navProfile;
+
+  /// No description provided for @kitchenTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Kitchen'**
+  String get kitchenTitle;
+
+  /// No description provided for @kitchenNoOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'No orders in the kitchen right now.'**
+  String get kitchenNoOrders;
+
+  /// No description provided for @kitchenReady.
+  ///
+  /// In en, this message translates to:
+  /// **'READY'**
+  String get kitchenReady;
+
+  /// No description provided for @kitchenTable.
+  ///
+  /// In en, this message translates to:
+  /// **'Table {number}'**
+  String kitchenTable(String number);
+
   /// No description provided for @settingsTitle.
   ///
   /// In en, this message translates to:
-  /// **'Settings'**
+  /// **'Profile'**
   String get settingsTitle;
+
+  /// No description provided for @settingsSectionActivity.
+  ///
+  /// In en, this message translates to:
+  /// **'ACTIVITY'**
+  String get settingsSectionActivity;
+
+  /// No description provided for @settingsSectionReports.
+  ///
+  /// In en, this message translates to:
+  /// **'REPORTS'**
+  String get settingsSectionReports;
+
+  /// No description provided for @settingsHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get settingsHistory;
+
+  /// No description provided for @settingsHistorySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'View past bills and transactions'**
+  String get settingsHistorySubtitle;
+
+  /// No description provided for @settingsReports.
+  ///
+  /// In en, this message translates to:
+  /// **'Reports'**
+  String get settingsReports;
+
+  /// No description provided for @settingsReportsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sales insights and summaries'**
+  String get settingsReportsSubtitle;
+
+  /// No description provided for @settingsExpenses.
+  ///
+  /// In en, this message translates to:
+  /// **'Expenses'**
+  String get settingsExpenses;
+
+  /// No description provided for @settingsExpensesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Track and manage expenses'**
+  String get settingsExpensesSubtitle;
 
   /// No description provided for @settingsSectionBusiness.
   ///
@@ -2401,6 +2485,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cashier'**
   String get staffRoleCashier;
+
+  /// No description provided for @staffRoleWaiter.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiter'**
+  String get staffRoleWaiter;
+
+  /// No description provided for @staffRoleKitchen.
+  ///
+  /// In en, this message translates to:
+  /// **'Kitchen Chef'**
+  String get staffRoleKitchen;
+
+  /// No description provided for @staffAddKitchen.
+  ///
+  /// In en, this message translates to:
+  /// **'Add Kitchen Chef'**
+  String get staffAddKitchen;
+
+  /// No description provided for @staffSectionWaiters.
+  ///
+  /// In en, this message translates to:
+  /// **'WAITERS & CASHIERS'**
+  String get staffSectionWaiters;
+
+  /// No description provided for @staffSectionKitchen.
+  ///
+  /// In en, this message translates to:
+  /// **'KITCHEN'**
+  String get staffSectionKitchen;
 
   /// No description provided for @staffDeleteTitle.
   ///

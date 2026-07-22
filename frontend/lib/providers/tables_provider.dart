@@ -47,6 +47,42 @@ class TablesNotifier extends AsyncNotifier<List<TableModel>> {
     state = await AsyncValue.guard(_fetch);
   }
 
+  /// Re-fetch tables in the background WITHOUT flipping to a loading spinner.
+  /// The current list stays on screen and is swapped for fresh data when it
+  /// arrives — used to reconcile after an optimistic update.
+  Future<void> refreshSilently() async {
+    try {
+      final tables = await _fetch();
+      state = AsyncData(tables);
+    } catch (_) {
+      // Keep the existing (optimistic) state on failure — a later refresh
+      // or reconnect will correct it.
+    }
+  }
+
+  /// Optimistically reflect a just-saved draft on a table: mark it occupied,
+  /// point it at the new bill and cache the bill so reopening is instant. Call
+  /// this the moment the save is issued so the UI updates without waiting for a
+  /// full tables refetch. Pass [bill] when the server response is available so
+  /// the cache is populated; the [billId] alone is enough to flip the status.
+  void applyDraftSaved(String tableId, {String? billId, Bill? bill}) {
+    final effectiveBillId = bill?.id ?? billId;
+    if (bill != null) _billCache[bill.id] = bill;
+    final current = state.valueOrNull ?? [];
+    state = AsyncData(current.map((t) {
+      if (t.id != tableId) return t;
+      return TableModel(
+        id: t.id,
+        businessId: t.businessId,
+        tableNumber: t.tableNumber,
+        floorX: t.floorX,
+        floorY: t.floorY,
+        status: 'occupied',
+        activeBillId: effectiveBillId ?? t.activeBillId,
+      );
+    }).toList());
+  }
+
   Future<void> addTable(Map<String, dynamic> data) async {
     final result = await api.createTable(data);
     final newTable = TableModel.fromJson(result);

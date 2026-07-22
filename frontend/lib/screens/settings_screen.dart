@@ -20,6 +20,9 @@ import 'printer_test_windows_screen.dart'
 import 'staff_screen.dart';
 import 'business_profile_screen.dart';
 import 'conflict_resolution_screen.dart';
+import 'history_screen.dart';
+import 'reports_screen.dart';
+import 'expenses_screen.dart';
 import '../services/offline_service.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -150,6 +153,57 @@ class _SettingsContentState extends State<_SettingsContent>
                     _buildProfileCard(context, session, isOwner),
                     const SizedBox(height: AppSpacing.space24),
 
+                    // Activity — History (all roles except kitchen chef).
+                    if (session.userRole != 'kitchen') ...[
+                      _sectionLabel(context, l10n.settingsSectionActivity),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.history_outlined,
+                        iconColor: const Color(0xFF64748B),
+                        title: l10n.settingsHistory,
+                        subtitle: l10n.settingsHistorySubtitle,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const HistoryScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.space24),
+                    ],
+
+                    // Reports & Expenses — owner only.
+                    if (isOwner) ...[
+                      _sectionLabel(context, l10n.settingsSectionReports),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.bar_chart_outlined,
+                        iconColor: const Color(0xFF16A34A),
+                        title: l10n.settingsReports,
+                        subtitle: l10n.settingsReportsSubtitle,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ReportsScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.account_balance_wallet_outlined,
+                        iconColor: const Color(0xFFEA580C),
+                        title: l10n.settingsExpenses,
+                        subtitle: l10n.settingsExpensesSubtitle,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ExpensesScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.space24),
+                    ],
+
                     if (isOwner) ...[
                       _sectionLabel(context, l10n.settingsSectionBusiness),
                       const SizedBox(height: AppSpacing.space8),
@@ -216,19 +270,19 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const PrinterSetupScreen()),
                         ),
                       ),
-                      // const SizedBox(height: AppSpacing.space8),
-                      // _buildNavCard(
-                      //   context,
-                      //   icon: Icons.translate_outlined,
-                      //   iconColor: AppColors.warning,
-                      //   title: 'Marathi Print Test',
-                      //   subtitle: 'Try different Marathi bill-printing methods',
-                      //   onTap: () => Navigator.push(
-                      //     context,
-                      //     MaterialPageRoute(
-                      //         builder: (_) => const MarathiPrintTestScreen()),
-                      //   ),
-                      // ),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.translate_outlined,
+                        iconColor: AppColors.warning,
+                        title: 'Marathi Print Test',
+                        subtitle: 'Try different Marathi bill-printing methods',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const MarathiPrintTestScreen()),
+                        ),
+                      ),
                     ],
                     // const SizedBox(height: AppSpacing.space8),
                     // _buildNavCard(

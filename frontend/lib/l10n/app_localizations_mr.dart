@@ -107,10 +107,55 @@ class AppLocalizationsMr extends AppLocalizations {
   String get navExpenses => 'खर्च';
 
   @override
+  String get navKitchen => 'किचन';
+
+  @override
   String get navSettings => 'सेटिंग्ज';
 
   @override
-  String get settingsTitle => 'सेटिंग्ज';
+  String get navProfile => 'प्रोफाइल';
+
+  @override
+  String get kitchenTitle => 'किचन';
+
+  @override
+  String get kitchenNoOrders => 'सध्या किचनमध्ये कोणतीही ऑर्डर नाही.';
+
+  @override
+  String get kitchenReady => 'तयार';
+
+  @override
+  String kitchenTable(String number) {
+    return 'टेबल $number';
+  }
+
+  @override
+  String get settingsTitle => 'प्रोफाइल';
+
+  @override
+  String get settingsSectionActivity => 'क्रियाकलाप';
+
+  @override
+  String get settingsSectionReports => 'अहवाल';
+
+  @override
+  String get settingsHistory => 'इतिहास';
+
+  @override
+  String get settingsHistorySubtitle => 'मागील बिले आणि व्यवहार पहा';
+
+  @override
+  String get settingsReports => 'अहवाल';
+
+  @override
+  String get settingsReportsSubtitle => 'विक्री माहिती आणि सारांश';
+
+  @override
+  String get settingsExpenses => 'खर्च';
+
+  @override
+  String get settingsExpensesSubtitle =>
+      'खर्चाचा मागोवा घ्या आणि व्यवस्थापित करा';
 
   @override
   String get settingsSectionBusiness => 'व्यवसाय';
@@ -1291,6 +1336,21 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get staffRoleCashier => 'कॅशियर';
+
+  @override
+  String get staffRoleWaiter => 'वेटर';
+
+  @override
+  String get staffRoleKitchen => 'किचन शेफ';
+
+  @override
+  String get staffAddKitchen => 'किचन शेफ जोडा';
+
+  @override
+  String get staffSectionWaiters => 'वेटर आणि कॅशियर';
+
+  @override
+  String get staffSectionKitchen => 'किचन';
 
   @override
   String get staffDeleteTitle => 'कर्मचारी काढायचा?';

@@ -14,12 +14,20 @@ function ownerOnly(req, res, next) {
   next();
 }
 
+// Staff roles this endpoint can create/manage. 'cashier' = waiter (order-taker),
+// 'kitchen' = kitchen chef (Kitchen Display). Owners are managed elsewhere.
+const MANAGED_ROLES = ['cashier', 'kitchen'];
+
 // POST /api/staff
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
-  const { name, phone, pin } = req.body;
+  const { name, phone, pin, role } = req.body;
+  const staffRole = role || 'cashier';
 
   if (!name || !phone || !pin) {
     return res.status(400).json({ error: 'name, phone, and pin are required' });
+  }
+  if (!MANAGED_ROLES.includes(staffRole)) {
+    return res.status(400).json({ error: `role must be one of: ${MANAGED_ROLES.join(', ')}` });
   }
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
@@ -37,10 +45,11 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('name', sql.NVarChar(200), name)
       .input('phone', sql.NVarChar(20), phone)
       .input('pin_hash', sql.NVarChar(255), pinHash)
+      .input('role', sql.NVarChar(20), staffRole)
       .query(`
         INSERT INTO users (business_id, name, phone, pin_hash, role)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.phone, INSERTED.role, INSERTED.created_at
-        VALUES (@business_id, @name, @phone, @pin_hash, 'cashier')
+        VALUES (@business_id, @name, @phone, @pin_hash, @role)
       `);
 
     const created = result.recordset[0];
@@ -66,7 +75,7 @@ router.get('/', requireAuth, ownerOnly, async (req, res) => {
       .query(`
         SELECT id, business_id, name, phone, role, created_at
         FROM users
-        WHERE business_id = @business_id AND role = 'cashier'
+        WHERE business_id = @business_id AND role IN ('cashier', 'kitchen')
         ORDER BY created_at ASC
       `);
 
@@ -86,7 +95,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
     const snapshot = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query('SELECT id, name, phone FROM users WHERE id = @id AND business_id = @business_id AND role = \'cashier\'');
+      .query('SELECT id, name, phone FROM users WHERE id = @id AND business_id = @business_id AND role IN (\'cashier\', \'kitchen\')');
 
     if (snapshot.recordset.length === 0) {
       return res.status(404).json({ error: 'Staff member not found' });
@@ -95,7 +104,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
     await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query('DELETE FROM users WHERE id = @id AND business_id = @business_id AND role = \'cashier\'');
+      .query('DELETE FROM users WHERE id = @id AND business_id = @business_id AND role IN (\'cashier\', \'kitchen\')');
 
     audit.logStaffDeleted(
       { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },
@@ -111,10 +120,13 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
 
 // PUT /api/staff/:id
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
-  const { name, phone, pin } = req.body;
+  const { name, phone, pin, role } = req.body;
 
-  if (!name && !phone && !pin) {
+  if (!name && !phone && !pin && !role) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
+  }
+  if (role && !MANAGED_ROLES.includes(role)) {
+    return res.status(400).json({ error: `role must be one of: ${MANAGED_ROLES.join(', ')}` });
   }
   if (pin && !/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
@@ -132,7 +144,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT id FROM users
-        WHERE id = @id AND business_id = @business_id AND role = 'cashier'
+        WHERE id = @id AND business_id = @business_id AND role IN ('cashier', 'kitchen')
       `);
 
     if (check.recordset.length === 0) {
@@ -158,12 +170,16 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       sets.push('pin_hash = @pin_hash');
       request.input('pin_hash', sql.NVarChar(255), pinHash);
     }
+    if (role) {
+      sets.push('role = @role');
+      request.input('role', sql.NVarChar(20), role);
+    }
 
     const result = await request.query(`
       UPDATE users
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.phone, INSERTED.role, INSERTED.created_at
-      WHERE id = @id AND business_id = @business_id AND role = 'cashier'
+      WHERE id = @id AND business_id = @business_id AND role IN ('cashier', 'kitchen')
     `);
 
     const updated = result.recordset[0];
@@ -173,6 +189,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     if (name)  changes.name  = name;
     if (phone) changes.phone = phone;
     if (pin)   changes.pin_changed = true;
+    if (role)  changes.role  = role;
 
     audit.logStaffUpdated(
       { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },

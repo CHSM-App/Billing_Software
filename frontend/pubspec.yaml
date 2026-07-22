@@ -52,6 +52,13 @@ flutter:
   assets:
     - assets/logo.png
 
+  fonts:
+    - family: Mangal
+      fonts:
+        - asset: assets/fonts/Mangal.ttf
+        - asset: assets/fonts/Mangal-Bold.ttf
+          weight: 700
+
 flutter_launcher_icons:
   android: true
   ios: true

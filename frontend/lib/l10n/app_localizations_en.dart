@@ -107,10 +107,54 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navExpenses => 'Expenses';
 
   @override
+  String get navKitchen => 'Kitchen';
+
+  @override
   String get navSettings => 'Settings';
 
   @override
-  String get settingsTitle => 'Settings';
+  String get navProfile => 'Profile';
+
+  @override
+  String get kitchenTitle => 'Kitchen';
+
+  @override
+  String get kitchenNoOrders => 'No orders in the kitchen right now.';
+
+  @override
+  String get kitchenReady => 'READY';
+
+  @override
+  String kitchenTable(String number) {
+    return 'Table $number';
+  }
+
+  @override
+  String get settingsTitle => 'Profile';
+
+  @override
+  String get settingsSectionActivity => 'ACTIVITY';
+
+  @override
+  String get settingsSectionReports => 'REPORTS';
+
+  @override
+  String get settingsHistory => 'History';
+
+  @override
+  String get settingsHistorySubtitle => 'View past bills and transactions';
+
+  @override
+  String get settingsReports => 'Reports';
+
+  @override
+  String get settingsReportsSubtitle => 'Sales insights and summaries';
+
+  @override
+  String get settingsExpenses => 'Expenses';
+
+  @override
+  String get settingsExpensesSubtitle => 'Track and manage expenses';
 
   @override
   String get settingsSectionBusiness => 'BUSINESS';
@@ -1286,6 +1330,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get staffRoleCashier => 'Cashier';
+
+  @override
+  String get staffRoleWaiter => 'Waiter';
+
+  @override
+  String get staffRoleKitchen => 'Kitchen Chef';
+
+  @override
+  String get staffAddKitchen => 'Add Kitchen Chef';
+
+  @override
+  String get staffSectionWaiters => 'WAITERS & CASHIERS';
+
+  @override
+  String get staffSectionKitchen => 'KITCHEN';
 
   @override
   String get staffDeleteTitle => 'Remove staff?';

@@ -1,4 +1,4 @@
-import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -21,6 +21,13 @@ class NotificationService {
   static const _channelId = 'low_stock';
   static const _channelName = 'Low Stock Alerts';
 
+  static const _kitchenChannelId = 'kitchen';
+  static const _kitchenChannelName = 'Kitchen Orders';
+
+  /// Ticks whenever a kitchen-order push arrives. The Kitchen screen listens and
+  /// refreshes its order list. Polling remains the fallback if push is missed.
+  final ValueNotifier<int> kitchenPing = ValueNotifier<int>(0);
+
   /// Call once from main() after Firebase.initializeApp()
   Future<void> init() async {
     // Register background handler
@@ -34,9 +41,17 @@ class NotificationService {
       importance: Importance.high,
     );
 
+    const kitchenChannel = AndroidNotificationChannel(
+      _kitchenChannelId,
+      _kitchenChannelName,
+      description: 'Alerts the kitchen when a new order arrives',
+      importance: Importance.high,
+    );
+
     final androidPlugin = _localNotifications
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await androidPlugin?.createNotificationChannel(androidChannel);
+    await androidPlugin?.createNotificationChannel(kitchenChannel);
 
     // Initialise local notifications plugin
     const initSettings = InitializationSettings(
@@ -50,6 +65,9 @@ class NotificationService {
 
     // Listen for foreground messages
     FirebaseMessaging.onMessage.listen((message) {
+      if (message.data['type'] == 'kitchen_order') {
+        kitchenPing.value++;
+      }
       showLocalNotification(message);
     });
 
@@ -62,16 +80,19 @@ class NotificationService {
     final notification = message.notification;
     if (notification == null) return;
 
-    const androidDetails = AndroidNotificationDetails(
-      _channelId,
-      _channelName,
-      channelDescription: 'Alerts when item stock falls below threshold',
+    final isKitchen = message.data['type'] == 'kitchen_order';
+    final androidDetails = AndroidNotificationDetails(
+      isKitchen ? _kitchenChannelId : _channelId,
+      isKitchen ? _kitchenChannelName : _channelName,
+      channelDescription: isKitchen
+          ? 'Alerts the kitchen when a new order arrives'
+          : 'Alerts when item stock falls below threshold',
       importance: Importance.high,
       priority: Priority.high,
     );
-    const notificationDetails = NotificationDetails(
+    final notificationDetails = NotificationDetails(
       android: androidDetails,
-      iOS: DarwinNotificationDetails(),
+      iOS: const DarwinNotificationDetails(),
     );
 
     await _localNotifications.show(

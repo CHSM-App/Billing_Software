@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
+import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 
-class StaffScreen extends StatefulWidget {
+class StaffScreen extends ConsumerStatefulWidget {
   const StaffScreen({super.key});
 
   @override
-  State<StaffScreen> createState() => _StaffScreenState();
+  ConsumerState<StaffScreen> createState() => _StaffScreenState();
 }
 
-class _StaffScreenState extends State<StaffScreen> {
+class _StaffScreenState extends ConsumerState<StaffScreen> {
   List<Map<String, dynamic>> _staff = [];
   bool _loading = true;
 
@@ -38,11 +40,16 @@ class _StaffScreenState extends State<StaffScreen> {
     }
   }
 
-  void _showStaffForm({Map<String, dynamic>? member}) {
+  void _showStaffForm({Map<String, dynamic>? member, String? initialRole}) {
+    final businessType = ref.read(businessTypeProvider);
+    final allowKitchen = businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
     showDialog(
       context: context,
       builder: (_) => _StaffFormDialog(
         member: member,
+        allowKitchen: allowKitchen,
+        initialRole: initialRole,
         onSaved: _loadStaff,
       ),
     );
@@ -122,10 +129,20 @@ class _StaffScreenState extends State<StaffScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(m['name'],
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context).textTheme.titleMedium),
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(m['name'],
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium),
+                                    ),
+                                    const SizedBox(width: AppSpacing.space8),
+                                    _RoleBadge(role: m['role'] ?? 'cashier'),
+                                  ],
+                                ),
                                 Text(m['phone'],
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -148,12 +165,63 @@ class _StaffScreenState extends State<StaffScreen> {
                     );
                   },
                 ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showStaffForm(),
-        icon: const Icon(Icons.person_add_outlined),
-        label: Text(l10n.staffAddStaff),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (_allowKitchen) ...[
+            FloatingActionButton.extended(
+              heroTag: 'add_kitchen',
+              onPressed: () => _showStaffForm(initialRole: 'kitchen'),
+              icon: const Icon(Icons.restaurant_menu_outlined),
+              label: Text(l10n.staffAddKitchen),
+              backgroundColor: AppColors.surface,
+              foregroundColor: AppColors.primary,
+            ),
+            const SizedBox(height: AppSpacing.space12),
+          ],
+          FloatingActionButton.extended(
+            heroTag: 'add_staff',
+            onPressed: () => _showStaffForm(),
+            icon: const Icon(Icons.person_add_outlined),
+            label: Text(l10n.staffAddStaff),
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool get _allowKitchen {
+    final businessType = ref.read(businessTypeProvider);
+    return businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
+  }
+}
+
+/// Small colored pill showing a staff member's role (Waiter / Kitchen Chef).
+class _RoleBadge extends StatelessWidget {
+  final String role;
+  const _RoleBadge({required this.role});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final isKitchen = role == 'kitchen';
+    final label = isKitchen ? l10n.staffRoleKitchen : l10n.staffRoleWaiter;
+    final color = isKitchen ? AppColors.warning : AppColors.primary;
+    final bg = isKitchen ? AppColors.warningLight : AppColors.primaryLight;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.space8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+            color: color, fontSize: 11, fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -161,9 +229,16 @@ class _StaffScreenState extends State<StaffScreen> {
 
 class _StaffFormDialog extends StatefulWidget {
   final Map<String, dynamic>? member;
+  final bool allowKitchen;
+  final String? initialRole;
   final VoidCallback onSaved;
 
-  const _StaffFormDialog({this.member, required this.onSaved});
+  const _StaffFormDialog({
+    this.member,
+    this.allowKitchen = false,
+    this.initialRole,
+    required this.onSaved,
+  });
 
   @override
   State<_StaffFormDialog> createState() => _StaffFormDialogState();
@@ -174,6 +249,7 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _pinCtrl = TextEditingController();
+  String _role = 'cashier';
   bool _saving = false;
 
   @override
@@ -183,6 +259,9 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
     if (m != null) {
       _nameCtrl.text = m['name'] ?? '';
       _phoneCtrl.text = m['phone'] ?? '';
+      _role = (m['role'] as String?) ?? 'cashier';
+    } else if (widget.initialRole != null) {
+      _role = widget.initialRole!;
     }
   }
 
@@ -202,6 +281,7 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
     final data = <String, dynamic>{
       'name': _nameCtrl.text.trim(),
       'phone': _phoneCtrl.text.trim(),
+      'role': _role,
       if (_pinCtrl.text.trim().isNotEmpty) 'pin': _pinCtrl.text.trim(),
       if (!isEdit) 'pin': _pinCtrl.text.trim(),
     };
@@ -237,6 +317,28 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (widget.allowKitchen) ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(l10n.staffRole,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(height: AppSpacing.space8),
+                SegmentedButton<String>(
+                  segments: [
+                    ButtonSegment(
+                        value: 'cashier', label: Text(l10n.staffRoleWaiter)),
+                    ButtonSegment(
+                        value: 'kitchen', label: Text(l10n.staffRoleKitchen)),
+                  ],
+                  selected: {_role == 'kitchen' ? 'kitchen' : 'cashier'},
+                  onSelectionChanged: (s) =>
+                      setState(() => _role = s.first),
+                ),
+                const SizedBox(height: AppSpacing.space12),
+              ],
               AppTextField(
                 label: l10n.staffName,
                 controller: _nameCtrl,

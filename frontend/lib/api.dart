@@ -4,8 +4,8 @@ import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
-// const String baseUrl = 'http://192.168.1.7:5000/api';
+// const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.8:5000/api';
 const String _genericApiErrorMessage = 'Something went wrong';
 
 String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
@@ -500,6 +500,24 @@ Future<Map<String, dynamic>> updateTable(String id, Map<String, dynamic> data) a
 
 Future<void> deleteTable(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/tables/$id')));
+}
+
+// ---------------------------------------------------------------------------
+// Kitchen (restaurant Kitchen Display)
+// ---------------------------------------------------------------------------
+
+/// Active orders (draft bills) with per-item kitchen status.
+Future<List<dynamic>> getKitchenOrders() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/kitchen/orders')));
+}
+
+/// Mark a single dish 'ready' or back to 'pending'.
+Future<Map<String, dynamic>> markKitchenItem(
+    String itemId, String kitchenStatus) async {
+  return _parse(await _authPut(
+    Uri.parse('$baseUrl/kitchen/items/$itemId'),
+    body: jsonEncode({'kitchen_status': kitchenStatus}),
+  ));
 }
 
 // ---------------------------------------------------------------------------
