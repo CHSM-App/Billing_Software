@@ -415,7 +415,7 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
         discount: 'सूट:',
         total: 'एकूण:',
         payment: 'पेमेंट:',
-        thankYou: 'धन्यवाद, पुन्हा भेट द्या!',
+        thankYou: 'धन्यवाद, पुन्हा भेट द्या!', table: '',
       );
 }
 

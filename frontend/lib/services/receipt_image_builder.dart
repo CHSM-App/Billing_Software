@@ -332,6 +332,10 @@ class ReceiptImageBuilder {
 
     // Bill info
     rows.add(_Row.left('${labels.billNo} ${bill.billNumber}', _smallFont));
+    // Table orders print their table number so the receipt is identifiable.
+    if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty) {
+      rows.add(_Row.left('${labels.table} ${bill.tableNumber}', _smallFont));
+    }
     rows.add(_Row.left(
         '${labels.date} ${_formatDate(bill.createdAt.toLocal())}', _smallFont));
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {

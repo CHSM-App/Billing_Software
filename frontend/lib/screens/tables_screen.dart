@@ -220,6 +220,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     return Scaffold(
       body: Column(children: [
         ShellAppBar(
+          // Bottom-bar root tab: never show a back arrow (open dialogs would
+          // otherwise flip Navigator.canPop() and reveal one).
+          automaticallyImplyLeading: false,
           title: Text(l10n.tablesTitle),
           actions: [
             IconButton(
@@ -269,6 +272,10 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       ]),
       floatingActionButton: userRole == 'owner'
           ? FloatingActionButton.extended(
+              // Explicit tag: all tab screens live in the shell's IndexedStack
+              // at once, so tag-less FABs would share the default hero tag and
+              // collide ("multiple heroes share the same tag").
+              heroTag: 'addTableFab',
               onPressed: _addTable,
               icon: const Icon(Icons.add),
               label: Text(l10n.tablesAddTable),

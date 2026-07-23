@@ -582,6 +582,12 @@ Future<Map<String, dynamic>> getBill(String id) async {
   return _parse(await _authGet(Uri.parse('$baseUrl/bills/$id')));
 }
 
+/// Open orders (draft bills) that are NOT attached to a table — the queue shown
+/// on the Open Orders page.
+Future<List<dynamic>> getDraftBills() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/bills/drafts')));
+}
+
 Future<Map<String, dynamic>> createBill(Map<String, dynamic> data) async {
   return _parse(await _authPost(Uri.parse('$baseUrl/bills'), body: jsonEncode(data)));
 }
@@ -594,8 +600,20 @@ Future<Map<String, dynamic>> addItemsToBill(String id, List<Map<String, dynamic>
   return _parse(await _authPut(Uri.parse('$baseUrl/bills/$id/add-items'), body: jsonEncode({'items': items})));
 }
 
-Future<Map<String, dynamic>> updateBillItems(String id, List<Map<String, dynamic>> items) async {
-  return _parse(await _authPut(Uri.parse('$baseUrl/bills/$id/update-items'), body: jsonEncode({'items': items})));
+Future<Map<String, dynamic>> updateBillItems(
+  String id,
+  List<Map<String, dynamic>> items, {
+  String? customerName,
+  String? customerPhone,
+}) async {
+  return _parse(await _authPut(
+    Uri.parse('$baseUrl/bills/$id/update-items'),
+    body: jsonEncode({
+      'items': items,
+      if (customerName != null) 'customer_name': customerName,
+      if (customerPhone != null) 'customer_phone': customerPhone,
+    }),
+  ));
 }
 
 Future<void> voidBill(String id) async {

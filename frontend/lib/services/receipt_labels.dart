@@ -7,6 +7,7 @@ class ReceiptLabels {
   final String defaultBusiness;
   final String phonePrefix;
   final String billNo;
+  final String table;
   final String date;
   final String customer;
   final String customerPhone;
@@ -26,6 +27,7 @@ class ReceiptLabels {
     required this.defaultBusiness,
     required this.phonePrefix,
     required this.billNo,
+    required this.table,
     required this.date,
     required this.customer,
     required this.customerPhone,
@@ -47,6 +49,7 @@ class ReceiptLabels {
         defaultBusiness: l10n.receiptDefaultBusiness,
         phonePrefix: l10n.receiptPhonePrefix,
         billNo: l10n.receiptBillNo,
+        table: l10n.receiptTable,
         date: l10n.receiptDate,
         customer: l10n.receiptCustomer,
         customerPhone: l10n.receiptCustomerPhone,

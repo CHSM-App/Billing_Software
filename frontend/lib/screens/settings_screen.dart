@@ -24,6 +24,7 @@ import 'history_screen.dart';
 import 'reports_screen.dart';
 import 'expenses_screen.dart';
 import '../services/offline_service.dart';
+import '../services/realtime_service.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -115,6 +116,8 @@ class _SettingsContentState extends State<_SettingsContent>
       ),
     );
     if (confirmed != true) return;
+    // Close the real-time socket so it doesn't keep reconnecting after logout.
+    await RealtimeService.instance.stop();
     await widget.ref.read(sessionProvider.notifier).clear();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
@@ -134,7 +137,9 @@ class _SettingsContentState extends State<_SettingsContent>
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(children: [
-        ShellAppBar(title: Text(l10n.settingsTitle)),
+        ShellAppBar(
+            title: Text(l10n.settingsTitle),
+            automaticallyImplyLeading: false),
         Expanded(child: FadeTransition(
         opacity: _fadeAnim,
         child: RefreshIndicator(

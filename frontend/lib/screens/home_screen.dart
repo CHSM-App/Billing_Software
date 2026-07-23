@@ -8,6 +8,7 @@ import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../models/cart_entry.dart';
 import '../providers.dart';
+import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
@@ -15,6 +16,7 @@ import '../services/printer_service.dart';
 import '../services/receipt_labels.dart';
 import '../services/offline_service.dart';
 import '../services/sync_service.dart';
+import '../services/notification_service.dart';
 import '../storage.dart';
 import '../main.dart' show rootMessengerKey;
 import 'login_screen.dart';
@@ -366,10 +368,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final payload = _cartPayload;
     final activeBillId = widget.activeBillId;
     final tableId = widget.tableId;
-    // Capture the notifier NOW. After Navigator.pop this ConsumerState is
+    // Persist any customer details entered on the draft so they survive the
+    // save and pre-fill when the order is reopened.
+    final customerName = _customerNameController.text.trim().nullIfEmpty;
+    final customerPhone = _customerPhoneController.text.trim().nullIfEmpty;
+    // Capture the notifiers NOW. After Navigator.pop this ConsumerState is
     // disposed and its `ref` becomes defunct — using it for the background
     // reconcile would silently no-op (this was why the table never updated).
     final tablesNotifier = ref.read(tablesProvider.notifier);
+    final openDraftsNotifier = ref.read(openDraftsProvider.notifier);
 
     // ── Optimistic UI ────────────────────────────────────────────────────────
     // Flip the table to "occupied" locally and close the billing screen
@@ -382,8 +389,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _showSnack(l10n.billingDraftSaved);
     if (widget.onBillDone != null) {
       widget.onBillDone!();
-    } else {
+    } else if (Navigator.canPop(context)) {
+      // Pushed as a table draft or reopened from Open Orders — pop back.
       Navigator.pop(context);
+    } else {
+      // Root Billing tab in the shell (nothing to pop). Saving from here creates
+      // a table-less "open order": clear the cart so the screen is ready for the
+      // next order, and let the Open Orders tab surface the saved draft.
+      ref.read(cartProvider.notifier).clear();
+      _discountPctController.clear();
+      _discountAmtController.clear();
     }
 
     // ── Background persistence + reconcile ───────────────────────────────────
@@ -393,28 +408,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       try {
         final Map<String, dynamic> result;
         if (activeBillId != null) {
-          result = await updateBillItems(activeBillId, payload);
+          result = await updateBillItems(
+            activeBillId,
+            payload,
+            customerName: customerName,
+            customerPhone: customerPhone,
+          );
         } else {
           result = await createBill({
             'items': payload,
             'table_id': tableId,
             'payment_mode': _paymentMode,
             'status': 'draft',
+            if (customerName != null) 'customer_name': customerName,
+            if (customerPhone != null) 'customer_phone': customerPhone,
           });
         }
-        // Cache the authoritative bill (with its real id + items) and flip the
-        // table right away, so re-tapping the table pre-selects the draft
-        // instantly instead of waiting for the full tables refetch below.
+        // The draft is now on the server — nudge the Kitchen screen to refresh
+        // so this order appears immediately, without waiting on an FCM push.
+        NotificationService.instance.pingKitchen();
         if (tableId != null) {
+          // Cache the authoritative bill (with its real id + items) and flip the
+          // table right away, so re-tapping the table pre-selects the draft
+          // instantly instead of waiting for the full tables refetch below.
           final bill = Bill.fromJson(result);
           tablesNotifier.applyDraftSaved(tableId, bill: bill);
+          // Pull the authoritative table state + bill cache. Silent — no spinner.
+          await tablesNotifier.refreshSilently();
+        } else {
+          // Table-less "open order": now that the write has COMMITTED, refresh the
+          // Open Orders queue so the new/updated draft appears there. (Doing this
+          // before the commit — as before — raced the write and returned stale
+          // data, which is why the page looked empty until a manual refresh.)
+          await openDraftsNotifier.refreshSilently();
         }
-        // Pull the authoritative table state + bill cache. Silent — no spinner.
-        await tablesNotifier.refreshSilently();
       } catch (e) {
         // The save failed after we already closed the screen — undo the
         // optimistic change by reloading the true server state and warn.
-        await tablesNotifier.refreshSilently();
+        if (tableId != null) {
+          await tablesNotifier.refreshSilently();
+        } else {
+          await openDraftsNotifier.refreshSilently();
+        }
         final msg = e is ApiException ? e.message : l10n.billingSaveFailed;
         _showGlobalSnack(msg, isError: true);
       }
@@ -458,14 +493,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
+  /// True when a customer phone is present. Otherwise it reveals and focuses the
+  /// customer-phone field (and warns) so the user can add it — WhatsApp needs a
+  /// number and we must NOT finalize/clear the bill without one.
+  bool _ensureCustomerPhoneForWhatsApp() {
+    if (_customerPhoneController.text.trim().isNotEmpty) return true;
+    setState(() => _showCustomerFields = true);
+    _showSnack(context.l10n.billingWhatsappNeedsPhone, isError: true);
+    // Focus after the frame so the (possibly just-expanded) field is laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _ensureVisible(_customerPhoneKey);
+      _customerPhoneFocus.requestFocus();
+    });
+    return false;
+  }
+
   void _navigateAfterBill() {
     if (!mounted) return;
-    if (widget.tableId != null) {
-      if (widget.onBillDone != null) {
-        widget.onBillDone!();
-      } else {
-        Navigator.pop(context);
-      }
+    if (widget.onBillDone != null) {
+      widget.onBillDone!();
+    } else if (Navigator.canPop(context)) {
+      // Pushed for a specific table or an Open Orders draft — return to it.
+      // The root Billing tab (nothing to pop) just stays put with a clean cart.
+      Navigator.pop(context);
     }
   }
 
@@ -494,6 +545,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         result = await finalizeBill(draft['id']);
       }
       final bill = Bill.fromJson(result);
+      // Cache the invoice prefix from the authoritative bill number (e.g. the
+      // 'INV' in 'INV-0007'), so offline receipts reuse the same prefix.
+      final dash = bill.billNumber.lastIndexOf('-');
+      if (dash > 0) {
+        unawaited(saveBillPrefix(bill.billNumber.substring(0, dash)));
+      }
       if (!mounted) return;
       // Optimistically flip the table to 'billed' so the Tables screen reflects
       // the finalized order the instant we pop, before the reconcile fetch.
@@ -513,6 +570,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.invalidate(billsProvider);
       // Reconcile table state with the server after the finalize commits.
       unawaited(ref.read(tablesProvider.notifier).refreshSilently());
+      // A just-finalized table-less draft leaves the Open Orders queue — refresh
+      // it so the completed order drops off the list.
+      if (widget.tableId == null) {
+        unawaited(ref.read(openDraftsProvider.notifier).refreshSilently());
+      }
+      // A finalized order is no longer a draft, so it leaves the kitchen queue —
+      // ping so the Kitchen screen drops it immediately.
+      NotificationService.instance.pingKitchen();
       if (onBillReady != null) {
         onBillReady(bill);
       } else {
@@ -630,6 +695,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     try {
       final businessId = await getBusinessId() ?? '';
       final userId = await getUserId() ?? '';
+      // Use the business's real invoice prefix for the offline receipt so the
+      // number doesn't visibly change (no "LOCAL-") when offline. The server
+      // assigns the authoritative sequence number on sync.
+      final billPrefix = await getBillPrefix();
 
       double subtotal = 0;
       double taxAmount = 0;
@@ -669,12 +738,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'created_at': DateTime.now().millisecondsSinceEpoch,
       });
       final localId = queued.localId;
+      // Display number keeps the real prefix; the last 6 digits of the queue
+      // timestamp keep it unique locally until the server assigns the final one.
+      final ts = localId.replaceAll(RegExp(r'\D'), '');
+      final offlineBillNumber =
+          '$billPrefix-${ts.length > 6 ? ts.substring(ts.length - 6) : ts}';
 
       final fakeBill = Bill(
         id: localId,
         businessId: businessId,
-        billNumber: localId,
+        billNumber: offlineBillNumber,
         tableId: widget.tableId,
+        tableNumber: widget.tableNumber,
         customerName: _customerNameController.text.trim().nullIfEmpty,
         customerPhone: _customerPhoneController.text.trim().nullIfEmpty,
         subtotal: subtotal,
@@ -889,7 +964,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   ShellAppBar _buildAppBar(String businessName, String userName) {
     final l10n = context.l10n;
+    // Show a back arrow only when this screen was pushed (opened from a table),
+    // not when it's the root Billing tab — where an open cart/variant sheet
+    // would otherwise flip Navigator.canPop() and reveal a stray arrow.
+    final isPushed = widget.tableId != null || widget.onBillDone != null;
     return ShellAppBar(
+      automaticallyImplyLeading: isPushed,
       title: AnimatedOpacity(
         opacity: _searchExpanded ? 0.0 : 1.0,
         duration: const Duration(milliseconds: 200),
@@ -1015,27 +1095,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return Stack(
         children: [
           _buildItemsPanel(),
-          if (count > 0 && widget.tableId == null)
-            Positioned(
-              bottom: AppSpacing.space16,
-              left: AppSpacing.space16,
-              child: Tooltip(
-                message: l10n.billingClearCart,
-                child: IconButton(
-                  onPressed: () => ref.read(cartProvider.notifier).clear(),
-                  icon: const Icon(Icons.remove_shopping_cart_outlined),
-                  color: AppColors.error,
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppColors.errorLight,
-                    minimumSize: const Size(48, 48),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.small)),
-                  ),
-                ),
-              ),
-            ),
-          if (count > 0 && widget.tableId != null)
+          // Save Draft + Cart row. Shown whenever the cart has items — for
+          // tables it saves a table draft; on the standalone billing page it
+          // saves a table-less "open order" everyone can create.
+          if (count > 0)
             Positioned(
               bottom: AppSpacing.space16,
               left: AppSpacing.space16,
@@ -1085,26 +1148,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ],
               ),
-            )
-          else if (count > 0)
-            Positioned(
-              bottom: AppSpacing.space16,
-              right: AppSpacing.space16,
-              child: FloatingActionButton.extended(
-                heroTag: 'cartFab',
-                onPressed: _openCartSheet,
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                elevation: 4,
-                icon: const Icon(Icons.shopping_cart_outlined, size: 20),
-                label: Text(
-                  count == 0 ? l10n.billingCart : l10n.billingCartWithCount(count),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.style(
-                      fontWeight: FontWeight.w600, fontSize: 14),
-                ),
-              ),
             ),
         ],
       );
@@ -1118,6 +1161,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final l10n = context.l10n;
     showModalBottomSheet(
       context: context,
+      // Let the sheet grow and — crucially — sit above the keyboard, so the
+      // editable quantity field on each size row stays visible while typing.
+      isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius:
@@ -1134,7 +1180,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               .where((e) => e.key == '${item.id}:${v.id}')
               .fold(0.0, (s, e) => s + e.quantity);
 
-          return SafeArea(
+          // Pad the sheet up by the keyboard height so its content (including
+          // the editable quantity field) is never hidden behind the keyboard.
+          final keyboardHeight = MediaQuery.of(sheetCtx).viewInsets.bottom;
+          return AnimatedPadding(
+            padding: EdgeInsets.only(bottom: keyboardHeight),
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.decelerate,
+            child: SafeArea(
+            child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1186,6 +1240,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ),
               ],
+            ),
+            ),
             ),
           );
         });
@@ -1422,7 +1478,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         style: Theme.of(context).textTheme.titleLarge),
                   ),
                   const Spacer(),
-                  if (cart.isNotEmpty)
+                  // Clearing a cart / releasing a table is a cashier/owner
+                  // action — hidden for servers, who only build orders.
+                  if (cart.isNotEmpty && canFinalize)
                     TextButton.icon(
                       onPressed: () => _clearCart(inSheet: inSheet),
                       icon: const Icon(Icons.delete_outline, size: 14),
@@ -1562,7 +1620,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
-            // Payment mode
+            // Payment mode — hidden for servers; taking payment is a
+            // cashier/owner step, so servers don't choose it.
+            if (canFinalize)
             Padding(
               padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.space16),
@@ -1596,7 +1656,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
-            // Discount row
+            // Discount row — also cashier/owner only; servers don't apply
+            // discounts when building an order.
+            if (canFinalize)
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                   AppSpacing.space12, AppSpacing.space16, 0),
@@ -1778,8 +1840,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 }),
               ),
 
-            if (widget.tableId != null || !canFinalize)
-              Padding(
+            // Save Draft is available to everyone — for tables and for
+            // table-less "open orders" on the standalone billing page.
+            Padding(
                 padding: EdgeInsets.fromLTRB(
                     AppSpacing.space16,
                     AppSpacing.space12,
@@ -1849,6 +1912,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       onPressed: (cart.isEmpty || _generatingBill)
                           ? null
                           : () {
+                              // WhatsApp needs a phone. Without one, don't
+                              // finalize/clear the bill — prompt for the number.
+                              if (!_ensureCustomerPhoneForWhatsApp()) return;
                               if (inSheet) Navigator.pop(context);
                               _generateBillAndWhatsApp();
                             },
@@ -2402,6 +2468,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
     with TickerProviderStateMixin {
   late final AnimationController _swipeCtrl;
   late final TextEditingController _qtyTextCtrl;
+  final FocusNode _qtyFocus = FocusNode();
   bool _editing = false;
   Timer? _debounce;
 
@@ -2426,9 +2493,12 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
     super.didUpdateWidget(old);
     if (old.qty != widget.qty) {
       if (widget.qty == 0) {
-        // Cart was cleared (bill generated) — always reset the field
-        _editing = false;
-        _qtyTextCtrl.text = '';
+        // Reset the field when the cart drops this row — but NOT while the user
+        // is actively editing it. Otherwise typing a transient '0' or '.' (which
+        // momentarily commits qty 0) would clear the field and steal focus.
+        if (!_editing) {
+          _qtyTextCtrl.text = '';
+        }
       } else if (!_editing) {
         _qtyTextCtrl.text = formatQty(widget.qty);
       }
@@ -2440,10 +2510,22 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
     _debounce?.cancel();
     _swipeCtrl.dispose();
     _qtyTextCtrl.dispose();
+    _qtyFocus.dispose();
     super.dispose();
   }
 
-  void _commitText() {
+  /// Live commit while the user is still typing: only apply a valid positive
+  /// quantity. A partial/zero value ('', '0', '.') is left untouched so the row
+  /// keeps its cart membership — and its focus — until editing actually ends.
+  void _commitLive() {
+    final v = double.tryParse(_qtyTextCtrl.text.trim()) ?? 0.0;
+    if (v > 0) widget.onSetQty(v);
+  }
+
+  /// Final commit when editing ends (focus lost / submitted). This is the only
+  /// path allowed to set qty to 0 and drop the row from the cart.
+  void _commitFinal() {
+    _debounce?.cancel();
     _editing = false;
     final v = double.tryParse(_qtyTextCtrl.text.trim()) ?? 0.0;
     widget.onSetQty(v);
@@ -2613,13 +2695,34 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                           // Editable qty field (read-only for a parent variant item)
                           Expanded(
                             child: GestureDetector(
-                              onTap: () {
-                                if (widget.treatAsVariantItem) {
-                                  widget.onAdd();
-                                } else if (!inCart) {
-                                  widget.onAdd();
-                                }
-                              },
+                              // A parent variant item opens the size picker.
+                              // Tapping the qty box of a plain row must NOT keep
+                              // incrementing — it just starts editing. For an
+                              // empty row we add qty 1 once, then focus so the
+                              // user can immediately type the real quantity.
+                              onTap: widget.treatAsVariantItem
+                                  ? widget.onAdd
+                                  : (!inCart
+                                      ? () {
+                                          widget.onAdd();
+                                          _editing = true;
+                                          // Reflect the added qty and select it so
+                                          // the user can overwrite by just typing.
+                                          _qtyTextCtrl.value = TextEditingValue(
+                                            text: '1',
+                                            selection:
+                                                const TextSelection(
+                                                    baseOffset: 0,
+                                                    extentOffset: 1),
+                                          );
+                                          WidgetsBinding.instance
+                                              .addPostFrameCallback((_) {
+                                            if (mounted) {
+                                              _qtyFocus.requestFocus();
+                                            }
+                                          });
+                                        }
+                                      : null),
                               child: SizedBox(
                                 height: 28,
                                 child: widget.treatAsVariantItem
@@ -2637,6 +2740,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                                       )
                                     : TextField(
                                         controller: _qtyTextCtrl,
+                                        focusNode: _qtyFocus,
                                         enabled: inCart,
                                         textAlign: TextAlign.center,
                                         keyboardType: widget.item.isMeasured
@@ -2664,18 +2768,23 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                                         ),
                                         onTap: () => _editing = true,
                                         onChanged: (val) {
+                                          _editing = true;
                                           _debounce?.cancel();
-                                          // Don't commit while field is empty —
-                                          // user may be mid-edit (erased to retype)
-                                          if (val.trim().isEmpty) return;
+                                          // Only a valid positive number commits
+                                          // live. Empty / '0' / '.' are left as-is
+                                          // so the row keeps focus while typing.
+                                          if ((double.tryParse(val.trim()) ?? 0) <=
+                                              0) {
+                                            return;
+                                          }
                                           _debounce = Timer(
                                             const Duration(milliseconds: 400),
-                                            _commitText,
+                                            _commitLive,
                                           );
                                         },
-                                        onSubmitted: (_) => _commitText(),
-                                        onEditingComplete: _commitText,
-                                        onTapOutside: (_) => _commitText(),
+                                        onSubmitted: (_) => _commitFinal(),
+                                        onEditingComplete: _commitFinal,
+                                        onTapOutside: (_) => _commitFinal(),
                                       ),
                               ),
                             ),

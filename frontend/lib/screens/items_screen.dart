@@ -11,6 +11,30 @@ import '../api.dart';
 import '../services/printer_service.dart';
 import 'raw_materials_tab.dart';
 
+/// Localized short label for an item's unit-of-measure (e.g. 'kg', 'plate').
+/// Covers every unit an item may use — a superset of [rawMaterialUnitLabel].
+String itemUnitLabel(BuildContext context, String unit) {
+  final l10n = context.l10n;
+  switch (unit) {
+    case 'kg':
+      return l10n.itemsUnitKg;
+    case 'g':
+      return l10n.itemsUnitGram;
+    case 'litre':
+      return l10n.itemsUnitLitre;
+    case 'ml':
+      return l10n.itemsUnitMl;
+    case 'metre':
+      return l10n.itemsUnitMetre;
+    case 'dozen':
+      return l10n.itemsUnitDozen;
+    case 'plate':
+      return l10n.itemsUnitPlate;
+    default:
+      return l10n.itemsUnitPiece;
+  }
+}
+
 class ItemsScreen extends ConsumerStatefulWidget {
   const ItemsScreen({super.key});
 
@@ -23,6 +47,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   final _searchController = TextEditingController();
   TabController? _tabController;
   int _activeTab = 0;
+  // When on, the Items list renders a compact stock overview (name + remaining
+  // stock) in place, instead of the normal cards.
+  bool _showStock = false;
 
   @override
   void initState() {
@@ -216,7 +243,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     return Scaffold(
       body: Column(
         children: [
-          ShellAppBar(title: Text(l10n.itemsTitle)),
+          // Bottom-bar root tab: never imply a back arrow. Without this,
+          // opening a dialog (add item / stock) pushes a route and flips
+          // Navigator.canPop() to true, making a stray back arrow appear.
+          ShellAppBar(
+              title: Text(l10n.itemsTitle),
+              automaticallyImplyLeading: false),
           if (withRawMaterials)
             TabBar(
               controller: _tabController,
@@ -243,6 +275,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
       ),
       floatingActionButton: userRole == 'owner'
           ? FloatingActionButton.extended(
+              // Explicit tag to avoid the shared default hero tag colliding with
+              // other FABs kept alive in the shell's IndexedStack.
+              heroTag: 'addItemFab',
               onPressed: () =>
                   onRawTab ? _showRawMaterialForm() : _showItemForm(),
               icon: const Icon(Icons.add),
@@ -272,23 +307,39 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     );
   }
 
-  Widget _searchBarSliver() => SliverToBoxAdapter(
+  Widget _searchBarSliver({bool inventoryEnabled = false}) =>
+      SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
               AppSpacing.space12, 6, AppSpacing.space12, AppSpacing.space4),
-          child: SizedBox(
-            height: 40,
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: context.l10n.itemsSearch,
-                isDense: true,
-                prefixIcon: const Icon(Icons.search_outlined,
-                    size: 18, color: AppColors.textSecondary),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.space16, vertical: 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 40,
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: context.l10n.itemsSearch,
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.search_outlined,
+                          size: 18, color: AppColors.textSecondary),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.space16, vertical: 0),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              // Toggle the in-place stock overview (name + remaining stock).
+              if (inventoryEnabled) ...[
+                const SizedBox(width: AppSpacing.space8),
+                StockOverviewButton(
+                  tooltip: context.l10n.itemsStockOverview,
+                  active: _showStock,
+                  onTap: () => setState(() => _showStock = !_showStock),
+                ),
+              ],
+            ],
           ),
         ),
       );
@@ -316,7 +367,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
               await ref.read(itemsProvider.future);
             },
             child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-              _searchBarSliver(),
+              _searchBarSliver(inventoryEnabled: inventoryEnabled),
               SliverFillRemaining(
                 child: EmptyState(
                   icon: Icons.inventory_2_outlined,
@@ -338,7 +389,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
             await ref.read(itemsProvider.future);
           },
           child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-            _searchBarSliver(),
+            _searchBarSliver(inventoryEnabled: inventoryEnabled),
             _buildGridSliver(items, userRole, inventoryEnabled,
                 crossAxisCount: isWide ? 3 : 1),
           ]),
@@ -356,12 +407,28 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
           crossAxisSpacing: AppSpacing.space8,
-          mainAxisSpacing: 8,
-          mainAxisExtent: 62,
+          mainAxisSpacing: 6,
+          mainAxisExtent: 52,
         ),
         itemCount: items.length,
-        itemBuilder: (_, i) =>
-            _buildItemCard(items[i], userRole, inventoryEnabled),
+        itemBuilder: (_, i) {
+          final it = items[i];
+          final stockMode = _showStock && inventoryEnabled;
+          // Cross-fade + scale between the normal card and the stock card when
+          // the overview is toggled. The ValueKey drives the transition.
+          final child = stockMode
+              ? buildStockCard(
+                  context,
+                  StockOverviewRow(
+                    name: it.name,
+                    stockQuantity: it.stockQuantity,
+                    unitLabel: itemUnitLabel(context, it.unit),
+                    isLowStock: it.isLowStock,
+                  ),
+                )
+              : _buildItemCard(it, userRole, inventoryEnabled);
+          return animatedCardSwap(stockMode, child);
+        },
       ),
     );
   }
@@ -387,19 +454,19 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           onTap: () => _showStockPopup(item),
           borderRadius: BorderRadius.circular(AppRadius.medium),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             child: Row(
               children: [
                 // Color dot
                 Container(
-                  width: 8,
-                  height: 8,
+                  width: 7,
+                  height: 7,
                   decoration: const BoxDecoration(
                     shape: BoxShape.circle,
                     color: AppColors.border,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 // Name + subtitle
                 Expanded(
                   child: Column(
@@ -409,10 +476,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                       Text(
                         item.name,
                         style: const TextStyle(
-                          fontSize: 14,
+                          fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary,
-                          height: 1.2,
+                          height: 1.15,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -425,9 +492,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                                 child: Text(
                                   subtitle,
                                   style: const TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 11,
                                     color: AppColors.textSecondary,
-                                    height: 1.2,
+                                    height: 1.15,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -440,10 +507,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                                 child: Text(
                                   '· ${l10n.itemsLowStock}',
                                   style: const TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 11,
                                     color: AppColors.warning,
                                     fontWeight: FontWeight.w600,
-                                    height: 1.2,
+                                    height: 1.15,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -459,7 +526,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                 Text(
                   '₹${item.price.toStringAsFixed(2)}',
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textSecondary,
                   ),
@@ -631,7 +698,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    formatQty(_current),
+                    '${formatQty(_current)} ${itemUnitLabel(context, widget.item.unit)}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -671,7 +738,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      formatQty(_total),
+                      '${formatQty(_total)} ${itemUnitLabel(context, widget.item.unit)}',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                             color: hasInput
@@ -1605,7 +1672,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600)),
                             Text(
-                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? formatQty(v.stockQuantity!) : '—'}',
+                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? '${formatQty(v.stockQuantity!)} ${itemUnitLabel(context, widget.item.unit)}' : '—'}',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -1614,7 +1681,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                             // Live preview of the resulting stock after adding.
                             if (_adding(v) > 0)
                               Text(
-                                '${l10n.itemsTotalAfterAdding}: ${formatQty((v.stockQuantity ?? 0) + _adding(v))}',
+                                '${l10n.itemsTotalAfterAdding}: ${formatQty((v.stockQuantity ?? 0) + _adding(v))} ${itemUnitLabel(context, widget.item.unit)}',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall

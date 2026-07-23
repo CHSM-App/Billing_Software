@@ -2,6 +2,7 @@ const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
+const { broadcast } = require('../realtime');
 
 const router = express.Router();
 
@@ -120,6 +121,12 @@ router.put('/:id', requireAuth, async (req, res) => {
              INSERTED.floor_x, INSERTED.floor_y, INSERTED.status, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);
+
+    // Real-time: a status change (e.g. marked paid/empty) should refresh other
+    // devices' tables screens. Position-only drags don't need a broadcast.
+    if (status !== undefined) {
+      broadcast(req.user.business_id, { type: 'tables' });
+    }
 
     return res.json(result.recordset[0]);
   } catch (err) {

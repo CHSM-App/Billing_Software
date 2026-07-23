@@ -2,6 +2,7 @@ const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
+const { broadcast } = require('../realtime');
 
 const router = express.Router();
 
@@ -103,6 +104,10 @@ router.put('/items/:id', requireAuth, kitchenOnly, async (req, res) => {
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: 'Order item not found' });
     }
+
+    // Real-time: tell every device in this business to refresh the kitchen view,
+    // so a cashier/server (not just the chef who tapped) sees the change live.
+    broadcast(req.user.business_id, { type: 'kitchen' });
 
     return res.json(result.recordset[0]);
   } catch (err) {

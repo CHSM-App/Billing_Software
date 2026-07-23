@@ -302,6 +302,10 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
     final isEdit = widget.member != null;
     return AlertDialog(
       title: Text(isEdit ? l10n.staffEditStaff : l10n.staffAddStaff),
+      // Keep the dialog scrollable so its fields (PIN in particular) stay
+      // reachable when the keyboard is open, instead of overflowing or hiding
+      // behind it.
+      scrollable: true,
       content: SizedBox(
         width: 360,
         child: Form(
