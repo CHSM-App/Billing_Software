@@ -1,6 +1,6 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
@@ -9,8 +9,8 @@ import '../widgets/app_widgets.dart';
 import '../services/notification_service.dart';
 
 /// Kitchen Display for restaurants. Shows active orders (draft bills) with each
-/// dish, letting the kitchen chef tick dishes as ready. Auto-refreshes on a
-/// timer and immediately when a kitchen push notification arrives.
+/// dish, letting the kitchen chef tick dishes as ready. Refreshes immediately
+/// when a kitchen push notification (FCM) arrives.
 class KitchenScreen extends ConsumerStatefulWidget {
   const KitchenScreen({super.key});
 
@@ -19,12 +19,9 @@ class KitchenScreen extends ConsumerStatefulWidget {
 }
 
 class _KitchenScreenState extends ConsumerState<KitchenScreen> {
-  static const _pollInterval = Duration(seconds: 15);
-
   List<Map<String, dynamic>> _orders = [];
   bool _loading = true;
   String? _error;
-  Timer? _timer;
   // Item ids currently being toggled — disables the tile to avoid double taps.
   final Set<String> _busy = {};
 
@@ -32,13 +29,11 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
   void initState() {
     super.initState();
     _load();
-    _timer = Timer.periodic(_pollInterval, (_) => _load(silent: true));
     NotificationService.instance.kitchenPing.addListener(_onPing);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
     NotificationService.instance.kitchenPing.removeListener(_onPing);
     super.dispose();
   }
@@ -210,6 +205,20 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
   }
 }
 
+/// Order-age label for a kitchen card: "Just now" (<1 min), "N min ago"
+/// (<1 hr), and the local clock time (e.g. "02:45 PM") once an hour or more has
+/// passed. [createdAtIso] is the UTC ISO timestamp from the API.
+String _orderTimeLabel(BuildContext context, String? createdAtIso) {
+  if (createdAtIso == null) return '';
+  final created = DateTime.tryParse(createdAtIso);
+  if (created == null) return '';
+  final diff = DateTime.now().difference(created.toLocal());
+  final l10n = context.l10n;
+  if (diff.inMinutes < 1) return l10n.kitchenJustNow;
+  if (diff.inMinutes < 60) return l10n.kitchenMinAgo(diff.inMinutes);
+  return DateFormat('hh:mm a').format(created.toLocal());
+}
+
 class _OrderCard extends StatelessWidget {
   final Map<String, dynamic> order;
   final int sequence;
@@ -272,6 +281,29 @@ class _OrderCard extends StatelessWidget {
                         fontSize: 14, fontWeight: FontWeight.w700),
                   ),
                 ),
+                Builder(builder: (context) {
+                  final timeLabel =
+                      _orderTimeLabel(context, order['created_at'] as String?);
+                  if (timeLabel.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.schedule,
+                            size: 11, color: AppColors.textSecondary),
+                        const SizedBox(width: 2),
+                        Text(
+                          timeLabel,
+                          style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.textSecondary,
+                              fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
                 if (allReady)
                   Container(
                     padding: const EdgeInsets.symmetric(

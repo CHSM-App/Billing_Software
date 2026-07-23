@@ -468,4 +468,97 @@ router.delete('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, re
   }
 });
 
+// ---------------------------------------------------------------------------
+// Recipes — the raw materials a sellable item consumes per unit sold (BOM).
+// Raw materials themselves live in routes/raw_materials.js and never appear on
+// the billing page; only the parent item is billed.
+// ---------------------------------------------------------------------------
+
+// GET /api/items/:id/recipe — list the recipe rows (with raw-material details).
+router.get('/:id/recipe', requireAuth, async (req, res) => {
+  try {
+    await poolConnect;
+    const result = await pool.request()
+      .input('item_id', sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query(`
+        SELECT ir.id, ir.item_id, ir.raw_material_id, ir.quantity,
+               rm.name AS raw_material_name, rm.unit AS raw_material_unit,
+               rm.stock_quantity, rm.low_stock_threshold
+        FROM item_recipes ir
+        JOIN items i ON i.id = ir.item_id
+        JOIN raw_materials rm ON rm.id = ir.raw_material_id
+        WHERE ir.item_id = @item_id AND i.business_id = @business_id AND rm.is_active = 1
+        ORDER BY rm.name ASC
+      `);
+    return res.json(result.recordset);
+  } catch (err) {
+    logger.error({ err }, 'Get recipe error');
+    return res.status(500).json({ error: 'Failed to fetch recipe' });
+  }
+});
+
+// PUT /api/items/:id/recipe — replace the item's whole recipe.
+// Body: { rows: [{ raw_material_id, quantity }, ...] }
+router.put('/:id/recipe', requireAuth, ownerOnly, async (req, res) => {
+  const { rows } = req.body;
+  if (!Array.isArray(rows)) {
+    return res.status(400).json({ error: 'rows array is required' });
+  }
+  for (const r of rows) {
+    if (!r.raw_material_id || r.quantity == null || isNaN(parseFloat(r.quantity)) || parseFloat(r.quantity) <= 0) {
+      return res.status(400).json({ error: 'each row needs a raw_material_id and a quantity > 0' });
+    }
+  }
+
+  try {
+    await poolConnect;
+    if (!(await loadOwnedItem(req.params.id, req.user.business_id))) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    // Validate all referenced raw materials belong to this business.
+    if (rows.length > 0) {
+      const request = pool.request().input('business_id', sql.UniqueIdentifier, req.user.business_id);
+      const ids = [...new Set(rows.map((r) => r.raw_material_id))];
+      const params = ids.map((id, i) => { request.input(`r${i}`, sql.UniqueIdentifier, id); return `@r${i}`; });
+      const check = await request.query(`
+        SELECT id FROM raw_materials
+        WHERE business_id = @business_id AND is_active = 1 AND id IN (${params.join(', ')})
+      `);
+      if (check.recordset.length !== ids.length) {
+        return res.status(400).json({ error: 'One or more raw materials were not found' });
+      }
+    }
+
+    const transaction = pool.transaction();
+    await transaction.begin();
+    try {
+      await transaction.request()
+        .input('item_id', sql.UniqueIdentifier, req.params.id)
+        .query('DELETE FROM item_recipes WHERE item_id = @item_id');
+
+      for (const r of rows) {
+        await transaction.request()
+          .input('item_id', sql.UniqueIdentifier, req.params.id)
+          .input('raw_material_id', sql.UniqueIdentifier, r.raw_material_id)
+          .input('quantity', sql.Decimal(12, 4), parseFloat(r.quantity))
+          .query(`
+            INSERT INTO item_recipes (item_id, raw_material_id, quantity)
+            VALUES (@item_id, @raw_material_id, @quantity)
+          `);
+      }
+      await transaction.commit();
+    } catch (err) {
+      await transaction.rollback();
+      throw err;
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Update recipe error');
+    return res.status(500).json({ error: 'Failed to update recipe' });
+  }
+});
+
 module.exports = router;

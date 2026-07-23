@@ -156,6 +156,69 @@ class Item {
       stockQuantity! <= lowStockThreshold!;
 }
 
+/// A stock-tracked ingredient (bun, patty, cheese) that is consumed by a dish's
+/// recipe. Raw materials never appear on the billing page — only sellable items
+/// are billed; selling a dish deducts its recipe's raw materials behind the scenes.
+class RawMaterial {
+  final String id;
+  final String businessId;
+  final String name;
+  final String unit;
+  final double? stockQuantity;
+  final double? lowStockThreshold;
+  final bool isActive;
+
+  RawMaterial({
+    required this.id,
+    required this.businessId,
+    required this.name,
+    this.unit = 'piece',
+    this.stockQuantity,
+    this.lowStockThreshold,
+    this.isActive = true,
+  });
+
+  factory RawMaterial.fromJson(Map<String, dynamic> j) => RawMaterial(
+        id: j['id'],
+        businessId: j['business_id'],
+        name: j['name'],
+        unit: (j['unit'] as String?) ?? 'piece',
+        stockQuantity: j['stock_quantity'] != null
+            ? double.parse(j['stock_quantity'].toString())
+            : null,
+        lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
+        isActive: j['is_active'] == true || j['is_active'] == 1,
+      );
+
+  bool get isLowStock =>
+      stockQuantity != null &&
+      lowStockThreshold != null &&
+      stockQuantity! <= lowStockThreshold!;
+}
+
+/// One line of a dish's recipe: how much of a given raw material one unit of the
+/// dish consumes.
+class RecipeRow {
+  final String rawMaterialId;
+  final String rawMaterialName;
+  final String rawMaterialUnit;
+  final double quantity;
+
+  RecipeRow({
+    required this.rawMaterialId,
+    required this.rawMaterialName,
+    required this.rawMaterialUnit,
+    required this.quantity,
+  });
+
+  factory RecipeRow.fromJson(Map<String, dynamic> j) => RecipeRow(
+        rawMaterialId: j['raw_material_id'],
+        rawMaterialName: (j['raw_material_name'] as String?) ?? '',
+        rawMaterialUnit: (j['raw_material_unit'] as String?) ?? 'piece',
+        quantity: double.parse(j['quantity'].toString()),
+      );
+}
+
 class BillItem {
   final String id;
   final String billId;

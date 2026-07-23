@@ -1,0 +1,497 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../l10n/l10n_ext.dart';
+import '../models/models.dart';
+import '../providers.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_widgets.dart';
+import '../api.dart';
+
+String rawMaterialUnitLabel(BuildContext context, String unit) {
+  final l10n = context.l10n;
+  switch (unit) {
+    case 'kg':
+      return l10n.itemsUnitKg;
+    case 'g':
+      return l10n.itemsUnitGram;
+    case 'litre':
+      return l10n.itemsUnitLitre;
+    case 'ml':
+      return l10n.itemsUnitMl;
+    default:
+      return l10n.itemsUnitPiece;
+  }
+}
+
+const rawMaterialUnits = ['piece', 'g', 'kg', 'ml', 'litre'];
+
+/// The unit a recipe amount is *entered* in for a raw material stocked in
+/// [stockUnit], and the factor to multiply the entered amount by to convert it
+/// into the stock unit. A material stocked in kg is stocked in bulk but a single
+/// plate uses grams, so the recipe is typed in grams (250) and stored as kg
+/// (0.25). Litres behave the same via ml. Small units pass through unchanged.
+({String unit, double toStock}) recipeEntryUnit(String stockUnit) {
+  switch (stockUnit) {
+    case 'kg':
+      return (unit: 'g', toStock: 0.001);
+    case 'litre':
+      return (unit: 'ml', toStock: 0.001);
+    default:
+      return (unit: stockUnit, toStock: 1.0);
+  }
+}
+
+/// Label for the recipe entry unit, e.g. a kg-stocked material shows "g".
+String recipeEntryUnitLabel(BuildContext context, String stockUnit) =>
+    rawMaterialUnitLabel(context, recipeEntryUnit(stockUnit).unit);
+
+// ---------------------------------------------------------------------------
+// Raw Materials tab — restaurant ingredient inventory. Owner-only. These never
+// appear on the billing page; they are consumed by dishes via item recipes.
+// ---------------------------------------------------------------------------
+class RawMaterialsTab extends ConsumerWidget {
+  const RawMaterialsTab({super.key});
+
+  void _showForm(BuildContext context, WidgetRef ref, {RawMaterial? material}) {
+    showDialog(
+      context: context,
+      builder: (_) => RawMaterialFormDialog(
+        material: material,
+        onSaved: (data) async {
+          if (material == null) {
+            await ref.read(rawMaterialsProvider.notifier).add(data);
+          } else {
+            await ref.read(rawMaterialsProvider.notifier).edit(material.id, data);
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _delete(BuildContext context, WidgetRef ref, RawMaterial m) async {
+    final l10n = context.l10n;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(l10n.itemsRawMaterialDeleteTitle),
+        content: Text(l10n.itemsRawMaterialDeleteBody(m.name)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l10n.commonCancel)),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.commonDelete,
+                style: const TextStyle(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref.read(rawMaterialsProvider.notifier).remove(m.id);
+    } on ApiException catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final async = ref.watch(rawMaterialsProvider);
+
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => AppErrorWidget(
+        error: e,
+        onRetry: () => ref.read(rawMaterialsProvider.notifier).reload(),
+      ),
+      data: (materials) {
+        if (materials.isEmpty) {
+          return RefreshIndicator(
+            onRefresh: () => ref.read(rawMaterialsProvider.notifier).reload(),
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverFillRemaining(
+                  child: EmptyState(
+                    icon: Icons.egg_alt_outlined,
+                    message: l10n.itemsRawMaterialsEmpty,
+                    actionLabel: l10n.itemsAddRawMaterial,
+                    onAction: () => _showForm(context, ref),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return RefreshIndicator(
+          onRefresh: () => ref.read(rawMaterialsProvider.notifier).reload(),
+          child: ListView.separated(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+            itemCount: materials.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (_, i) {
+              final m = materials[i];
+              final stockStr = m.stockQuantity != null
+                  ? '${formatQty(m.stockQuantity!)} ${rawMaterialUnitLabel(context, m.unit)}'
+                  : '—';
+              return Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.medium),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: ListTile(
+                  title: Text(m.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Row(
+                    children: [
+                      Flexible(
+                        child: Text(l10n.itemsStockLabel(stockStr),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: AppColors.textSecondary)),
+                      ),
+                      if (m.isLowStock) ...[
+                        const SizedBox(width: 6),
+                        Text('· ${l10n.itemsLowStock}',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.warning,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ],
+                  ),
+                  onTap: () => _showForm(context, ref, material: m),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline,
+                        size: 18, color: AppColors.error),
+                    onPressed: () => _delete(context, ref, m),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class RawMaterialFormDialog extends StatefulWidget {
+  final RawMaterial? material;
+  final Future<void> Function(Map<String, dynamic> data) onSaved;
+
+  const RawMaterialFormDialog({super.key, this.material, required this.onSaved});
+
+  @override
+  State<RawMaterialFormDialog> createState() => _RawMaterialFormDialogState();
+}
+
+class _RawMaterialFormDialogState extends State<RawMaterialFormDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _stockCtrl = TextEditingController();
+  final _thresholdCtrl = TextEditingController();
+  String _unit = 'piece';
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final m = widget.material;
+    if (m != null) {
+      _nameCtrl.text = m.name;
+      _stockCtrl.text = m.stockQuantity?.toString() ?? '';
+      _thresholdCtrl.text = m.lowStockThreshold?.toString() ?? '';
+      _unit = rawMaterialUnits.contains(m.unit) ? m.unit : 'piece';
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _stockCtrl.dispose();
+    _thresholdCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+    final data = {
+      'name': _nameCtrl.text.trim(),
+      'unit': _unit,
+      'stock_quantity': _stockCtrl.text.trim().isNotEmpty
+          ? double.parse(_stockCtrl.text.trim())
+          : null,
+      'low_stock_threshold': _thresholdCtrl.text.trim().isNotEmpty
+          ? double.parse(_thresholdCtrl.text.trim())
+          : null,
+    };
+    try {
+      await widget.onSaved(data);
+      if (mounted) Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      title: Text(widget.material == null
+          ? l10n.itemsAddRawMaterial
+          : l10n.itemsEditRawMaterial),
+      content: SizedBox(
+        width: 400,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppTextField(
+                  label: l10n.itemsFieldName,
+                  controller: _nameCtrl,
+                  validator: (v) =>
+                      v == null || v.isEmpty ? l10n.commonRequired : null,
+                ),
+                const SizedBox(height: AppSpacing.space12),
+                DropdownButtonFormField<String>(
+                  initialValue: _unit,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: l10n.itemsFieldUnit,
+                    prefixIcon: const Icon(Icons.straighten_outlined,
+                        size: 18, color: AppColors.textSecondary),
+                  ),
+                  items: [
+                    for (final u in rawMaterialUnits)
+                      DropdownMenuItem(
+                          value: u, child: Text(rawMaterialUnitLabel(context, u))),
+                  ],
+                  onChanged: (v) => setState(() => _unit = v ?? 'piece'),
+                ),
+                const SizedBox(height: AppSpacing.space12),
+                AppTextField(
+                  label: l10n.itemsFieldStock,
+                  controller: _stockCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: AppSpacing.space12),
+                AppTextField(
+                  label: l10n.itemsLowStockThreshold,
+                  controller: _thresholdCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonCancel)),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : Text(widget.material == null ? l10n.commonAdd : l10n.commonSave),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Recipe editor — set how much of each raw material a dish consumes per unit.
+// Opened from the item form for restaurant businesses. Saving replaces the
+// item's whole recipe.
+// ---------------------------------------------------------------------------
+class RecipeEditorDialog extends ConsumerStatefulWidget {
+  final String itemId;
+  final String itemName;
+
+  const RecipeEditorDialog(
+      {super.key, required this.itemId, required this.itemName});
+
+  @override
+  ConsumerState<RecipeEditorDialog> createState() => _RecipeEditorDialogState();
+}
+
+class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
+  // raw_material_id -> quantity text controller. Blank/zero means "not used".
+  final Map<String, TextEditingController> _ctrls = {};
+  bool _loading = true;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      // Ensure the raw-materials list is available.
+      final materials = await ref.read(rawMaterialsProvider.future);
+      final recipeRaw = await getItemRecipe(widget.itemId);
+      final recipe = recipeRaw
+          .map((j) => RecipeRow.fromJson(j as Map<String, dynamic>))
+          .toList();
+      // Stored quantity is in the material's stock unit; show it in the entry
+      // unit (kg -> g, L -> ml) so a plate reads as "250" not "0.25".
+      final byId = {for (final r in recipe) r.rawMaterialId: r.quantity};
+      for (final m in materials) {
+        String text = '';
+        if (byId.containsKey(m.id)) {
+          final entry = recipeEntryUnit(m.unit);
+          text = formatQty(byId[m.id]! / entry.toStock);
+        }
+        _ctrls[m.id] = TextEditingController(text: text);
+      }
+      if (mounted) setState(() => _loading = false);
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.message;
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _ctrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final materials = ref.read(rawMaterialsProvider).valueOrNull ?? [];
+    final unitById = {for (final m in materials) m.id: m.unit};
+    final rows = <Map<String, dynamic>>[];
+    for (final entry in _ctrls.entries) {
+      final typed = double.tryParse(entry.value.text.trim());
+      if (typed != null && typed > 0) {
+        // Convert the entered amount (g/ml) back to the material's stock unit
+        // (kg/L) before storing, so deduction math stays in the stock unit.
+        final conv = recipeEntryUnit(unitById[entry.key] ?? 'piece');
+        rows.add({
+          'raw_material_id': entry.key,
+          'quantity': typed * conv.toStock,
+        });
+      }
+    }
+    setState(() => _saving = true);
+    try {
+      await setItemRecipe(widget.itemId, rows);
+      if (mounted) Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final materials = ref.watch(rawMaterialsProvider).valueOrNull ?? [];
+
+    return AlertDialog(
+      title: Text(l10n.itemsRecipeTitle(widget.itemName),
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+      content: SizedBox(
+        width: 400,
+        child: _loading
+            ? const SizedBox(
+                height: 120, child: Center(child: CircularProgressIndicator()))
+            : _error != null
+                ? Text(_error!, style: const TextStyle(color: AppColors.error))
+                : materials.isEmpty
+                    ? Text(l10n.itemsRecipeNoMaterials)
+                    : SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(l10n.itemsRecipeHint,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: AppColors.textSecondary)),
+                            const SizedBox(height: 8),
+                            for (final m in materials)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(m.name,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w500)),
+                                    ),
+                                    SizedBox(
+                                      width: 110,
+                                      child: AppTextField(
+                                        label:
+                                            recipeEntryUnitLabel(context, m.unit),
+                                        controller: _ctrls[m.id]!,
+                                        keyboardType:
+                                            const TextInputType.numberWithOptions(
+                                                decimal: true),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonCancel)),
+        ElevatedButton(
+          onPressed: (_saving || _loading) ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : Text(l10n.commonSave),
+        ),
+      ],
+    );
+  }
+}

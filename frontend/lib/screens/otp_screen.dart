@@ -134,6 +134,13 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   void _onDigitChanged(int index, String value) {
+    // Paste (or an autofilled OTP): more than one character arrives in a single
+    // field. Spread the digits across the boxes starting from this one instead
+    // of letting maxLength truncate it to a single digit.
+    if (value.length > 1) {
+      _distributeOtp(value, from: index);
+      return;
+    }
     if (value.length == 1 && index < 5) {
       _focusNodes[index + 1].requestFocus();
     }
@@ -142,6 +149,28 @@ class _OtpScreenState extends State<OtpScreen> {
       _verify();
     }
     setState(() => _error = null);
+  }
+
+  /// Fills the OTP boxes from [text] (keeping only digits), starting at box
+  /// [from]. Used for paste / OS autofill of a full code.
+  void _distributeOtp(String text, {int from = 0}) {
+    final digits = text.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      // Nothing usable — reset this box so the stray value doesn't stick.
+      _otpCtrls[from].text = '';
+      return;
+    }
+    int box = from;
+    for (var i = 0; i < digits.length && box < _otpCtrls.length; i++, box++) {
+      _otpCtrls[box].text = digits[i];
+    }
+    // Focus the box after the last filled one (or the last box), and auto-verify
+    // when all six are now filled.
+    final lastFilled = box - 1;
+    final nextFocus = lastFilled < 5 ? lastFilled + 1 : 5;
+    _focusNodes[nextFocus].requestFocus();
+    setState(() => _error = null);
+    if (_otp.length == 6) _verify();
   }
 
   void _onKeyDown(int index, KeyEvent event) {
@@ -302,7 +331,9 @@ class _OtpScreenState extends State<OtpScreen> {
           focusNode: _focusNodes[index],
           keyboardType: TextInputType.number,
           textAlign: TextAlign.center,
-          maxLength: 1,
+          // No maxLength here: a maxLength/length-limiting formatter would
+          // truncate a pasted 6-digit code to one char before onChanged sees
+          // it. Length is managed in _onDigitChanged instead.
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w700,

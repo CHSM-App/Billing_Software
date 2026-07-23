@@ -14,9 +14,16 @@ function ownerOnly(req, res, next) {
   next();
 }
 
-// Staff roles this endpoint can create/manage. 'cashier' = waiter (order-taker),
-// 'kitchen' = kitchen chef (Kitchen Display). Owners are managed elsewhere.
-const MANAGED_ROLES = ['cashier', 'kitchen'];
+// Staff roles this endpoint can create/manage:
+//   'cashier' = finalizes bills, takes payment, can be voided by owner
+//   'server'  = takes/builds orders (draft bills) and sends them to the kitchen;
+//               cannot finalize or collect payment
+//   'kitchen' = kitchen chef (Kitchen Display)
+// Owners are managed elsewhere.
+const MANAGED_ROLES = ['cashier', 'server', 'kitchen'];
+
+// SQL fragment listing the manageable roles for WHERE ... role IN (...) clauses.
+const MANAGED_ROLES_SQL = "'cashier', 'server', 'kitchen'";
 
 // POST /api/staff
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
@@ -75,7 +82,7 @@ router.get('/', requireAuth, ownerOnly, async (req, res) => {
       .query(`
         SELECT id, business_id, name, phone, role, created_at
         FROM users
-        WHERE business_id = @business_id AND role IN ('cashier', 'kitchen')
+        WHERE business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})
         ORDER BY created_at ASC
       `);
 
@@ -95,7 +102,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
     const snapshot = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query('SELECT id, name, phone FROM users WHERE id = @id AND business_id = @business_id AND role IN (\'cashier\', \'kitchen\')');
+      .query(`SELECT id, name, phone FROM users WHERE id = @id AND business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})`);
 
     if (snapshot.recordset.length === 0) {
       return res.status(404).json({ error: 'Staff member not found' });
@@ -104,7 +111,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
     await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query('DELETE FROM users WHERE id = @id AND business_id = @business_id AND role IN (\'cashier\', \'kitchen\')');
+      .query(`DELETE FROM users WHERE id = @id AND business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})`);
 
     audit.logStaffDeleted(
       { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },
@@ -144,7 +151,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT id FROM users
-        WHERE id = @id AND business_id = @business_id AND role IN ('cashier', 'kitchen')
+        WHERE id = @id AND business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})
       `);
 
     if (check.recordset.length === 0) {
@@ -179,7 +186,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       UPDATE users
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.phone, INSERTED.role, INSERTED.created_at
-      WHERE id = @id AND business_id = @business_id AND role IN ('cashier', 'kitchen')
+      WHERE id = @id AND business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})
     `);
 
     const updated = result.recordset[0];

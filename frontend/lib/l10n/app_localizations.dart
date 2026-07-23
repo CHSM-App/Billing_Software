@@ -332,6 +332,18 @@ abstract class AppLocalizations {
   /// **'Table {number}'**
   String kitchenTable(String number);
 
+  /// No description provided for @kitchenJustNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Just now'**
+  String get kitchenJustNow;
+
+  /// No description provided for @kitchenMinAgo.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min ago'**
+  String kitchenMinAgo(int minutes);
+
   /// No description provided for @settingsTitle.
   ///
   /// In en, this message translates to:
@@ -1355,7 +1367,7 @@ abstract class AppLocalizations {
   /// No description provided for @billingChooseSize.
   ///
   /// In en, this message translates to:
-  /// **'Choose size — {name}'**
+  /// **'Choose variant — {name}'**
   String billingChooseSize(String name);
 
   /// No description provided for @billingOutOfStock.
@@ -1739,25 +1751,25 @@ abstract class AppLocalizations {
   /// No description provided for @itemsManageSizes.
   ///
   /// In en, this message translates to:
-  /// **'Add sizes / variants'**
+  /// **'Add variants'**
   String get itemsManageSizes;
 
   /// No description provided for @itemsManageSizesCount.
   ///
   /// In en, this message translates to:
-  /// **'Manage sizes ({count})'**
+  /// **'Manage variants ({count})'**
   String itemsManageSizesCount(int count);
 
   /// No description provided for @itemsSizesTitle.
   ///
   /// In en, this message translates to:
-  /// **'Sizes — {name}'**
+  /// **'Variants — {name}'**
   String itemsSizesTitle(String name);
 
   /// No description provided for @itemsSizeLabel.
   ///
   /// In en, this message translates to:
-  /// **'Size label (e.g. XL)'**
+  /// **'Variant label (e.g. XL, Half, 500ml)'**
   String get itemsSizeLabel;
 
   /// No description provided for @itemsSizePrice.
@@ -1775,25 +1787,25 @@ abstract class AppLocalizations {
   /// No description provided for @itemsAddSize.
   ///
   /// In en, this message translates to:
-  /// **'Add size'**
+  /// **'Add variant'**
   String get itemsAddSize;
 
   /// No description provided for @itemsNoSizesYet.
   ///
   /// In en, this message translates to:
-  /// **'No sizes yet. Add one below.'**
+  /// **'No variants yet. Add one below.'**
   String get itemsNoSizesYet;
 
   /// No description provided for @itemsStockPerSizeHint.
   ///
   /// In en, this message translates to:
-  /// **'Stock is tracked per size. Tap the item to update each size\'s stock.'**
+  /// **'Stock is tracked per variant. Tap the item to update each variant\'s stock.'**
   String get itemsStockPerSizeHint;
 
   /// No description provided for @itemsSizeDeleteConfirm.
   ///
   /// In en, this message translates to:
-  /// **'Remove size \"{label}\"?'**
+  /// **'Remove variant \"{label}\"?'**
   String itemsSizeDeleteConfirm(String label);
 
   /// No description provided for @itemsStockLabel.
@@ -2491,6 +2503,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Waiter'**
   String get staffRoleWaiter;
+
+  /// No description provided for @staffRoleServer.
+  ///
+  /// In en, this message translates to:
+  /// **'Server'**
+  String get staffRoleServer;
 
   /// No description provided for @staffRoleKitchen.
   ///
@@ -3379,6 +3397,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Something went wrong'**
   String get errorSomethingWentWrong;
+
+  /// No description provided for @itemsTabItems.
+  ///
+  /// In en, this message translates to:
+  /// **'Items'**
+  String get itemsTabItems;
+
+  /// No description provided for @itemsTabRawMaterials.
+  ///
+  /// In en, this message translates to:
+  /// **'Raw Materials'**
+  String get itemsTabRawMaterials;
+
+  /// No description provided for @itemsAddRawMaterial.
+  ///
+  /// In en, this message translates to:
+  /// **'Add raw material'**
+  String get itemsAddRawMaterial;
+
+  /// No description provided for @itemsEditRawMaterial.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit raw material'**
+  String get itemsEditRawMaterial;
+
+  /// No description provided for @itemsRawMaterialsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No raw materials yet.\nAdd ingredients to track their stock.'**
+  String get itemsRawMaterialsEmpty;
+
+  /// No description provided for @itemsRawMaterialDeleteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete raw material?'**
+  String get itemsRawMaterialDeleteTitle;
+
+  /// No description provided for @itemsRawMaterialDeleteBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete \"{name}\"? This cannot be undone.'**
+  String itemsRawMaterialDeleteBody(String name);
+
+  /// No description provided for @itemsLowStockThreshold.
+  ///
+  /// In en, this message translates to:
+  /// **'Low-stock alert at'**
+  String get itemsLowStockThreshold;
+
+  /// No description provided for @itemsManageRecipe.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage recipe (raw materials)'**
+  String get itemsManageRecipe;
+
+  /// No description provided for @itemsRecipeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Recipe · {name}'**
+  String itemsRecipeTitle(String name);
+
+  /// No description provided for @itemsRecipeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Set how much of each raw material this dish uses per unit sold. Leave blank to skip.'**
+  String get itemsRecipeHint;
+
+  /// No description provided for @itemsRecipeNoMaterials.
+  ///
+  /// In en, this message translates to:
+  /// **'Add raw materials first, then set the recipe.'**
+  String get itemsRecipeNoMaterials;
 }
 
 class _AppLocalizationsDelegate

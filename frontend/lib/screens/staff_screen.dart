@@ -165,42 +165,19 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
                     );
                   },
                 ),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (_allowKitchen) ...[
-            FloatingActionButton.extended(
-              heroTag: 'add_kitchen',
-              onPressed: () => _showStaffForm(initialRole: 'kitchen'),
-              icon: const Icon(Icons.restaurant_menu_outlined),
-              label: Text(l10n.staffAddKitchen),
-              backgroundColor: AppColors.surface,
-              foregroundColor: AppColors.primary,
-            ),
-            const SizedBox(height: AppSpacing.space12),
-          ],
-          FloatingActionButton.extended(
-            heroTag: 'add_staff',
-            onPressed: () => _showStaffForm(),
-            icon: const Icon(Icons.person_add_outlined),
-            label: Text(l10n.staffAddStaff),
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-          ),
-        ],
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'add_staff',
+        onPressed: () => _showStaffForm(),
+        icon: const Icon(Icons.person_add_outlined),
+        label: Text(l10n.staffAddStaff),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
       ),
     );
   }
-
-  bool get _allowKitchen {
-    final businessType = ref.read(businessTypeProvider);
-    return businessType == 'restaurant_with_tables' ||
-        businessType == 'restaurant_no_tables';
-  }
 }
 
-/// Small colored pill showing a staff member's role (Waiter / Kitchen Chef).
+/// Small colored pill showing a staff member's role (Cashier / Server / Kitchen).
 class _RoleBadge extends StatelessWidget {
   final String role;
   const _RoleBadge({required this.role});
@@ -208,10 +185,25 @@ class _RoleBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final isKitchen = role == 'kitchen';
-    final label = isKitchen ? l10n.staffRoleKitchen : l10n.staffRoleWaiter;
-    final color = isKitchen ? AppColors.warning : AppColors.primary;
-    final bg = isKitchen ? AppColors.warningLight : AppColors.primaryLight;
+    final String label;
+    final Color color;
+    final Color bg;
+    switch (role) {
+      case 'kitchen':
+        label = l10n.staffRoleKitchen;
+        color = AppColors.warning;
+        bg = AppColors.warningLight;
+        break;
+      case 'server':
+        label = l10n.staffRoleServer;
+        color = AppColors.accent;
+        bg = AppColors.accentLight;
+        break;
+      default:
+        label = l10n.staffRoleCashier;
+        color = AppColors.primary;
+        bg = AppColors.primaryLight;
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.space8, vertical: 2),
       decoration: BoxDecoration(
@@ -317,6 +309,9 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Role picker. Retail shops only need cashiers, so the picker
+              // shows for restaurants: Cashier (bills + payment), Server (takes
+              // orders), Kitchen (Kitchen Display).
               if (widget.allowKitchen) ...[
                 Align(
                   alignment: Alignment.centerLeft,
@@ -329,11 +324,17 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
                 SegmentedButton<String>(
                   segments: [
                     ButtonSegment(
-                        value: 'cashier', label: Text(l10n.staffRoleWaiter)),
+                        value: 'cashier', label: Text(l10n.staffRoleCashier)),
+                    ButtonSegment(
+                        value: 'server', label: Text(l10n.staffRoleServer)),
                     ButtonSegment(
                         value: 'kitchen', label: Text(l10n.staffRoleKitchen)),
                   ],
-                  selected: {_role == 'kitchen' ? 'kitchen' : 'cashier'},
+                  selected: {
+                    const {'cashier', 'server', 'kitchen'}.contains(_role)
+                        ? _role
+                        : 'cashier'
+                  },
                   onSelectionChanged: (s) =>
                       setState(() => _role = s.first),
                 ),

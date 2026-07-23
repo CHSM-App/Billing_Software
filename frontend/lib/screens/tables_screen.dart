@@ -44,9 +44,10 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       return;
     }
     if (table.status == 'empty' || table.status == 'occupied') {
-      if (table.activeBillId == null) {
-        ref.read(cartProvider.notifier).clear();
-      }
+      // The cart is shared across all billing screens (retail Billing tab and
+      // each table). Always start a table session from a clean cart: an empty
+      // table opens empty; an occupied table's draft is loaded fresh below.
+      ref.read(cartProvider.notifier).clear();
 
       // Retrieve from cache — populated when tables were last fetched.
       final cachedBill = ref
@@ -74,9 +75,19 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
               FadeTransition(opacity: animation, child: child),
         ),
       );
-      // Reconcile with the server in the background. The screen keeps its
-      // current (optimistically updated) list instead of flashing a spinner.
-      ref.read(tablesProvider.notifier).refreshSilently();
+
+      // Back from the table screen: clear the borrowed cart so a table draft's
+      // items never leak into the standalone Billing tab (both share the same
+      // cartProvider, and the Billing tab stays alive in the shell's
+      // IndexedStack). This runs on every exit path — save, finalize, or back.
+      if (!mounted) return;
+      ref.read(cartProvider.notifier).clear();
+
+      // We intentionally do NOT refresh tables here. Saving a draft pops this
+      // screen immediately (optimistic) while the create/update commits in the
+      // background; a refresh fired now would race that uncommitted write and
+      // could momentarily flip the table back to empty. _saveDraft runs its own
+      // refreshSilently() once the write commits, keeping the list correct.
     }
   }
 

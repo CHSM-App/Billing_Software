@@ -23,8 +23,19 @@ class LicenseStatus {
   final LicenseState state;
   final int? daysUntilExpiry;      // for warning banner
   final int? graceDaysRemaining;   // how many grace days left
+  /// True when the check failed because the local session (access/refresh
+  /// token) is invalid or unreadable rather than because the device is
+  /// offline. Callers should send the user to the login screen instead of
+  /// showing an "offline"/"go online" message, since reconnecting can't fix
+  /// a corrupted or expired local session.
+  final bool sessionInvalid;
 
-  const LicenseStatus(this.state, {this.daysUntilExpiry, this.graceDaysRemaining});
+  const LicenseStatus(
+    this.state, {
+    this.daysUntilExpiry,
+    this.graceDaysRemaining,
+    this.sessionInvalid = false,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +115,23 @@ class LicenseService {
         }
         return const LicenseStatus(LicenseState.blockedSubscription);
       }
-      // Other API error (401, 500 etc.) — store error and fall back to cached
+      // 401 means the access token was rejected and the auto-refresh in
+      // api.dart also failed to recover it (refresh token expired, revoked,
+      // or — on Windows — unreadable because the DPAPI-encrypted secure
+      // storage blob was corrupted/rotated). None of those are fixed by
+      // going online, so flag it distinctly instead of falling into the
+      // "offline too long" bucket.
+      if (e.statusCode == 401) {
+        lastOnlineError = 'Server error (${e.statusCode}): ${e.message}';
+        final offlineResult = await _checkOffline();
+        return LicenseStatus(
+          offlineResult.state,
+          daysUntilExpiry: offlineResult.daysUntilExpiry,
+          graceDaysRemaining: offlineResult.graceDaysRemaining,
+          sessionInvalid: true,
+        );
+      }
+      // Other API error (500 etc.) — store error and fall back to cached
       lastOnlineError = 'Server error (${e.statusCode}): ${e.message}';
       return await _checkOffline();
     } catch (e) {

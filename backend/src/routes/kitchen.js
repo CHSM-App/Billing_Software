@@ -5,14 +5,8 @@ const logger = require('../logger');
 
 const router = express.Router();
 
-// Kitchen endpoints are for the kitchen chef and the owner (who may watch the
-// kitchen). Waiters (cashiers) take orders but do not mark dishes ready here.
-function kitchenOrOwner(req, res, next) {
-  if (req.user.role !== 'kitchen' && req.user.role !== 'owner') {
-    return res.status(403).json({ error: 'Only kitchen or owner can access the kitchen view' });
-  }
-  next();
-}
+// Viewing the kitchen queue is open to any authenticated role (owner,
+// kitchen chef, waiter) — everyone on staff may want to check order status.
 
 // Marking a dish ready is reserved for the kitchen chef. Owners/waiters may
 // watch the queue but cannot tick dishes off.
@@ -29,7 +23,7 @@ const VALID_KITCHEN_STATUSES = ['pending', 'ready'];
 // Active orders for the kitchen: draft bills (an order that has not been paid),
 // with their line items and per-item kitchen status. Oldest order first so the
 // kitchen works through the queue in arrival order.
-router.get('/orders', requireAuth, kitchenOrOwner, async (req, res) => {
+router.get('/orders', requireAuth, async (req, res) => {
   try {
     await poolConnect;
 

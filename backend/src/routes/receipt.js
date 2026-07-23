@@ -13,7 +13,7 @@ router.get('/:token', async (req, res) => {
       .input('token', sql.NVarChar(16), req.params.token)
       .query(`
         SELECT b.bill_number, b.customer_name, b.customer_phone,
-               b.subtotal, b.total, b.payment_mode, b.created_at,
+               b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.created_at,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
                bs.gst_number, bs.logo_url, bs.bill_footer_note
@@ -185,9 +185,21 @@ router.get('/:token', async (req, res) => {
       <span>Items</span>
       <span>${items.length}</span>
     </div>
+    <div class="t-row">
+      <span>Subtotal</span>
+      <span>&#8377;${fmt(bill.subtotal)}</span>
+    </div>
+    ${Number(bill.tax_amount) > 0 ? `<div class="t-row">
+      <span>Tax</span>
+      <span>&#8377;${fmt(bill.tax_amount)}</span>
+    </div>` : ''}
+    ${Number(bill.discount_amount) > 0 ? `<div class="t-row">
+      <span>Discount</span>
+      <span>&minus;&#8377;${fmt(bill.discount_amount)}</span>
+    </div>` : ''}
     <div class="t-grand">
       <span>Grand Total</span>
-      <span>&#8377;${fmt(bill.total)}</span>
+      <span>&#8377;${fmt(Number(bill.total) - Number(bill.discount_amount || 0))}</span>
     </div>
   </div>
 

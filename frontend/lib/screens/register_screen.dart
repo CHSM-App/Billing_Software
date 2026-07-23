@@ -115,7 +115,7 @@ class _RegisterScreenState extends State<RegisterScreen>
             ? null
             : _addressController.text.trim(),
         phone: _businessPhoneController.text.trim(),
-        inventoryEnabled: _isRetail && _inventoryEnabled,
+        inventoryEnabled: _inventoryEnabled,
         hasBarcodeScanner: _isRetail && _isWindows && _hasBarcodeScanner,
         ownerName: _ownerNameController.text.trim(),
         ownerPhone: _ownerPhoneController.text.trim(),
@@ -257,29 +257,30 @@ class _RegisterScreenState extends State<RegisterScreen>
                               entry.$2,
                               entry.$3,
                             ))),
-                        if (_isRetail) ...[
-                          const SizedBox(height: AppSpacing.space8),
-                          const Divider(),
+                        // Inventory tracking is offered to every business type
+                        // (retail stock, liquor bottles, restaurant raw materials).
+                        const SizedBox(height: AppSpacing.space8),
+                        const Divider(),
+                        const SizedBox(height: AppSpacing.space8),
+                        _buildToggleTile(
+                          icon: Icons.inventory_2_outlined,
+                          title: l10n.registerInventoryTitle,
+                          subtitle: l10n.registerInventorySubtitle,
+                          value: _inventoryEnabled,
+                          onChanged: (v) =>
+                              setState(() => _inventoryEnabled = v),
+                        ),
+                        // Barcode scanner is a retail-specific (Windows) feature.
+                        if (_isRetail && _isWindows) ...[
                           const SizedBox(height: AppSpacing.space8),
                           _buildToggleTile(
-                            icon: Icons.inventory_2_outlined,
-                            title: l10n.registerInventoryTitle,
-                            subtitle: l10n.registerInventorySubtitle,
-                            value: _inventoryEnabled,
+                            icon: Icons.barcode_reader,
+                            title: l10n.registerScannerTitle,
+                            subtitle: l10n.registerScannerSubtitle,
+                            value: _hasBarcodeScanner,
                             onChanged: (v) =>
-                                setState(() => _inventoryEnabled = v),
+                                setState(() => _hasBarcodeScanner = v),
                           ),
-                          if (_isWindows) ...[
-                            const SizedBox(height: AppSpacing.space8),
-                            _buildToggleTile(
-                              icon: Icons.barcode_reader,
-                              title: l10n.registerScannerTitle,
-                              subtitle: l10n.registerScannerSubtitle,
-                              value: _hasBarcodeScanner,
-                              onChanged: (v) =>
-                                  setState(() => _hasBarcodeScanner = v),
-                            ),
-                          ],
                         ],
                       ],
                     ),
@@ -465,8 +466,8 @@ class _RegisterScreenState extends State<RegisterScreen>
     return GestureDetector(
       onTap: () => setState(() {
         _businessType = value;
+        // Barcode scanner is retail-only; inventory is available to all types.
         if (!_isRetail) {
-          _inventoryEnabled = false;
           _hasBarcodeScanner = false;
         }
       }),

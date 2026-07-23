@@ -31,9 +31,12 @@ function inParams(ids, type) {
   return { clause: names.join(','), bind };
 }
 
-function ownerOnly(req, res, next) {
-  if (req.user.role !== 'owner') {
-    return res.status(403).json({ error: 'Only owners can perform this action' });
+// Finalizing a bill (and collecting payment) is reserved for cashiers and
+// owners. A 'server' takes/builds orders as drafts and sends them to the
+// kitchen, but cannot finalize or take payment.
+function cashierOrOwner(req, res, next) {
+  if (req.user.role !== 'cashier' && req.user.role !== 'owner') {
+    return res.status(403).json({ error: 'Only a cashier or owner can finalize a bill or take payment' });
   }
   next();
 }
@@ -56,6 +59,32 @@ async function loadVariantMap(transaction, businessId, items) {
     `);
   const map = {};
   for (const row of result.recordset) map[row.id] = row;
+  return map;
+}
+
+// Load recipe rows for a set of line items, keyed by item_id. Each entry is a
+// list of { raw_material_id, quantity, stock_quantity, low_stock_threshold, name }.
+// Rows are read inside the transaction so raw-material stock is consistent with
+// the deductions that follow.
+async function loadRecipeMap(transaction, businessId, items) {
+  const itemIds = [...new Set(items.map((i) => i.item_id).filter(Boolean))];
+  if (itemIds.length === 0) return {};
+  const { clause, bind } = inParams(itemIds);
+  const result = await bind(transaction.request())
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .query(`
+      SELECT ir.item_id, ir.raw_material_id, ir.quantity,
+             rm.name, rm.stock_quantity, rm.low_stock_threshold
+      FROM item_recipes ir
+      JOIN raw_materials rm ON rm.id = ir.raw_material_id
+      JOIN items i ON i.id = ir.item_id
+      WHERE ir.item_id IN (${clause}) AND i.business_id = @business_id
+        AND rm.business_id = @business_id AND rm.is_active = 1
+    `);
+  const map = {};
+  for (const row of result.recordset) {
+    (map[row.item_id] = map[row.item_id] || []).push(row);
+  }
   return map;
 }
 
@@ -89,20 +118,104 @@ async function decrementLineStock(transaction, businessId, li, itemMap, variantM
   return r.rowsAffected[0] > 0;
 }
 
+// Build the list of stock shortfalls for a set of line items, aggregating
+// requested amounts per stock target so multiple lines hitting the same target
+// are summed. Covers all three line kinds plus recipe raw materials. Returns an
+// array of { item_name, requested, available, ... } — empty when everything fits.
+// This is an early check; the atomic guarded UPDATEs remain the true gate.
+function checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap) {
+  // Requested amount per target key; available amount per target key.
+  const requested = {};   // key -> amount
+  const available = {};    // key -> amount (null = untracked)
+  const label = {};        // key -> display name for the error
+
+  const setAvail = (key, val, name) => {
+    if (!(key in available)) { available[key] = val; label[key] = name; }
+  };
+
+  for (const li of lineItems) {
+    if (li.variant_id) {
+      const key = `var:${li.variant_id}`;
+      const v = variantMap[li.variant_id];
+      setAvail(key, v ? v.stock_quantity : null, li.item_name);
+      requested[key] = (requested[key] || 0) + parseFloat(li.quantity);
+    } else {
+      const key = `item:${li.item_id}`;
+      setAvail(key, itemMap[li.item_id]?.stock_quantity ?? null, li.item_name);
+      requested[key] = (requested[key] || 0) + parseFloat(li.quantity);
+    }
+
+    // Recipe raw materials consumed by this line's item.
+    const rows = recipeMap[li.item_id] || [];
+    for (const r of rows) {
+      const key = `rm:${r.raw_material_id}`;
+      setAvail(key, r.stock_quantity, r.name);
+      requested[key] = (requested[key] || 0) + parseFloat(r.quantity) * parseFloat(li.quantity);
+    }
+  }
+
+  const out = [];
+  for (const key of Object.keys(requested)) {
+    const avail = available[key];
+    if (avail != null && requested[key] > parseFloat(avail)) {
+      out.push({ item_name: label[key], requested: requested[key], available: parseFloat(avail) });
+    }
+  }
+  return out;
+}
+
+// Deduct every raw-material line in an item's recipe. `recipeMap` is keyed by
+// item_id -> [{ raw_material_id, quantity, stock_quantity }]. Returns true when
+// all raw materials had enough stock (or were untracked), false on any shortfall.
+async function decrementRecipe(transaction, li, recipeMap) {
+  const rows = recipeMap[li.item_id];
+  if (!rows || rows.length === 0) return true;
+  for (const r of rows) {
+    if (r.stock_quantity == null) continue; // untracked raw material
+    const used = parseFloat(r.quantity) * parseFloat(li.quantity);
+    const upd = await transaction.request()
+      .input('id', sql.UniqueIdentifier, r.raw_material_id)
+      .input('qty', sql.Decimal(10, 2), used)
+      .query(`
+        UPDATE raw_materials
+        SET stock_quantity = stock_quantity - @qty
+        WHERE id = @id AND stock_quantity >= @qty
+      `);
+    if (upd.rowsAffected[0] === 0) return false;
+  }
+  return true;
+}
+
 // Restore stock for a line item (used when voiding/replacing bill items).
-async function restoreLineStock(transaction, businessId, li, variantMap) {
+// Mirrors decrementLineStock: variants restore the variant count, plain lines
+// the item count. Also restores any recipe raw materials consumed by the line.
+async function restoreLineStock(transaction, businessId, li) {
   if (li.variant_id) {
     await transaction.request()
       .input('variant_id', sql.UniqueIdentifier, li.variant_id)
       .input('qty', sql.Decimal(10, 2), li.quantity)
       .query('UPDATE item_variants SET stock_quantity = stock_quantity + @qty WHERE id = @variant_id AND stock_quantity IS NOT NULL');
-    return;
+  } else if (li.item_id) {
+    await transaction.request()
+      .input('item_id', sql.UniqueIdentifier, li.item_id)
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .input('qty', sql.Decimal(10, 2), li.quantity)
+      .query('UPDATE items SET stock_quantity = stock_quantity + @qty WHERE id = @item_id AND business_id = @business_id AND stock_quantity IS NOT NULL');
   }
-  await transaction.request()
-    .input('item_id', sql.UniqueIdentifier, li.item_id)
-    .input('business_id', sql.UniqueIdentifier, businessId)
-    .input('qty', sql.Decimal(10, 2), li.quantity)
-    .query('UPDATE items SET stock_quantity = stock_quantity + @qty WHERE id = @item_id AND business_id = @business_id AND stock_quantity IS NOT NULL');
+
+  // Restore recipe raw materials, if this item consumes any.
+  if (li.item_id) {
+    await transaction.request()
+      .input('item_id', sql.UniqueIdentifier, li.item_id)
+      .input('qty', sql.Decimal(10, 2), li.quantity)
+      .query(`
+        UPDATE rm
+        SET rm.stock_quantity = rm.stock_quantity + (ir.quantity * @qty)
+        FROM raw_materials rm
+        JOIN item_recipes ir ON ir.raw_material_id = rm.id
+        WHERE ir.item_id = @item_id AND rm.stock_quantity IS NOT NULL
+      `);
+  }
 }
 
 // Build the low-stock notification list: which stock targets crossed from
@@ -188,6 +301,11 @@ router.post('/', requireAuth, async (req, res) => {
   if (!['draft', 'finalized'].includes(billStatus)) {
     return res.status(400).json({ error: 'status must be draft or finalized' });
   }
+  // A server may only open/build orders (drafts); finalizing + taking payment is
+  // reserved for cashiers and owners.
+  if (billStatus === 'finalized' && req.user.role === 'server') {
+    return res.status(403).json({ error: 'A server can only send orders to the kitchen; a cashier finalizes the bill and takes payment' });
+  }
   // client_bill_id must be a UUID v4 when supplied
   if (client_bill_id !== undefined && (typeof client_bill_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(client_bill_id))) {
     return res.status(400).json({ error: 'client_bill_id must be a valid UUID' });
@@ -256,6 +374,9 @@ router.post('/', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Variant not found: ${badVariant.variant_id}` });
       }
 
+      // Recipe rows (raw materials) for any items that consume them.
+      const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
+
       // Calculate totals
       let subtotal = 0;
       let taxAmount = 0;
@@ -302,29 +423,15 @@ router.post('/', requireAuth, async (req, res) => {
       // Aggregate requested quantities per stock target. The target is the
       // variant when present, otherwise the item — so a size's stock is checked
       // independently of the base item and its other sizes.
+      // Per-target requested totals for the low-stock notification below.
       const stockKey = (li) => li.variant_id || li.item_id;
-      const availableFor = (li) => li.variant_id
-        ? variantMap[li.variant_id]?.stock_quantity
-        : itemMap[li.item_id].stock_quantity;
-
       const requested = {};
       for (const li of lineItems) {
         requested[stockKey(li)] = (requested[stockKey(li)] || 0) + li.quantity;
       }
 
       if (inventoryEnabled) {
-        const insufficient = lineItems
-          .filter((li) => availableFor(li) != null && requested[stockKey(li)] > availableFor(li))
-          .map((li) => ({
-            item_id: li.item_id,
-            variant_id: li.variant_id,
-            item_name: li.item_name,
-            requested: requested[stockKey(li)],
-            available: availableFor(li),
-          }))
-          // De-duplicate (same stock target can appear on multiple lines)
-          .filter((v, i, arr) => arr.findIndex((x) => (x.variant_id || x.item_id) === (v.variant_id || v.item_id)) === i);
-
+        const insufficient = checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap);
         if (insufficient.length > 0) {
           await transaction.rollback();
           return res.status(409).json({
@@ -406,6 +513,14 @@ router.post('/', requireAuth, async (req, res) => {
             return res.status(409).json({
               error: 'Insufficient stock',
               items: [{ item_name: li.item_name, item_id: li.item_id, variant_id: li.variant_id }],
+            });
+          }
+          const recipeOk = await decrementRecipe(transaction, li, recipeMap);
+          if (!recipeOk) {
+            await transaction.rollback();
+            return res.status(409).json({
+              error: 'Insufficient stock',
+              items: [{ item_name: li.item_name, item_id: li.item_id }],
             });
           }
         }
@@ -566,7 +681,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // PUT /api/bills/:id/finalize
-router.put('/:id/finalize', requireAuth, async (req, res) => {
+router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   try {
     await poolConnect;
     const result = await pool.request()
@@ -672,6 +787,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Variant not found: ${badVariant2.variant_id}` });
       }
 
+      const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
+
       const lineItems = items.map((i) => {
         const dbItem = itemMap[i.item_id];
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
@@ -694,27 +811,12 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       });
 
       const stockKey2 = (li) => li.variant_id || li.item_id;
-      const availableFor2 = (li) => li.variant_id
-        ? variantMap[li.variant_id]?.stock_quantity
-        : itemMap[li.item_id].stock_quantity;
-
-      // Centralized stock pre-check — report all insufficient items before any writes.
       const requested2 = {};
       for (const li of lineItems) {
         requested2[stockKey2(li)] = (requested2[stockKey2(li)] || 0) + li.quantity;
       }
       if (inventoryEnabled) {
-        const insufficient2 = lineItems
-          .filter((li) => availableFor2(li) != null && requested2[stockKey2(li)] > availableFor2(li))
-          .map((li) => ({
-            item_id: li.item_id,
-            variant_id: li.variant_id,
-            item_name: li.item_name,
-            requested: requested2[stockKey2(li)],
-            available: availableFor2(li),
-          }))
-          .filter((v, i, arr) => arr.findIndex((x) => (x.variant_id || x.item_id) === (v.variant_id || v.item_id)) === i);
-
+        const insufficient2 = checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap);
         if (insufficient2.length > 0) {
           await transaction.rollback();
           return res.status(409).json({ error: 'Insufficient stock', items: insufficient2 });
@@ -757,6 +859,14 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
             return res.status(409).json({
               error: 'Insufficient stock',
               items: [{ item_name: li.item_name, item_id: li.item_id, variant_id: li.variant_id }],
+            });
+          }
+          const recipeOk = await decrementRecipe(transaction, li, recipeMap);
+          if (!recipeOk) {
+            await transaction.rollback();
+            return res.status(409).json({
+              error: 'Insufficient stock',
+              items: [{ item_name: li.item_name, item_id: li.item_id }],
             });
           }
         }
@@ -884,6 +994,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Variant not found: ${badVariant3.variant_id}` });
       }
 
+      const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
+
       const lineItems = items.map((i) => {
         const dbItem = itemMap[i.item_id];
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
@@ -905,48 +1017,58 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         };
       });
 
-      const stockKey3 = (li) => li.variant_id || li.item_id;
-      const availableFor3 = (li) => li.variant_id
-        ? variantMap[li.variant_id]?.stock_quantity
-        : itemMap[li.item_id].stock_quantity;
-
       // Centralized stock pre-check for new items.
       // Note: old-item stock will be restored below before the new decrements,
       // so we check against current stock_quantity as a conservative lower bound.
       // The atomic UPDATE is still the final concurrency guard.
       if (inventoryEnabled) {
-        const requested3 = {};
-        for (const li of lineItems) {
-          requested3[stockKey3(li)] = (requested3[stockKey3(li)] || 0) + li.quantity;
-        }
-        const insufficient3 = lineItems
-          .filter((li) => availableFor3(li) != null && requested3[stockKey3(li)] > availableFor3(li))
-          .map((li) => ({
-            item_id: li.item_id,
-            variant_id: li.variant_id,
-            item_name: li.item_name,
-            requested: requested3[stockKey3(li)],
-            available: availableFor3(li),
-          }))
-          .filter((v, i, arr) => arr.findIndex((x) => (x.variant_id || x.item_id) === (v.variant_id || v.item_id)) === i);
-
+        const insufficient3 = checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap);
         if (insufficient3.length > 0) {
           await transaction.rollback();
           return res.status(409).json({ error: 'Insufficient stock', items: insufficient3 });
         }
       }
 
-      // Snapshot old items for audit + stock restore
+      // Snapshot old items for audit + stock restore. Kitchen fields are read
+      // too so a dish the kitchen already marked ready keeps that status when the
+      // waiter edits the order (this endpoint replaces all lines, so without this
+      // the checkboxes would reset — see the kitchen-status carry-over below).
       const oldItemsResult = await transaction.request()
         .input('bill_id', sql.UniqueIdentifier, req.params.id)
-        .query('SELECT item_id, variant_id, item_name, quantity, unit_price FROM bill_items WHERE bill_id = @bill_id');
+        .query('SELECT item_id, variant_id, item_name, quantity, unit_price, kitchen_status, kitchen_done_at FROM bill_items WHERE bill_id = @bill_id');
       previousLineItems = oldItemsResult.recordset;
 
+      // Build a per-dish pool of prior kitchen statuses keyed by identity
+      // (item + variant + name). Each new line consumes one matching prior status
+      // so an unchanged dish keeps "ready"; genuinely new dishes stay "pending".
+      const kitchenPool = {};
+      const dishKey = (li) => `${li.item_id || ''}|${li.variant_id || ''}|${li.item_name}`;
+      for (const old of previousLineItems) {
+        (kitchenPool[dishKey(old)] ||= []).push({
+          kitchen_status: old.kitchen_status,
+          kitchen_done_at: old.kitchen_done_at,
+          quantity: parseFloat(old.quantity),
+        });
+      }
+      const takeKitchenStatus = (li) => {
+        const bucket = kitchenPool[dishKey(li)];
+        if (bucket && bucket.length > 0) {
+          const prev = bucket.shift();
+          // If the waiter increased the quantity of an already-ready dish, the
+          // extra portions still need cooking — send it back to pending.
+          if (prev.kitchen_status === 'ready' && parseFloat(li.quantity) > prev.quantity) {
+            return { kitchen_status: 'pending', kitchen_done_at: null };
+          }
+          return { kitchen_status: prev.kitchen_status, kitchen_done_at: prev.kitchen_done_at };
+        }
+        return { kitchen_status: 'pending', kitchen_done_at: null };
+      };
+
       // Restore inventory for old items — increment is always safe, no guard needed.
-      // Targets the variant's stock when the old line had one.
+      // restoreLineStock handles variants, plain items and recipes.
       if (inventoryEnabled) {
         for (const li of previousLineItems.filter((x) => x.item_id || x.variant_id)) {
-          await restoreLineStock(transaction, req.user.business_id, li, variantMap);
+          await restoreLineStock(transaction, req.user.business_id, li);
         }
       }
 
@@ -955,8 +1077,10 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         .input('bill_id', sql.UniqueIdentifier, req.params.id)
         .query('DELETE FROM bill_items WHERE bill_id = @bill_id');
 
-      // Insert new line items
+      // Insert new line items, carrying over the prior kitchen status for any
+      // dish that already existed on the order.
       for (const li of lineItems) {
+        const k = takeKitchenStatus(li);
         await transaction.request()
           .input('bill_id', sql.UniqueIdentifier, req.params.id)
           .input('item_id', sql.UniqueIdentifier, li.item_id)
@@ -966,9 +1090,11 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           .input('unit_price', sql.Decimal(10, 2), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
+          .input('kitchen_status', sql.NVarChar(20), k.kitchen_status)
+          .input('kitchen_done_at', sql.DateTime2, k.kitchen_done_at)
           .query(`
-            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total)
-            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
+            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total, kitchen_status, kitchen_done_at)
+            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total, @kitchen_status, @kitchen_done_at)
           `);
       }
 
@@ -992,6 +1118,14 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
             return res.status(409).json({
               error: 'Insufficient stock',
               items: [{ item_name: li.item_name, item_id: li.item_id, variant_id: li.variant_id }],
+            });
+          }
+          const recipeOk = await decrementRecipe(transaction, li, recipeMap);
+          if (!recipeOk) {
+            await transaction.rollback();
+            return res.status(409).json({
+              error: 'Insufficient stock',
+              items: [{ item_name: li.item_name, item_id: li.item_id }],
             });
           }
         }
@@ -1020,8 +1154,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/bills/:id — void (owner only)
-router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
+// DELETE /api/bills/:id — void (cashier or owner)
+router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
   try {
     await poolConnect;
 
@@ -1075,7 +1209,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
           .query('SELECT item_id, variant_id, item_name, quantity FROM bill_items WHERE bill_id = @bill_id AND (item_id IS NOT NULL OR variant_id IS NOT NULL)');
 
         for (const li of lineItems.recordset) {
-          await restoreLineStock(transaction, req.user.business_id, li, {});
+          await restoreLineStock(transaction, req.user.business_id, li);
         }
       }
 

@@ -158,6 +158,7 @@ app.use('/api', require('./routes/auth'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/businesses', require('./routes/businesses'));
 app.use('/api/items', require('./routes/items'));
+app.use('/api/raw-materials', require('./routes/raw_materials'));
 app.use('/api/bills', require('./routes/bills'));
 app.use('/receipt',  require('./routes/receipt'));
 app.use('/api/tables', require('./routes/tables'));

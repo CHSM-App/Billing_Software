@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:developer' as dev;
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
@@ -274,7 +275,18 @@ Future<Map<String, dynamic>> login(String phone, String pin) async {
 /// Throws on network errors so the caller does NOT treat a WiFi blip as a
 /// logged-out session.
 Future<bool> refreshAccessToken() async {
-  final refreshToken = await getRefreshToken();
+  String? refreshToken;
+  try {
+    refreshToken = await getRefreshToken();
+  } on PlatformException catch (e) {
+    // Secure storage failed to decrypt the stored value (e.g. on Windows,
+    // the DPAPI key backing flutter_secure_storage was rotated/corrupted).
+    // This is NOT recoverable by going online, so it must NOT be treated
+    // as a transient/offline error — surface it as a real auth failure so
+    // the caller prompts the user to log in again.
+    throw ApiException('Local session data is unreadable. Please log in again.', 401,
+        serverMessage: 'secure_storage_unreadable: ${e.message}');
+  }
   // No refresh token in storage — transient storage issue, do NOT log out.
   if (refreshToken == null) {
     throw const _TransientError('No refresh token in storage');
@@ -460,6 +472,38 @@ Future<Map<String, dynamic>> updateVariant(
 Future<void> deleteVariant(String itemId, String variantId) async {
   _parse(await _authDelete(
       Uri.parse('$baseUrl/items/$itemId/variants/$variantId')));
+}
+
+// ---------------------------------------------------------------------------
+// Raw materials (restaurant ingredient inventory) + item recipes (BOM)
+// ---------------------------------------------------------------------------
+
+Future<List<dynamic>> getRawMaterials() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/raw-materials')));
+}
+
+Future<Map<String, dynamic>> createRawMaterial(Map<String, dynamic> data) async {
+  return _parse(await _authPost(Uri.parse('$baseUrl/raw-materials'), body: jsonEncode(data)));
+}
+
+Future<Map<String, dynamic>> updateRawMaterial(String id, Map<String, dynamic> data) async {
+  return _parse(await _authPut(Uri.parse('$baseUrl/raw-materials/$id'), body: jsonEncode(data)));
+}
+
+Future<void> deleteRawMaterial(String id) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/raw-materials/$id')));
+}
+
+/// The recipe (raw-material consumption) for a sellable item.
+Future<List<dynamic>> getItemRecipe(String itemId) async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/items/$itemId/recipe')));
+}
+
+/// Replaces an item's whole recipe. [rows] is a list of
+/// `{ raw_material_id, quantity }`.
+Future<void> setItemRecipe(String itemId, List<Map<String, dynamic>> rows) async {
+  _parse(await _authPut(Uri.parse('$baseUrl/items/$itemId/recipe'),
+      body: jsonEncode({'rows': rows})));
 }
 
 // ---------------------------------------------------------------------------

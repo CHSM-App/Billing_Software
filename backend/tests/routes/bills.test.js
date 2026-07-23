@@ -221,12 +221,15 @@ describe('POST /api/bills', () => {
     // The route makes these calls in order inside the transaction:
     //   1. SELECT inventory_enabled FROM businesses
     //   2. SELECT items WHERE id IN (...)
-    //   3. SELECT COUNT(*) AS cnt FROM bills  (generateBillNumber)
-    //   4. INSERT INTO bills OUTPUT INSERTED.id
-    //   5. INSERT INTO bill_items  (one per item)
+    //   3. SELECT item_recipes JOIN raw_materials  (loadRecipeMap — empty here)
+    //   4. SELECT COUNT(*) AS cnt FROM bills  (generateBillNumber)
+    //   5. INSERT INTO bills OUTPUT INSERTED.id
+    //   6. INSERT INTO bill_items  (one per item)
+    // (loadVariantMap is skipped — no variant_id on the line item.)
     const txQueryMock = jest.fn()
       .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
       .mockResolvedValue({ recordset: [], rowsAffected: [1] });
@@ -303,10 +306,10 @@ describe('PUT /api/bills/:id/finalize', () => {
 // DELETE /api/bills/:id (void)
 // ------------------------------------------------------------------
 describe('DELETE /api/bills/:id', () => {
-  test('returns 403 for non-owner', async () => {
+  test('returns 403 for a role that is neither cashier nor owner', async () => {
     const res = await request(app)
       .delete(`/api/bills/${BILL_ID}`)
-      .set(authHeader({ role: 'cashier' }));
+      .set(authHeader({ role: 'kitchen' }));
     expect(res.status).toBe(403);
   });
 
@@ -316,6 +319,24 @@ describe('DELETE /api/bills/:id', () => {
       .delete(`/api/bills/${BILL_ID}`)
       .set(authHeader({ role: 'owner' }));
     expect(res.status).toBe(404);
+  });
+
+  test('allows a cashier to void/release a table', async () => {
+    mockRequest.query.mockResolvedValueOnce({
+      recordset: [{ ...sampleBill, status: 'draft', inventory_enabled: false }],
+      rowsAffected: [1],
+    });
+    mockTransaction.request.mockImplementation(() => ({
+      ...mockRequest,
+      input: jest.fn().mockReturnThis(),
+      query: jest.fn()
+        .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] }),
+    }));
+    const res = await request(app)
+      .delete(`/api/bills/${BILL_ID}`)
+      .set(authHeader({ role: 'cashier' }));
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
   });
 
   test('returns 409 when bill already voided', async () => {
