@@ -40,46 +40,111 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
   // for cheap 58mm BT printers) and slow chunking. The old GS v 0 variants are
   // kept lower down for comparison.
   late final List<_Approach> _approaches = [
-    _Approach('0a. MANGAL font (bold)',
-        'Mangal Devanagari, ESC * single density + bold. Compare vs Noto.',
-        threshold: 150, bold: true, mode: _SendMode.escStarSingle,
-        slowSend: true, fontFamily: 'Mangal'),
-    _Approach('0b. MANGAL font (regular)',
-        'Mangal Devanagari, ESC * single density, no bold boost.',
-        threshold: 150, mode: _SendMode.escStarSingle, slowSend: true,
-        fontFamily: 'Mangal'),
-    _Approach('1. ESC * bands (RECOMMENDED)',
-        'ESC * 33 24-dot bands, sent slowly. Best path for 58mm BT printers.',
-        threshold: 150, mode: _SendMode.escStar, slowSend: true),
-    _Approach('2. ESC * bands + bold',
-        'Same band method, heavier strokes.',
-        threshold: 140, bold: true, mode: _SendMode.escStar, slowSend: true),
-    _Approach('3. ESC * bands + 2x supersample',
-        'Crisper glyphs, band transmission, slow send.',
-        threshold: 150, scale: 2, mode: _SendMode.escStar, slowSend: true),
-    _Approach('4. ESC * bands + bold + larger',
-        'Boldest/biggest via band mode — for very faint heads.',
-        threshold: 130, bold: true, fontScale: 1.2, mode: _SendMode.escStar,
-        slowSend: true),
     _Approach('5. ESC * SINGLE density (8-dot)',
         'For printers that don\'t support 24-dot mode. Try if 1–4 squish.',
-        threshold: 150, bold: true, mode: _SendMode.escStarSingle,
-        slowSend: true),
-    _Approach('6. GS v 0 raster + slow send',
-        'Original raster but chunked slowly (rules out buffer overrun).',
-        threshold: 150, slowSend: true),
-    _Approach('7. GS v 0 (current default)',
-        'Today\'s default — for comparison.',
-        threshold: 160),
-    _Approach('8. GS ( L graphics fn',
-        'Bitmap via the graphics command.',
-        threshold: 140, bold: true, mode: _SendMode.graphics),
+        threshold: 170, scale: 3, bold: true, fontScale: 1.15,
+        mode: _SendMode.escStarSingle, slowSend: true),
     _Approach('9. GS * image() single density',
         'Non-double-density bit-image (old firmware).',
-        threshold: 140, mode: _SendMode.bitImage),
-    _Approach('10. Floyd–Steinberg dither (ESC *)',
-        'Error-diffusion + band mode.',
-        dither: true, mode: _SendMode.escStar, slowSend: true),
+        threshold: 160, scale: 3, fontScale: 1.35,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
+    _Approach('9b. 9 + adaptive (Sauvola) threshold',
+        'Same as 9, but a local threshold instead of one flat cut — should '
+        'keep thin matras without blobbing heavy conjuncts.',
+        threshold: 160, scale: 3, fontScale: 1.35, adaptive: true,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
+    _Approach('9c. 9 + unsharp mask',
+        'Same as 9, plus a sharpen pass after downscaling to claw back thin '
+        'strokes the supersample blur softened.',
+        threshold: 160, scale: 3, fontScale: 1.35, unsharpAmount: 1.2,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
+    _Approach('9d. 9 + lower threshold',
+        'Same as 9, but a darker cut (130 vs 160) so thin vowel marks are '
+        'less likely to fall below the cut and vanish.',
+        threshold: 130, scale: 3, fontScale: 1.35,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
+    _Approach('9e. 9 + 4x supersample',
+        'Same as 9, but supersampled at 4x instead of 3x before downscale — '
+        'more source detail for the downscale to average from.',
+        threshold: 160, scale: 4, fontScale: 1.35,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
+    _Approach('9f. 9 + w500 bold, bigger glyphs',
+        'Same as 9, plus larger sizes (26/22/42) and a lighter bold target '
+        '(w500) — w700/w900 fills the counters of thick conjuncts.',
+        threshold: 160, scale: 3, fontScale: 1.35,
+        bold: true, boldTarget: FontWeight.w500,
+        fontSize: 26, smallFont: 22, linePitch: 42,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
+    _Approach('9g. 9 + double-strike',
+        'Same as 9, but the printer strikes the image twice (ESC G 1) for '
+        'darker, fuller strokes.',
+        threshold: 160, scale: 3, fontScale: 1.35, doubleStrike: true,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
+    _Approach('9h. 9e, no bold',
+        'Same as 9e (4x supersample), but bold is stripped everywhere it\'s '
+        'structurally applied — header, item column headings, total row — '
+        'all print at plain weight instead of w700.',
+        threshold: 160, scale: 4, fontScale: 1.35,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal',
+        boldOff: true),
+    _Approach('9i. 9h + compact spacing',
+        'Same as 9h, but tighter row pitch (26 vs 34 dots) and tighter '
+        'left/right margin (3 vs 6 dots) — less dead white space between '
+        'rows and at the edges.',
+        threshold: 160, scale: 4, fontScale: 1.35,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal',
+        boldOff: true, linePitch: 26, hPad: 3),
+    _Approach('9j. 9i + tight line height',
+        'Same as 9i, but the strut line-height is dropped from 1.45 to 1.15 '
+        '— that 1.45 multiplier (headroom for matras/shirorekha) was the '
+        'real driver of row height, so 9i\'s smaller linePitch never took '
+        'effect until now. Watch for clipped vowel marks top/bottom.',
+        threshold: 160, scale: 4, fontScale: 1.35,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal',
+        boldOff: true, linePitch: 22, hPad: 3, lineHeight: 1.15),
+    _Approach('9k. 9j via ESC * bands (full width)',
+        'Same rendering as 9j, but sent via ESC * single-density bands '
+        '(approach 5\'s path) instead of GS * image(). That path writes the '
+        'bitmap at its real width with no library-imposed halving/centering '
+        '— GS * image() single-density always squeezes to a fixed 192 dots '
+        'then centers it, which is what was leaving the big left/right gap.',
+        threshold: 160, scale: 4, fontScale: 1.35,
+        mode: _SendMode.escStarSingle, fontFamily: 'Mangal', slowSend: true,
+        boldOff: true, linePitch: 22, hPad: 3, lineHeight: 1.15),
+    _Approach('9l. 9k, smaller font (drop the 1.35 boost)',
+        'Same as 9k, but fontScale drops from 1.35 to 1.0. That 1.35 was '
+        'copied from approach 9, where it compensated for GS * image() '
+        'quietly quartering everything — on the true-scale ESC * path there '
+        'is nothing to compensate for, so it was just inflating every row\'s '
+        'height (and the total paper length) for no reason.',
+        threshold: 160, scale: 4, fontScale: 1.0,
+        mode: _SendMode.escStarSingle, fontFamily: 'Mangal', slowSend: true,
+        boldOff: true, linePitch: 18, hPad: 3, lineHeight: 1.1),
+    _Approach('9m. 9h, tight rows, narrower margin',
+        'Same as 9h (keeps GS * image() single density, same font size — '
+        'the version you said looked good), just with 9j\'s tighter row '
+        'spacing (linePitch 22, lineHeight 1.15) and the widest margin this '
+        'send mode allows: mm80 paper size (288 of 384 dots used, vs 192) '
+        'plus a smaller 2-dot inset. Full English-style edge-to-edge margins '
+        'aren\'t reachable in this send mode — GS * image() single-density '
+        'hard-caps the printed width at paperSize.width~/2 regardless of '
+        'source, and mm80 (288) is the widest that cap goes. 9k/9l (ESC * '
+        'bands) are the only path to a true full-width, zero-imposed-margin '
+        'print.',
+        threshold: 160, scale: 4, fontScale: 1.35,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal',
+        boldOff: true, linePitch: 22, hPad: 2, lineHeight: 1.15,
+        paperSizeMm: 80),
+    _Approach('9n. 9m, standard font size',
+        'Same as 9m, but fontScale drops from 1.35 to 1.0 — the plain, '
+        'un-boosted fontSize/smallFont (20/17) that were originally tuned '
+        'to mirror the native English text bill\'s size. The 1.35 boost was '
+        'inherited from approach 9 for legibility reasons that predate this '
+        'round of fixes; try this to see if it\'s still needed.',
+        threshold: 160, scale: 4, fontScale: 1.0,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal',
+        boldOff: true, linePitch: 22, hPad: 2, lineHeight: 1.15,
+        paperSizeMm: 80),
   ];
 
   // Cache of rendered previews for on-screen display.
@@ -115,6 +180,17 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
         fontScale: a.fontScale,
         dither: a.dither,
         fontFamilyOverride: a.fontFamily,
+        fontSizeOverride: a.fontSize ?? ReceiptImageBuilder.defaultFontSize,
+        smallFontOverride: a.smallFont ?? ReceiptImageBuilder.defaultSmallFont,
+        linePitchOverride: a.linePitch ?? ReceiptImageBuilder.defaultLinePitch,
+        boldTarget: a.boldTarget,
+        unsharpAmount: a.unsharpAmount,
+        adaptive: a.adaptive,
+        paperDotsOverride:
+            a.paperDots ?? ReceiptImageBuilder.defaultPaperDots,
+        boldWeight: a.boldOff ? FontWeight.w400 : FontWeight.w700,
+        hPadOverride: a.hPad ?? ReceiptImageBuilder.defaultHPad,
+        lineHeight: a.lineHeight ?? ReceiptImageBuilder.defaultLineHeight,
       );
 
   // Build the ESC/POS byte stream for an approach using its chosen send mode.
@@ -128,15 +204,22 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
         0x1B, 0x40, // ESC @  reset
         0x1B, 0x61, 0x01, // ESC a 1  centre
       ];
+      if (a.doubleStrike) bytes.addAll([0x1B, 0x47, 0x01]); // ESC G 1
       bytes.addAll(ReceiptImageBuilder.escStarBitImage(bitmap,
           doubleDensity: a.mode == _SendMode.escStar));
+      if (a.doubleStrike) bytes.addAll([0x1B, 0x47, 0x00]); // ESC G 0
       bytes.addAll([0x0A, 0x0A]); // feed to tear
       return bytes;
     }
 
     final profile = await CapabilityProfile.load();
-    final gen = Generator(PaperSize.mm58, profile);
+    final gen = Generator(a.paperSizeMm == 80
+        ? PaperSize.mm80
+        : a.paperSizeMm == 72
+            ? PaperSize.mm72
+            : PaperSize.mm58, profile);
     final bytes = <int>[];
+    if (a.doubleStrike) bytes.addAll([0x1B, 0x47, 0x01]); // ESC G 1
     switch (a.mode) {
       case _SendMode.raster:
         bytes.addAll(gen.imageRaster(bitmap));
@@ -145,12 +228,24 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
         bytes.addAll(gen.imageRaster(bitmap, imageFn: PosImageFn.graphics));
         break;
       case _SendMode.bitImage:
-        bytes.addAll(gen.image(bitmap, isDoubleDensity: false));
+        // esc_pos_utils_plus's gen.image(isDoubleDensity: false) ALWAYS
+        // resizes the final raster to a FIXED width of paperSize.width ~/ 2
+        // (192 for mm58, 256 for mm72, 288 for mm80) — it ignores the source
+        // image's actual width entirely, so our _paperDots/hPad knobs can't
+        // reach the printed width in this mode. mm80 (288) is the widest we
+        // can get out of this send mode; use escStarSingle instead for the
+        // true full-width path. Pre-double the source (nearest-neighbor, no
+        // blur) just so the internal resize is a shrink, not a blur-inducing
+        // upscale.
+        final upscaled = img.copyResize(bitmap,
+            width: bitmap.width * 2, interpolation: img.Interpolation.nearest);
+        bytes.addAll(gen.image(upscaled, isDoubleDensity: false));
         break;
       case _SendMode.escStar:
       case _SendMode.escStarSingle:
         break; // handled above
     }
+    if (a.doubleStrike) bytes.addAll([0x1B, 0x47, 0x00]); // ESC G 0
     bytes.addAll(gen.feed(3));
     return bytes;
   }
@@ -252,6 +347,22 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          const Text(
+            'Width test prints three solid bars (384 / 512 / 576 dots) so you '
+            'can see which one spans the full paper width with no wrap and no '
+            'right margin — that tells us the REAL head width for _paperDots.',
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _busy ? null : _printWidthTest,
+              icon: const Icon(Icons.straighten, size: 18),
+              label: const Text('Width test (384 / 512 / 576)'),
+            ),
+          ),
         ],
       ),
     );
@@ -271,6 +382,32 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
       bytes.addAll([0x0A, 0x0A]);
       await PrinterService.instance.printRawBytes(bytes, slow: true);
       if (mounted) setState(() => _status = '✓ Solid box sent');
+    } catch (e) {
+      if (mounted) setState(() => _status = '✗ $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  // Prints one solid bar per candidate head width via escStarBitImage, with a
+  // gap between each. Whichever bar prints full-bleed — no wrap, no right
+  // margin — is the printer's real dot width. Doesn't touch _paperDots.
+  Future<void> _printWidthTest() async {
+    setState(() {
+      _busy = true;
+      _status = 'Printing width test…';
+    });
+    try {
+      final bytes = <int>[0x1B, 0x40, 0x1B, 0x61, 0x01];
+      for (final w in [384, 512, 576]) {
+        final bar = img.Image(width: w, height: 20);
+        img.fill(bar, color: img.ColorRgb8(0, 0, 0));
+        bytes.addAll(ReceiptImageBuilder.escStarBitImage(bar));
+        bytes.addAll([0x0A, 0x0A, 0x0A]); // gap between bars
+      }
+      bytes.addAll([0x0A, 0x0A]);
+      await PrinterService.instance.printRawBytes(bytes, slow: true);
+      if (mounted) setState(() => _status = '✓ Width test sent (384/512/576)');
     } catch (e) {
       if (mounted) setState(() => _status = '✗ $e');
     } finally {
@@ -438,6 +575,39 @@ class _Approach {
   /// Devanagari font family override (null → default Noto Sans Devanagari).
   final String? fontFamily;
 
+  /// Sizing/weight/rendering overrides — null/false/0 → builder defaults, so
+  /// approaches 5 and 9 are unaffected.
+  final double? fontSize;
+  final double? smallFont;
+  final double? linePitch;
+  final FontWeight? boldTarget;
+  final double unsharpAmount;
+  final bool adaptive;
+  final bool doubleStrike;
+
+  /// Painting width in dots (null → builder default, 384). Lets one approach
+  /// render/print at the head's real 576-dot width without touching the
+  /// shared default other approaches rely on.
+  final int? paperDots;
+
+  /// true → strips bold everywhere it's structurally applied (header, item
+  /// column headings, total row) instead of the builder's default w700.
+  final bool boldOff;
+
+  /// Left/right margin in dots (null → builder default, 6).
+  final double? hPad;
+
+  /// Strut line-height multiplier (null → builder default, 1.45). Lower
+  /// tightens vertical space per row but risks clipping matras/shirorekha.
+  final double? lineHeight;
+
+  /// Paper size (58/72/80) passed to the esc_pos Generator — only matters
+  /// for [_SendMode.bitImage]: gen.image(isDoubleDensity:false) always caps
+  /// the printed width at paperSize.width ~/ 2, so 80 (→288 dots) wastes
+  /// less width than the 58 default (→192 dots). Doesn't reach full width
+  /// either way; use escStarSingle for that.
+  final int paperSizeMm;
+
   _Approach(
     this.title,
     this.description, {
@@ -449,5 +619,17 @@ class _Approach {
     this.mode = _SendMode.raster,
     this.slowSend = false,
     this.fontFamily,
+    this.fontSize,
+    this.smallFont,
+    this.linePitch,
+    this.boldTarget,
+    this.unsharpAmount = 0.0,
+    this.adaptive = false,
+    this.doubleStrike = false,
+    this.paperDots,
+    this.boldOff = false,
+    this.hPad,
+    this.lineHeight,
+    this.paperSizeMm = 58,
   });
 }
