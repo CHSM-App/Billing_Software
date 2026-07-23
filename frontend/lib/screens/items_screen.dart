@@ -9,6 +9,7 @@ import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../api.dart';
 import '../services/printer_service.dart';
+import 'raw_materials_tab.dart';
 
 class ItemsScreen extends ConsumerStatefulWidget {
   const ItemsScreen({super.key});
@@ -17,18 +18,43 @@ class ItemsScreen extends ConsumerStatefulWidget {
   ConsumerState<ItemsScreen> createState() => _ItemsScreenState();
 }
 
-class _ItemsScreenState extends ConsumerState<ItemsScreen> {
+class _ItemsScreenState extends ConsumerState<ItemsScreen>
+    with SingleTickerProviderStateMixin {
   final _searchController = TextEditingController();
+  TabController? _tabController;
+  int _activeTab = 0;
 
   @override
   void initState() {
-    super.initState(); 
+    super.initState();
     _searchController.addListener(() => setState(() {}));
+  }
+
+  /// Whether the Raw Materials tab should be offered — restaurant businesses
+  /// with inventory enabled (only owners manage it).
+  bool _showRawMaterials(String businessType, bool inventoryEnabled, String role) {
+    final isRestaurant = businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
+    return isRestaurant && inventoryEnabled && role == 'owner';
+  }
+
+  void _ensureTabController(bool withRawMaterials) {
+    final desiredLength = withRawMaterials ? 2 : 1;
+    if (_tabController?.length == desiredLength) return;
+    _tabController?.dispose();
+    _tabController = TabController(length: desiredLength, vsync: this)
+      ..addListener(() {
+        if (!(_tabController!.indexIsChanging)) {
+          setState(() => _activeTab = _tabController!.index);
+        }
+      });
+    _activeTab = 0;
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _tabController?.dispose();
     super.dispose();
   }
 
@@ -94,11 +120,20 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
 
   void _showItemForm({Item? item}) {
     final inventoryEnabled = ref.read(inventoryEnabledProvider);
+    final businessType = ref.read(businessTypeProvider);
+    final isRestaurant = businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
+    // Recipes only apply to restaurant dishes with inventory, and need a saved
+    // item to attach to.
+    final showRecipe = isRestaurant && inventoryEnabled && item != null;
+    // Existing categories for this business, to offer as dropdown suggestions.
+    final categories = ref.read(categoriesProvider).valueOrNull ?? const [];
     showDialog(
       context: context,
       builder: (_) => _ItemFormDialog(
         item: item,
         inventoryEnabled: inventoryEnabled,
+        categories: categories,
         onSaved: (data) async {
           if (item == null) {
             await ref.read(itemsProvider.notifier).addItem(data);
@@ -109,6 +144,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
         },
         onManageSizes:
             item != null ? () => _showVariantManager(item) : null,
+        onManageRecipe: showRecipe
+            ? () => showDialog(
+                  context: context,
+                  builder: (_) => RecipeEditorDialog(
+                      itemId: item.id, itemName: item.name),
+                )
+            : null,
       ),
     );
   }
@@ -165,22 +207,68 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen> {
     final itemsAsync = ref.watch(itemsProvider);
     final l10n = context.l10n;
 
+    final businessType = ref.watch(businessTypeProvider);
+    final withRawMaterials =
+        _showRawMaterials(businessType, inventoryEnabled, userRole);
+    _ensureTabController(withRawMaterials);
+    final onRawTab = withRawMaterials && _activeTab == 1;
+
     return Scaffold(
       body: Column(
         children: [
           ShellAppBar(title: Text(l10n.itemsTitle)),
-          Expanded(child: _buildBody(itemsAsync, userRole, inventoryEnabled)),
+          if (withRawMaterials)
+            TabBar(
+              controller: _tabController,
+              labelColor: AppColors.primary,
+              unselectedLabelColor: AppColors.textSecondary,
+              indicatorColor: AppColors.primary,
+              tabs: [
+                Tab(text: l10n.itemsTabItems),
+                Tab(text: l10n.itemsTabRawMaterials),
+              ],
+            ),
+          Expanded(
+            child: withRawMaterials
+                ? TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildBody(itemsAsync, userRole, inventoryEnabled),
+                      const RawMaterialsTab(),
+                    ],
+                  )
+                : _buildBody(itemsAsync, userRole, inventoryEnabled),
+          ),
         ],
       ),
       floatingActionButton: userRole == 'owner'
           ? FloatingActionButton.extended(
-              onPressed: () => _showItemForm(),
+              onPressed: () =>
+                  onRawTab ? _showRawMaterialForm() : _showItemForm(),
               icon: const Icon(Icons.add),
-              label: Text(l10n.itemsAddItem),
+              label: Text(onRawTab
+                  ? l10n.itemsAddRawMaterial
+                  : l10n.itemsAddItem),
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
             )
           : null,
+    );
+  }
+
+  void _showRawMaterialForm({RawMaterial? material}) {
+    showDialog(
+      context: context,
+      builder: (_) => RawMaterialFormDialog(
+        material: material,
+        onSaved: (data) async {
+          if (material == null) {
+            await ref.read(rawMaterialsProvider.notifier).add(data);
+          } else {
+            await ref.read(rawMaterialsProvider.notifier).edit(material.id, data);
+          }
+        },
+      ),
     );
   }
 
@@ -632,14 +720,18 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
 class _ItemFormDialog extends StatefulWidget {
   final Item? item;
   final bool inventoryEnabled;
+  final List<String> categories;
   final Future<void> Function(Map<String, dynamic> data) onSaved;
   final VoidCallback? onManageSizes;
+  final VoidCallback? onManageRecipe;
 
   const _ItemFormDialog(
       {this.item,
       required this.inventoryEnabled,
+      this.categories = const [],
       required this.onSaved,
-      this.onManageSizes});
+      this.onManageSizes,
+      this.onManageRecipe});
 
   @override
   State<_ItemFormDialog> createState() => _ItemFormDialogState();
@@ -649,6 +741,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _categoryCtrl = TextEditingController();
+  final _categoryFocus = FocusNode();
   final _priceCtrl = TextEditingController();
   final _taxCtrl = TextEditingController();
   final _barcodeCtrl = TextEditingController();
@@ -708,11 +801,80 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   void dispose() {
     _nameCtrl.dispose();
     _categoryCtrl.dispose();
+    _categoryFocus.dispose();
     _priceCtrl.dispose();
     _taxCtrl.dispose();
     _barcodeCtrl.dispose();
     _stockCtrl.dispose();
     super.dispose();
+  }
+
+  /// Category field: a text field you can type into freely, with a dropdown of
+  /// this business's existing categories. Typing a new value keeps it — on save
+  /// that category is added to the business (categories come from the items, so
+  /// a new category exists as soon as an item uses it). Picking a suggestion
+  /// fills the field.
+  Widget _buildCategoryField(BuildContext context, AppLocalizations l10n) {
+    return RawAutocomplete<String>(
+      textEditingController: _categoryCtrl,
+      focusNode: _categoryFocus,
+      optionsBuilder: (value) {
+        final q = value.text.trim().toLowerCase();
+        final all = [...widget.categories]..sort();
+        if (q.isEmpty) return all;
+        return all.where((c) => c.toLowerCase().contains(q));
+      },
+      onSelected: (sel) => _categoryCtrl.text = sel,
+      fieldViewBuilder: (context, controller, focusNode, onSubmit) {
+        return AppTextField(
+          label: l10n.itemsFieldCategory,
+          controller: controller,
+          focusNode: focusNode,
+          hint: l10n.itemsFieldCategoryHint,
+          suffixIcon: widget.categories.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.arrow_drop_down,
+                      color: AppColors.textSecondary),
+                  tooltip: l10n.itemsFieldCategory,
+                  // Toggle the suggestion list by nudging focus + an empty edit
+                  // so optionsBuilder re-runs and the overlay shows all options.
+                  onPressed: () {
+                    if (focusNode.hasFocus) {
+                      focusNode.unfocus();
+                    } else {
+                      focusNode.requestFocus();
+                    }
+                  },
+                ),
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(AppRadius.small),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220, maxWidth: 368),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (_, i) {
+                  final opt = options.elementAt(i);
+                  return ListTile(
+                    dense: true,
+                    title: Text(opt),
+                    onTap: () => onSelected(opt),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _save() async {
@@ -778,10 +940,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                       v == null || v.isEmpty ? l10n.commonRequired : null,
                 ),
                 const SizedBox(height: AppSpacing.space12),
-                AppTextField(
-                    label: l10n.itemsFieldCategory,
-                    controller: _categoryCtrl,
-                    hint: l10n.itemsFieldCategoryHint),
+                _buildCategoryField(context, l10n),
                 const SizedBox(height: AppSpacing.space12),
                 AppTextField(
                   label: l10n.itemsFieldPrice,
@@ -888,6 +1047,24 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                           ? l10n.itemsManageSizesCount(
                               widget.item!.variants.length)
                           : l10n.itemsManageSizes,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                  ),
+                ],
+                if (widget.onManageRecipe != null) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      widget.onManageRecipe!();
+                    },
+                    icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                    label: Text(
+                      l10n.itemsManageRecipe,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),

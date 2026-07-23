@@ -68,6 +68,30 @@ class TablesNotifier extends AsyncNotifier<List<TableModel>> {
   void applyDraftSaved(String tableId, {String? billId, Bill? bill}) {
     final effectiveBillId = bill?.id ?? billId;
     if (bill != null) _billCache[bill.id] = bill;
+    _patchTableFull(tableId, status: 'occupied', activeBillId: effectiveBillId);
+  }
+
+  /// Optimistically reflect a table order that was just finalized (paid): mark
+  /// it 'billed' and drop its cached draft. The tables screen then offers the
+  /// "mark paid / empty" options for that table. Reconciled by a later refresh.
+  void applyFinalized(String tableId, {String? billId}) {
+    if (billId != null) _billCache.remove(billId);
+    _patchTableFull(tableId, status: 'billed');
+  }
+
+  /// Optimistically reflect a table that was just released (draft voided / paid
+  /// & emptied): mark it 'empty' and drop its cached draft, so the Tables screen
+  /// updates instantly. Reconciled by a later refresh.
+  void applyTableReleased(String tableId, {String? billId}) {
+    if (billId != null) _billCache.remove(billId);
+    _patchTableFull(tableId, status: 'empty', clearBill: true);
+  }
+
+  /// Patch a single table's status and (optionally) its active bill id, keeping
+  /// every other field. `activeBillId` is only changed when a non-null value is
+  /// passed; pass [clearBill] to force it to null (e.g. when freeing a table).
+  void _patchTableFull(String tableId,
+      {required String status, String? activeBillId, bool clearBill = false}) {
     final current = state.valueOrNull ?? [];
     state = AsyncData(current.map((t) {
       if (t.id != tableId) return t;
@@ -77,8 +101,9 @@ class TablesNotifier extends AsyncNotifier<List<TableModel>> {
         tableNumber: t.tableNumber,
         floorX: t.floorX,
         floorY: t.floorY,
-        status: 'occupied',
-        activeBillId: effectiveBillId ?? t.activeBillId,
+        status: status,
+        activeBillId:
+            clearBill ? null : (activeBillId ?? t.activeBillId),
       );
     }).toList());
   }

@@ -130,6 +130,14 @@ class AppLocalizationsMr extends AppLocalizations {
   }
 
   @override
+  String get kitchenJustNow => 'आत्ताच';
+
+  @override
+  String kitchenMinAgo(int minutes) {
+    return '$minutes मिनिटांपूर्वी';
+  }
+
+  @override
   String get settingsTitle => 'प्रोफाइल';
 
   @override
@@ -681,7 +689,7 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String billingChooseSize(String name) {
-    return 'आकार निवडा — $name';
+    return 'प्रकार निवडा — $name';
   }
 
   @override
@@ -891,20 +899,20 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsUnitPlate => 'प्लेट';
 
   @override
-  String get itemsManageSizes => 'आकार / प्रकार जोडा';
+  String get itemsManageSizes => 'प्रकार जोडा';
 
   @override
   String itemsManageSizesCount(int count) {
-    return 'आकार व्यवस्थापित करा ($count)';
+    return 'प्रकार व्यवस्थापित करा ($count)';
   }
 
   @override
   String itemsSizesTitle(String name) {
-    return 'आकार — $name';
+    return 'प्रकार — $name';
   }
 
   @override
-  String get itemsSizeLabel => 'आकार नाव (उदा. XL)';
+  String get itemsSizeLabel => 'प्रकार नाव (उदा. XL, हाफ, 500ml)';
 
   @override
   String get itemsSizePrice => 'किंमत (रिक्त = वस्तूची किंमत)';
@@ -913,18 +921,18 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsSizeStock => 'स्टॉक';
 
   @override
-  String get itemsAddSize => 'आकार जोडा';
+  String get itemsAddSize => 'प्रकार जोडा';
 
   @override
-  String get itemsNoSizesYet => 'अद्याप आकार नाहीत. खाली एक जोडा.';
+  String get itemsNoSizesYet => 'अद्याप प्रकार नाहीत. खाली एक जोडा.';
 
   @override
   String get itemsStockPerSizeHint =>
-      'स्टॉक आकारानुसार ठेवला जातो. प्रत्येक आकाराचा स्टॉक अद्ययावत करण्यासाठी वस्तूवर टॅप करा.';
+      'स्टॉक प्रत्येक प्रकारानुसार ठेवला जातो. प्रत्येक प्रकाराचा स्टॉक अद्ययावत करण्यासाठी वस्तूवर टॅप करा.';
 
   @override
   String itemsSizeDeleteConfirm(String label) {
-    return '\"$label\" आकार काढायचा?';
+    return '\"$label\" प्रकार काढायचा?';
   }
 
   @override
@@ -1339,6 +1347,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get staffRoleWaiter => 'वेटर';
+
+  @override
+  String get staffRoleServer => 'सर्व्हर';
 
   @override
   String get staffRoleKitchen => 'किचन शेफ';
@@ -1871,4 +1882,47 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get errorSomethingWentWrong => 'काहीतरी चूक झाली';
+
+  @override
+  String get itemsTabItems => 'वस्तू';
+
+  @override
+  String get itemsTabRawMaterials => 'कच्चा माल';
+
+  @override
+  String get itemsAddRawMaterial => 'कच्चा माल जोडा';
+
+  @override
+  String get itemsEditRawMaterial => 'कच्चा माल बदला';
+
+  @override
+  String get itemsRawMaterialsEmpty =>
+      'अजून कच्चा माल नाही.\nसाठा ट्रॅक करण्यासाठी घटक जोडा.';
+
+  @override
+  String get itemsRawMaterialDeleteTitle => 'कच्चा माल हटवायचा?';
+
+  @override
+  String itemsRawMaterialDeleteBody(String name) {
+    return '\"$name\" हटवायचे? हे पूर्ववत करता येणार नाही.';
+  }
+
+  @override
+  String get itemsLowStockThreshold => 'कमी साठा इशारा यावर';
+
+  @override
+  String get itemsManageRecipe => 'रेसिपी व्यवस्थापित करा (कच्चा माल)';
+
+  @override
+  String itemsRecipeTitle(String name) {
+    return 'रेसिपी · $name';
+  }
+
+  @override
+  String get itemsRecipeHint =>
+      'प्रत्येक विक्रीमागे हा पदार्थ किती कच्चा माल वापरतो ते सेट करा. वगळण्यासाठी रिकामे ठेवा.';
+
+  @override
+  String get itemsRecipeNoMaterials =>
+      'आधी कच्चा माल जोडा, नंतर रेसिपी सेट करा.';
 }

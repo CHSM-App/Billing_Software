@@ -129,6 +129,19 @@ class _AppEntryState extends ConsumerState<_AppEntry> {
 
     if (!mounted) return;
 
+    if (licenseStatus.sessionInvalid) {
+      // Local session (access/refresh token) is invalid or unreadable —
+      // reconnecting won't fix this, so send the user straight to login
+      // instead of showing a misleading "go online" screen.
+      await ref.read(sessionProvider.notifier).clear();
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+      return;
+    }
+
     if (licenseStatus.state == LicenseState.blockedOffline ||
         licenseStatus.state == LicenseState.blockedSubscription ||
         licenseStatus.state == LicenseState.blockedPending) {

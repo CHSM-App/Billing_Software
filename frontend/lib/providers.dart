@@ -1,5 +1,6 @@
 export 'providers/session_provider.dart';
 export 'providers/items_provider.dart';
+export 'providers/raw_materials_provider.dart';
 export 'providers/cart_provider.dart';
 export 'providers/tables_provider.dart';
 export 'providers/bills_provider.dart';

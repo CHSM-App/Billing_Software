@@ -136,6 +136,7 @@ class SyncService {
       'items': lineItems
           .map((li) => {
                 'item_id':  li['item_id'],
+                if (li['variant_id'] != null) 'variant_id': li['variant_id'],
                 'quantity': li['quantity'],
               })
           .toList(),

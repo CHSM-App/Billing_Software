@@ -130,6 +130,14 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get kitchenJustNow => 'Just now';
+
+  @override
+  String kitchenMinAgo(int minutes) {
+    return '$minutes min ago';
+  }
+
+  @override
   String get settingsTitle => 'Profile';
 
   @override
@@ -679,7 +687,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String billingChooseSize(String name) {
-    return 'Choose size — $name';
+    return 'Choose variant — $name';
   }
 
   @override
@@ -887,20 +895,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsUnitPlate => 'Plate';
 
   @override
-  String get itemsManageSizes => 'Add sizes / variants';
+  String get itemsManageSizes => 'Add variants';
 
   @override
   String itemsManageSizesCount(int count) {
-    return 'Manage sizes ($count)';
+    return 'Manage variants ($count)';
   }
 
   @override
   String itemsSizesTitle(String name) {
-    return 'Sizes — $name';
+    return 'Variants — $name';
   }
 
   @override
-  String get itemsSizeLabel => 'Size label (e.g. XL)';
+  String get itemsSizeLabel => 'Variant label (e.g. XL, Half, 500ml)';
 
   @override
   String get itemsSizePrice => 'Price (blank = item price)';
@@ -909,18 +917,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsSizeStock => 'Stock';
 
   @override
-  String get itemsAddSize => 'Add size';
+  String get itemsAddSize => 'Add variant';
 
   @override
-  String get itemsNoSizesYet => 'No sizes yet. Add one below.';
+  String get itemsNoSizesYet => 'No variants yet. Add one below.';
 
   @override
   String get itemsStockPerSizeHint =>
-      'Stock is tracked per size. Tap the item to update each size\'s stock.';
+      'Stock is tracked per variant. Tap the item to update each variant\'s stock.';
 
   @override
   String itemsSizeDeleteConfirm(String label) {
-    return 'Remove size \"$label\"?';
+    return 'Remove variant \"$label\"?';
   }
 
   @override
@@ -1333,6 +1341,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get staffRoleWaiter => 'Waiter';
+
+  @override
+  String get staffRoleServer => 'Server';
 
   @override
   String get staffRoleKitchen => 'Kitchen Chef';
@@ -1865,4 +1876,47 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorSomethingWentWrong => 'Something went wrong';
+
+  @override
+  String get itemsTabItems => 'Items';
+
+  @override
+  String get itemsTabRawMaterials => 'Raw Materials';
+
+  @override
+  String get itemsAddRawMaterial => 'Add raw material';
+
+  @override
+  String get itemsEditRawMaterial => 'Edit raw material';
+
+  @override
+  String get itemsRawMaterialsEmpty =>
+      'No raw materials yet.\nAdd ingredients to track their stock.';
+
+  @override
+  String get itemsRawMaterialDeleteTitle => 'Delete raw material?';
+
+  @override
+  String itemsRawMaterialDeleteBody(String name) {
+    return 'Delete \"$name\"? This cannot be undone.';
+  }
+
+  @override
+  String get itemsLowStockThreshold => 'Low-stock alert at';
+
+  @override
+  String get itemsManageRecipe => 'Manage recipe (raw materials)';
+
+  @override
+  String itemsRecipeTitle(String name) {
+    return 'Recipe · $name';
+  }
+
+  @override
+  String get itemsRecipeHint =>
+      'Set how much of each raw material this dish uses per unit sold. Leave blank to skip.';
+
+  @override
+  String get itemsRecipeNoMaterials =>
+      'Add raw materials first, then set the recipe.';
 }

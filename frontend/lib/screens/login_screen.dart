@@ -260,6 +260,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       final licenseStatus = await LicenseService.instance.check(isOnline: true);
       if (!mounted) return;
 
+      if (licenseStatus.sessionInvalid) {
+        // Freshly-written session couldn't be read back / was rejected —
+        // don't show a misleading offline screen, let the user retry login.
+        await ref.read(sessionProvider.notifier).clear();
+        if (!mounted) return;
+        setState(() {
+          _errorMessage = 'Could not verify your session. Please try logging in again.';
+        });
+        return;
+      }
+
       if (licenseStatus.state == LicenseState.blockedOffline ||
           licenseStatus.state == LicenseState.blockedSubscription ||
           licenseStatus.state == LicenseState.blockedPending) {

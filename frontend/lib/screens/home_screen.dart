@@ -292,7 +292,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         .toList();
   }
 
-  Future<void> _clearCart() async {
+  Future<void> _clearCart({bool inSheet = false}) async {
     // If this is a table with an active draft, offer to release the table.
     if (widget.activeBillId != null) {
       final l10n = context.l10n;
@@ -314,13 +314,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ),
       );
       if (confirmed != true || !mounted) return;
+      // Capture the notifier before any pop disposes this screen's `ref`.
+      final tablesNotifier = ref.read(tablesProvider.notifier);
+      final tableId = widget.tableId;
+      final billId = widget.activeBillId!;
       try {
-        await voidBill(widget.activeBillId!);
+        await voidBill(billId);
         ref.read(cartProvider.notifier).clear();
         _discountPctController.clear();
         _discountAmtController.clear();
+        // Optimistically free the table so the Tables screen updates instantly,
+        // then reconcile with the server in the background.
+        if (tableId != null) {
+          tablesNotifier.applyTableReleased(tableId, billId: billId);
+        }
         if (!mounted) return;
-        Navigator.pop(context);
+        // When invoked from the cart bottom sheet, pop the sheet first so the
+        // following pop closes the billing screen (not the sheet) and the user
+        // lands back on the now-updated Tables list.
+        if (inSheet) Navigator.pop(context);
+        Navigator.pop(context); // close the billing screen
+        unawaited(tablesNotifier.refreshSilently());
       } on ApiException catch (e) {
         _showSnack(e.message, isError: true);
       } catch (_) {
@@ -352,6 +366,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final payload = _cartPayload;
     final activeBillId = widget.activeBillId;
     final tableId = widget.tableId;
+    // Capture the notifier NOW. After Navigator.pop this ConsumerState is
+    // disposed and its `ref` becomes defunct — using it for the background
+    // reconcile would silently no-op (this was why the table never updated).
+    final tablesNotifier = ref.read(tablesProvider.notifier);
 
     // ── Optimistic UI ────────────────────────────────────────────────────────
     // Flip the table to "occupied" locally and close the billing screen
@@ -359,10 +377,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // list reconciles with the server when it returns. This removes the
     // save→close→refresh wait the user was seeing.
     if (tableId != null) {
-      ref.read(tablesProvider.notifier).applyDraftSaved(
-            tableId,
-            billId: activeBillId,
-          );
+      tablesNotifier.applyDraftSaved(tableId, billId: activeBillId);
     }
     _showSnack(l10n.billingDraftSaved);
     if (widget.onBillDone != null) {
@@ -372,25 +387,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
 
     // ── Background persistence + reconcile ───────────────────────────────────
+    // Uses the captured notifier (not `ref`) so it survives this screen's
+    // disposal after the pop above.
     unawaited(() async {
       try {
+        final Map<String, dynamic> result;
         if (activeBillId != null) {
-          await updateBillItems(activeBillId, payload);
+          result = await updateBillItems(activeBillId, payload);
         } else {
-          await createBill({
+          result = await createBill({
             'items': payload,
             'table_id': tableId,
             'payment_mode': _paymentMode,
             'status': 'draft',
           });
         }
-        // Pull the authoritative table state + bill cache (fills in the real
-        // bill id for a brand-new draft). Silent — no spinner.
-        await ref.read(tablesProvider.notifier).refreshSilently();
+        // Cache the authoritative bill (with its real id + items) and flip the
+        // table right away, so re-tapping the table pre-selects the draft
+        // instantly instead of waiting for the full tables refetch below.
+        if (tableId != null) {
+          final bill = Bill.fromJson(result);
+          tablesNotifier.applyDraftSaved(tableId, bill: bill);
+        }
+        // Pull the authoritative table state + bill cache. Silent — no spinner.
+        await tablesNotifier.refreshSilently();
       } catch (e) {
         // The save failed after we already closed the screen — undo the
         // optimistic change by reloading the true server state and warn.
-        await ref.read(tablesProvider.notifier).refreshSilently();
+        await tablesNotifier.refreshSilently();
         final msg = e is ApiException ? e.message : l10n.billingSaveFailed;
         _showGlobalSnack(msg, isError: true);
       }
@@ -471,6 +495,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
       final bill = Bill.fromJson(result);
       if (!mounted) return;
+      // Optimistically flip the table to 'billed' so the Tables screen reflects
+      // the finalized order the instant we pop, before the reconcile fetch.
+      if (widget.tableId != null) {
+        ref.read(tablesProvider.notifier).applyFinalized(
+              widget.tableId!,
+              billId: widget.activeBillId ?? bill.id,
+            );
+      }
       ref.read(cartProvider.notifier).clear();
       _customerNameController.clear();
       _customerPhoneController.clear();
@@ -479,6 +511,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       setState(() => _paymentMode = 'cash');
       ref.invalidate(reportProvider);
       ref.invalidate(billsProvider);
+      // Reconcile table state with the server after the finalize commits.
+      unawaited(ref.read(tablesProvider.notifier).refreshSilently());
       if (onBillReady != null) {
         onBillReady(bill);
       } else {
@@ -1342,6 +1376,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final subtotal = ref.watch(cartSubtotalProvider);
       final tax = ref.watch(cartTaxProvider);
       final total = ref.watch(cartTotalProvider);
+      // A server takes/builds orders and sends them to the kitchen but cannot
+      // finalize or take payment — hide the finalize (WhatsApp/Print) actions.
+      final canFinalize = ref.watch(userRoleProvider) != 'server';
 
       return Container(
         color: AppColors.surface,
@@ -1387,7 +1424,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   const Spacer(),
                   if (cart.isNotEmpty)
                     TextButton.icon(
-                      onPressed: _clearCart,
+                      onPressed: () => _clearCart(inSheet: inSheet),
                       icon: const Icon(Icons.delete_outline, size: 14),
                       label: Text(l10n.commonClear,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -1741,19 +1778,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 }),
               ),
 
-            if (widget.tableId != null)
+            if (widget.tableId != null || !canFinalize)
               Padding(
-                padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
-                    AppSpacing.space12, AppSpacing.space16, 0),
+                padding: EdgeInsets.fromLTRB(
+                    AppSpacing.space16,
+                    AppSpacing.space12,
+                    AppSpacing.space16,
+                    // When this is the only action (a server with no finalize
+                    // row), add the bottom safe-area inset here instead.
+                    canFinalize ? 0 : AppSpacing.space16 + MediaQuery.of(context).padding.bottom),
                 child: SecondaryButton(
                   text: _savingDraft ? l10n.commonSaving : l10n.billingSaveDraft,
                   icon: Icons.save_outlined,
-                  onPressed:
-                      (cart.isEmpty || _savingDraft) ? null : _saveDraft,
+                  onPressed: (cart.isEmpty || _savingDraft)
+                      ? null
+                      : () {
+                          // This button lives inside the cart bottom sheet.
+                          // Close the sheet first so _saveDraft's Navigator.pop
+                          // pops the billing screen (not the sheet) and the
+                          // Tables list is what the user returns to.
+                          if (inSheet) Navigator.pop(context);
+                          _saveDraft();
+                        },
                 ),
               ),
 
-            Padding(
+            if (canFinalize)
+              Padding(
               padding: EdgeInsets.fromLTRB(
                 AppSpacing.space16,
                 AppSpacing.space16,
