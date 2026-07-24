@@ -400,9 +400,28 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
 
   Widget _buildGridSliver(List<Item> items, String userRole, bool inventoryEnabled,
       {int crossAxisCount = 1}) {
+    final stockMode = _showStock && inventoryEnabled;
+    const padding = EdgeInsets.fromLTRB(
+        AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96);
+
+    // In stock mode, item cards with variants expand to a variable-height list
+    // of their variants, so use a variable-height list layout instead of the
+    // fixed-extent grid used for normal item cards.
+    if (stockMode) {
+      return SliverPadding(
+        padding: padding,
+        sliver: SliverList.builder(
+          itemCount: items.length,
+          itemBuilder: (_, i) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: animatedCardSwap(true, _buildStockCard(items[i])),
+          ),
+        ),
+      );
+    }
+
     return SliverPadding(
-      padding: const EdgeInsets.fromLTRB(
-          AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96),
+      padding: padding,
       sliver: SliverGrid.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: crossAxisCount,
@@ -411,24 +430,37 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           mainAxisExtent: 52,
         ),
         itemCount: items.length,
-        itemBuilder: (_, i) {
-          final it = items[i];
-          final stockMode = _showStock && inventoryEnabled;
-          // Cross-fade + scale between the normal card and the stock card when
-          // the overview is toggled. The ValueKey drives the transition.
-          final child = stockMode
-              ? buildStockCard(
-                  context,
-                  StockOverviewRow(
-                    name: it.name,
-                    stockQuantity: it.stockQuantity,
-                    unitLabel: itemUnitLabel(context, it.unit),
-                    isLowStock: it.isLowStock,
-                  ),
-                )
-              : _buildItemCard(it, userRole, inventoryEnabled);
-          return animatedCardSwap(stockMode, child);
-        },
+        itemBuilder: (_, i) =>
+            animatedCardSwap(false, _buildItemCard(items[i], userRole, inventoryEnabled)),
+      ),
+    );
+  }
+
+  /// Stock-overview card for a single item. Items whose stock is tracked per
+  /// variant show each variant's remaining stock; others show a single total.
+  Widget _buildStockCard(Item item) {
+    if (item.hasVariants) {
+      return buildVariantStockCard(
+        context,
+        name: item.name,
+        variants: [
+          for (final v in item.variants)
+            StockOverviewRow(
+              name: v.label,
+              stockQuantity: v.stockQuantity,
+              unitLabel: itemUnitLabel(context, item.unit),
+              isLowStock: v.isLowStock,
+            ),
+        ],
+      );
+    }
+    return buildStockCard(
+      context,
+      StockOverviewRow(
+        name: item.name,
+        stockQuantity: item.stockQuantity,
+        unitLabel: itemUnitLabel(context, item.unit),
+        isLowStock: item.isLowStock,
       ),
     );
   }

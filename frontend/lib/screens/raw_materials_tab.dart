@@ -94,6 +94,94 @@ Widget buildStockCard(BuildContext context, StockOverviewRow r) {
   );
 }
 
+/// A stock-overview card for an item whose stock is tracked per variant.
+/// Shows the item name as a header, then one line per variant with its
+/// remaining stock (low-stock variants highlighted).
+Widget buildVariantStockCard(
+  BuildContext context, {
+  required String name,
+  required List<StockOverviewRow> variants,
+}) {
+  return Container(
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.medium),
+      border: Border.all(color: AppColors.border, width: 1),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.border,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                    height: 1.15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          for (final v in variants)
+            Padding(
+              padding: const EdgeInsets.only(left: 15, top: 3),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      v.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: v.isLowStock
+                            ? AppColors.warning
+                            : AppColors.textSecondary,
+                        height: 1.15,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    v.stockQuantity != null
+                        ? '${formatQty(v.stockQuantity!)} ${v.unitLabel}'
+                        : '—',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: v.isLowStock
+                          ? AppColors.warning
+                          : AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Wraps a card so toggling the stock overview cross-fades and gently scales
 /// between the two card variants. [stockMode] keys the transition.
 Widget animatedCardSwap(bool stockMode, Widget child) {
@@ -962,70 +1050,75 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
   Widget _selectedRow(
       BuildContext context, RawMaterial m, int i, BorderSide border) {
     return Container(
+      height: 40,
       decoration: BoxDecoration(
         color: i.isOdd ? AppColors.border.withOpacity(0.08) : null,
         border: Border(top: border),
       ),
-      child: IntrinsicHeight(
-        child: Row(
-          children: [
-            Expanded(
-              flex: 60,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text(m.name,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(fontWeight: FontWeight.w500)),
-              ),
+      child: Row(
+        children: [
+          // Name
+          Expanded(
+            flex: 60,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Text(m.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(fontWeight: FontWeight.w500)),
             ),
-            Expanded(
-              flex: 35,
-              child: Container(
-                decoration: BoxDecoration(border: Border(left: border)),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                child: TextField(
-                  controller: _ctrls[m.id]!,
-                  autofocus: true,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  textAlign: TextAlign.right,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    isCollapsed: true,
-                    // Unit shown as placeholder; disappears once a value is typed.
-                    hintText: recipeEntryUnitLabel(context, m.unit),
-                    hintStyle: TextStyle(
-                      fontSize: 13,
-                      color: AppColors.textSecondary,
-                    ),
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
+          ),
+          // Quantity — a compact filled input cell with padding around it.
+          Expanded(
+            flex: 35,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(left: border),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              alignment: Alignment.centerLeft,
+              child: TextField(
+                controller: _ctrls[m.id]!,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                textAlign: TextAlign.left,
+                style: Theme.of(context).textTheme.bodyMedium,
+                decoration: InputDecoration(
+                  // Unit shown as placeholder; disappears once a value is typed.
+                  hintText: recipeEntryUnitLabel(context, m.unit),
+                  hintStyle: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
                   ),
+                  isDense: true,
+                  isCollapsed: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
                 ),
               ),
             ),
-            SizedBox(
-              width: 36,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                icon: const Icon(Icons.close, size: 16),
-                color: AppColors.textSecondary,
-                tooltip: 'Remove',
-                onPressed: () {
-                  setState(() {
-                    _selectedIds.remove(m.id);
-                    _ctrls[m.id]?.clear(); // don't save a removed material
-                  });
-                },
-              ),
+          ),
+          // Remove
+          SizedBox(
+            width: 36,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              icon: const Icon(Icons.close, size: 16),
+              color: AppColors.textSecondary,
+              tooltip: 'Remove',
+              onPressed: () {
+                setState(() {
+                  _selectedIds.remove(m.id);
+                  _ctrls[m.id]?.clear(); // don't save a removed material
+                });
+              },
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

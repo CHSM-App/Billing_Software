@@ -3,10 +3,11 @@
  * VengurlaTech
  *
  * USAGE:
- *   node deploy.js --priority=3              → normal release (10% users, bottom sheet popup)
+ *   node deploy.js --track=sharing           → Internal App Sharing — returns a shareable install link
+ *   node deploy.js --priority=3              → production release (10% users, bottom sheet popup)
  *   node deploy.js --priority=5 --force      → emergency force update (100% users, full screen)
- *   node deploy.js --track=internal          → internal testing only
  *   node deploy.js --priority=3 --dry-run    → test without uploading
+ *   --yes                                    → skip confirmations (used by CI)
  */
 
 const { google } = require('googleapis');
@@ -170,6 +171,31 @@ async function main() {
   const authClient = await auth.getClient();
   const play       = google.androidpublisher({ version: 'v3', auth: authClient });
   ok('Connected to Google Play API');
+
+  // ── INTERNAL APP SHARING ──────────────────────────────────────────────────
+  // A completely separate flow from the track-based release below. It uploads
+  // the AAB to Internal App Sharing and returns a one-tap download link. No
+  // edit/track/commit, no review, and no versionCode uniqueness requirement —
+  // so the guard and the edit session below are skipped entirely.
+  if (TRACK === 'sharing') {
+    log('Uploading AAB to Internal App Sharing...');
+    const shareRes = await play.internalappsharingartifacts.uploadbundle({
+      packageName : PACKAGE_NAME,
+      media: {
+        mimeType : 'application/octet-stream',
+        body     : fs.createReadStream(AAB_PATH),
+      },
+    });
+
+    console.log('\n');
+    console.log('  ══════════════════════════════════════════════════');
+    ok('UPLOADED TO INTERNAL APP SHARING!');
+    console.log('  ══════════════════════════════════════════════════');
+    console.log(`\n  Share link:\n  ${shareRes.data.downloadUrl}\n`);
+    console.log('  Anyone with Play Store access you\'ve granted can install via this link.');
+    console.log('\n');
+    return;
+  }
 
   // ── STEP 5: Create an edit ────────────────────────────────────────────────
 

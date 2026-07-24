@@ -12,18 +12,18 @@ on:
   workflow_dispatch:
     inputs:
       track:
-        description: 'Play Store track'
+        description: 'Target: sharing (Internal App Sharing link) or production'
         type: choice
-        default: internal
+        default: sharing
         options:
-          - internal
+          - sharing
           - production
       priority:
-        description: 'In-app update priority (0-5). 5 = forced full-screen update.'
+        description: 'In-app update priority (0-5). 5 = forced full-screen update. Production only.'
         type: string
         default: '3'
       fraction:
-        description: 'Staged rollout fraction for production (e.g. 0.1 = 10%). Ignored for internal.'
+        description: 'Staged rollout fraction for production (e.g. 0.1 = 10%). Ignored for sharing.'
         type: string
         default: '0.1'
       dry_run:
