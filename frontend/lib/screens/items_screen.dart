@@ -1001,6 +1001,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 AppTextField(
                   label: l10n.itemsFieldName,
                   controller: _nameCtrl,
+                  capitalizeWords: true,
                   validator: (v) =>
                       v == null || v.isEmpty ? l10n.commonRequired : null,
                 ),
@@ -1507,7 +1508,9 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                 }),
               const Divider(height: 20),
               AppTextField(
-                  label: l10n.itemsSizeLabel, controller: _labelCtrl),
+                  label: l10n.itemsSizeLabel,
+                  controller: _labelCtrl,
+                  capitalizeWords: true),
               const SizedBox(height: AppSpacing.space8),
               AppTextField(
                 label: l10n.itemsSizePrice,
