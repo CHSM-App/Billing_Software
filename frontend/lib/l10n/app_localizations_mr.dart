@@ -110,10 +110,36 @@ class AppLocalizationsMr extends AppLocalizations {
   String get navKitchen => 'किचन';
 
   @override
+  String get navOpenOrders => 'खुल्या ऑर्डर';
+
+  @override
   String get navSettings => 'सेटिंग्ज';
 
   @override
   String get navProfile => 'प्रोफाइल';
+
+  @override
+  String get openOrdersTitle => 'खुल्या ऑर्डर';
+
+  @override
+  String get openOrdersEmpty =>
+      'कोणत्याही खुल्या ऑर्डर नाहीत. टेबलशिवाय जतन केलेले ड्राफ्ट येथे दिसतात.';
+
+  @override
+  String openOrdersBillNumber(String number) {
+    return 'बिल #$number';
+  }
+
+  @override
+  String openOrdersItemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count वस्तू',
+      one: '1 वस्तू',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get kitchenTitle => 'किचन';
@@ -539,6 +565,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get receiptBillNo => 'बिल क्र.:';
 
   @override
+  String get receiptTable => 'टेबल:';
+
+  @override
   String get receiptDate => 'दिनांक:';
 
   @override
@@ -685,6 +714,10 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingWhatsappSent => 'पावतीची लिंक व्हॉट्सअ‍ॅपवर पाठवली';
 
   @override
+  String get billingWhatsappNeedsPhone =>
+      'व्हॉट्सअ‍ॅपवर पाठवण्यासाठी ग्राहकाचा फोन नंबर टाका';
+
+  @override
   String get billingWhatsappFailed => 'व्हॉट्सअ‍ॅप संदेश पाठवता आला नाही';
 
   @override
@@ -822,6 +855,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsSearch => 'वस्तू शोधा…';
+
+  @override
+  String get itemsStockOverview => 'उपलब्ध साठा';
 
   @override
   String get itemsAddItem => 'वस्तू जोडा';

@@ -66,11 +66,22 @@ class LicenseService {
   // If offline: use cached data, evaluate against last_verified_at
   // -------------------------------------------------------------------------
   Future<LicenseStatus> check({required bool isOnline}) async {
-    if (isOnline) {
-      return await _checkOnline();
-    } else {
-      return await _checkOffline();
-    }
+    // Always try the online check first. `isOnline` is only a hint derived from a
+    // DB-dependent /health probe with a short timeout, which false-negatives on a
+    // slow/cold database even when the network and the license endpoint are fine
+    // — that was falsely blocking users with "Go Online to Continue". _checkOnline
+    // fetches the real license and, only if that request itself fails, falls back
+    // to the cached offline evaluation. So attempting it is safe regardless of the
+    // hint; we skip it only when we already know we're offline AND have a cache to
+    // evaluate against.
+    if (isOnline) return await _checkOnline();
+
+    // Offline hint: if we have never cached a license there is nothing to evaluate
+    // offline, so still try online once (the health probe may simply have timed
+    // out). Otherwise trust the cache.
+    final hasCache = (await _secure.read(key: _keyVerifiedAt)) != null;
+    if (!hasCache) return await _checkOnline();
+    return await _checkOffline();
   }
 
   // Last error message — shown on the blocked screen when online check fails

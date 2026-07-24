@@ -38,6 +38,10 @@ class AuthStorage {
   static const _keyBusinessType     = 'business_type';
   static const _keyInventoryEnabled = 'inventory_enabled';
   static const _keyHasBarcodeScanner = 'has_barcode_scanner';
+  // Cached bill-number prefix (e.g. 'INV'), so offline receipts use the same
+  // invoice prefix as online instead of a jarring 'LOCAL-'. Refreshed whenever
+  // the business profile is fetched.
+  static const _keyBillPrefix       = 'bill_prefix';
 
   // -------------------------------------------------------------------------
   // Write
@@ -78,6 +82,18 @@ class AuthStorage {
   Future<void> updateBusinessName(String name) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyBusinessName, name);
+  }
+
+  Future<void> saveBillPrefix(String prefix) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyBillPrefix, prefix);
+  }
+
+  /// The cached invoice prefix, defaulting to 'INV' when unknown.
+  Future<String> getBillPrefix() async {
+    final prefs = await SharedPreferences.getInstance();
+    final p = prefs.getString(_keyBillPrefix)?.trim();
+    return (p == null || p.isEmpty) ? 'INV' : p;
   }
 
   Future<void> saveAccessToken(String accessToken) =>
@@ -182,3 +198,5 @@ Future<Map<String, dynamic>> getSession()      => AuthStorage.instance.getSessio
 Future<String?> getBusinessId()                => AuthStorage.instance.getBusinessId();
 Future<String?> getUserId()                    => AuthStorage.instance.getUserId();
 Future<void>    clearSession()                 => AuthStorage.instance.clearSession();
+Future<void>    saveBillPrefix(String prefix)  => AuthStorage.instance.saveBillPrefix(prefix);
+Future<String>  getBillPrefix()                => AuthStorage.instance.getBillPrefix();

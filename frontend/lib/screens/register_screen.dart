@@ -249,9 +249,6 @@ class _RegisterScreenState extends State<RegisterScreen>
                           ('restaurant_with_tables',
                               l10n.businessTypeRestaurantTables,
                               Icons.table_restaurant_outlined),
-                          ('restaurant_no_tables',
-                              l10n.registerTypeRestaurantTakeaway,
-                              Icons.fastfood_outlined),
                         ].map((entry) => _buildTypeOption(
                               entry.$1,
                               entry.$2,

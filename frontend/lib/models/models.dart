@@ -260,6 +260,9 @@ class Bill {
   final String businessId;
   final String billNumber;
   final String? tableId;
+  /// Display number of the table this bill belongs to (null for retail bills).
+  /// Printed on the receipt so a table order is identifiable.
+  final String? tableNumber;
   final String? customerName;
   final String? customerPhone;
   final double subtotal;
@@ -277,6 +280,7 @@ class Bill {
     required this.businessId,
     required this.billNumber,
     this.tableId,
+    this.tableNumber,
     this.customerName,
     this.customerPhone,
     required this.subtotal,
@@ -295,6 +299,7 @@ class Bill {
         businessId: j['business_id'],
         billNumber: j['bill_number'],
         tableId: j['table_id'],
+        tableNumber: j['table_number'],
         customerName: j['customer_name'],
         customerPhone: j['customer_phone'],
         subtotal: double.parse(j['subtotal'].toString()),

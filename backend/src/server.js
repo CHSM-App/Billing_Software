@@ -203,9 +203,15 @@ const PORT = process.env.PORT || 3000;
 // live process. The DB pool connects eagerly in db.js and routes will queue
 // until it is ready. Tests require() this file and set NODE_ENV=test.
 if (process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     logger.info({ port: PORT }, 'server listening');
   });
+  // Attach the WebSocket server for real-time updates (kitchen/tables/drafts).
+  try {
+    require('./realtime').attach(server);
+  } catch (err) {
+    logger.error({ err }, 'failed to attach websocket server');
+  }
 }
 
 module.exports = app;

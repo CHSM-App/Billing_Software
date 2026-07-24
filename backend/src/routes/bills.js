@@ -6,7 +6,8 @@ const logger = require('../logger');
 const audit = require('../audit');
 const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUtils');
 const { sendBillLink, normalisePhone } = require('../whatsapp');
-const { sendLowStockNotification, sendKitchenNotification } = require('../fcm');
+const { sendLowStockNotification } = require('../fcm');
+const { broadcast } = require('../realtime');
 
 // Base URL used in receipt links — no trailing slash
 const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
@@ -249,9 +250,13 @@ function collectLowStock(lineItems, itemMap, variantMap, requested) {
 async function generateBillNumber(transaction, businessId) {
   const result = await transaction.request()
     .input('business_id', sql.UniqueIdentifier, businessId)
-    .query('SELECT COUNT(*) AS cnt FROM bills WHERE business_id = @business_id');
+    .query(`
+      SELECT (SELECT COUNT(*) FROM bills WHERE business_id = @business_id) AS cnt,
+             (SELECT bill_prefix FROM businesses WHERE id = @business_id) AS bill_prefix
+    `);
   const next = result.recordset[0].cnt + 1;
-  return 'INV-' + String(next).padStart(4, '0');
+  const prefix = (result.recordset[0].bill_prefix || 'INV').trim() || 'INV';
+  return `${prefix}-` + String(next).padStart(4, '0');
 }
 
 // Fetch full bill with line items
@@ -260,11 +265,13 @@ async function fetchBill(billId, businessId) {
     .input('id', sql.UniqueIdentifier, billId)
     .input('business_id', sql.UniqueIdentifier, businessId)
     .query(`
-      SELECT id, business_id, bill_number, table_id, customer_name, customer_phone,
-             subtotal, tax_amount, discount_amount, total, payment_mode, status, created_by_user_id, created_at,
-             receipt_token
-      FROM bills
-      WHERE id = @id AND business_id = @business_id
+      SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
+             b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.status,
+             b.created_by_user_id, b.created_at, b.receipt_token,
+             t.table_number
+      FROM bills b
+      LEFT JOIN tables t ON t.id = b.table_id
+      WHERE b.id = @id AND b.business_id = @business_id
     `);
 
   if (billResult.recordset.length === 0) return null;
@@ -545,28 +552,12 @@ router.post('/', requireAuth, async (req, res) => {
 
       const created = await fetchBill(billId, req.user.business_id);
 
-      // Notify the kitchen when a new order (draft bill) is placed. Fire-and-forget;
-      // sendKitchenNotification is a no-op when no kitchen users/tokens exist.
+      // Real-time: a new draft appears on the kitchen queue and (depending on
+      // whether it has a table) on the tables screen or the open-orders list.
       if (billStatus === 'draft') {
-        (async () => {
-          try {
-            let tableLabel = created.customer_name || null;
-            if (created.table_id) {
-              const t = await pool.request()
-                .input('table_id', sql.UniqueIdentifier, created.table_id)
-                .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-                .query('SELECT table_number FROM tables WHERE id = @table_id AND business_id = @business_id');
-              if (t.recordset[0]) tableLabel = `Table ${t.recordset[0].table_number}`;
-            }
-            await sendKitchenNotification(pool, sql, req.user.business_id, {
-              tableLabel,
-              itemCount: lineItems.length,
-              isNew: true,
-            });
-          } catch (err) {
-            logger.error({ err }, '[FCM] kitchen new-order notification error');
-          }
-        })();
+        broadcast(req.user.business_id, { type: 'kitchen' });
+        broadcast(req.user.business_id,
+          { type: created.table_id ? 'tables' : 'drafts' });
       }
 
       // Audit — fire-and-forget after the transaction commits
@@ -667,6 +658,55 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/bills/drafts
+// Open orders that are NOT attached to a table — the "Open Orders" queue. A
+// server can build these on the billing page; a cashier/owner picks them up and
+// finalizes them. Table drafts are excluded (those live on the Tables screen).
+// Declared before '/:id' so the literal path wins the route match.
+router.get('/drafts', requireAuth, async (req, res) => {
+  try {
+    await poolConnect;
+    const billsResult = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query(`
+        SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
+               b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.status,
+               b.created_by_user_id, b.created_at, b.receipt_token
+        FROM bills b
+        WHERE b.business_id = @business_id
+          AND b.status = 'draft'
+          AND b.table_id IS NULL
+        ORDER BY b.created_at DESC
+      `);
+
+    if (billsResult.recordset.length === 0) return res.json([]);
+
+    const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
+    const itemsResult = await bindBills(pool.request()).query(`
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total,
+             kitchen_status, kitchen_done_at
+      FROM bill_items
+      WHERE bill_id IN (${billClause})
+    `);
+
+    const itemsByBill = {};
+    for (const item of itemsResult.recordset) {
+      if (!itemsByBill[item.bill_id]) itemsByBill[item.bill_id] = [];
+      itemsByBill[item.bill_id].push(item);
+    }
+
+    const bills = billsResult.recordset.map((b) => ({
+      ...b,
+      items: itemsByBill[b.id] || [],
+    }));
+
+    return res.json(bills);
+  } catch (err) {
+    logger.error({ err }, 'Get draft bills error');
+    return res.status(500).json({ error: 'Failed to fetch draft bills' });
+  }
+});
+
 // GET /api/bills/:id
 router.get('/:id', requireAuth, async (req, res) => {
   try {
@@ -714,6 +754,11 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
       { user_id: req.user.user_id, user_name: req.user.name || null },
       { id: req.params.id, business_id: req.user.business_id, bill_number: billNumber },
     );
+
+    // Real-time: a finalized order leaves the kitchen queue and frees/updates its
+    // table or the open-orders list.
+    broadcast(req.user.business_id, { type: 'kitchen' });
+    broadcast(req.user.business_id, { type: bill.table_id ? 'tables' : 'drafts' });
 
     return res.json(bill);
   } catch (err) {
@@ -892,27 +937,9 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
     const bill = await fetchBill(req.params.id, req.user.business_id);
 
-    // Notify the kitchen that dishes were added to an existing order.
+    // Real-time: dishes were added to an existing order — refresh the kitchen.
     if (bill && bill.status === 'draft' && addedLineItems.length > 0) {
-      (async () => {
-        try {
-          let tableLabel = bill.customer_name || null;
-          if (bill.table_id) {
-            const t = await pool.request()
-              .input('table_id', sql.UniqueIdentifier, bill.table_id)
-              .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-              .query('SELECT table_number FROM tables WHERE id = @table_id AND business_id = @business_id');
-            if (t.recordset[0]) tableLabel = `Table ${t.recordset[0].table_number}`;
-          }
-          await sendKitchenNotification(pool, sql, req.user.business_id, {
-            tableLabel,
-            itemCount: addedLineItems.length,
-            isNew: false,
-          });
-        } catch (err) {
-          logger.error({ err }, '[FCM] kitchen add-items notification error');
-        }
-      })();
+      broadcast(req.user.business_id, { type: 'kitchen' });
     }
 
     audit.logBillItemsAdded(
@@ -930,11 +957,15 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
 // PUT /api/bills/:id/update-items — replace all items on a draft bill
 router.put('/:id/update-items', requireAuth, async (req, res) => {
-  const { items } = req.body;
+  const { items, customer_name, customer_phone } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required' });
   }
+  // Only overwrite a customer field when the key was actually sent, so callers
+  // that omit them (e.g. the kitchen) never wipe existing details.
+  const setCustomerName = Object.prototype.hasOwnProperty.call(req.body, 'customer_name');
+  const setCustomerPhone = Object.prototype.hasOwnProperty.call(req.body, 'customer_phone');
 
   let previousLineItems = [];
   let replacementLineItems = [];
@@ -1098,14 +1129,23 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           `);
       }
 
-      // Recalculate totals
-      await transaction.request()
-        .input('id', sql.UniqueIdentifier, req.params.id)
-        .query(`
+      // Recalculate totals, and update customer details when supplied.
+      const totalsReq = transaction.request()
+        .input('id', sql.UniqueIdentifier, req.params.id);
+      const customerSets = [];
+      if (setCustomerName) {
+        totalsReq.input('customer_name', sql.NVarChar(200), customer_name || null);
+        customerSets.push('customer_name = @customer_name');
+      }
+      if (setCustomerPhone) {
+        totalsReq.input('customer_phone', sql.NVarChar(20), customer_phone || null);
+        customerSets.push('customer_phone = @customer_phone');
+      }
+      await totalsReq.query(`
           UPDATE bills SET
             subtotal   = (SELECT SUM(quantity * unit_price) FROM bill_items WHERE bill_id = @id),
             tax_amount = (SELECT SUM(line_total - quantity * unit_price) FROM bill_items WHERE bill_id = @id),
-            total      = (SELECT SUM(line_total) FROM bill_items WHERE bill_id = @id)
+            total      = (SELECT SUM(line_total) FROM bill_items WHERE bill_id = @id)${customerSets.length ? ',\n            ' + customerSets.join(',\n            ') : ''}
           WHERE id = @id
         `);
 
@@ -1146,6 +1186,11 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       previousLineItems,
       replacementLineItems,
     );
+
+    // Real-time: items/customer changed on a draft — refresh kitchen and the
+    // relevant list (tables for a table order, open-orders otherwise).
+    broadcast(req.user.business_id, { type: 'kitchen' });
+    broadcast(req.user.business_id, { type: bill.table_id ? 'tables' : 'drafts' });
 
     return res.json(bill);
   } catch (err) {
@@ -1235,6 +1280,11 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
       { id: req.params.id, business_id: req.user.business_id, bill_number: bill.bill_number, total: bill.total, status: bill.status },
       [],
     );
+
+    // Real-time: a voided order leaves the kitchen queue and frees its table /
+    // drops off the open-orders list.
+    broadcast(req.user.business_id, { type: 'kitchen' });
+    broadcast(req.user.business_id, { type: bill.table_id ? 'tables' : 'drafts' });
 
     return res.json({ success: true });
   } catch (err) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/l10n_ext.dart';
@@ -5,13 +6,17 @@ import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../services/sync_service.dart';
 import '../services/license_service.dart';
+import '../services/realtime_service.dart';
+import '../services/notification_service.dart';
 import '../widgets/nav_item.dart';
 import '../widgets/bottom_nav_bar.dart';
 import 'home_screen.dart';
 import 'items_screen.dart';
 import 'tables_screen.dart';
 import 'kitchen_screen.dart';
+import 'open_drafts_screen.dart';
 import 'settings_screen.dart';
+import '../providers/open_drafts_provider.dart';
 
 class MainShell extends ConsumerStatefulWidget {
   final int initialIndex;
@@ -27,6 +32,7 @@ class _MainShellState extends ConsumerState<MainShell>
   int _index = 0;
   late final AnimationController _railAnimController;
   late final Animation<double> _railFadeAnim;
+  StreamSubscription<String>? _realtimeSub;
 
   @override
   void initState() {
@@ -39,15 +45,37 @@ class _MainShellState extends ConsumerState<MainShell>
     _railFadeAnim = CurvedAnimation(
         parent: _railAnimController, curve: Curves.easeOut);
     _railAnimController.forward();
+
+    // Route real-time WebSocket events to the relevant providers so every
+    // screen updates live across devices, without any notifications.
+    _realtimeSub = RealtimeService.instance.events.listen(_onRealtimeEvent);
+  }
+
+  void _onRealtimeEvent(String type) {
+    if (!mounted) return;
+    switch (type) {
+      case 'kitchen':
+        // The Kitchen screen listens to this ping and reloads its queue.
+        NotificationService.instance.pingKitchen();
+        break;
+      case 'tables':
+        ref.read(tablesProvider.notifier).refreshSilently();
+        break;
+      case 'drafts':
+        ref.read(openDraftsProvider.notifier).refreshSilently();
+        break;
+    }
   }
 
   @override
   void dispose() {
+    _realtimeSub?.cancel();
     _railAnimController.dispose();
     super.dispose();
   }
 
-  List<NavItem> _buildNavItems(String userRole, String businessType) {
+  List<NavItem> _buildNavItems(
+      String userRole, String businessType, bool hasOpenDrafts) {
     final l10n = context.l10n;
     final isRestaurant = businessType == 'restaurant_with_tables' ||
         businessType == 'restaurant_no_tables';
@@ -76,6 +104,11 @@ class _MainShellState extends ConsumerState<MainShell>
       if (isRestaurant)
         NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu,
             l10n.navKitchen, const KitchenScreen()),
+      // Open Orders: table-less drafts awaiting finalization. Only shown while
+      // such drafts exist, so it appears/disappears with the queue.
+      if (hasOpenDrafts)
+        NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
+            l10n.navOpenOrders, const OpenDraftsScreen()),
       // History, Reports and Expenses moved into the Profile screen.
       NavItem(Icons.person_outline, Icons.person, l10n.navProfile,
           const SettingsScreen()),
@@ -107,7 +140,11 @@ class _MainShellState extends ConsumerState<MainShell>
           }
         });
 
-        final items = _buildNavItems(session.userRole, session.businessType);
+        // Kitchen staff never see billing/orders, so don't even query drafts.
+        final hasOpenDrafts = session.userRole != 'kitchen' &&
+            ref.watch(hasOpenDraftsProvider);
+        final items = _buildNavItems(
+            session.userRole, session.businessType, hasOpenDrafts);
         final safeIndex = _index.clamp(0, items.length - 1);
         final isWide = MediaQuery.of(context).size.width >= 720;
 

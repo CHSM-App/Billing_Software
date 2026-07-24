@@ -14,11 +14,13 @@ router.get('/:token', async (req, res) => {
       .query(`
         SELECT b.bill_number, b.customer_name, b.customer_phone,
                b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.created_at,
+               t.table_number,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
                bs.gst_number, bs.logo_url, bs.bill_footer_note
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
+        LEFT JOIN tables t ON t.id = b.table_id
         WHERE b.receipt_token = @token AND b.status != 'voided'
       `);
 
@@ -144,6 +146,11 @@ router.get('/:token', async (req, res) => {
       <div class="label">Bill No</div>
       <div class="value">${esc(bill.bill_number)}</div>
     </div>
+    ${bill.table_number ? `
+    <div class="meta-item">
+      <div class="label">Table</div>
+      <div class="value">${esc(String(bill.table_number))}</div>
+    </div>` : ''}
     <div class="meta-item">
       <div class="label">Date &amp; Time</div>
       <div class="value">${date}</div>

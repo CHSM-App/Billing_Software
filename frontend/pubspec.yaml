@@ -38,6 +38,7 @@ dependencies:
   package_info_plus: ^8.0.2
   url_launcher: ^6.3.0
   in_app_update: ^4.2.3
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

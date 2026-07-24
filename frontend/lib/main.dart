@@ -14,6 +14,7 @@ import 'screens/license_screen.dart';
 import 'services/offline_service.dart';
 import 'services/license_service.dart';
 import 'services/notification_service.dart';
+import 'services/realtime_service.dart';
 // import 'core/services/remote_config_service.dart';  // TODO: enable when Firebase is needed
 import 'features/splash/vittam_splash_screen.dart';
 
@@ -118,6 +119,10 @@ class _AppEntryState extends ConsumerState<_AppEntry> {
 
     // Init notifications now that we have an authenticated session
     NotificationService.instance.init();
+
+    // Open the real-time WebSocket for live cross-device updates
+    // (kitchen / tables / open-orders).
+    RealtimeService.instance.start();
 
     // Wire connectivity notifier into api.dart
     final notifier = ref.read(connectivityProvider.notifier);

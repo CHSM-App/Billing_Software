@@ -36,6 +36,11 @@ function getMessaging() {
  * @param {Array<{name: string, remaining: number}>} lowItems  — items that crossed threshold
  */
 async function sendLowStockNotification(pool, sql, businessId, lowItems) {
+  // Disabled: we show no notifications to any role. Low-stock is surfaced in-app
+  // (stock screens / badges), not via push. Kept as a no-op so callers don't
+  // need to change.
+  return;
+  // eslint-disable-next-line no-unreachable
   if (!lowItems || lowItems.length === 0) return;
 
   const messaging = getMessaging();
@@ -137,21 +142,21 @@ async function sendKitchenNotification(pool, sql, businessId, order = {}) {
 
   if (tokens.length === 0) return;
 
-  const where = order.tableLabel ? ` — ${order.tableLabel}` : '';
-  const title = order.isNew ? `New order${where}` : `Order updated${where}`;
-  const body = order.itemCount
-    ? `${order.itemCount} item${order.itemCount === 1 ? '' : 's'} to prepare`
-    : 'Open the kitchen view to see the order';
-
+  // DATA-ONLY, silent message: no `notification` block, no sound, no channel —
+  // so nothing is shown to the kitchen (or any) device. The client uses the
+  // `type: kitchen_order` data payload solely to refresh the kitchen queue in
+  // real time. High priority + content-available so it still wakes the app.
   const message = {
-    notification: { title, body },
     data: {
       type: 'kitchen_order',
       is_new: String(!!order.isNew),
       table: order.tableLabel || '',
     },
-    android: { notification: { channelId: 'kitchen', priority: 'high' } },
-    apns: { payload: { aps: { sound: 'default' } } },
+    android: { priority: 'high' },
+    apns: {
+      headers: { 'apns-priority': '5' },
+      payload: { aps: { 'content-available': 1 } },
+    },
     tokens,
   };
 
@@ -183,4 +188,66 @@ async function sendKitchenNotification(pool, sql, businessId, order = {}) {
   }
 }
 
-module.exports = { sendLowStockNotification, sendKitchenNotification };
+/**
+ * Silently notify ALL of a business's devices that a dish's kitchen status
+ * changed, so any open Kitchen view (cashier, server, or chef) refreshes in real
+ * time. Data-only — nothing is shown. Reuses the `kitchen_order` type the client
+ * already listens for (it just bumps the refresh signal).
+ *
+ * @param {object} pool
+ * @param {object} sql
+ * @param {string} businessId
+ */
+async function sendKitchenStatusChanged(pool, sql, businessId) {
+  const messaging = getMessaging();
+  if (!messaging) return;
+
+  let tokens;
+  try {
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .query(`SELECT token FROM fcm_tokens WHERE business_id = @business_id`);
+    tokens = result.recordset.map((r) => r.token);
+  } catch (err) {
+    console.error('[FCM] Failed to fetch tokens (status change):', err.message);
+    return;
+  }
+  if (tokens.length === 0) return;
+
+  const message = {
+    data: { type: 'kitchen_order', is_new: 'false', table: '' },
+    android: { priority: 'high' },
+    apns: {
+      headers: { 'apns-priority': '5' },
+      payload: { aps: { 'content-available': 1 } },
+    },
+    tokens,
+  };
+
+  try {
+    const response = await messaging.sendEachForMulticast(message);
+    const staleTokens = [];
+    response.responses.forEach((r, i) => {
+      if (!r.success) {
+        const code = r.error?.errorInfo?.code;
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token'
+        ) {
+          staleTokens.push(tokens[i]);
+        }
+      }
+    });
+    for (const token of staleTokens) {
+      try {
+        await pool.request()
+          .input('token', sql.NVarChar(500), token)
+          .query(`DELETE FROM fcm_tokens WHERE token = @token`);
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.error('[FCM] status-change multicast error:', err.message);
+  }
+}
+
+module.exports = { sendLowStockNotification, sendKitchenNotification, sendKitchenStatusChanged };

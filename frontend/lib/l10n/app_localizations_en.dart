@@ -110,10 +110,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navKitchen => 'Kitchen';
 
   @override
+  String get navOpenOrders => 'Open Orders';
+
+  @override
   String get navSettings => 'Settings';
 
   @override
   String get navProfile => 'Profile';
+
+  @override
+  String get openOrdersTitle => 'Open Orders';
+
+  @override
+  String get openOrdersEmpty =>
+      'No open orders. Saved drafts without a table appear here.';
+
+  @override
+  String openOrdersBillNumber(String number) {
+    return 'Bill #$number';
+  }
+
+  @override
+  String openOrdersItemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items',
+      one: '1 item',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get kitchenTitle => 'Kitchen';
@@ -537,6 +563,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get receiptBillNo => 'Bill#:';
 
   @override
+  String get receiptTable => 'Table:';
+
+  @override
   String get receiptDate => 'Date:';
 
   @override
@@ -683,6 +712,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingWhatsappSent => 'Receipt link sent to WhatsApp';
 
   @override
+  String get billingWhatsappNeedsPhone =>
+      'Add the customer\'s phone number to send on WhatsApp';
+
+  @override
   String get billingWhatsappFailed => 'Could not send WhatsApp message';
 
   @override
@@ -819,6 +852,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsSearch => 'Search items…';
+
+  @override
+  String get itemsStockOverview => 'Available Stock';
 
   @override
   String get itemsAddItem => 'Add Item';

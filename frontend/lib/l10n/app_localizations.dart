@@ -296,6 +296,12 @@ abstract class AppLocalizations {
   /// **'Kitchen'**
   String get navKitchen;
 
+  /// No description provided for @navOpenOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Orders'**
+  String get navOpenOrders;
+
   /// No description provided for @navSettings.
   ///
   /// In en, this message translates to:
@@ -307,6 +313,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Profile'**
   String get navProfile;
+
+  /// No description provided for @openOrdersTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Orders'**
+  String get openOrdersTitle;
+
+  /// No description provided for @openOrdersEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No open orders. Saved drafts without a table appear here.'**
+  String get openOrdersEmpty;
+
+  /// No description provided for @openOrdersBillNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill #{number}'**
+  String openOrdersBillNumber(String number);
+
+  /// No description provided for @openOrdersItemCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item} other{{count} items}}'**
+  String openOrdersItemCount(int count);
 
   /// No description provided for @kitchenTitle.
   ///
@@ -1088,6 +1118,12 @@ abstract class AppLocalizations {
   /// **'Bill#:'**
   String get receiptBillNo;
 
+  /// No description provided for @receiptTable.
+  ///
+  /// In en, this message translates to:
+  /// **'Table:'**
+  String get receiptTable;
+
   /// No description provided for @receiptDate.
   ///
   /// In en, this message translates to:
@@ -1358,6 +1394,12 @@ abstract class AppLocalizations {
   /// **'Receipt link sent to WhatsApp'**
   String get billingWhatsappSent;
 
+  /// No description provided for @billingWhatsappNeedsPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Add the customer\'s phone number to send on WhatsApp'**
+  String get billingWhatsappNeedsPhone;
+
   /// No description provided for @billingWhatsappFailed.
   ///
   /// In en, this message translates to:
@@ -1603,6 +1645,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Search items…'**
   String get itemsSearch;
+
+  /// No description provided for @itemsStockOverview.
+  ///
+  /// In en, this message translates to:
+  /// **'Available Stock'**
+  String get itemsStockOverview;
 
   /// No description provided for @itemsAddItem.
   ///

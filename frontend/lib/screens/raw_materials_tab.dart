@@ -25,6 +25,135 @@ String rawMaterialUnitLabel(BuildContext context, String unit) {
 
 const rawMaterialUnits = ['piece', 'g', 'kg', 'ml', 'litre'];
 
+/// One line in the stock-overview sheet: a product name and its remaining stock.
+/// [unitLabel] is the already-localized unit (each tab formats its own units).
+class StockOverviewRow {
+  final String name;
+  final double? stockQuantity;
+  final String unitLabel;
+  final bool isLowStock;
+  const StockOverviewRow({
+    required this.name,
+    required this.stockQuantity,
+    required this.unitLabel,
+    this.isLowStock = false,
+  });
+}
+
+/// A compact stock-overview card (same look as the item/raw-material cards) that
+/// shows only a product's name and its remaining stock. Used inline when the
+/// stock-overview toggle is on.
+Widget buildStockCard(BuildContext context, StockOverviewRow r) {
+  final stockStr = r.stockQuantity != null
+      ? '${formatQty(r.stockQuantity!)} ${r.unitLabel}'
+      : '—';
+  return Container(
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.medium),
+      border: Border.all(color: AppColors.border, width: 1),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: r.isLowStock ? AppColors.warning : AppColors.border,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              r.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+                height: 1.15,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            stockStr,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: r.isLowStock ? AppColors.warning : AppColors.textPrimary,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Wraps a card so toggling the stock overview cross-fades and gently scales
+/// between the two card variants. [stockMode] keys the transition.
+Widget animatedCardSwap(bool stockMode, Widget child) {
+  return AnimatedSwitcher(
+    duration: const Duration(milliseconds: 250),
+    switchInCurve: Curves.easeOut,
+    switchOutCurve: Curves.easeIn,
+    transitionBuilder: (c, anim) => FadeTransition(
+      opacity: anim,
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 0.96, end: 1.0).animate(anim),
+        child: c,
+      ),
+    ),
+    child: KeyedSubtree(key: ValueKey(stockMode), child: child),
+  );
+}
+
+/// Square icon button placed beside a search box to toggle the stock overview.
+class StockOverviewButton extends StatelessWidget {
+  final String tooltip;
+  final VoidCallback onTap;
+  final bool active;
+  const StockOverviewButton(
+      {super.key,
+      required this.tooltip,
+      required this.onTap,
+      this.active = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        height: 40,
+        width: 40,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(AppRadius.small),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(AppRadius.small),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              decoration: BoxDecoration(
+                color: active ? AppColors.primary : AppColors.surfaceVariant,
+                borderRadius: BorderRadius.circular(AppRadius.small),
+              ),
+              child: Icon(Icons.inventory_2_outlined,
+                  size: 20,
+                  color: active ? Colors.white : AppColors.primary),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The unit a recipe amount is *entered* in for a raw material stocked in
 /// [stockUnit], and the factor to multiply the entered amount by to convert it
 /// into the stock unit. A material stocked in kg is stocked in bulk but a single
@@ -49,8 +178,70 @@ String recipeEntryUnitLabel(BuildContext context, String stockUnit) =>
 // Raw Materials tab — restaurant ingredient inventory. Owner-only. These never
 // appear on the billing page; they are consumed by dishes via item recipes.
 // ---------------------------------------------------------------------------
-class RawMaterialsTab extends ConsumerWidget {
+class RawMaterialsTab extends ConsumerStatefulWidget {
   const RawMaterialsTab({super.key});
+
+  @override
+  ConsumerState<RawMaterialsTab> createState() => _RawMaterialsTabState();
+}
+
+class _RawMaterialsTabState extends ConsumerState<RawMaterialsTab> {
+  final _searchController = TextEditingController();
+  String _search = '';
+  bool _showStock = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(
+        () => setState(() => _search = _searchController.text.trim()));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<RawMaterial> _filtered(List<RawMaterial> all) {
+    if (_search.isEmpty) return all;
+    final q = _search.toLowerCase();
+    return all.where((m) => m.name.toLowerCase().contains(q)).toList();
+  }
+
+  Widget _searchBarSliver() => SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.space12, 6, AppSpacing.space12, AppSpacing.space4),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 40,
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: context.l10n.itemsSearch,
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.search_outlined,
+                          size: 18, color: AppColors.textSecondary),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.space16, vertical: 0),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.space8),
+              // Toggle the in-place stock overview.
+              StockOverviewButton(
+                tooltip: context.l10n.itemsStockOverview,
+                active: _showStock,
+                onTap: () => setState(() => _showStock = !_showStock),
+              ),
+            ],
+          ),
+        ),
+      );
 
   void _showForm(BuildContext context, WidgetRef ref, {RawMaterial? material}) {
     showDialog(
@@ -99,7 +290,7 @@ class RawMaterialsTab extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(rawMaterialsProvider);
 
@@ -109,79 +300,161 @@ class RawMaterialsTab extends ConsumerWidget {
         error: e,
         onRetry: () => ref.read(rawMaterialsProvider.notifier).reload(),
       ),
-      data: (materials) {
-        if (materials.isEmpty) {
-          return RefreshIndicator(
-            onRefresh: () => ref.read(rawMaterialsProvider.notifier).reload(),
-            child: CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
+      data: (allMaterials) {
+        final materials = _filtered(allMaterials);
+        final isWide = MediaQuery.of(context).size.width >= 720;
+        return RefreshIndicator(
+          onRefresh: () => ref.read(rawMaterialsProvider.notifier).reload(),
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              _searchBarSliver(),
+              if (materials.isEmpty)
                 SliverFillRemaining(
+                  hasScrollBody: false,
                   child: EmptyState(
                     icon: Icons.egg_alt_outlined,
-                    message: l10n.itemsRawMaterialsEmpty,
-                    actionLabel: l10n.itemsAddRawMaterial,
-                    onAction: () => _showForm(context, ref),
+                    message: allMaterials.isEmpty
+                        ? l10n.itemsRawMaterialsEmpty
+                        : l10n.itemsNoneFound,
+                    actionLabel:
+                        allMaterials.isEmpty ? l10n.itemsAddRawMaterial : null,
+                    onAction: allMaterials.isEmpty
+                        ? () => _showForm(context, ref)
+                        : null,
+                  ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96),
+                  sliver: SliverGrid.builder(
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: isWide ? 3 : 1,
+                      crossAxisSpacing: AppSpacing.space8,
+                      mainAxisSpacing: 6,
+                      mainAxisExtent: 52,
+                    ),
+                    itemCount: materials.length,
+                    itemBuilder: (_, i) {
+                      final m = materials[i];
+                      // Stock overview toggle: same compact card, name + stock.
+                      final child = _showStock
+                          ? buildStockCard(
+                              context,
+                              StockOverviewRow(
+                                name: m.name,
+                                stockQuantity: m.stockQuantity,
+                                unitLabel:
+                                    rawMaterialUnitLabel(context, m.unit),
+                                isLowStock: m.isLowStock,
+                              ),
+                            )
+                          : _buildCard(context, m);
+                      return animatedCardSwap(_showStock, child);
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Compact card matching the Items tab: colour dot, name + stock subtitle,
+  // and a trailing delete action.
+  Widget _buildCard(BuildContext context, RawMaterial m) {
+    final l10n = context.l10n;
+    final stockStr = m.stockQuantity != null
+        ? '${formatQty(m.stockQuantity!)} ${rawMaterialUnitLabel(context, m.unit)}'
+        : '—';
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        child: InkWell(
+          onTap: () => _showForm(context, ref, material: m),
+          borderRadius: BorderRadius.circular(AppRadius.medium),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.border,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        m.name,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                          height: 1.15,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              l10n.itemsStockLabel(stockStr),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.textSecondary,
+                                height: 1.15,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (m.isLowStock) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '· ${l10n.itemsLowStock}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.warning,
+                                fontWeight: FontWeight.w600,
+                                height: 1.15,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                InkWell(
+                  onTap: () => _delete(context, ref, m),
+                  borderRadius: BorderRadius.circular(4),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Icon(Icons.delete_outline,
+                        size: 16, color: AppColors.error),
                   ),
                 ),
               ],
             ),
-          );
-        }
-        return RefreshIndicator(
-          onRefresh: () => ref.read(rawMaterialsProvider.notifier).reload(),
-          child: ListView.separated(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-            itemCount: materials.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (_, i) {
-              final m = materials[i];
-              final stockStr = m.stockQuantity != null
-                  ? '${formatQty(m.stockQuantity!)} ${rawMaterialUnitLabel(context, m.unit)}'
-                  : '—';
-              return Container(
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(AppRadius.medium),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: ListTile(
-                  title: Text(m.name,
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Row(
-                    children: [
-                      Flexible(
-                        child: Text(l10n.itemsStockLabel(stockStr),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: AppColors.textSecondary)),
-                      ),
-                      if (m.isLowStock) ...[
-                        const SizedBox(width: 6),
-                        Text('· ${l10n.itemsLowStock}',
-                            style: const TextStyle(
-                                fontSize: 12,
-                                color: AppColors.warning,
-                                fontWeight: FontWeight.w600)),
-                      ],
-                    ],
-                  ),
-                  onTap: () => _showForm(context, ref, material: m),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline,
-                        size: 18, color: AppColors.error),
-                    onPressed: () => _delete(context, ref, m),
-                  ),
-                ),
-              );
-            },
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

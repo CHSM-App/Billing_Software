@@ -190,6 +190,10 @@ class PrinterService {
 
     // Bill info
     lines.add('${labels?.billNo ?? 'Bill#:'} ${bill.billNumber}');
+    // Table orders print their table number so the receipt is identifiable.
+    if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty) {
+      lines.add('${labels?.table ?? 'Table:'} ${bill.tableNumber}');
+    }
     lines.add(
         '${labels?.date ?? 'Date:'} ${_formatDate(bill.createdAt.toLocal())}');
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
