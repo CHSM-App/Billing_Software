@@ -1,3 +1,7 @@
+// _Approach intentionally exposes a broad set of optional rendering knobs so new
+// experiments can be added without editing the class; not every knob is used by
+// the current shortlist of approaches.
+// ignore_for_file: unused_element_parameter
 import 'dart:typed_data';
 
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
@@ -40,40 +44,17 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
   // for cheap 58mm BT printers) and slow chunking. The old GS v 0 variants are
   // kept lower down for comparison.
   late final List<_Approach> _approaches = [
-    _Approach('5. ESC * SINGLE density (8-dot)',
-        'For printers that don\'t support 24-dot mode. Try if 1–4 squish.',
-        threshold: 170, scale: 3, bold: true, fontScale: 1.15,
-        mode: _SendMode.escStarSingle, slowSend: true),
+    // The prints you rated best — all GS * image() single density (_SendMode
+    // .bitImage), which is what comes out smooth on this hardware. Keep this
+    // send mode; only refine spacing/size within it (see the C-variants below).
     _Approach('9. GS * image() single density',
         'Non-double-density bit-image (old firmware).',
         threshold: 160, scale: 3, fontScale: 1.35,
-        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
-    _Approach('9b. 9 + adaptive (Sauvola) threshold',
-        'Same as 9, but a local threshold instead of one flat cut — should '
-        'keep thin matras without blobbing heavy conjuncts.',
-        threshold: 160, scale: 3, fontScale: 1.35, adaptive: true,
-        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
-    _Approach('9c. 9 + unsharp mask',
-        'Same as 9, plus a sharpen pass after downscaling to claw back thin '
-        'strokes the supersample blur softened.',
-        threshold: 160, scale: 3, fontScale: 1.35, unsharpAmount: 1.2,
-        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
-    _Approach('9d. 9 + lower threshold',
-        'Same as 9, but a darker cut (130 vs 160) so thin vowel marks are '
-        'less likely to fall below the cut and vanish.',
-        threshold: 130, scale: 3, fontScale: 1.35,
         mode: _SendMode.bitImage, fontFamily: 'Mangal'),
     _Approach('9e. 9 + 4x supersample',
         'Same as 9, but supersampled at 4x instead of 3x before downscale — '
         'more source detail for the downscale to average from.',
         threshold: 160, scale: 4, fontScale: 1.35,
-        mode: _SendMode.bitImage, fontFamily: 'Mangal'),
-    _Approach('9f. 9 + w500 bold, bigger glyphs',
-        'Same as 9, plus larger sizes (26/22/42) and a lighter bold target '
-        '(w500) — w700/w900 fills the counters of thick conjuncts.',
-        threshold: 160, scale: 3, fontScale: 1.35,
-        bold: true, boldTarget: FontWeight.w500,
-        fontSize: 26, smallFont: 22, linePitch: 42,
         mode: _SendMode.bitImage, fontFamily: 'Mangal'),
     _Approach('9g. 9 + double-strike',
         'Same as 9, but the printer strikes the image twice (ESC G 1) for '
@@ -82,69 +63,38 @@ class _MarathiPrintTestScreenState extends State<MarathiPrintTestScreen> {
         mode: _SendMode.bitImage, fontFamily: 'Mangal'),
     _Approach('9h. 9e, no bold',
         'Same as 9e (4x supersample), but bold is stripped everywhere it\'s '
-        'structurally applied — header, item column headings, total row — '
-        'all print at plain weight instead of w700.',
+        'structurally applied — header, item column headings, total row.',
         threshold: 160, scale: 4, fontScale: 1.35,
         mode: _SendMode.bitImage, fontFamily: 'Mangal',
         boldOff: true),
-    _Approach('9i. 9h + compact spacing',
-        'Same as 9h, but tighter row pitch (26 vs 34 dots) and tighter '
-        'left/right margin (3 vs 6 dots) — less dead white space between '
-        'rows and at the edges.',
-        threshold: 160, scale: 4, fontScale: 1.35,
-        mode: _SendMode.bitImage, fontFamily: 'Mangal',
-        boldOff: true, linePitch: 26, hPad: 3),
-    _Approach('9j. 9i + tight line height',
-        'Same as 9i, but the strut line-height is dropped from 1.45 to 1.15 '
-        '— that 1.45 multiplier (headroom for matras/shirorekha) was the '
-        'real driver of row height, so 9i\'s smaller linePitch never took '
-        'effect until now. Watch for clipped vowel marks top/bottom.',
+    _Approach('9j. 9h + compact + tight line height',
+        'Same as 9h, but tighter row pitch (22) and line height (1.15).',
         threshold: 160, scale: 4, fontScale: 1.35,
         mode: _SendMode.bitImage, fontFamily: 'Mangal',
         boldOff: true, linePitch: 22, hPad: 3, lineHeight: 1.15),
-    _Approach('9k. 9j via ESC * bands (full width)',
-        'Same rendering as 9j, but sent via ESC * single-density bands '
-        '(approach 5\'s path) instead of GS * image(). That path writes the '
-        'bitmap at its real width with no library-imposed halving/centering '
-        '— GS * image() single-density always squeezes to a fixed 192 dots '
-        'then centers it, which is what was leaving the big left/right gap.',
-        threshold: 160, scale: 4, fontScale: 1.35,
-        mode: _SendMode.escStarSingle, fontFamily: 'Mangal', slowSend: true,
-        boldOff: true, linePitch: 22, hPad: 3, lineHeight: 1.15),
-    _Approach('9l. 9k, smaller font (drop the 1.35 boost)',
-        'Same as 9k, but fontScale drops from 1.35 to 1.0. That 1.35 was '
-        'copied from approach 9, where it compensated for GS * image() '
-        'quietly quartering everything — on the true-scale ESC * path there '
-        'is nothing to compensate for, so it was just inflating every row\'s '
-        'height (and the total paper length) for no reason.',
-        threshold: 160, scale: 4, fontScale: 1.0,
-        mode: _SendMode.escStarSingle, fontFamily: 'Mangal', slowSend: true,
-        boldOff: true, linePitch: 18, hPad: 3, lineHeight: 1.1),
-    _Approach('9m. 9h, tight rows, narrower margin',
-        'Same as 9h (keeps GS * image() single density, same font size — '
-        'the version you said looked good), just with 9j\'s tighter row '
-        'spacing (linePitch 22, lineHeight 1.15) and the widest margin this '
-        'send mode allows: mm80 paper size (288 of 384 dots used, vs 192) '
-        'plus a smaller 2-dot inset. Full English-style edge-to-edge margins '
-        'aren\'t reachable in this send mode — GS * image() single-density '
-        'hard-caps the printed width at paperSize.width~/2 regardless of '
-        'source, and mm80 (288) is the widest that cap goes. 9k/9l (ESC * '
-        'bands) are the only path to a true full-width, zero-imposed-margin '
-        'print.',
+
+    // ── Compact refinements — SAME smooth GS * image() path as the 9-series,
+    //    only the row spacing is tightened further. No send-mode change. ──────
+    _Approach('C1. 9h, compact rows + slim margin',
+        'Exactly 9h (4x, no bold, GS * image()) — just tighter rows '
+        '(linePitch 20, lineHeight 1.15) and a slim 2-dot edge margin (was 6) '
+        'to match the English bill.',
         threshold: 160, scale: 4, fontScale: 1.35,
         mode: _SendMode.bitImage, fontFamily: 'Mangal',
-        boldOff: true, linePitch: 22, hPad: 2, lineHeight: 1.15,
-        paperSizeMm: 80),
-    _Approach('9n. 9m, standard font size',
-        'Same as 9m, but fontScale drops from 1.35 to 1.0 — the plain, '
-        'un-boosted fontSize/smallFont (20/17) that were originally tuned '
-        'to mirror the native English text bill\'s size. The 1.35 boost was '
-        'inherited from approach 9 for legibility reasons that predate this '
-        'round of fixes; try this to see if it\'s still needed.',
-        threshold: 160, scale: 4, fontScale: 1.0,
+        boldOff: true, linePitch: 20, lineHeight: 1.15, hPad: 2),
+    _Approach('C2. 9h, most compact',
+        'Same as C1 but tighter still: linePitch 18, lineHeight 1.1. The most '
+        'compact that should still clear matras/shirorekha — watch top/bottom '
+        'clipping.',
+        threshold: 160, scale: 4, fontScale: 1.35,
         mode: _SendMode.bitImage, fontFamily: 'Mangal',
-        boldOff: true, linePitch: 22, hPad: 2, lineHeight: 1.15,
-        paperSizeMm: 80),
+        boldOff: true, linePitch: 18, lineHeight: 1.1, hPad: 2),
+    _Approach('C3. 9g, compact rows + slim margin',
+        'The double-strike look of 9g (darker strokes), with C1\'s compact '
+        'rows and 2-dot margin.',
+        threshold: 160, scale: 3, fontScale: 1.35, doubleStrike: true,
+        mode: _SendMode.bitImage, fontFamily: 'Mangal',
+        linePitch: 20, lineHeight: 1.15, hPad: 2),
   ];
 
   // Cache of rendered previews for on-screen display.

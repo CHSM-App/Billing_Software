@@ -638,9 +638,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
         children: [
           Expanded(
             child: Text(item.name,
-                style: Theme.of(context).textTheme.titleMedium,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
+                style: Theme.of(context).textTheme.titleMedium),
           ),
           IconButton(
             tooltip: l10n.itemsEditItemTooltip,

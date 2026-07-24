@@ -78,6 +78,9 @@ class ReceiptImageBuilder {
       scale: 3,
       boldBoost: true,
       fontScale: 1.15,
+      // Slim edge margin to match the native English bill, which prints
+      // essentially edge-to-edge. Was the default 6 dots.
+      hPad: 2,
     );
 
     final bytes = <int>[

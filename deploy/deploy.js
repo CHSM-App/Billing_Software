@@ -33,6 +33,9 @@ const TRACK    = args.track    ?? 'production';
 const FORCE    = args.force    === true;
 const DRY_RUN  = args['dry-run'] === true;
 const FRACTION = FORCE ? 1.0 : parseFloat(args.fraction ?? '0.1');
+// --yes skips all interactive confirmations. Required in CI (GitHub Actions),
+// which has no stdin — the ask() prompts would hang the job forever.
+const YES      = args.yes === true;
 
 // ─── PRIORITY DESCRIPTIONS ────────────────────────────────────────────────────
 
@@ -48,6 +51,11 @@ const PRIORITY_INFO = {
 // ─── HELPER FUNCTIONS ─────────────────────────────────────────────────────────
 
 function ask(question) {
+  // In CI (--yes) there is no interactive terminal — auto-confirm and log it.
+  if (YES) {
+    console.log(`  ${question} (y/n): y  [auto-confirmed via --yes]`);
+    return Promise.resolve(true);
+  }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise(resolve => {
     rl.question(`  ${question} (y/n): `, answer => {
@@ -98,12 +106,19 @@ async function main() {
   const aabSizeMB  = (fs.statSync(AAB_PATH).size / 1024 / 1024).toFixed(1);
   const aabBuiltAt = fs.statSync(AAB_PATH).mtime.toLocaleString('en-IN');
 
-  // Read version name from pubspec.yaml for the summary
+  // Read version name + versionCode from pubspec.yaml. The versionCode is the
+  // integer after the '+' (e.g. "1.1.1+12" → 12). This is the number Play Store
+  // uses; the guard below verifies it's higher than anything already uploaded.
   let versionLabel = 'unknown';
+  let localVersionCode = null;
   try {
     const pubspec = fs.readFileSync(path.join(__dirname, '../frontend/pubspec.yaml'), 'utf8');
     const match   = pubspec.match(/^version:\s*(.+)$/m);
-    if (match) versionLabel = match[1].trim();
+    if (match) {
+      versionLabel = match[1].trim();
+      const codeMatch = versionLabel.match(/\+(\d+)/);
+      if (codeMatch) localVersionCode = parseInt(codeMatch[1], 10);
+    }
   } catch (_) {}
 
   console.log('\n');
@@ -164,6 +179,26 @@ async function main() {
   ok(`Edit session created: ${editId}`);
 
   try {
+
+    // ── STEP 5b: Guard — versionCode must be higher than anything on Play ────
+    // Play Store rejects any AAB whose versionCode was already used. Catch that
+    // *before* the slow upload and fail with a clear "bump pubspec" message
+    // instead of a cryptic rejection mid-commit.
+    log('Checking existing version codes on Play...');
+    const listRes = await play.edits.bundles.list({ packageName: PACKAGE_NAME, editId });
+    const existing = (listRes.data.bundles ?? []).map(b => b.versionCode ?? 0);
+    const highest  = existing.length ? Math.max(...existing) : 0;
+
+    if (localVersionCode == null) {
+      warn('Could not read versionCode from pubspec.yaml — skipping guard.');
+    } else if (localVersionCode <= highest) {
+      err(`versionCode ${localVersionCode} is not higher than the highest already on Play (${highest}).`);
+      err(`Bump the "+NN" in frontend/pubspec.yaml to at least +${highest + 1}, rebuild, and retry.`);
+      await play.edits.delete({ packageName: PACKAGE_NAME, editId }).catch(() => {});
+      process.exit(1);
+    } else {
+      ok(`versionCode ${localVersionCode} > highest on Play (${highest}) — OK to upload`);
+    }
 
     // ── STEP 6: Upload AAB ──────────────────────────────────────────────────
 

@@ -399,6 +399,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      // This screen stays alive (nothing was popped), so reset the saving flag
+      // ourselves — otherwise the Save Draft FAB spins forever.
+      if (mounted) setState(() => _savingDraft = false);
     }
 
     // ── Background persistence + reconcile ───────────────────────────────────
