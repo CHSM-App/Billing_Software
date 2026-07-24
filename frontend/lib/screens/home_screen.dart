@@ -1631,7 +1631,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.space16),
               child: DropdownButtonFormField<String>(
-                initialValue: _paymentMode,
+                value: _paymentMode,
                 isExpanded: true,
                 decoration: InputDecoration(
                   labelText: l10n.billingPaymentMode,
