@@ -227,8 +227,7 @@ class PrinterService {
     lines.add('-' * _cols);
 
     // Totals
-
-    lines.add(_twoCol(bill.discountAmount> 0 ? 'Subtotal:':'total',
+    lines.add(_twoCol(labels?.subtotal ?? 'Subtotal:',
         'Rs.${bill.subtotal.toStringAsFixed(2)}'));
 
     if (bill.taxAmount > 0) {
@@ -236,13 +235,13 @@ class PrinterService {
           labels?.tax ?? 'Tax:', 'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
     }
 
-
     if (bill.discountAmount > 0) {
-      lines.add(_twoCol(labels?.discount ?? 'Discount:','Rs.${bill.discountAmount.toStringAsFixed(2)}'));
-
-      lines.add(_twoCol('Grand Total:', 'Rs.${bill.total.toStringAsFixed(2)}'));
-
+      lines.add(_twoCol(labels?.discount ?? 'Discount:',
+          '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
     }
+
+    lines.add(_twoCol(labels?.total ?? 'Grand Total:',
+        'Rs.${grandTotal.toStringAsFixed(2)}'));
 
     lines.add(
         _twoCol(labels?.payment ?? 'Payment:', bill.paymentMode.toUpperCase()));

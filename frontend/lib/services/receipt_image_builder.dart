@@ -494,21 +494,24 @@ class ReceiptImageBuilder {
     rows.add(_Row.divider(size: smallFont));
 
     // Totals
-    if (bill.taxAmount > 0) {
+    final grandTotal = bill.total - bill.discountAmount;
+    if (bill.taxAmount > 0 || bill.discountAmount > 0) {
       rows.add(_Row.twoCol(
           labels.subtotal, 'Rs.${bill.subtotal.toStringAsFixed(2)}',
           size: smallFont));
+    }
+    if (bill.taxAmount > 0) {
       rows.add(_Row.twoCol(
           labels.tax, 'Rs.${bill.taxAmount.toStringAsFixed(2)}',
           size: smallFont));
     }
     if (bill.discountAmount > 0) {
       rows.add(_Row.twoCol(
-          labels.discount, 'Rs.${bill.discountAmount.toStringAsFixed(2)}',
+          labels.discount, '-Rs.${bill.discountAmount.toStringAsFixed(2)}',
           size: smallFont));
     }
     rows.add(_Row.twoCol(
-        labels.total, 'Rs.${bill.total.toStringAsFixed(2)}',
+        labels.total, 'Rs.${grandTotal.toStringAsFixed(2)}',
         bold: true, size: smallFont, weight: boldWeight));
     rows.add(_Row.twoCol(labels.payment, bill.paymentMode.toUpperCase(),
         size: smallFont));
