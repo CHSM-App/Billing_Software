@@ -618,8 +618,12 @@ class RecipeEditorDialog extends ConsumerStatefulWidget {
 class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
   // raw_material_id -> quantity text controller. Blank/zero means "not used".
   final Map<String, TextEditingController> _ctrls = {};
-  final _searchCtrl = TextEditingController();
-  String _query = '';
+  // Ordered ids of materials the user has added to the recipe (only these are
+  // shown in the list). Search-to-add appends; the remove button drops one.
+  final List<String> _selectedIds = [];
+  // The Autocomplete's own field focus, captured so we can keep focus on the
+  // search box after adding a material (dropdown stays open for the next add).
+  FocusNode? _fieldFocus;
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -646,6 +650,8 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
         if (byId.containsKey(m.id)) {
           final entry = recipeEntryUnit(m.unit);
           text = formatQty(byId[m.id]! / entry.toStock);
+          // Already part of the recipe -> show it in the added list.
+          _selectedIds.add(m.id);
         }
         _ctrls[m.id] = TextEditingController(text: text);
       }
@@ -665,7 +671,6 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
     for (final c in _ctrls.values) {
       c.dispose();
     }
-    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -698,6 +703,8 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
     }
   }
 
+  /* OLD: showed the full materials list inline. Replaced by search-to-add flow
+     (only added materials appear in the table). Kept for reference.
   /// Compact, Excel-like table: a header row plus one striped, bordered row
   /// per raw material with an inline quantity cell.
   Widget _buildRecipeTable(BuildContext context, List<RawMaterial> materials) {
@@ -811,6 +818,217 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
       ),
     );
   }
+  END OLD */
+
+  /// Adds a material to the recipe without touching the search field, then
+  /// keeps focus on the search box so the (now-filtered) dropdown stays open.
+  void _addMaterial(RawMaterial m) {
+    if (_selectedIds.contains(m.id)) return;
+    setState(() => _selectedIds.add(m.id));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fieldFocus?.requestFocus();
+    });
+  }
+
+  /// Search-to-add box: an autocomplete over all raw materials not yet added.
+  /// Shows the full list on focus and filters as the user types; picking an
+  /// option appends it to the recipe.
+  Widget _buildAddSearch(BuildContext context, List<RawMaterial> materials) {
+    return Autocomplete<RawMaterial>(
+      displayStringForOption: (m) => m.name,
+      optionsBuilder: (value) {
+        final q = value.text.trim().toLowerCase();
+        return materials.where((m) {
+          if (_selectedIds.contains(m.id)) return false; // already added
+          return q.isEmpty || m.name.toLowerCase().contains(q);
+        });
+      },
+      // We never route selection through Autocomplete's onSelected (which
+      // writes the option name into the field). _addMaterial handles it and
+      // leaves the search text untouched.
+      onSelected: (_) {},
+      fieldViewBuilder: (context, controller, focusNode, onSubmit) {
+        _fieldFocus = focusNode;
+        return TextField(
+          controller: controller,
+          focusNode: focusNode,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'Search material to add',
+            prefixIcon: const Icon(Icons.search, size: 20),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+        );
+      },
+      optionsViewBuilder: (context, onSelected, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(6),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 240, maxWidth: 520),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (context, i) {
+                  final m = options.elementAt(i);
+                  return ListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    title: Text(m.name),
+                    trailing: Text(recipeEntryUnitLabel(context, m.unit),
+                        style: TextStyle(color: AppColors.textSecondary)),
+                    onTap: () => _addMaterial(m),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Compact table of the materials the user has added, each with an inline
+  /// quantity cell and a remove button.
+  Widget _buildSelectedTable(
+      BuildContext context, List<RawMaterial> materials) {
+    final border = BorderSide(color: AppColors.border, width: 0.5);
+    final headerStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: AppColors.textSecondary,
+        );
+    final byId = {for (final m in materials) m.id: m};
+
+    Widget cell(Widget child) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+          child: Align(alignment: Alignment.centerLeft, child: child),
+        );
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border, width: 0.5),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header
+          Container(
+            height: 26,
+            color: AppColors.border.withOpacity(0.25),
+            child: Row(
+              children: [
+                Expanded(
+                    flex: 60,
+                    child: cell(Text('Raw material', style: headerStyle))),
+                Expanded(
+                    flex: 35,
+                    child: cell(Text('Quantity', style: headerStyle))),
+                const SizedBox(width: 36),
+              ],
+            ),
+          ),
+          if (_selectedIds.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text('No materials added yet',
+                  style: TextStyle(color: AppColors.textSecondary)),
+            ),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < _selectedIds.length; i++)
+                    if (byId[_selectedIds[i]] != null)
+                      _selectedRow(context, byId[_selectedIds[i]]!, i, border),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _selectedRow(
+      BuildContext context, RawMaterial m, int i, BorderSide border) {
+    return Container(
+      decoration: BoxDecoration(
+        color: i.isOdd ? AppColors.border.withOpacity(0.08) : null,
+        border: Border(top: border),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            Expanded(
+              flex: 60,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text(m.name,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(fontWeight: FontWeight.w500)),
+              ),
+            ),
+            Expanded(
+              flex: 35,
+              child: Container(
+                decoration: BoxDecoration(border: Border(left: border)),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                child: TextField(
+                  controller: _ctrls[m.id]!,
+                  autofocus: true,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  textAlign: TextAlign.right,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    isCollapsed: true,
+                    // Unit shown as placeholder; disappears once a value is typed.
+                    hintText: recipeEntryUnitLabel(context, m.unit),
+                    hintStyle: TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textSecondary,
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 36,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                icon: const Icon(Icons.close, size: 16),
+                color: AppColors.textSecondary,
+                tooltip: 'Remove',
+                onPressed: () {
+                  setState(() {
+                    _selectedIds.remove(m.id);
+                    _ctrls[m.id]?.clear(); // don't save a removed material
+                  });
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -824,6 +1042,7 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
           maxLines: 1, overflow: TextOverflow.ellipsis),
       content: SizedBox(
         width: 560,
+        height: MediaQuery.of(context).size.height * 0.7,
         child: _loading
             ? const SizedBox(
                 height: 120, child: Center(child: CircularProgressIndicator()))
@@ -831,54 +1050,28 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
                 ? Text(_error!, style: const TextStyle(color: AppColors.error))
                 : materials.isEmpty
                     ? Text(l10n.itemsRecipeNoMaterials)
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(l10n.itemsRecipeHint,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: AppColors.textSecondary)),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: _searchCtrl,
-                            onChanged: (v) =>
-                                setState(() => _query = v.trim().toLowerCase()),
-                            decoration: InputDecoration(
-                              isDense: true,
-                              hintText: 'Search materials',
-                              prefixIcon: const Icon(Icons.search, size: 20),
-                              suffixIcon: _query.isEmpty
-                                  ? null
-                                  : IconButton(
-                                      icon: const Icon(Icons.close, size: 18),
-                                      onPressed: () {
-                                        _searchCtrl.clear();
-                                        setState(() => _query = '');
-                                      },
-                                    ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(6),
-                              ),
+                    // Tapping the dialog body (outside the search field/list)
+                    // drops focus, which closes the Autocomplete dropdown.
+                    : GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => FocusScope.of(context).unfocus(),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(l10n.itemsRecipeHint,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: AppColors.textSecondary)),
+                            const SizedBox(height: 8),
+                            _buildAddSearch(context, materials),
+                            const SizedBox(height: 8),
+                            Flexible(
+                              child: _buildSelectedTable(context, materials),
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          Flexible(
-                            child: _buildRecipeTable(
-                              context,
-                              _query.isEmpty
-                                  ? materials
-                                  : materials
-                                      .where((m) => m.name
-                                          .toLowerCase()
-                                          .contains(_query))
-                                      .toList(),
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
       ),
       actions: [

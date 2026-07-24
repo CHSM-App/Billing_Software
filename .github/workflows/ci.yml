@@ -186,16 +186,26 @@ jobs:
         run: flutter pub get
 
       - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > frontend/android/app/upload-keystore.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        # tr -d whitespace strips any stray spaces/newlines the secret box may
+        # have added, which would otherwise corrupt the decoded .jks.
+        run: printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > frontend/android/app/upload-keystore.jks
 
       - name: Create key.properties
+        env:
+          STORE_PASSWORD: ${{ secrets.STOREPASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEYPASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEYALIAS }}
+        # Reference the env vars (not ${{ }} inline) so no shell expansion mangles
+        # special characters like '@' in the password.
         run: |
-          cat > frontend/android/key.properties << EOF
-          storePassword=${{ secrets.STORE_PASSWORD }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          storeFile=app/upload-keystore.jks
-          EOF
+          {
+            printf 'storePassword=%s\n' "$STORE_PASSWORD"
+            printf 'keyPassword=%s\n'   "$KEY_PASSWORD"
+            printf 'keyAlias=%s\n'      "$KEY_ALIAS"
+            printf 'storeFile=app/upload-keystore.jks\n'
+          } > frontend/android/key.properties
 
       - name: Create google-services.json
         env:
@@ -365,16 +375,26 @@ jobs:
         run: flutter pub get
 
       - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > frontend/android/app/upload-keystore.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        # tr -d whitespace strips any stray spaces/newlines the secret box may
+        # have added, which would otherwise corrupt the decoded .jks.
+        run: printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > frontend/android/app/upload-keystore.jks
 
       - name: Create key.properties
+        env:
+          STORE_PASSWORD: ${{ secrets.STOREPASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEYPASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEYALIAS }}
+        # Reference the env vars (not ${{ }} inline) so no shell expansion mangles
+        # special characters like '@' in the password.
         run: |
-          cat > frontend/android/key.properties << EOF
-          storePassword=${{ secrets.STORE_PASSWORD }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          storeFile=app/upload-keystore.jks
-          EOF
+          {
+            printf 'storePassword=%s\n' "$STORE_PASSWORD"
+            printf 'keyPassword=%s\n'   "$KEY_PASSWORD"
+            printf 'keyAlias=%s\n'      "$KEY_ALIAS"
+            printf 'storeFile=app/upload-keystore.jks\n'
+          } > frontend/android/key.properties
 
       - name: Create google-services.json
         env:
