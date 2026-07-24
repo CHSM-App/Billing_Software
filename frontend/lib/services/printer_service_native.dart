@@ -6,10 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
 // On Windows we still fall back to flutter_thermal_printer (BLE/USB).
-import 'package:flutter_thermal_printer/flutter_thermal_printer.dart'
-    as ftp show FlutterThermalPrinter;
-import 'package:flutter_thermal_printer/utils/printer.dart'
-    as ftp show Printer, ConnectionType;
+import 'package:flutter_thermal_printer/flutter_thermal_printer.dart' as ftp
+    show FlutterThermalPrinter;
+import 'package:flutter_thermal_printer/utils/printer.dart' as ftp
+    show Printer, ConnectionType;
 
 import 'receipt_labels.dart';
 import 'receipt_image_builder.dart';
@@ -104,10 +104,12 @@ class PrinterService {
         refreshDuration: const Duration(seconds: 3),
         connectionTypes: [ftp.ConnectionType.BLE, ftp.ConnectionType.USB],
       );
-      await ftpInstance.devicesStream.first.timeout(
+      await ftpInstance.devicesStream.first
+          .timeout(
         const Duration(seconds: 4),
         onTimeout: () => <ftp.Printer>[],
-      ).then((devices) {
+      )
+          .then((devices) {
         for (final d in devices) {
           found.add(Printer(
             name: d.name,
@@ -171,16 +173,18 @@ class PrinterService {
       String? businessPhone,
       String? businessAddress,
       ReceiptLabels? labels}) {
+    final grandTotal = bill.total - bill.discountAmount;
     final lines = <String>[];
 
     // Header
-    lines.add(_centre(
-        businessName ?? labels?.defaultBusiness ?? 'BUSINESS', _cols));
+    lines.add(
+        _centre(businessName ?? labels?.defaultBusiness ?? 'BUSINESS', _cols));
     if (businessAddress != null && businessAddress.isNotEmpty) {
       lines.add(_centre(businessAddress, _cols));
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
-      lines.add(_centre('${labels?.phonePrefix ?? 'Ph:'} $businessPhone', _cols));
+      lines.add(
+          _centre('${labels?.phonePrefix ?? 'Ph:'} $businessPhone', _cols));
     }
     lines.add('-' * _cols);
 
@@ -197,11 +201,8 @@ class PrinterService {
     lines.add('-' * _cols);
 
     // Items header
-    lines.add(_itemRow(
-        labels?.colItem ?? 'Item',
-        labels?.colQty ?? 'Qty',
-        labels?.colPrice ?? 'Price',
-        labels?.colTotal ?? 'Total'));
+    lines.add(_itemRow(labels?.colItem ?? 'Item', labels?.colQty ?? 'Qty',
+        labels?.colPrice ?? 'Price', labels?.colTotal ?? 'Total'));
     lines.add('-' * _cols);
 
     // Items
@@ -222,18 +223,23 @@ class PrinterService {
     lines.add('-' * _cols);
 
     // Totals
+
+    lines.add(_twoCol(bill.discountAmount> 0 ? 'Subtotal:':'total',
+        'Rs.${bill.subtotal.toStringAsFixed(2)}'));
+
     if (bill.taxAmount > 0) {
-      lines.add(_twoCol(labels?.subtotal ?? 'Subtotal:',
-          'Rs.${bill.subtotal.toStringAsFixed(2)}'));
       lines.add(_twoCol(
           labels?.tax ?? 'Tax:', 'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
     }
+
+
     if (bill.discountAmount > 0) {
-      lines.add(_twoCol(labels?.discount ?? 'Discount:',
-          'Rs.${bill.discountAmount.toStringAsFixed(2)}'));
+      lines.add(_twoCol(labels?.discount ?? 'Discount:','Rs.${bill.discountAmount.toStringAsFixed(2)}'));
+
+      lines.add(_twoCol('Grand Total:', 'Rs.${bill.total.toStringAsFixed(2)}'));
+
     }
-    lines.add(_twoCol(
-        labels?.total ?? 'TOTAL:', 'Rs.${bill.total.toStringAsFixed(2)}'));
+
     lines.add(
         _twoCol(labels?.payment ?? 'Payment:', bill.paymentMode.toUpperCase()));
     lines.add('-' * _cols);
@@ -347,18 +353,23 @@ class PrinterService {
       sb.write('CODEPAGE 437\r\n');
       sb.write('CLS\r\n');
       sb.write('TEXT 10,10,"3",0,1,1,"${name.replaceAll('"', '\\"')}"\r\n');
-      sb.write('TEXT 480,10,"3",0,1,1,"${priceStr.replaceAll('"', '\\"')}"\r\n');
+      sb.write(
+          'TEXT 480,10,"3",0,1,1,"${priceStr.replaceAll('"', '\\"')}"\r\n');
       sb.write('BARCODE 10,40,"128",80,1,0,2,2,"$barcodeValue"\r\n');
       sb.write('PRINT $copies,1\r\n');
       bytes = _enc(sb.toString());
     } else {
       // Raw text label for BT printer (no barcode graphic — print value as text)
-      final name = itemName.length > _cols ? itemName.substring(0, _cols) : itemName;
+      final name =
+          itemName.length > _cols ? itemName.substring(0, _cols) : itemName;
       final b = <int>[];
       void addLine(String s) {
-        for (final c in s.codeUnits) { b.add(c > 127 ? 63 : c); }
+        for (final c in s.codeUnits) {
+          b.add(c > 127 ? 63 : c);
+        }
         b.add(0x0A);
       }
+
       addLine(_centre(name, _cols));
       addLine(_centre('Rs.${price.toStringAsFixed(2)}', _cols));
       addLine('-' * _cols);
@@ -388,8 +399,10 @@ class PrinterService {
       throw PrinterException('Printer address not set');
     }
     try {
-      final permitted = await PrintBluetoothThermal.isPermissionBluetoothGranted;
-      if (!permitted) throw PrinterException('Bluetooth permission not granted');
+      final permitted =
+          await PrintBluetoothThermal.isPermissionBluetoothGranted;
+      if (!permitted)
+        throw PrinterException('Bluetooth permission not granted');
 
       final btOn = await PrintBluetoothThermal.bluetoothEnabled;
       if (!btOn) throw PrinterException('Bluetooth is turned off');
@@ -416,7 +429,8 @@ class PrinterService {
       final gapMs = slow ? 60 : 50;
       for (var i = 0; i < bytes.length; i += chunkSize) {
         final end = (i + chunkSize).clamp(0, bytes.length);
-        final result = await PrintBluetoothThermal.writeBytes(bytes.sublist(i, end));
+        final result =
+            await PrintBluetoothThermal.writeBytes(bytes.sublist(i, end));
         if (!result) throw PrinterException('Write failed at chunk $i');
         if (end < bytes.length) {
           await Future.delayed(Duration(milliseconds: gapMs));
@@ -468,7 +482,6 @@ class PrinterService {
     return '$n$q$p$t';
   }
 
-
   /// 2-column row: label left, value right (32-char)
   static String _twoCol(String label, String value) =>
       _twoColN(label, value, _cols);
@@ -486,15 +499,27 @@ class PrinterService {
   String _formatDate(DateTime dt) {
     final d = dt.day.toString().padLeft(2, '0');
     final mo = _monthName(dt.month);
-    final h = (dt.hour % 12 == 0 ? 12 : dt.hour % 12).toString().padLeft(2, '0');
+    final h =
+        (dt.hour % 12 == 0 ? 12 : dt.hour % 12).toString().padLeft(2, '0');
     final mi = dt.minute.toString().padLeft(2, '0');
     final ampm = dt.hour < 12 ? 'AM' : 'PM';
     return '$d-$mo-${dt.year} $h:$mi $ampm';
   }
 
   String _monthName(int m) => const [
-        '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+        '',
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec'
       ][m];
 }
 

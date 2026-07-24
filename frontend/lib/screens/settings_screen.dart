@@ -270,19 +270,19 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const PrinterSetupScreen()),
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.space8),
-                      _buildNavCard(
-                        context,
-                        icon: Icons.translate_outlined,
-                        iconColor: AppColors.warning,
-                        title: 'Marathi Print Test',
-                        subtitle: 'Try different Marathi bill-printing methods',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const MarathiPrintTestScreen()),
-                        ),
-                      ),
+                      // const SizedBox(height: AppSpacing.space8),
+                      // _buildNavCard(
+                      //   context,
+                      //   icon: Icons.translate_outlined,
+                      //   iconColor: AppColors.warning,
+                      //   title: 'Marathi Print Test',
+                      //   subtitle: 'Try different Marathi bill-printing methods',
+                      //   onTap: () => Navigator.push(
+                      //     context,
+                      //     MaterialPageRoute(
+                      //         builder: (_) => const MarathiPrintTestScreen()),
+                      //   ),
+                      // ),
                     ],
                     // const SizedBox(height: AppSpacing.space8),
                     // _buildNavCard(
