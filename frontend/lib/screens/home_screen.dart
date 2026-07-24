@@ -399,6 +399,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      // This screen stays alive (nothing was popped), so reset the saving flag
+      // ourselves — otherwise the Save Draft FAB spins forever.
+      if (mounted) setState(() => _savingDraft = false);
     }
 
     // ── Background persistence + reconcile ───────────────────────────────────
@@ -1628,7 +1631,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.space16),
               child: DropdownButtonFormField<String>(
-                initialValue: _paymentMode,
+                value: _paymentMode,
                 isExpanded: true,
                 decoration: InputDecoration(
                   labelText: l10n.billingPaymentMode,

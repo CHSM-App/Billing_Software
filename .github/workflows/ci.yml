@@ -6,6 +6,30 @@ on:
       - '**'
     tags:
       - 'v*'
+  # Manual "Run workflow" button for Play Store deploys. Nothing is ever pushed
+  # to the Play Store automatically — you trigger this deliberately and pick the
+  # track / priority / rollout each time.
+  workflow_dispatch:
+    inputs:
+      track:
+        description: 'Play Store track'
+        type: choice
+        default: internal
+        options:
+          - internal
+          - production
+      priority:
+        description: 'In-app update priority (0-5). 5 = forced full-screen update.'
+        type: string
+        default: '3'
+      fraction:
+        description: 'Staged rollout fraction for production (e.g. 0.1 = 10%). Ignored for internal.'
+        type: string
+        default: '0.1'
+      dry_run:
+        description: 'Dry run — validate + authenticate but do NOT upload.'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -173,6 +197,11 @@ jobs:
           storeFile=app/upload-keystore.jks
           EOF
 
+      - name: Create google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: printf '%s' "$GOOGLE_SERVICES_JSON" > frontend/android/app/google-services.json
+
       - name: Build APK (release)
         working-directory: frontend
         run: flutter build apk --release
@@ -305,3 +334,79 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: frontend/build/ios/ipa/billing-*.ipa
+
+  # Job 7: Deploy signed AAB to the Play Store.
+  # Manual only — triggered from the Actions tab via "Run workflow". Builds a
+  # fresh signed AAB (same signing steps as build-apk) and hands it to
+  # deploy/deploy.js, which uploads it to the chosen track.
+  deploy-playstore:
+    name: Deploy to Play Store
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Get Flutter dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > frontend/android/app/upload-keystore.jks
+
+      - name: Create key.properties
+        run: |
+          cat > frontend/android/key.properties << EOF
+          storePassword=${{ secrets.STORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=app/upload-keystore.jks
+          EOF
+
+      - name: Create google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: printf '%s' "$GOOGLE_SERVICES_JSON" > frontend/android/app/google-services.json
+
+      - name: Build AAB (release)
+        working-directory: frontend
+        run: flutter build appbundle --release
+
+      - name: Write Play service account
+        env:
+          PLAY_SA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: printf '%s' "$PLAY_SA" > deploy/service-account.json
+
+      - name: Install deploy dependencies
+        working-directory: deploy
+        run: npm ci
+
+      - name: Deploy to Play Store
+        working-directory: deploy
+        run: >
+          node deploy.js --yes
+          --track=${{ github.event.inputs.track }}
+          --priority=${{ github.event.inputs.priority }}
+          --fraction=${{ github.event.inputs.fraction }}
+          ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+
+      - name: Clean up secrets
+        if: always()
+        run: |
+          rm -f deploy/service-account.json
+          rm -f frontend/android/key.properties
+          rm -f frontend/android/app/upload-keystore.jks
+          rm -f frontend/android/app/google-services.json

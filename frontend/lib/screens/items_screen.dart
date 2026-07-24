@@ -638,9 +638,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
         children: [
           Expanded(
             child: Text(item.name,
-                style: Theme.of(context).textTheme.titleMedium,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
+                style: Theme.of(context).textTheme.titleMedium),
           ),
           IconButton(
             tooltip: l10n.itemsEditItemTooltip,
@@ -1025,7 +1023,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 DropdownButtonFormField<String>(
-                  initialValue: _unit,
+                  value: _unit,
                   isExpanded: true,
                   decoration: InputDecoration(
                     labelText: l10n.itemsFieldUnit,

@@ -547,7 +547,7 @@ class _RawMaterialFormDialogState extends State<RawMaterialFormDialog> {
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 DropdownButtonFormField<String>(
-                  initialValue: _unit,
+                  value: _unit,
                   isExpanded: true,
                   decoration: InputDecoration(
                     labelText: l10n.itemsFieldUnit,
@@ -618,6 +618,8 @@ class RecipeEditorDialog extends ConsumerStatefulWidget {
 class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
   // raw_material_id -> quantity text controller. Blank/zero means "not used".
   final Map<String, TextEditingController> _ctrls = {};
+  final _searchCtrl = TextEditingController();
+  String _query = '';
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -663,6 +665,7 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
     for (final c in _ctrls.values) {
       c.dispose();
     }
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -695,16 +698,132 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
     }
   }
 
+  /// Compact, Excel-like table: a header row plus one striped, bordered row
+  /// per raw material with an inline quantity cell.
+  Widget _buildRecipeTable(BuildContext context, List<RawMaterial> materials) {
+    final border = BorderSide(color: AppColors.border, width: 0.5);
+    final headerStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: AppColors.textSecondary,
+        );
+
+    Widget cell(Widget child, {bool right = false}) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+          child: Align(
+            alignment: right ? Alignment.centerRight : Alignment.centerLeft,
+            child: child,
+          ),
+        );
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border, width: 0.5),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header
+          Container(
+            height: 26,
+            color: AppColors.border.withOpacity(0.25),
+            child: Row(
+              children: [
+                Expanded(
+                    flex: 75,
+                    child: cell(Text('Raw material', style: headerStyle))),
+                Expanded(
+                    flex: 25,
+                    child: cell(Text('Quantity', style: headerStyle))),
+              ],
+            ),
+          ),
+          if (materials.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Text('No materials found',
+                  style: TextStyle(color: AppColors.textSecondary)),
+            ),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < materials.length; i++)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: i.isOdd
+                            ? AppColors.border.withOpacity(0.08)
+                            : null,
+                        border: Border(top: border),
+                      ),
+                      child: IntrinsicHeight(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 75,
+                              child: cell(Text(materials[i].name,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                          fontWeight: FontWeight.w500))),
+                            ),
+                            Expanded(
+                              flex: 25,
+                              child: Container(
+                              decoration: BoxDecoration(
+                                border: Border(left: border),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 0),
+                              child: TextField(
+                                controller: _ctrls[materials[i].id]!,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                textAlign: TextAlign.right,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall,
+                                decoration: InputDecoration(
+                                  isDense: true,
+                                  isCollapsed: true,
+                                  hintText: '0',
+                                  suffixText: recipeEntryUnitLabel(
+                                      context, materials[i].unit),
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                              ),
+                            ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final materials = ref.watch(rawMaterialsProvider).valueOrNull ?? [];
 
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       title: Text(l10n.itemsRecipeTitle(widget.itemName),
           maxLines: 1, overflow: TextOverflow.ellipsis),
       content: SizedBox(
-        width: 400,
+        width: 560,
         child: _loading
             ? const SizedBox(
                 height: 120, child: Center(child: CircularProgressIndicator()))
@@ -712,43 +831,54 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
                 ? Text(_error!, style: const TextStyle(color: AppColors.error))
                 : materials.isEmpty
                     ? Text(l10n.itemsRecipeNoMaterials)
-                    : SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text(l10n.itemsRecipeHint,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: AppColors.textSecondary)),
-                            const SizedBox(height: 8),
-                            for (final m in materials)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(m.name,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w500)),
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(l10n.itemsRecipeHint,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: AppColors.textSecondary)),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: _searchCtrl,
+                            onChanged: (v) =>
+                                setState(() => _query = v.trim().toLowerCase()),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              hintText: 'Search materials',
+                              prefixIcon: const Icon(Icons.search, size: 20),
+                              suffixIcon: _query.isEmpty
+                                  ? null
+                                  : IconButton(
+                                      icon: const Icon(Icons.close, size: 18),
+                                      onPressed: () {
+                                        _searchCtrl.clear();
+                                        setState(() => _query = '');
+                                      },
                                     ),
-                                    SizedBox(
-                                      width: 110,
-                                      child: AppTextField(
-                                        label:
-                                            recipeEntryUnitLabel(context, m.unit),
-                                        controller: _ctrls[m.id]!,
-                                        keyboardType:
-                                            const TextInputType.numberWithOptions(
-                                                decimal: true),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(6),
                               ),
-                          ],
-                        ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Flexible(
+                            child: _buildRecipeTable(
+                              context,
+                              _query.isEmpty
+                                  ? materials
+                                  : materials
+                                      .where((m) => m.name
+                                          .toLowerCase()
+                                          .contains(_query))
+                                      .toList(),
+                            ),
+                          ),
+                        ],
                       ),
       ),
       actions: [
