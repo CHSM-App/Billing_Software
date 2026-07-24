@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../theme/app_theme.dart';
+import '../utils/text_formatters.dart';
 
 // Animated primary button with gradient and press effect
 class PrimaryButton extends StatefulWidget {
@@ -266,6 +268,8 @@ class AppTextField extends StatelessWidget {
   final Widget? prefixIcon;
   final bool enabled;
   final FocusNode? focusNode;
+  final bool capitalizeWords;
+  final List<TextInputFormatter>? inputFormatters;
 
   const AppTextField({
     super.key,
@@ -280,6 +284,8 @@ class AppTextField extends StatelessWidget {
     this.prefixIcon,
     this.enabled = true,
     this.focusNode,
+    this.capitalizeWords = false,
+    this.inputFormatters,
   });
 
   @override
@@ -299,6 +305,12 @@ class AppTextField extends StatelessWidget {
       maxLength: maxLength,
       validator: validator,
       enabled: enabled,
+      textCapitalization:
+          capitalizeWords ? TextCapitalization.words : TextCapitalization.none,
+      inputFormatters: [
+        if (capitalizeWords) const CapitalizeWordsFormatter(),
+        ...?inputFormatters,
+      ],
     );
   }
 }

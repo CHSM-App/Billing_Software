@@ -541,6 +541,7 @@ class _RawMaterialFormDialogState extends State<RawMaterialFormDialog> {
                 AppTextField(
                   label: l10n.itemsFieldName,
                   controller: _nameCtrl,
+                  capitalizeWords: true,
                   validator: (v) =>
                       v == null || v.isEmpty ? l10n.commonRequired : null,
                 ),

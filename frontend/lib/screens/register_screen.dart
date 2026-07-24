@@ -202,6 +202,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                           label: l10n.registerBusinessName,
                           controller: _businessNameController,
                           hint: l10n.registerBusinessNameHint,
+                          capitalizeWords: true,
                           prefixIcon: const Icon(Icons.store_outlined,
                               size: 18, color: AppColors.textSecondary),
                           validator: (v) => v == null || v.isEmpty
@@ -232,6 +233,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                           label: l10n.registerAddress,
                           controller: _addressController,
                           hint: l10n.registerAddressHint,
+                          capitalizeWords: true,
                           prefixIcon: const Icon(Icons.location_on_outlined,
                               size: 18, color: AppColors.textSecondary),
                         ),
@@ -291,6 +293,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                           label: l10n.registerOwnerName,
                           controller: _ownerNameController,
                           hint: l10n.registerOwnerNameHint,
+                          capitalizeWords: true,
                           prefixIcon: const Icon(Icons.person_outline,
                               size: 18, color: AppColors.textSecondary),
                           validator: (v) => v == null || v.isEmpty

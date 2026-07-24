@@ -5,6 +5,7 @@ import '../l10n/l10n_ext.dart';
 import '../providers/session_provider.dart';
 import '../storage.dart';
 import '../theme/app_theme.dart';
+import '../utils/text_formatters.dart';
 import '../widgets/app_widgets.dart';
 
 // ---------------------------------------------------------------------------
@@ -240,6 +241,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                 controller: _nameCtrl,
                                 label: l10n.businessProfileNameLabel,
                                 hint: l10n.businessProfileNameHint,
+                                textCapitalization: TextCapitalization.words,
                                 validator: (v) => (v == null || v.trim().isEmpty)
                                     ? l10n.commonRequired
                                     : null,
@@ -304,6 +306,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                 controller: _addressCtrl,
                                 label: l10n.businessProfileStreet,
                                 hint: l10n.businessProfileStreetHint,
+                                textCapitalization: TextCapitalization.words,
                                 maxLines: 2,
                               ),
                               const SizedBox(height: AppSpacing.space12),
@@ -314,6 +317,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                       controller: _cityCtrl,
                                       label: l10n.businessProfileCity,
                                       hint: l10n.businessProfileCityHint,
+                                      textCapitalization: TextCapitalization.words,
                                     ),
                                   ),
                                   const SizedBox(width: AppSpacing.space12),
@@ -322,6 +326,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                       controller: _stateCtrl,
                                       label: l10n.businessProfileState,
                                       hint: l10n.businessProfileStateHint,
+                                      textCapitalization: TextCapitalization.words,
                                     ),
                                   ),
                                 ],
@@ -508,6 +513,10 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
       controller: controller,
       keyboardType: keyboardType,
       textCapitalization: textCapitalization,
+      inputFormatters: [
+        if (textCapitalization == TextCapitalization.words)
+          const CapitalizeWordsFormatter(),
+      ],
       maxLines: maxLines,
       maxLength: maxLength,
       validator: validator,

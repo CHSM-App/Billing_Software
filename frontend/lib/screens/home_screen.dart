@@ -1595,6 +1595,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   label: l10n.billingCustomerNameLabel,
                                   controller: _customerNameController,
                                   focusNode: _customerNameFocus,
+                                  capitalizeWords: true,
                                   prefixIcon: const Icon(Icons.person_outline,
                                       size: 16,
                                       color: AppColors.textSecondary),

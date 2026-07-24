@@ -347,6 +347,7 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
               AppTextField(
                 label: l10n.staffName,
                 controller: _nameCtrl,
+                capitalizeWords: true,
                 validator: (v) =>
                     v == null || v.isEmpty ? l10n.commonRequired : null,
               ),
