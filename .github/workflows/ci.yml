@@ -197,6 +197,11 @@ jobs:
           storeFile=app/upload-keystore.jks
           EOF
 
+      - name: Create google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: printf '%s' "$GOOGLE_SERVICES_JSON" > frontend/android/app/google-services.json
+
       - name: Build APK (release)
         working-directory: frontend
         run: flutter build apk --release
@@ -371,6 +376,11 @@ jobs:
           storeFile=app/upload-keystore.jks
           EOF
 
+      - name: Create google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: printf '%s' "$GOOGLE_SERVICES_JSON" > frontend/android/app/google-services.json
+
       - name: Build AAB (release)
         working-directory: frontend
         run: flutter build appbundle --release
@@ -399,3 +409,4 @@ jobs:
           rm -f deploy/service-account.json
           rm -f frontend/android/key.properties
           rm -f frontend/android/app/upload-keystore.jks
+          rm -f frontend/android/app/google-services.json
