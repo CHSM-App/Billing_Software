@@ -24,7 +24,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get commonAdd => 'जोडा';
 
   @override
-  String get commonEdit => 'संपादित करा';
+  String get commonEdit => 'बदल करा';
 
   @override
   String get commonDelete => 'हटवा';
@@ -45,10 +45,10 @@ class AppLocalizationsMr extends AppLocalizations {
   String get commonRetry => 'पुन्हा प्रयत्न करा';
 
   @override
-  String get commonBack => 'मागे';
+  String get commonBack => 'मागे जा ';
 
   @override
-  String get commonNext => 'पुढे';
+  String get commonNext => 'पुढे जा ';
 
   @override
   String get commonDone => 'पूर्ण';
@@ -863,10 +863,10 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsAddItem => 'वस्तू जोडा';
 
   @override
-  String get itemsEditItem => 'वस्तू संपादित करा';
+  String get itemsEditItem => 'वस्तूमधे बदल करा';
 
   @override
-  String get itemsEditItemTooltip => 'वस्तू संपादित करा';
+  String get itemsEditItemTooltip => 'वस्तूमधे बदल करा';
 
   @override
   String get itemsNoneYetOwner =>
@@ -1565,7 +1565,7 @@ class AppLocalizationsMr extends AppLocalizations {
       'फक्त अक्षरे, अंक, हायफन आणि स्लॅश चालतील';
 
   @override
-  String get businessProfileFooterNote => 'बिलावरील तळटीप (ऐच्छिक)';
+  String get businessProfileFooterNote => 'बिलावरील तळमजकूर (ऐच्छिक)';
 
   @override
   String get businessProfileFooterNoteHint =>
@@ -1933,7 +1933,7 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsRawMaterialsEmpty =>
-      'अजून कच्चा माल नाही.\nसाठा ट्रॅक करण्यासाठी घटक जोडा.';
+      'अजून कच्चा माल नाही.\nसाठा तपासण्यासाठी प्रथम घटक जोडा.';
 
   @override
   String get itemsRawMaterialDeleteTitle => 'कच्चा माल हटवायचा?';
@@ -1947,18 +1947,18 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsLowStockThreshold => 'कमी साठा इशारा यावर';
 
   @override
-  String get itemsManageRecipe => 'रेसिपी व्यवस्थापित करा (कच्चा माल)';
+  String get itemsManageRecipe => 'पाककृती व्यवस्थापित करा (कच्चा माल)';
 
   @override
   String itemsRecipeTitle(String name) {
-    return 'रेसिपी · $name';
+    return 'पाककृती · $name';
   }
 
   @override
   String get itemsRecipeHint =>
-      'प्रत्येक विक्रीमागे हा पदार्थ किती कच्चा माल वापरतो ते सेट करा. वगळण्यासाठी रिकामे ठेवा.';
+      'प्रत्येक विक्रीमागे हा पदार्थ किती कच्चा माल वापरतो ते स्थापित करा. वगळण्यासाठी रिकामे ठेवा.';
 
   @override
   String get itemsRecipeNoMaterials =>
-      'आधी कच्चा माल जोडा, नंतर रेसिपी सेट करा.';
+      'आधी कच्चा माल जोडा, नंतर पाककृती पाककृती सेट करा.';
 }
