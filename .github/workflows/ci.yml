@@ -252,7 +252,7 @@ jobs:
   # Job 5: Build Flutter Windows release on tag push (v*)
   build-windows:
     name: Build Flutter Windows
-    runs-on: windows-latest
+    runs-on: windows-2022
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - name: Checkout code
