@@ -10,7 +10,6 @@ const LINKS = {
   ],
   Support: [
     { label: 'Help Center', href: '/help' },
-    { label: 'Contact Us',  href: 'mailto:support@vengurlatech.com' },
   ],
   Legal: [
     { label: 'Privacy Policy', href: '/privacy' },
@@ -37,7 +36,7 @@ function FooterLink({ href, label }) {
 export default function Footer() {
   return (
     <footer className="px-6 py-14" style={{ background: '#060d1f' }}>
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
 
         {/* Top row */}
         <div className="flex flex-col md:flex-row justify-between gap-10 mb-12">
@@ -51,7 +50,7 @@ export default function Footer() {
           </div>
 
           {/* Link columns */}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 text-sm">
+          <div className="grid grid-cols-3 md:grid-cols-4 gap-7 text-sm">
             {Object.entries(LINKS).map(([col, items]) => (
               <div key={col}>
                 <p className="font-semibold text-white/55 mb-3">{col}</p>
@@ -64,6 +63,29 @@ export default function Footer() {
                 </ul>
               </div>
             ))}
+
+            {/* Contact details shown directly */}
+            <div>
+              <p className="font-semibold text-white/55 mb-3">Contact</p>
+              <ul className="space-y-2">
+                <li>
+                  <a
+                    href="tel:+919422229951"
+                    className="text-white/30 hover:text-white/70 transition-colors"
+                  >
+                    +91 94222 29951
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="mailto:support@vengurlatech.com"
+                    className="text-white/30 hover:text-white/70 transition-colors break-all"
+                  >
+                    support@vengurlatech.com
+                  </a>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
 

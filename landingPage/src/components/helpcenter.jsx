@@ -433,9 +433,9 @@ export default function HelpCenter() {
           >
             <MessageCircle size={26} className="mx-auto mb-3" style={{ color: '#00e5c0' }} />
             <h3 className="font-display font-bold text-white text-sm mb-1">WhatsApp Support</h3>
-            <p className="text-white/40 text-xs mb-4">Chat with us for quick help</p>
+            <p className="text-white/40 text-xs mb-4">Chat or call us at +91 94222 29951</p>
             <a
-              href="https://wa.me/919XXXXXXXXX"
+              href="https://wa.me/919422229951"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block text-xs font-bold px-4 py-2.5 rounded-xl"
