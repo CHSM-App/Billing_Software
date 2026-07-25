@@ -258,17 +258,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # cache: false on purpose. A cached build tree from an older runner image
+      # carries a CMakeCache.txt that pins "Visual Studio 16 2019", which no
+      # longer exists on windows-latest (VS 2022 only). Restoring it makes the
+      # CMake project() call fail before any of our steps run.
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
-          cache: true
+          cache: false
 
-      # Wipe any restored CMake cache. A CMakeCache.txt generated on an older
-      # runner image pins "Visual Studio 16 2019", which no longer exists on
-      # windows-latest (VS 2022 only) and makes the CMake project() call fail.
-      # Cleaning forces CMake to re-detect the installed Visual Studio.
+      # Extra safety: wipe any local CMake cache so CMake re-detects Visual Studio.
       # Runs before pub get since flutter clean also removes .dart_tool.
       - name: Clean previous build cache
         working-directory: frontend
@@ -278,8 +279,13 @@ jobs:
         working-directory: frontend
         run: flutter pub get
 
+      # Pin the generator to the Visual Studio that actually ships on
+      # windows-latest (VS 2022 = "Visual Studio 17 2022"). This forces CMake
+      # off the stale "Visual Studio 16 2019" default even if a cache slips in.
       - name: Build Windows release
         working-directory: frontend
+        env:
+          CMAKE_GENERATOR: 'Visual Studio 17 2022'
         run: flutter build windows --release
 
       - name: Copy output with tag version
