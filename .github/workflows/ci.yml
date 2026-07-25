@@ -265,6 +265,15 @@ jobs:
           channel: stable
           cache: true
 
+      # Wipe any restored CMake cache. A CMakeCache.txt generated on an older
+      # runner image pins "Visual Studio 16 2019", which no longer exists on
+      # windows-latest (VS 2022 only) and makes the CMake project() call fail.
+      # Cleaning forces CMake to re-detect the installed Visual Studio.
+      # Runs before pub get since flutter clean also removes .dart_tool.
+      - name: Clean previous build cache
+        working-directory: frontend
+        run: flutter clean
+
       - name: Get Flutter dependencies
         working-directory: frontend
         run: flutter pub get
