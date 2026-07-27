@@ -67,7 +67,9 @@ router.post('/register', registerLimiter, async (req, res) => {
         .input('address', sql.NVarChar(500), addressSaved)
         .input('phone', sql.NVarChar(20), phone)
         .input('inventory_enabled', sql.Bit, inventory_enabled ? 1 : 0)
-        .input('has_barcode_scanner', sql.Bit, has_barcode_scanner ? 1 : 0)
+        // Barcode scanning is enabled by default; only disabled if a client
+        // explicitly sends has_barcode_scanner: false.
+        .input('has_barcode_scanner', sql.Bit, has_barcode_scanner === false ? 0 : 1)
         .query(`
           INSERT INTO businesses (name, business_type, address, phone, inventory_enabled, has_barcode_scanner)
           OUTPUT INSERTED.id

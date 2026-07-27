@@ -174,7 +174,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     _lastKeyTime = now;
 
-    if (event.logicalKey == LogicalKeyboardKey.enter) {
+    // Many USB HID scanners send Numpad Enter (not the main Enter) as the
+    // suffix character, so accept both.
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
       final code = _barcodeBuffer.toString().trim();
       _barcodeBuffer.clear();
       _lastKeyTime = null;
@@ -187,7 +190,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final char = event.character;
     if (char != null && char.isNotEmpty) {
-      _barcodeBuffer.write(char);
+      // Ignore control characters (CR/LF/tab) some scanners emit as a suffix;
+      // only printable characters belong in the barcode buffer.
+      final code = char.codeUnitAt(0);
+      if (code >= 0x20) {
+        _barcodeBuffer.write(char);
+      }
       return true;
     }
     return false;
@@ -967,10 +975,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   ShellAppBar _buildAppBar(String businessName, String userName) {
     final l10n = context.l10n;
-    // Show a back arrow only when this screen was pushed (opened from a table),
-    // not when it's the root Billing tab — where an open cart/variant sheet
-    // would otherwise flip Navigator.canPop() and reveal a stray arrow.
-    final isPushed = widget.tableId != null || widget.onBillDone != null;
+    // Show a back arrow only when this screen was pushed — opened from a table
+    // (tableId) or from Open Orders (activeBillId) — not when it's the root
+    // Billing tab, where an open cart/variant sheet would otherwise flip
+    // Navigator.canPop() and reveal a stray arrow.
+    final isPushed = widget.tableId != null ||
+        widget.activeBillId != null ||
+        widget.onBillDone != null;
     return ShellAppBar(
       automaticallyImplyLeading: isPushed,
       title: AnimatedOpacity(

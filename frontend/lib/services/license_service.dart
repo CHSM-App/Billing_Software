@@ -1,5 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../api.dart';
+import '../storage.dart';
 
 // ---------------------------------------------------------------------------
 // LicenseStatus — result of a license check
@@ -146,9 +147,39 @@ class LicenseService {
       lastOnlineError = 'Server error (${e.statusCode}): ${e.message}';
       return await _checkOffline();
     } catch (e) {
-      // Network error — store error and fall back to cached
+      // Network error — store error and fall back to cached.
       lastOnlineError = e.toString();
-      return await _checkOffline();
+      final offlineResult = await _checkOffline();
+
+      // Distinguish a genuine network outage from a lost local credential.
+      // On Windows the DPAPI-backed secure store can become unreadable (blob
+      // rotated/corrupted, profile moved) while the SharedPreferences session
+      // metadata survives — so the app looks "logged in" but every request
+      // fails auth. Going online can never fix that, yet the user would be
+      // stuck on the "Go Online to Continue" screen forever. Detect it: if the
+      // refresh token can't be read, flag the session invalid so the caller
+      // routes to the login screen instead.
+      if (!await _hasReadableRefreshToken()) {
+        return LicenseStatus(
+          offlineResult.state,
+          daysUntilExpiry: offlineResult.daysUntilExpiry,
+          graceDaysRemaining: offlineResult.graceDaysRemaining,
+          sessionInvalid: true,
+        );
+      }
+      return offlineResult;
+    }
+  }
+
+  /// True when a refresh token is present and readable in secure storage.
+  /// Returns false both when the token is genuinely absent and when the
+  /// secure store throws trying to decrypt it (the Windows DPAPI failure).
+  Future<bool> _hasReadableRefreshToken() async {
+    try {
+      final token = await getRefreshToken();
+      return token != null && token.isNotEmpty;
+    } catch (_) {
+      return false;
     }
   }
 

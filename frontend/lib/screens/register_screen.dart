@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
-import '../utils/platform_utils.dart' as platform;
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/language_selector.dart';
@@ -28,15 +27,12 @@ class _RegisterScreenState extends State<RegisterScreen>
 
   String _businessType = 'retail';
   bool _inventoryEnabled = false;
-  bool _hasBarcodeScanner = false;
   bool _isLoading = false;
   String? _errorMessage;
 
   late final AnimationController _animController;
   late final Animation<double> _fadeAnim;
 
-  bool get _isRetail => _businessType == 'retail';
-  bool get _isWindows => platform.isWindows;
 
   @override
   void initState() {
@@ -116,7 +112,7 @@ class _RegisterScreenState extends State<RegisterScreen>
             : _addressController.text.trim(),
         phone: _businessPhoneController.text.trim(),
         inventoryEnabled: _inventoryEnabled,
-        hasBarcodeScanner: _isRetail && _isWindows && _hasBarcodeScanner,
+        hasBarcodeScanner: true,
         ownerName: _ownerNameController.text.trim(),
         ownerPhone: _ownerPhoneController.text.trim(),
         pin: _pinController.text.trim(),
@@ -269,18 +265,8 @@ class _RegisterScreenState extends State<RegisterScreen>
                           onChanged: (v) =>
                               setState(() => _inventoryEnabled = v),
                         ),
-                        // Barcode scanner is a retail-specific (Windows) feature.
-                        if (_isRetail && _isWindows) ...[
-                          const SizedBox(height: AppSpacing.space8),
-                          _buildToggleTile(
-                            icon: Icons.barcode_reader,
-                            title: l10n.registerScannerTitle,
-                            subtitle: l10n.registerScannerSubtitle,
-                            value: _hasBarcodeScanner,
-                            onChanged: (v) =>
-                                setState(() => _hasBarcodeScanner = v),
-                          ),
-                        ],
+                        // Barcode scanning is enabled by default for every
+                        // business, so no toggle is shown here.
                       ],
                     ),
                     const SizedBox(height: AppSpacing.space16),
@@ -466,10 +452,6 @@ class _RegisterScreenState extends State<RegisterScreen>
     return GestureDetector(
       onTap: () => setState(() {
         _businessType = value;
-        // Barcode scanner is retail-only; inventory is available to all types.
-        if (!_isRetail) {
-          _hasBarcodeScanner = false;
-        }
       }),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),

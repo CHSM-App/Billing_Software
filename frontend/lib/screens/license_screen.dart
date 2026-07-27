@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../services/license_service.dart';
 import '../providers.dart';
@@ -61,16 +60,25 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
         return;
       }
 
+      // A lost/expired local session can't be recovered by going online:
+      // send the user to login instead of showing an offline error they can
+      // never clear. sessionInvalid covers the Windows case where the secure
+      // token store became unreadable; the '401' text covers an outright
+      // rejected/expired token.
       final rawError = LicenseService.instance.lastOnlineError;
-      final isSessionExpired = rawError != null && rawError.contains('401');
+      final isSessionExpired =
+          status.sessionInvalid || (rawError != null && rawError.contains('401'));
       if (isSessionExpired) {
         await _logout();
         return;
       }
       setState(() {
-        _errorMessage = rawError == null
-            ? _messageForState(l10n, status.state)
-            : sanitizeUiErrorMessage(rawError);
+        // `rawError` is already a human-readable string built by LicenseService
+        // (e.g. "Server error (500): …" or a socket/handshake message). Show it
+        // as-is; running it through sanitizeUiErrorMessage — which only unwraps
+        // ApiException — would always collapse it to a generic "Something went
+        // wrong" and hide the real cause.
+        _errorMessage = rawError ?? _messageForState(l10n, status.state);
       });
     } catch (e) {
       if (!mounted) return;

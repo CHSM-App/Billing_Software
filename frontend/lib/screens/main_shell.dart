@@ -151,7 +151,17 @@ class _MainShellState extends ConsumerState<MainShell>
         final inGrace = widget.licenseStatus?.state == LicenseState.grace;
         final graceDays = widget.licenseStatus?.graceDaysRemaining ?? 0;
 
-        return Scaffold(
+        // Back behaviour: from any bottom-bar tab, the first back press returns
+        // to Billing (the home tab, index 0). Only a back press while already
+        // on Billing is allowed to pop the shell and exit the app.
+        final onHomeTab = safeIndex == 0;
+        return PopScope(
+          canPop: onHomeTab,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            setState(() => _index = 0);
+          },
+          child: Scaffold(
           bottomNavigationBar: isWide ? null : _buildBottomNav(items, safeIndex),
           body: Column(
             children: [
@@ -199,6 +209,7 @@ class _MainShellState extends ConsumerState<MainShell>
                 ),
               ),
             ],
+          ),
           ),
         );
       },

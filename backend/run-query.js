@@ -1,7 +1,7 @@
 const { pool, poolConnect } = require('./src/db');
 
 // ─── PUT YOUR SQL QUERY HERE ───────────────────────────────────────────────
-const QUERY = `se`;
+const QUERY = `select * from businesses`;
 // ──────────────────────────────────────────────────────────────────────────
 
 async function main() {
