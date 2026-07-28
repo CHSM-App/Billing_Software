@@ -225,6 +225,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsPrinterSetupSubtitle => 'Configure your thermal printer';
 
   @override
+  String get settingsSectionAbout => 'ABOUT & SUPPORT';
+
+  @override
+  String get settingsHelpCenter => 'Help Center';
+
+  @override
+  String get settingsHelpCenterSubtitle => 'Guides, FAQs and support';
+
+  @override
+  String get settingsPrivacyPolicy => 'Privacy Policy';
+
+  @override
+  String get settingsPrivacyPolicySubtitle => 'How we handle your data';
+
+  @override
   String get settingsLanguage => 'Language';
 
   @override
@@ -664,24 +679,23 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get billingReleaseTable => 'Release Table';
+  String get billingReleaseTable => 'Discard Draft';
 
   @override
-  String get billingReleaseTableTitle => 'Release Table?';
+  String get billingReleaseTableTitle => 'Discard Draft?';
 
   @override
   String get billingReleaseTableBody =>
-      'Clearing all items will void the draft and mark the table as empty.';
+      'Clearing all items will discard this saved draft. This cannot be undone.';
 
   @override
-  String get billingReleaseTableFailed => 'Failed to release table.';
+  String get billingReleaseTableFailed => 'Failed to discard draft.';
 
   @override
-  String get billingDraftOfflineError =>
-      'Cannot save table draft while offline';
+  String get billingDraftOfflineError => 'Cannot save draft while offline';
 
   @override
-  String get billingDraftSaved => 'Items saved. Table is now occupied.';
+  String get billingDraftSaved => 'Draft saved.';
 
   @override
   String get billingSaveFailed => 'Failed to save. Check your connection.';
@@ -776,6 +790,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingCustomerPhoneLabel => 'Customer phone';
+
+  @override
+  String get billingPhoneInvalid => 'Customer No. must be 10 digits.';
 
   @override
   String get billingDiscountPercent => 'Discount %';
@@ -1092,6 +1109,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get historyNoBillsForPeriod => 'No bills found for this period.';
 
   @override
+  String get historyFilterToday => 'Today';
+
+  @override
+  String get historyFilterYesterday => 'Yesterday';
+
+  @override
+  String get historyFilterThisMonth => 'This Month';
+
+  @override
+  String get historyFilterLastMonth => 'Last Month';
+
+  @override
+  String get historyFilterAll => 'All';
+
+  @override
+  String get historyFilterCustom => 'Custom';
+
+  @override
   String get historyStatusFinalized => 'Finalized';
 
   @override
@@ -1277,6 +1312,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get expensesDescription => 'Description (optional)';
 
   @override
+  String get expensesDetailsTitle => 'Expense Details';
+
+  @override
+  String get expensesPaymentMode => 'Payment Mode';
+
+  @override
+  String get expensesExpenseDate => 'Date';
+
+  @override
+  String get expensesAddedBy => 'Added By';
+
+  @override
   String get expensesDeleteTitle => 'Delete Expense?';
 
   @override
@@ -1418,6 +1465,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get staffNoCashiers => 'No cashiers added yet.';
 
   @override
+  String get staffSearchHint => 'Search staff by name or phone…';
+
+  @override
+  String get staffNoMatch => 'No staff match your search.';
+
+  @override
   String get staffPhoneInvalid => '10-digit number required';
 
   @override
@@ -1462,6 +1515,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get businessProfileUpdated => 'Profile updated successfully';
+
+  @override
+  String get businessProfileSectionAccount => 'ACCOUNT';
+
+  @override
+  String get businessProfileOwnerName => 'Name';
+
+  @override
+  String get businessProfileOwnerPhone => 'Phone';
 
   @override
   String get businessProfileSectionBasic => 'BASIC INFO';

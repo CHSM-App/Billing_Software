@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:ui' show TextAlign;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,7 +13,7 @@ import 'package:flutter_thermal_printer/utils/printer.dart' as ftp
     show Printer, ConnectionType;
 
 import 'receipt_labels.dart';
-import 'receipt_image_builder.dart';
+import 'raster_lab.dart';
 
 // ---------------------------------------------------------------------------
 // Unified Printer model — wraps both BluetoothInfo and ftp.Printer
@@ -168,7 +169,10 @@ class PrinterService {
   static const int _priceCols = 9;
   static const int _totalCols = 9;
 
-  List<int> _buildReceiptRaw(Bill bill,
+  /// Build the receipt as a list of pre-formatted, column-aligned lines.
+  /// Shared by both the ASCII text path and the raster path so the layout is
+  /// identical regardless of which is used.
+  List<String> _buildReceiptLines(Bill bill,
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
@@ -248,17 +252,143 @@ class PrinterService {
     lines.add('-' * _cols);
     lines.add(_centre(labels?.thankYou ?? 'Thank you, visit again!', _cols));
 
-    // Build bytes: each line as ASCII + 0x0A
+    return lines;
+  }
+
+  /// Build the receipt as STRUCTURED rows (columns + rules) for the raster
+  /// path, so proportional Devanagari/Tamil glyphs align in a real table
+  /// (Item / Qty / Price / Total) instead of overflowing space-padded columns.
+  List<ReceiptRow> _buildReceiptRows(Bill bill,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      ReceiptLabels? labels}) {
+    final grandTotal = bill.total - bill.discountAmount;
+    final rows = <ReceiptRow>[];
+
+    // Header
+    rows.add(ReceiptRow.center(
+        businessName ?? labels?.defaultBusiness ?? 'BUSINESS',
+        size: 34, bold: true));
+    if (businessAddress != null && businessAddress.isNotEmpty) {
+      rows.add(ReceiptRow.center(businessAddress, size: 26));
+    }
+    if (businessPhone != null && businessPhone.isNotEmpty) {
+      rows.add(ReceiptRow.center(
+          '${labels?.phonePrefix ?? 'Ph:'} $businessPhone', size: 26));
+    }
+    rows.add(ReceiptRow.rule());
+
+    // Bill info (label left, value right)
+    rows.add(ReceiptRow.cols([
+      ReceiptCell('${labels?.billNo ?? 'Bill#:'} ${bill.billNumber}',
+          widthFraction: 1.0),
+    ], size: 26));
+    if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty) {
+      rows.add(ReceiptRow.cols([
+        ReceiptCell('${labels?.table ?? 'Table:'} ${bill.tableNumber}',
+            widthFraction: 1.0),
+      ], size: 26));
+    }
+    rows.add(ReceiptRow.cols([
+      ReceiptCell(
+          '${labels?.date ?? 'Date:'} ${_formatDate(bill.createdAt.toLocal())}',
+          widthFraction: 1.0),
+    ], size: 26));
+    if (bill.customerName != null && bill.customerName!.isNotEmpty) {
+      rows.add(ReceiptRow.cols([
+        ReceiptCell('${labels?.customer ?? 'Cust:'} ${bill.customerName}',
+            widthFraction: 1.0),
+      ], size: 26));
+    }
+    if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty) {
+      rows.add(ReceiptRow.cols([
+        ReceiptCell('${labels?.customerPhone ?? 'Ph:'} ${bill.customerPhone}',
+            widthFraction: 1.0),
+      ], size: 26));
+    }
+    rows.add(ReceiptRow.rule());
+
+    // Item table: Name(.46) Qty(.14,center) Price(.20,right) Total(.20,right)
+    ReceiptRow itemRow(String n, String q, String p, String t,
+            {bool bold = false}) =>
+        ReceiptRow.cols([
+          ReceiptCell(n, widthFraction: 0.46),
+          ReceiptCell(q, align: TextAlign.center, widthFraction: 0.14),
+          ReceiptCell(p, align: TextAlign.right, widthFraction: 0.20),
+          ReceiptCell(t, align: TextAlign.right, widthFraction: 0.20),
+        ], size: 26, bold: bold);
+
+    rows.add(itemRow(labels?.colItem ?? 'Item', labels?.colQty ?? 'Qty',
+        labels?.colPrice ?? 'Price', labels?.colTotal ?? 'Total',
+        bold: true));
+    rows.add(ReceiptRow.rule());
+
+    for (final item in bill.items) {
+      final qty = item.quantity % 1 == 0
+          ? item.quantity.toInt().toString()
+          : item.quantity.toStringAsFixed(1);
+      rows.add(itemRow(
+        item.itemName,
+        qty,
+        item.unitPrice.toStringAsFixed(2),
+        item.lineTotal.toStringAsFixed(2),
+      ));
+    }
+    rows.add(ReceiptRow.rule());
+
+    // Totals (label left, amount right)
+    ReceiptRow total(String l, String r, {bool bold = false, double size = 22}) =>
+        ReceiptRow.cols([
+          ReceiptCell(l, widthFraction: 0.55),
+          ReceiptCell(r, align: TextAlign.right, widthFraction: 0.45),
+        ], size: size, bold: bold);
+
+    rows.add(total(labels?.subtotal ?? 'Subtotal:',
+        'Rs.${bill.subtotal.toStringAsFixed(2)}'));
+    if (bill.taxAmount > 0) {
+      rows.add(total(labels?.tax ?? 'Tax:',
+          'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
+    }
+    if (bill.discountAmount > 0) {
+      rows.add(total(labels?.discount ?? 'Discount:',
+          '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
+    }
+    rows.add(total(labels?.total ?? 'Grand Total:',
+        'Rs.${grandTotal.toStringAsFixed(2)}',
+        bold: true, size: 32));
+    rows.add(total(labels?.payment ?? 'Payment:',
+        bill.paymentMode.toUpperCase()));
+    rows.add(ReceiptRow.rule());
+    rows.add(ReceiptRow.center(
+        labels?.thankYou ?? 'Thank you, visit again!', size: 26));
+
+    return rows;
+  }
+
+  /// Pack ASCII-only receipt [lines] into plain ESC/POS text bytes (fast path).
+  List<int> _linesToAsciiBytes(List<String> lines) {
     final bytes = <int>[];
     for (final line in lines) {
       for (final c in line.codeUnits) {
-        bytes.add(c > 127 ? 63 : c); // replace non-ASCII with '?'
+        bytes.add(c > 127 ? 63 : c); // replace any stray non-ASCII with '?'
       }
       bytes.add(0x0A); // LF
     }
-    // 4 extra feeds to advance paper past the print head for tearing
+    // 4 extra feeds to advance paper past the print head for tearing.
     bytes.addAll([0x0A, 0x0A, 0x0A, 0x0A]);
     return bytes;
+  }
+
+  /// True if any line contains a non-ASCII character (e.g. Marathi/Tamil/…),
+  /// meaning the printer can't render it as text and we must rasterize.
+  static bool _hasNonAscii(List<String> lines) {
+    for (final line in lines) {
+      for (final u in line.codeUnits) {
+        if (u > 127) return true;
+      }
+    }
+    return false;
   }
 
   // -------------------------------------------------------------------------
@@ -277,28 +407,33 @@ class PrinterService {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
 
-    final List<int> bytes;
-    // Marathi renders to an ESC * bit-image (no Devanagari code page exists) and
-    // MUST be sent slowly so the printer buffer doesn't drop raster rows.
-    final bool marathi = labels != null && labels.needsImageRendering;
-    if (marathi) {
-      bytes = await ReceiptImageBuilder.build(
-        bill,
-        labels,
+    final lines = _buildReceiptLines(bill,
         businessName: businessName,
         businessPhone: businessPhone,
         businessAddress: businessAddress,
-      );
-    } else {
-      // English (or unknown): fast plain-text path, works on Android BT and
-      // Windows USB/BLE alike.
-      bytes = _buildReceiptRaw(bill,
+        labels: labels);
+
+    if (_hasNonAscii(lines)) {
+      // The receipt contains at least one non-English character (Marathi,
+      // Tamil, …) which the printer's ROM cannot render as text. Render the
+      // whole receipt as a raster image with TRUE column alignment so every
+      // glyph prints correctly and the table stays aligned.
+      // Uses the proven transport: single write, no inter-chunk delay.
+      final rows = _buildReceiptRows(bill,
           businessName: businessName,
           businessPhone: businessPhone,
           businessAddress: businessAddress,
           labels: labels);
+      final raster = await RasterLab.rowsToReceiptRaster(rows);
+      if (_isWindows) {
+        await _printWindows(printer, raster);
+      } else {
+        await _sendClassicBtTuned(printer, raster, 0, 0);
+      }
+    } else {
+      // Pure English/numbers → fast native ESC/POS text.
+      await _printBytes(printer, _linesToAsciiBytes(lines));
     }
-    await _printBytes(printer, bytes, slow: marathi);
   }
 
   /// Send a pre-built ESC/POS byte stream to the active printer as-is.
@@ -309,6 +444,23 @@ class PrinterService {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
     await _printBytes(printer, bytes, slow: slow);
+  }
+
+  /// Raster-lab tuned send: explicit [chunkSize] and inter-chunk [delayMs] so
+  /// Stage 5 can measure throughput and find the smallest clean chunk/delay.
+  /// Android/Classic-BT only; Windows ignores the tuning and uses its own path.
+  Future<void> printRawBytesTuned(
+    List<int> bytes, {
+    required int chunkSize,
+    required int delayMs,
+  }) async {
+    final printer = await getActivePrinter();
+    if (printer == null) throw PrinterException('No printer configured');
+    if (_isWindows) {
+      await _printWindows(printer, bytes);
+      return;
+    }
+    await _sendClassicBtTuned(printer, bytes, chunkSize, delayMs);
   }
 
   Future<void> testPrint() async {
@@ -404,8 +556,9 @@ class PrinterService {
     try {
       final permitted =
           await PrintBluetoothThermal.isPermissionBluetoothGranted;
-      if (!permitted)
+      if (!permitted) {
         throw PrinterException('Bluetooth permission not granted');
+      }
 
       final btOn = await PrintBluetoothThermal.bluetoothEnabled;
       if (!btOn) throw PrinterException('Bluetooth is turned off');
@@ -426,17 +579,68 @@ class PrinterService {
 
       await Future.delayed(const Duration(seconds: 2));
 
-      // Slow mode: small chunks + longer pauses so the printer's limited buffer
-      // can keep up with raster data (prevents dropped rows / faint output).
-      final chunkSize = slow ? 128 : 512;
-      final gapMs = slow ? 60 : 50;
+      // Chunking strategy:
+      //  - fast (default): big chunks, no per-chunk delay → prints raster at
+      //    full head speed, matching professional POS apps. SPP flow-control in
+      //    print_bluetooth_thermal blocks writeBytes until the buffer drains, so
+      //    large chunks are safe and far faster than many tiny delayed writes.
+      //  - slow: small chunks + pauses, kept only as a fallback for flaky links.
+      final chunkSize = slow ? 256 : 2048;
+      final gapMs = slow ? 40 : 0;
       for (var i = 0; i < bytes.length; i += chunkSize) {
         final end = (i + chunkSize).clamp(0, bytes.length);
-        final result =
-            await PrintBluetoothThermal.writeBytes(bytes.sublist(i, end));
+        // writeBytes expects a plain Dart List<int>. A Uint8List sublist crosses
+        // the method channel as a Java byte[], which the plugin tries to cast to
+        // List → ClassCastException (raster/Marathi prints silently fail). Force
+        // a growable List<int> so it marshals as a Java List.
+        final chunk = List<int>.from(bytes.sublist(i, end));
+        final result = await PrintBluetoothThermal.writeBytes(chunk);
         if (!result) throw PrinterException('Write failed at chunk $i');
-        if (end < bytes.length) {
+        if (gapMs > 0 && end < bytes.length) {
           await Future.delayed(Duration(milliseconds: gapMs));
+        }
+      }
+    } catch (e) {
+      if (e is PrinterException) rethrow;
+      throw PrinterException(e.toString());
+    }
+  }
+
+  /// Connect + send with explicit chunk size and delay (Stage 5 tuning).
+  /// chunkSize <= 0 means a single write of the whole payload.
+  Future<void> _sendClassicBtTuned(
+      Printer printer, List<int> bytes, int chunkSize, int delayMs) async {
+    if (printer.address == null) {
+      throw PrinterException('Printer address not set');
+    }
+    try {
+      final permitted =
+          await PrintBluetoothThermal.isPermissionBluetoothGranted;
+      if (!permitted) throw PrinterException('Bluetooth permission not granted');
+      final btOn = await PrintBluetoothThermal.bluetoothEnabled;
+      if (!btOn) throw PrinterException('Bluetooth is turned off');
+
+      final alreadyConnected = await PrintBluetoothThermal.connectionStatus;
+      if (alreadyConnected) {
+        await PrintBluetoothThermal.disconnect;
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      final connected = await PrintBluetoothThermal.connect(
+          macPrinterAddress: printer.address!);
+      if (!connected) {
+        throw PrinterException(
+            'Could not connect to printer. Make sure it is powered on and paired.');
+      }
+      await Future.delayed(const Duration(seconds: 2));
+
+      final step = chunkSize <= 0 ? bytes.length : chunkSize;
+      for (var i = 0; i < bytes.length; i += step) {
+        final end = (i + step).clamp(0, bytes.length);
+        final chunk = List<int>.from(bytes.sublist(i, end));
+        final ok = await PrintBluetoothThermal.writeBytes(chunk);
+        if (!ok) throw PrinterException('Write failed at chunk $i');
+        if (delayMs > 0 && end < bytes.length) {
+          await Future.delayed(Duration(milliseconds: delayMs));
         }
       }
     } catch (e) {
@@ -457,7 +661,16 @@ class PrinterService {
       final ftpInstance = ftp.FlutterThermalPrinter.instance;
       final connected = await ftpInstance.connect(ftpPrinter);
       if (!connected) throw PrinterException('Could not connect to printer');
-      await ftpInstance.printData(ftpPrinter, bytes, longData: true);
+      // flutter_thermal_printer hardcodes a 50-byte BLE chunk on Windows +10ms
+      // per chunk, which makes a raster receipt take 20-30s. Override with a
+      // large chunk so a big image transfers in a handful of writes instead of
+      // hundreds. (chunkSize maps to the BLE write size in the package.)
+      await ftpInstance.printData(
+        ftpPrinter,
+        bytes,
+        longData: true,
+        chunkSize: 512,
+      );
     } catch (e) {
       if (e is PrinterException) rethrow;
       throw PrinterException(e.toString());

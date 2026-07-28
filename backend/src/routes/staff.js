@@ -45,6 +45,20 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
   try {
     await poolConnect;
+
+    // Reject a phone that already belongs to another user (staff or owner) in
+    // this business — phone is the login identity, so it must be unique.
+    const existing = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .input('phone', sql.NVarChar(20), phone)
+      .query(`
+        SELECT TOP 1 id FROM users
+        WHERE business_id = @business_id AND phone = @phone
+      `);
+    if (existing.recordset.length > 0) {
+      return res.status(409).json({ error: 'This phone number is already registered.' });
+    }
+
     const pinHash = await bcrypt.hash(pin, 10);
 
     const result = await pool.request()
@@ -68,6 +82,10 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
     return res.status(201).json(created);
   } catch (err) {
+    // Unique-constraint violation (race between the check above and insert).
+    if (err && (err.number === 2627 || err.number === 2601)) {
+      return res.status(409).json({ error: 'This phone number is already registered.' });
+    }
     logger.error({ err }, 'Add staff error');
     return res.status(500).json({ error: 'Failed to add staff' });
   }
@@ -206,6 +224,9 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
 
     return res.json(updated);
   } catch (err) {
+    if (err && (err.number === 2627 || err.number === 2601)) {
+      return res.status(409).json({ error: 'This phone number is already registered.' });
+    }
     logger.error({ err }, 'Update staff error');
     return res.status(500).json({ error: 'Failed to update staff' });
   }

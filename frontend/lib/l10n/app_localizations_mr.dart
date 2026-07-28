@@ -226,6 +226,21 @@ class AppLocalizationsMr extends AppLocalizations {
   String get settingsPrinterSetupSubtitle => 'तुमचा थर्मल प्रिंटर कॉन्फिगर करा';
 
   @override
+  String get settingsSectionAbout => 'माहिती आणि मदत';
+
+  @override
+  String get settingsHelpCenter => 'मदत केंद्र';
+
+  @override
+  String get settingsHelpCenterSubtitle => 'मार्गदर्शक, प्रश्न आणि सहाय्य';
+
+  @override
+  String get settingsPrivacyPolicy => 'गोपनीयता धोरण';
+
+  @override
+  String get settingsPrivacyPolicySubtitle => 'आम्ही तुमचा डेटा कसा हाताळतो';
+
+  @override
   String get settingsLanguage => 'भाषा';
 
   @override
@@ -666,24 +681,24 @@ class AppLocalizationsMr extends AppLocalizations {
   }
 
   @override
-  String get billingReleaseTable => 'टेबल मोकळे करा';
+  String get billingReleaseTable => 'ड्राफ्ट काढून टाका';
 
   @override
-  String get billingReleaseTableTitle => 'टेबल मोकळे करायचे?';
+  String get billingReleaseTableTitle => 'ड्राफ्ट काढून टाकायचा?';
 
   @override
   String get billingReleaseTableBody =>
-      'सर्व वस्तू काढल्यास ड्राफ्ट रद्द होईल आणि टेबल रिकामे दाखवले जाईल.';
+      'सर्व वस्तू काढल्यास हा जतन केलेला ड्राफ्ट रद्द होईल. हे पूर्ववत करता येणार नाही.';
 
   @override
-  String get billingReleaseTableFailed => 'टेबल मोकळे करता आले नाही.';
+  String get billingReleaseTableFailed => 'ड्राफ्ट काढता आला नाही.';
 
   @override
   String get billingDraftOfflineError =>
-      'ऑफलाइन असताना टेबल ड्राफ्ट जतन करता येणार नाही';
+      'ऑफलाइन असताना ड्राफ्ट जतन करता येणार नाही';
 
   @override
-  String get billingDraftSaved => 'वस्तू जतन झाल्या. टेबल आता व्यापलेले आहे.';
+  String get billingDraftSaved => 'ड्राफ्ट जतन झाला.';
 
   @override
   String get billingSaveFailed => 'जतन करता आले नाही. तुमचे कनेक्शन तपासा.';
@@ -778,6 +793,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingCustomerPhoneLabel => 'ग्राहकाचा मोबाइल';
+
+  @override
+  String get billingPhoneInvalid => 'ग्राहक क्रमांक १० अंकी असणे आवश्यक आहे.';
 
   @override
   String get billingDiscountPercent => 'सूट %';
@@ -1097,6 +1115,24 @@ class AppLocalizationsMr extends AppLocalizations {
   String get historyNoBillsForPeriod => 'या कालावधीत कोणतेही बिल नाही.';
 
   @override
+  String get historyFilterToday => 'आज';
+
+  @override
+  String get historyFilterYesterday => 'काल';
+
+  @override
+  String get historyFilterThisMonth => 'या महिन्यात';
+
+  @override
+  String get historyFilterLastMonth => 'मागील महिना';
+
+  @override
+  String get historyFilterAll => 'सर्व';
+
+  @override
+  String get historyFilterCustom => 'सानुकूल';
+
+  @override
   String get historyStatusFinalized => 'पूर्ण झाले';
 
   @override
@@ -1283,6 +1319,18 @@ class AppLocalizationsMr extends AppLocalizations {
   String get expensesDescription => 'तपशील (ऐच्छिक)';
 
   @override
+  String get expensesDetailsTitle => 'खर्चाचा तपशील';
+
+  @override
+  String get expensesPaymentMode => 'पेमेंट पद्धत';
+
+  @override
+  String get expensesExpenseDate => 'तारीख';
+
+  @override
+  String get expensesAddedBy => 'जोडणारा';
+
+  @override
   String get expensesDeleteTitle => 'खर्च हटवायचा?';
 
   @override
@@ -1424,6 +1472,12 @@ class AppLocalizationsMr extends AppLocalizations {
   String get staffNoCashiers => 'अजून कॅशियर जोडलेले नाहीत.';
 
   @override
+  String get staffSearchHint => 'नाव किंवा फोनने कर्मचारी शोधा…';
+
+  @override
+  String get staffNoMatch => 'तुमच्या शोधाशी जुळणारे कर्मचारी नाहीत.';
+
+  @override
   String get staffPhoneInvalid => '१० अंकी नंबर आवश्यक आहे';
 
   @override
@@ -1468,6 +1522,15 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get businessProfileUpdated => 'प्रोफाइल यशस्वीरित्या अपडेट झाले';
+
+  @override
+  String get businessProfileSectionAccount => 'खाते';
+
+  @override
+  String get businessProfileOwnerName => 'नाव';
+
+  @override
+  String get businessProfileOwnerPhone => 'मोबाइल';
 
   @override
   String get businessProfileSectionBasic => 'मूलभूत माहिती';

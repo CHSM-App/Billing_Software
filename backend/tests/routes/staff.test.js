@@ -87,7 +87,11 @@ describe('GET /api/staff', () => {
 // ------------------------------------------------------------------
 describe('POST /api/staff', () => {
   test('creates staff and returns 201', async () => {
-    mockRequest.recordset = [sampleStaff];
+    // Two queries run: the duplicate-phone check (must be empty), then the
+    // INSERT (returns the created row).
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [] })
+      .mockResolvedValueOnce({ recordset: [sampleStaff] });
     const res = await request(app)
       .post('/api/staff')
       .set(authHeader({ role: 'owner' }))
@@ -95,6 +99,17 @@ describe('POST /api/staff', () => {
     expect(res.status).toBe(201);
     expect(res.body.name).toBe('Bob');
     expect(res.body.role).toBe('cashier');
+  });
+
+  test('returns 409 when phone already exists', async () => {
+    // Duplicate-phone check finds an existing user.
+    mockRequest.query.mockResolvedValueOnce({ recordset: [sampleStaff] });
+    const res = await request(app)
+      .post('/api/staff')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Bob', phone: '9876543210', pin: '1234' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already registered/i);
   });
 
   test('returns 400 when name is missing', async () => {

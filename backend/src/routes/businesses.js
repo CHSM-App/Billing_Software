@@ -31,16 +31,20 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
     await poolConnect;
     const result = await pool.request()
       .input('id', sql.UniqueIdentifier, req.user.business_id)
+      .input('user_id', sql.UniqueIdentifier, req.user.user_id)
       .query(`
         SELECT
-          id, name, business_type, address, phone,
-          inventory_enabled, has_barcode_scanner,
-          gst_number, pan_number, email, website,
-          city, state, pincode, logo_url,
-          bill_prefix, bill_footer_note,
-          created_at
-        FROM businesses
-        WHERE id = @id
+          b.id, b.name, b.business_type, b.address, b.phone,
+          b.inventory_enabled, b.has_barcode_scanner,
+          b.gst_number, b.pan_number, b.email, b.website,
+          b.city, b.state, b.pincode, b.logo_url,
+          b.bill_prefix, b.bill_footer_note,
+          b.created_at,
+          u.name  AS owner_name,
+          u.phone AS owner_phone
+        FROM businesses b
+        LEFT JOIN users u ON u.id = @user_id
+        WHERE b.id = @id
       `);
 
     if (result.recordset.length === 0) {
@@ -48,7 +52,11 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
     }
 
     const row = result.recordset[0];
-    return res.json(_formatBusiness(row));
+    const formatted = _formatBusiness(row);
+    // Owner account info — shown read-only in the app (not editable here).
+    formatted.owner_name = row.owner_name || null;
+    formatted.owner_phone = row.owner_phone || null;
+    return res.json(formatted);
   } catch (err) {
     logger.error({ err }, 'Get business profile error');
     return res.status(500).json({ error: 'Failed to fetch business profile' });

@@ -1,7 +1,7 @@
 name: Vittam
 description: "Billing app for small Indian businesses."
 publish_to: 'none'
-version: 1.1.6+17
+version: 1.1.6+18
 
 environment:
   sdk: ^3.5.0
@@ -59,6 +59,15 @@ flutter:
         - asset: assets/fonts/Mangal.ttf
         - asset: assets/fonts/Mangal-Bold.ttf
           weight: 700
+    - family: NotoSansDevanagari
+      fonts:
+        - asset: assets/fonts/NotoSansDevanagari-Regular.ttf
+    - family: NotoSansTamil
+      fonts:
+        - asset: assets/fonts/NotoSansTamil-Regular.ttf
+    - family: NotoSansGujarati
+      fonts:
+        - asset: assets/fonts/NotoSansGujarati-Regular.ttf
 
 flutter_launcher_icons:
   android: true

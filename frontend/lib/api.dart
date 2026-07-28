@@ -5,12 +5,22 @@ import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+// const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.10:5000/api';
 const String _genericApiErrorMessage = 'Something went wrong';
 
 String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
-  if (error is ApiException && error.message.trim().isNotEmpty) {
-    return error.message;
+  if (error is ApiException) {
+    // Prefer the human-readable message the server sent (e.g. validation errors
+    // like "This phone number is already registered."). Fall back to the
+    // exception's own message, then the generic fallback.
+    if (error.serverMessage != null && error.serverMessage!.trim().isNotEmpty) {
+      return error.serverMessage!.trim();
+    }
+    if (error.message.trim().isNotEmpty &&
+        error.message.trim() != _genericApiErrorMessage) {
+      return error.message.trim();
+    }
   }
   return fallback;
 }
@@ -604,6 +614,7 @@ Future<Map<String, dynamic>> updateBillItems(
   List<Map<String, dynamic>> items, {
   String? customerName,
   String? customerPhone,
+  double? discountAmount,
 }) async {
   return _parse(await _authPut(
     Uri.parse('$baseUrl/bills/$id/update-items'),
@@ -611,6 +622,7 @@ Future<Map<String, dynamic>> updateBillItems(
       'items': items,
       if (customerName != null) 'customer_name': customerName,
       if (customerPhone != null) 'customer_phone': customerPhone,
+      if (discountAmount != null) 'discount_amount': discountAmount,
     }),
   ));
 }

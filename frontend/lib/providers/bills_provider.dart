@@ -7,18 +7,33 @@ import '../models/models.dart';
 // Filter state
 // ---------------------------------------------------------------------------
 
+/// Quick date-range presets for the bill history filter.
+enum BillDatePreset { today, yesterday, thisMonth, lastMonth, all, custom }
+
 class BillFilterState {
   final DateTime from;
   final DateTime to;
   final String? search;
+  final BillDatePreset preset;
 
-  const BillFilterState({required this.from, required this.to, this.search});
+  const BillFilterState({
+    required this.from,
+    required this.to,
+    this.search,
+    this.preset = BillDatePreset.today,
+  });
 
-  BillFilterState copyWith({DateTime? from, DateTime? to, String? search}) =>
+  BillFilterState copyWith({
+    DateTime? from,
+    DateTime? to,
+    String? search,
+    BillDatePreset? preset,
+  }) =>
       BillFilterState(
         from: from ?? this.from,
         to: to ?? this.to,
         search: search,
+        preset: preset ?? this.preset,
       );
 }
 
@@ -29,16 +44,51 @@ class BillFilterNotifier extends Notifier<BillFilterState> {
     // matches what the user sees on their device clock.
     final today = DateTime.now();
     final startOfToday = DateTime(today.year, today.month, today.day);
-    return BillFilterState(from: startOfToday, to: startOfToday);
+    return BillFilterState(
+        from: startOfToday, to: startOfToday, preset: BillDatePreset.today);
   }
 
-  void setDateRange(DateTime from, DateTime to) =>
-      state = state.copyWith(from: from, to: to);
+  /// Apply a named preset, computing its date range.
+  void setPreset(BillDatePreset preset) {
+    final now = DateTime.now();
+    final startOfToday = DateTime(now.year, now.month, now.day);
+    switch (preset) {
+      case BillDatePreset.today:
+        state = state.copyWith(
+            from: startOfToday, to: startOfToday, preset: preset);
+      case BillDatePreset.yesterday:
+        final y = startOfToday.subtract(const Duration(days: 1));
+        state = state.copyWith(from: y, to: y, preset: preset);
+      case BillDatePreset.thisMonth:
+        state = state.copyWith(
+            from: DateTime(now.year, now.month, 1),
+            to: startOfToday,
+            preset: preset);
+      case BillDatePreset.lastMonth:
+        final firstOfLast = DateTime(now.year, now.month - 1, 1);
+        final lastOfLast = DateTime(now.year, now.month, 0); // day 0 = prev month
+        state = state.copyWith(
+            from: firstOfLast, to: lastOfLast, preset: preset);
+      case BillDatePreset.all:
+        // From well before any possible bill up to today.
+        state = state.copyWith(
+            from: DateTime(2020, 1, 1), to: startOfToday, preset: preset);
+      case BillDatePreset.custom:
+        state = state.copyWith(preset: preset);
+    }
+  }
+
+  void setDateRange(DateTime from, DateTime to) => state = state.copyWith(
+        from: from,
+        to: to,
+        preset: BillDatePreset.custom,
+      );
 
   void setSearch(String? query) =>
       state = state.copyWith(
         from: state.from,
         to: state.to,
+        preset: state.preset,
         search: (query == null || query.isEmpty) ? null : query,
       );
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb; // used to hide printer tile on web
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
@@ -12,13 +13,14 @@ import 'login_screen.dart';
 // Printer screens use native-only packages — excluded on web.
 import 'printer_setup_screen.dart'
     if (dart.library.html) 'printer_setup_screen_web.dart';
-import 'marathi_print_test_screen.dart';
 import 'printer_test_screen.dart'
     if (dart.library.html) 'printer_test_screen_web.dart';
 import 'printer_test_windows_screen.dart'
     if (dart.library.html) 'printer_test_windows_screen_web.dart';
 import 'staff_screen.dart';
 import 'business_profile_screen.dart';
+import 'marathi_print_test_screen.dart';
+import 'raster_lab_screen.dart';
 import 'conflict_resolution_screen.dart';
 import 'history_screen.dart';
 import 'reports_screen.dart';
@@ -279,13 +281,26 @@ class _SettingsContentState extends State<_SettingsContent>
                       _buildNavCard(
                         context,
                         icon: Icons.translate_outlined,
-                        iconColor: AppColors.warning,
+                        iconColor: Colors.deepPurple,
                         title: 'Marathi Print Test',
-                        subtitle: 'Try different Marathi bill-printing methods',
+                        subtitle: 'Diagnose Devanagari printing strategies',
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
                               builder: (_) => const MarathiPrintTestScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.science_outlined,
+                        iconColor: Colors.indigo,
+                        title: 'Raster Lab',
+                        subtitle: 'Staged Devanagari raster diagnostics',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const RasterLabScreen()),
                         ),
                       ),
                     ],
@@ -315,6 +330,29 @@ class _SettingsContentState extends State<_SettingsContent>
                     //         builder: (_) => const PrinterTestWindowsScreen()),
                     //   ),
                     // ),
+
+                    const SizedBox(height: AppSpacing.space24),
+                    _sectionLabel(context, l10n.settingsSectionAbout),
+                    const SizedBox(height: AppSpacing.space8),
+                    _buildNavCard(
+                      context,
+                      icon: Icons.help_outline,
+                      iconColor: const Color(0xFF0891B2),
+                      title: l10n.settingsHelpCenter,
+                      subtitle: l10n.settingsHelpCenterSubtitle,
+                      onTap: () => _openUrl(
+                          context, 'https://vittam.vengurlatech.com/help'),
+                    ),
+                    const SizedBox(height: AppSpacing.space8),
+                    _buildNavCard(
+                      context,
+                      icon: Icons.privacy_tip_outlined,
+                      iconColor: const Color(0xFF16A34A),
+                      title: l10n.settingsPrivacyPolicy,
+                      subtitle: l10n.settingsPrivacyPolicySubtitle,
+                      onTap: () => _openUrl(
+                          context, 'https://vittam.vengurlatech.com/privacy'),
+                    ),
 
                     const SizedBox(height: AppSpacing.space32),
                     _buildLogoutButton(),
@@ -507,6 +545,24 @@ class _SettingsContentState extends State<_SettingsContent>
         ],
       ),
     );
+  }
+
+  Future<void> _openUrl(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open $url')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open $url')),
+        );
+      }
+    }
   }
 
   Widget _buildLogoutButton() {

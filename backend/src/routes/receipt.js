@@ -58,9 +58,9 @@ router.get('/:token', async (req, res) => {
       const qty = Number(i.quantity) % 1 === 0 ? Number(i.quantity) : fmt(i.quantity);
       return `<tr>
           <td class="item-name">${esc(i.item_name)}</td>
-          <td class="r">${qty}</td>
-          <td class="r">&#8377;${fmt(i.unit_price)}</td>
-          <td class="r amount">&#8377;${fmt(i.line_total)}</td>
+          <td class="r col-qty">${qty}</td>
+          <td class="r col-rate">&#8377;${fmt(i.unit_price)}</td>
+          <td class="r amount col-amt">&#8377;${fmt(i.line_total)}</td>
         </tr>`;
     }).join('');
 
@@ -102,14 +102,22 @@ router.get('/:token', async (req, res) => {
   .customer .cphone{font-size:12px;color:#666;margin-top:2px}
 
   /* ── items ── */
-  table{width:100%;border-collapse:collapse;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
   .table-head{background:#f4f5f7}
-  .table-head th{padding:10px 24px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#888;text-align:left}
+  .table-head th{padding:10px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#888;text-align:left}
+  .table-head th:first-child{padding-left:24px}
+  .table-head th:last-child{padding-right:24px}
   .table-head th.r{text-align:right}
-  tbody td{padding:11px 24px;border-bottom:1px solid #f4f4f6;color:#2c2c2e;vertical-align:middle}
+  /* Fixed column widths so the amount can never be pushed outside the card */
+  th.col-qty,td.col-qty{width:14%}
+  th.col-rate,td.col-rate{width:24%}
+  th.col-amt,td.col-amt{width:26%}
+  tbody td{padding:11px 12px;border-bottom:1px solid #f4f4f6;color:#2c2c2e;vertical-align:middle}
+  tbody td:first-child{padding-left:24px}
+  tbody td:last-child{padding-right:24px}
   tbody tr:last-child td{border-bottom:none}
   td.r{text-align:right}
-  td.item-name{font-weight:500}
+  td.item-name{font-weight:500;word-break:break-word;overflow-wrap:anywhere}
   td.amount{font-weight:600}
 
   /* ── totals ── */
@@ -122,6 +130,19 @@ router.get('/:token', async (req, res) => {
   .footer .note{font-size:12px;color:#444;font-style:italic;margin-bottom:6px}
   .footer .thanks{font-size:13px;font-weight:600;color:#333;letter-spacing:.2px}
   .footer .powered{font-size:11px;color:#bbb;margin-top:8px}
+
+  /* ── download button ── */
+  .actions{max-width:500px;margin:16px auto 0;text-align:center}
+  .btn-download{display:inline-flex;align-items:center;gap:8px;background:#1a1a2e;color:#fff;border:none;border-radius:6px;padding:12px 22px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15);transition:opacity .15s}
+  .btn-download:hover{opacity:.9}
+  .btn-download svg{width:16px;height:16px}
+
+  /* When saving/printing: hide the button and neutralise screen chrome */
+  @media print{
+    body{background:#fff;padding:0}
+    .receipt{box-shadow:none;max-width:none}
+    .actions{display:none}
+  }
 </style>
 </head>
 <body>
@@ -174,9 +195,9 @@ router.get('/:token', async (req, res) => {
     <thead class="table-head">
       <tr>
         <th>Description</th>
-        <th class="r">Qty</th>
-        <th class="r">Rate</th>
-        <th class="r">Amount</th>
+        <th class="r col-qty">Qty</th>
+        <th class="r col-rate">Rate</th>
+        <th class="r col-amt">Amount</th>
       </tr>
     </thead>
     <tbody>${itemRows}</tbody>
@@ -214,10 +235,18 @@ router.get('/:token', async (req, res) => {
   <div class="footer">
     ${bill.bill_footer_note ? '<div class="note">' + esc(bill.bill_footer_note) + '</div>' : ''}
     <div class="thanks">Thank you for your business.</div>
-    <div class="powered">Powered by VengurlaTech Billing</div>
+    <div class="powered">powered by vittam</div>
   </div>
 
 </div>
+
+<div class="actions">
+  <button type="button" class="btn-download" onclick="window.print()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Download Receipt
+  </button>
+</div>
+
 </body>
 </html>`;
 

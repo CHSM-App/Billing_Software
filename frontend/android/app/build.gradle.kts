@@ -38,7 +38,10 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = maxOf(flutter.minSdkVersion, 21) // Firebase requires API 21+
-        targetSdk = flutter.targetSdkVersion
+        // Google Play requires targeting Android 16 (API 36) for updates from
+        // 31 Aug 2026. Pin it explicitly rather than inheriting Flutter's
+        // default (currently 35). compileSdk above is already 36.
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

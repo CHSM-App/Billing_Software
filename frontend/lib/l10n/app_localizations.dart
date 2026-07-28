@@ -494,6 +494,36 @@ abstract class AppLocalizations {
   /// **'Configure your thermal printer'**
   String get settingsPrinterSetupSubtitle;
 
+  /// No description provided for @settingsSectionAbout.
+  ///
+  /// In en, this message translates to:
+  /// **'ABOUT & SUPPORT'**
+  String get settingsSectionAbout;
+
+  /// No description provided for @settingsHelpCenter.
+  ///
+  /// In en, this message translates to:
+  /// **'Help Center'**
+  String get settingsHelpCenter;
+
+  /// No description provided for @settingsHelpCenterSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Guides, FAQs and support'**
+  String get settingsHelpCenterSubtitle;
+
+  /// No description provided for @settingsPrivacyPolicy.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy Policy'**
+  String get settingsPrivacyPolicy;
+
+  /// No description provided for @settingsPrivacyPolicySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'How we handle your data'**
+  String get settingsPrivacyPolicySubtitle;
+
   /// No description provided for @settingsLanguage.
   ///
   /// In en, this message translates to:
@@ -1319,37 +1349,37 @@ abstract class AppLocalizations {
   /// No description provided for @billingReleaseTable.
   ///
   /// In en, this message translates to:
-  /// **'Release Table'**
+  /// **'Discard Draft'**
   String get billingReleaseTable;
 
   /// No description provided for @billingReleaseTableTitle.
   ///
   /// In en, this message translates to:
-  /// **'Release Table?'**
+  /// **'Discard Draft?'**
   String get billingReleaseTableTitle;
 
   /// No description provided for @billingReleaseTableBody.
   ///
   /// In en, this message translates to:
-  /// **'Clearing all items will void the draft and mark the table as empty.'**
+  /// **'Clearing all items will discard this saved draft. This cannot be undone.'**
   String get billingReleaseTableBody;
 
   /// No description provided for @billingReleaseTableFailed.
   ///
   /// In en, this message translates to:
-  /// **'Failed to release table.'**
+  /// **'Failed to discard draft.'**
   String get billingReleaseTableFailed;
 
   /// No description provided for @billingDraftOfflineError.
   ///
   /// In en, this message translates to:
-  /// **'Cannot save table draft while offline'**
+  /// **'Cannot save draft while offline'**
   String get billingDraftOfflineError;
 
   /// No description provided for @billingDraftSaved.
   ///
   /// In en, this message translates to:
-  /// **'Items saved. Table is now occupied.'**
+  /// **'Draft saved.'**
   String get billingDraftSaved;
 
   /// No description provided for @billingSaveFailed.
@@ -1501,6 +1531,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Customer phone'**
   String get billingCustomerPhoneLabel;
+
+  /// No description provided for @billingPhoneInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer No. must be 10 digits.'**
+  String get billingPhoneInvalid;
 
   /// No description provided for @billingDiscountPercent.
   ///
@@ -2084,6 +2120,42 @@ abstract class AppLocalizations {
   /// **'No bills found for this period.'**
   String get historyNoBillsForPeriod;
 
+  /// No description provided for @historyFilterToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Today'**
+  String get historyFilterToday;
+
+  /// No description provided for @historyFilterYesterday.
+  ///
+  /// In en, this message translates to:
+  /// **'Yesterday'**
+  String get historyFilterYesterday;
+
+  /// No description provided for @historyFilterThisMonth.
+  ///
+  /// In en, this message translates to:
+  /// **'This Month'**
+  String get historyFilterThisMonth;
+
+  /// No description provided for @historyFilterLastMonth.
+  ///
+  /// In en, this message translates to:
+  /// **'Last Month'**
+  String get historyFilterLastMonth;
+
+  /// No description provided for @historyFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get historyFilterAll;
+
+  /// No description provided for @historyFilterCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get historyFilterCustom;
+
   /// No description provided for @historyStatusFinalized.
   ///
   /// In en, this message translates to:
@@ -2390,6 +2462,30 @@ abstract class AppLocalizations {
   /// **'Description (optional)'**
   String get expensesDescription;
 
+  /// No description provided for @expensesDetailsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Expense Details'**
+  String get expensesDetailsTitle;
+
+  /// No description provided for @expensesPaymentMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment Mode'**
+  String get expensesPaymentMode;
+
+  /// No description provided for @expensesExpenseDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Date'**
+  String get expensesExpenseDate;
+
+  /// No description provided for @expensesAddedBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Added By'**
+  String get expensesAddedBy;
+
   /// No description provided for @expensesDeleteTitle.
   ///
   /// In en, this message translates to:
@@ -2618,6 +2714,18 @@ abstract class AppLocalizations {
   /// **'No cashiers added yet.'**
   String get staffNoCashiers;
 
+  /// No description provided for @staffSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search staff by name or phone…'**
+  String get staffSearchHint;
+
+  /// No description provided for @staffNoMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'No staff match your search.'**
+  String get staffNoMatch;
+
   /// No description provided for @staffPhoneInvalid.
   ///
   /// In en, this message translates to:
@@ -2707,6 +2815,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Profile updated successfully'**
   String get businessProfileUpdated;
+
+  /// No description provided for @businessProfileSectionAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'ACCOUNT'**
+  String get businessProfileSectionAccount;
+
+  /// No description provided for @businessProfileOwnerName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get businessProfileOwnerName;
+
+  /// No description provided for @businessProfileOwnerPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get businessProfileOwnerPhone;
 
   /// No description provided for @businessProfileSectionBasic.
   ///

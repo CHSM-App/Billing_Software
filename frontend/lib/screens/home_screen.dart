@@ -231,6 +231,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             _customerPhoneController.text = bill.customerPhone!;
             _showCustomerFields = true;
           }
+          // Restore the saved discount. Setting the amount fires the listener,
+          // which derives the matching percentage from the (now loaded) total.
+          if (bill.discountAmount > 0) {
+            _discountAmtController.text = bill.discountAmount.toStringAsFixed(2);
+          }
         });
       }
     } catch (_) {}
@@ -369,6 +374,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _showSnack(l10n.billingAddAtLeastOneItemFirst, isError: true);
       return;
     }
+    if (!_validateCustomerPhone()) return;
     if (_savingDraft) return; // guard against a double-tap before we pop
     setState(() => _savingDraft = true);
 
@@ -380,6 +386,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // save and pre-fill when the order is reopened.
     final customerName = _customerNameController.text.trim().nullIfEmpty;
     final customerPhone = _customerPhoneController.text.trim().nullIfEmpty;
+    // Persist the discount too, so reopening the draft keeps it (was previously
+    // dropped — the draft saved with no discount).
+    final discountAmount =
+        double.tryParse(_discountAmtController.text.trim()) ?? 0.0;
     // Capture the notifiers NOW. After Navigator.pop this ConsumerState is
     // disposed and its `ref` becomes defunct — using it for the background
     // reconcile would silently no-op (this was why the table never updated).
@@ -424,6 +434,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             payload,
             customerName: customerName,
             customerPhone: customerPhone,
+            discountAmount: discountAmount,
           );
         } else {
           result = await createBill({
@@ -433,6 +444,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'status': 'draft',
             if (customerName != null) 'customer_name': customerName,
             if (customerPhone != null) 'customer_phone': customerPhone,
+            if (discountAmount > 0) 'discount_amount': discountAmount,
           });
         }
         // The draft is now on the server — nudge the Kitchen screen to refresh
@@ -473,6 +485,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _showSnack(context.l10n.billingAddAtLeastOneItem, isError: true);
       return;
     }
+    if (!_validateCustomerPhone()) return;
     if (widget.activeBillId != null || widget.tableId != null) {
       // Table billing — always online
       await _generateBillOnline(cart, onBillReady: onBillReady);
@@ -491,6 +504,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _generateBillAndPrint() async {
+    // Verify a printer is configured BEFORE generating the bill. Otherwise the
+    // bill would be finalized + the cart cleared, then the print would silently
+    // fail — the user would lose the cart with nothing printed. Fail early so
+    // they can connect a printer and retry without losing the order.
+    final printer = await PrinterService.instance.getActivePrinter();
+    if (printer == null) {
+      if (mounted) {
+        _showSnack(context.l10n.historyNoPrinterConfigured, isError: true);
+      }
+      return;
+    }
     await _generateBill(onBillReady: (bill) {
       _navigateAfterBill();
       _autoPrint(bill);
@@ -512,6 +536,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     setState(() => _showCustomerFields = true);
     _showSnack(context.l10n.billingWhatsappNeedsPhone, isError: true);
     // Focus after the frame so the (possibly just-expanded) field is laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _ensureVisible(_customerPhoneKey);
+      _customerPhoneFocus.requestFocus();
+    });
+    return false;
+  }
+
+  /// Validates the customer phone: it may be empty (optional), but if entered it
+  /// must be exactly 10 digits. On failure it reveals/focuses the field, warns,
+  /// and returns false so callers abort the save/generate.
+  bool _validateCustomerPhone() {
+    final phone = _customerPhoneController.text.trim();
+    if (phone.isEmpty) return true;
+    if (RegExp(r'^\d{10}$').hasMatch(phone)) return true;
+    setState(() => _showCustomerFields = true);
+    _showSnack(context.l10n.billingPhoneInvalid, isError: true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _ensureVisible(_customerPhoneKey);
@@ -1622,6 +1663,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   focusNode: _customerPhoneFocus,
                                   keyboardType: TextInputType.phone,
                                   maxLength: 10,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                  ],
                                   prefixIcon: const Icon(Icons.phone_outlined,
                                       size: 16,
                                       color: AppColors.textSecondary),

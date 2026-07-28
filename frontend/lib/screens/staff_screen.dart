@@ -16,6 +16,30 @@ class StaffScreen extends ConsumerStatefulWidget {
 class _StaffScreenState extends ConsumerState<StaffScreen> {
   List<Map<String, dynamic>> _staff = [];
   bool _loading = true;
+  String _search = '';
+
+  List<Map<String, dynamic>> _filtered(AppLocalizations l10n) {
+    final q = _search.trim().toLowerCase();
+    if (q.isEmpty) return _staff;
+    return _staff.where((m) {
+      final name = (m['name'] as String? ?? '').toLowerCase();
+      final phone = (m['phone'] as String? ?? '').toLowerCase();
+      final role = (m['role'] as String? ?? 'cashier');
+      // Match both the raw role value and its localized label so users can
+      // search "cashier", "server", "kitchen" or "Kitchen Chef", "कॅशियर", etc.
+      final roleLabel = _roleLabel(l10n, role).toLowerCase();
+      return name.contains(q) ||
+          phone.contains(q) ||
+          role.toLowerCase().contains(q) ||
+          roleLabel.contains(q);
+    }).toList();
+  }
+
+  static String _roleLabel(AppLocalizations l10n, String role) => switch (role) {
+        'kitchen' => l10n.staffRoleKitchen,
+        'server' => l10n.staffRoleServer,
+        _ => l10n.staffRoleCashier,
+      };
 
   @override
   void initState() {
@@ -79,7 +103,7 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
       await deleteStaff(member['id']);
       _loadStaff();
     } on ApiException catch (e) {
-      _showSnack(e.message, isError: true);
+      _showSnack(sanitizeUiErrorMessage(e), isError: true);
     }
   }
 
@@ -104,66 +128,28 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
                   actionLabel: l10n.staffAddStaff,
                   onAction: () => _showStaffForm(),
                 )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(AppSpacing.space16),
-                  itemCount: _staff.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.space8),
-                  itemBuilder: (_, i) {
-                    final m = _staff[i];
-                    return AppCard(
-                      onTap: () => _showStaffForm(member: m),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 20,
-                            backgroundColor: AppColors.primaryLight,
-                            child: Text(
-                              (m['name'] as String).substring(0, 1).toUpperCase(),
-                              style: AppFont.style(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.w600),
-                            ),
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
+                          AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
+                      child: SizedBox(
+                        height: 44,
+                        child: TextField(
+                          decoration: InputDecoration(
+                            hintText: l10n.staffSearchHint,
+                            isDense: true,
+                            prefixIcon: const Icon(Icons.search_outlined,
+                                size: 18, color: AppColors.textSecondary),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space16, vertical: 0),
                           ),
-                          const SizedBox(width: AppSpacing.space12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(m['name'],
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium),
-                                    ),
-                                    const SizedBox(width: AppSpacing.space8),
-                                    _RoleBadge(role: m['role'] ?? 'cashier'),
-                                  ],
-                                ),
-                                Text(m['phone'],
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(color: AppColors.textSecondary)),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline,
-                                color: AppColors.error, size: 20),
-                            onPressed: () => _deleteMember(m),
-                            visualDensity: VisualDensity.compact,
-                            tooltip: l10n.commonRemove,
-                          ),
-                        ],
+                          onChanged: (v) => setState(() => _search = v),
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                    Expanded(child: _buildStaffBody(l10n)),
+                  ],
                 ),
       floatingActionButton: FloatingActionButton.extended(
         heroTag: 'add_staff',
@@ -172,6 +158,101 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
         label: Text(l10n.staffAddStaff),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
+      ),
+    );
+  }
+
+  /// Body below the search bar: responsive list/grid of staff, or a no-match
+  /// empty state when the search filters everything out.
+  Widget _buildStaffBody(AppLocalizations l10n) {
+    final list = _filtered(l10n);
+    if (list.isEmpty) {
+      return EmptyState(
+        icon: Icons.search_off_outlined,
+        message: l10n.staffNoMatch,
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        // ~360px per card; up to 3 columns on wide screens.
+        final columns = w >= 1100 ? 3 : (w >= 720 ? 2 : 1);
+        final padding = const EdgeInsets.fromLTRB(AppSpacing.space16, 0,
+            AppSpacing.space16, AppSpacing.space32);
+        if (columns == 1) {
+          return ListView.separated(
+            padding: padding,
+            itemCount: list.length,
+            separatorBuilder: (_, __) =>
+                const SizedBox(height: AppSpacing.space8),
+            itemBuilder: (_, i) => _buildStaffCard(l10n, list[i]),
+          );
+        }
+        return GridView.builder(
+          padding: padding,
+          itemCount: list.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisSpacing: AppSpacing.space8,
+            crossAxisSpacing: AppSpacing.space8,
+            mainAxisExtent: 76,
+          ),
+          itemBuilder: (_, i) => _buildStaffCard(l10n, list[i]),
+        );
+      },
+    );
+  }
+
+  Widget _buildStaffCard(AppLocalizations l10n, Map<String, dynamic> m) {
+    return AppCard(
+      onTap: () => _showStaffForm(member: m),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 20,
+            backgroundColor: AppColors.primaryLight,
+            child: Text(
+              (m['name'] as String).substring(0, 1).toUpperCase(),
+              style: AppFont.style(
+                  color: AppColors.primary, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.space12),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(m['name'],
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                    const SizedBox(width: AppSpacing.space8),
+                    _RoleBadge(role: m['role'] ?? 'cashier'),
+                  ],
+                ),
+                Text(m['phone'],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline,
+                color: AppColors.error, size: 20),
+            onPressed: () => _deleteMember(m),
+            visualDensity: VisualDensity.compact,
+            tooltip: l10n.commonRemove,
+          ),
+        ],
       ),
     );
   }
@@ -243,6 +324,7 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
   final _pinCtrl = TextEditingController();
   String _role = 'cashier';
   bool _saving = false;
+  String? _error;
 
   @override
   void initState() {
@@ -267,7 +349,10 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
 
     final isEdit = widget.member != null;
     final data = <String, dynamic>{
@@ -288,9 +373,11 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
       Navigator.pop(context);
       widget.onSaved();
     } on ApiException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
-      );
+      // Show the real server message (e.g. "This phone number is already
+      // registered.") inline inside the dialog, not just a fleeting snackbar.
+      if (mounted) setState(() => _error = sanitizeUiErrorMessage(e));
+    } catch (e) {
+      if (mounted) setState(() => _error = sanitizeUiErrorMessage(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -313,6 +400,33 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Inline error banner — shows server messages such as a duplicate
+              // phone number, right inside the dialog.
+              if (_error != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.space12),
+                  decoration: BoxDecoration(
+                    color: AppColors.errorLight,
+                    borderRadius: BorderRadius.circular(AppRadius.small),
+                    border: Border.all(
+                        color: AppColors.error.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline,
+                          color: AppColors.error, size: 18),
+                      const SizedBox(width: AppSpacing.space8),
+                      Expanded(
+                        child: Text(_error!,
+                            style: const TextStyle(
+                                color: AppColors.error, fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.space12),
+              ],
               // Role picker. Retail shops only need cashiers, so the picker
               // shows for restaurants: Cashier (bills + payment), Server (takes
               // orders), Kitchen (Kitchen Display).

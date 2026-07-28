@@ -134,13 +134,23 @@ class _ThisMonthTab extends ConsumerWidget {
           e.expenseDate.month == filter.from.month);
     }).toList();
 
-    return CustomScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      slivers: [
-        // Filter bar
-        SliverToBoxAdapter(
-          child: _buildFilterBar(context, ref, filter, expensesAsync),
-        ),
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'addExpense',
+        onPressed: () => _showAddSheet(context, ref),
+        icon: const Icon(Icons.add),
+        label: Text(context.l10n.expensesAddExpense),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          // Filter bar
+          SliverToBoxAdapter(
+            child: _buildFilterBar(context, ref, filter, expensesAsync),
+          ),
 
         // Recurring reminder banner
         if (pendingRecurring.isNotEmpty)
@@ -183,7 +193,8 @@ class _ThisMonthTab extends ConsumerWidget {
                   ),
                 ),
         ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -252,15 +263,6 @@ class _ThisMonthTab extends ConsumerWidget {
                       to: DateTime(next.year, next.month + 1, 0),
                     );
                   },
-          ),
-          // Add button
-          FloatingActionButton.small(
-            heroTag: 'addExpense',
-            onPressed: () => _showAddSheet(context, ref),
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            child: const Icon(Icons.add, size: 20),
           ),
         ],
       ),
@@ -945,7 +947,7 @@ class _ExpenseCard extends ConsumerWidget {
     final l10n = context.l10n;
     final categoryColor = _categoryColor(expense.category);
     return AppCard(
-      onTap: () => _showOptions(context),
+      onTap: () => _showDetail(context),
       child: Row(
         children: [
           Container(
@@ -1025,88 +1027,156 @@ class _ExpenseCard extends ConsumerWidget {
     );
   }
 
-  void _showOptions(BuildContext context) {
+  /// Tapping an expense opens a details dialog showing every field, with Edit
+  /// and Delete actions as icon buttons in the top-right corner.
+  void _showDetail(BuildContext context) {
     final l10n = context.l10n;
-    showModalBottomSheet(
+    final categoryColor = _categoryColor(expense.category);
+    showDialog(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(AppRadius.large)),
+      builder: (dctx) => AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(20, 12, 8, 0),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(l10n.expensesDetailsTitle,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w700)),
+            ),
+            IconButton(
+              icon: const Icon(Icons.edit_outlined,
+                  color: AppColors.primary, size: 20),
+              tooltip: l10n.commonEdit,
+              onPressed: () {
+                Navigator.pop(dctx);
+                _edit(context);
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: AppColors.error, size: 20),
+              tooltip: l10n.commonDelete,
+              onPressed: () {
+                Navigator.pop(dctx);
+                _delete(context);
+              },
+            ),
+          ],
         ),
-        child: SafeArea(
+        content: SizedBox(
+          width: 360,
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Amount headline
               Container(
-                  width: 36, height: 4,
-                  margin: const EdgeInsets.only(top: 12, bottom: 8),
-                  decoration: BoxDecoration(
-                      color: AppColors.border,
-                      borderRadius: BorderRadius.circular(2))),
-              ListTile(
-                leading:
-                    const Icon(Icons.edit_outlined, color: AppColors.primary),
-                title: Text(l10n.commonEdit),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (_) =>
-                        _ExpenseForm(expense: expense, onSaved: onChanged),
-                  );
-                },
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: categoryColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(AppRadius.small),
+                ),
+                child: Center(
+                  child: Text('Rs. ${_fmt.format(expense.amount)}',
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.error)),
+                ),
               ),
-              ListTile(
-                leading:
-                    const Icon(Icons.delete_outline, color: AppColors.error),
-                title: Text(l10n.commonDelete,
-                    style: const TextStyle(color: AppColors.error)),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      title: Text(l10n.expensesDeleteTitle),
-                      content: Text(l10n.expensesDeleteBody(
-                          _categoryLabel(l10n, expense.category),
-                          _fmt.format(expense.amount))),
-                      actions: [
-                        TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: Text(l10n.commonCancel)),
-                        TextButton(
-                            onPressed: () => Navigator.pop(context, true),
-                            child: Text(l10n.commonDelete,
-                                style:
-                                    const TextStyle(color: AppColors.error))),
-                      ],
-                    ),
-                  );
-                  if (confirmed == true) {
-                    try {
-                      await api.deleteExpense(expense.id);
-                      onChanged();
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content:
-                                Text(l10n.commonErrorWithMessage('$e'))));
-                      }
-                    }
-                  }
-                },
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
+              _detailRow(context, l10n.expensesCategory,
+                  _categoryLabel(l10n, expense.category)),
+              if (expense.description != null &&
+                  expense.description!.isNotEmpty)
+                _detailRow(
+                    context, l10n.expensesDescription, expense.description!),
+              _detailRow(context, l10n.expensesPaymentMode,
+                  _paymentLabel(l10n, expense.paymentMode)),
+              _detailRow(context, l10n.expensesExpenseDate,
+                  _dateFmt.format(expense.expenseDate)),
+              if (expense.createdByName != null &&
+                  expense.createdByName!.isNotEmpty)
+                _detailRow(
+                    context, l10n.expensesAddedBy, expense.createdByName!),
             ],
           ),
         ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dctx),
+              child: Text(l10n.commonClose)),
+        ],
       ),
     );
+  }
+
+  Widget _detailRow(BuildContext context, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 110,
+            child: Text(label,
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.textSecondary)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _edit(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ExpenseForm(expense: expense, onSaved: onChanged),
+    );
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final l10n = context.l10n;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(l10n.expensesDeleteTitle),
+        content: Text(l10n.expensesDeleteBody(
+            _categoryLabel(l10n, expense.category),
+            _fmt.format(expense.amount))),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l10n.commonCancel)),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(l10n.commonDelete,
+                  style: const TextStyle(color: AppColors.error))),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      try {
+        await api.deleteExpense(expense.id);
+        onChanged();
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(l10n.commonErrorWithMessage('$e'))));
+        }
+      }
+    }
   }
 
   Color _categoryColor(String cat) {

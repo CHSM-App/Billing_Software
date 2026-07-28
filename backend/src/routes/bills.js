@@ -957,15 +957,16 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
 // PUT /api/bills/:id/update-items — replace all items on a draft bill
 router.put('/:id/update-items', requireAuth, async (req, res) => {
-  const { items, customer_name, customer_phone } = req.body;
+  const { items, customer_name, customer_phone, discount_amount } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required' });
   }
-  // Only overwrite a customer field when the key was actually sent, so callers
-  // that omit them (e.g. the kitchen) never wipe existing details.
+  // Only overwrite a field when the key was actually sent, so callers that omit
+  // them (e.g. the kitchen) never wipe existing details.
   const setCustomerName = Object.prototype.hasOwnProperty.call(req.body, 'customer_name');
   const setCustomerPhone = Object.prototype.hasOwnProperty.call(req.body, 'customer_phone');
+  const setDiscount = Object.prototype.hasOwnProperty.call(req.body, 'discount_amount');
 
   let previousLineItems = [];
   let replacementLineItems = [];
@@ -1129,23 +1130,32 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           `);
       }
 
-      // Recalculate totals, and update customer details when supplied.
+      // Recalculate totals, and update customer/discount fields when supplied.
       const totalsReq = transaction.request()
         .input('id', sql.UniqueIdentifier, req.params.id);
-      const customerSets = [];
+      const extraSets = [];
       if (setCustomerName) {
         totalsReq.input('customer_name', sql.NVarChar(200), customer_name || null);
-        customerSets.push('customer_name = @customer_name');
+        extraSets.push('customer_name = @customer_name');
       }
       if (setCustomerPhone) {
         totalsReq.input('customer_phone', sql.NVarChar(20), customer_phone || null);
-        customerSets.push('customer_phone = @customer_phone');
+        extraSets.push('customer_phone = @customer_phone');
+      }
+      if (setDiscount) {
+        // Clamp to a non-negative value; can't exceed the new total (computed
+        // from bill_items in this same statement).
+        const discountAmount = Math.max(parseFloat(discount_amount) || 0, 0);
+        totalsReq.input('discount_amount', sql.Decimal(10, 2), discountAmount);
+        extraSets.push(
+          'discount_amount = (SELECT CASE WHEN @discount_amount > SUM(line_total) THEN SUM(line_total) ELSE @discount_amount END FROM bill_items WHERE bill_id = @id)',
+        );
       }
       await totalsReq.query(`
           UPDATE bills SET
             subtotal   = (SELECT SUM(quantity * unit_price) FROM bill_items WHERE bill_id = @id),
             tax_amount = (SELECT SUM(line_total - quantity * unit_price) FROM bill_items WHERE bill_id = @id),
-            total      = (SELECT SUM(line_total) FROM bill_items WHERE bill_id = @id)${customerSets.length ? ',\n            ' + customerSets.join(',\n            ') : ''}
+            total      = (SELECT SUM(line_total) FROM bill_items WHERE bill_id = @id)${extraSets.length ? ',\n            ' + extraSets.join(',\n            ') : ''}
           WHERE id = @id
         `);
 

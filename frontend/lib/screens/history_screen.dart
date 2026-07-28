@@ -58,11 +58,22 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   Future<void> _pickDateRange() async {
     final filter = ref.read(billFilterProvider);
+    final firstDate = DateTime(2020);
+    final lastDate = DateTime.now();
+    // Clamp the current filter range into [firstDate, lastDate] so the picker
+    // never receives an out-of-bounds initialDateRange (which makes it fail
+    // silently — this was why "Custom" did nothing after choosing "All").
+    DateTime clampD(DateTime d) =>
+        d.isBefore(firstDate) ? firstDate : (d.isAfter(lastDate) ? lastDate : d);
+    final initStart = clampD(filter.from);
+    final initEnd = clampD(filter.to).isBefore(initStart)
+        ? initStart
+        : clampD(filter.to);
     final picked = await showDateRangePicker(
       context: context,
-      firstDate: DateTime(2024),
-      lastDate: DateTime.now(),
-      initialDateRange: DateTimeRange(start: filter.from, end: filter.to),
+      firstDate: firstDate,
+      lastDate: lastDate,
+      initialDateRange: DateTimeRange(start: initStart, end: initEnd),
     );
     if (picked != null) {
       ref
@@ -99,12 +110,70 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
+  SliverToBoxAdapter _presetChipsSliver(
+          AppLocalizations l10n, BillFilterState filter) =>
+      SliverToBoxAdapter(
+        child: SizedBox(
+          height: 40,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.space16, AppSpacing.space12, AppSpacing.space16, 0),
+            children: [
+              _presetChip(l10n.historyFilterToday, BillDatePreset.today, filter),
+              _presetChip(
+                  l10n.historyFilterYesterday, BillDatePreset.yesterday, filter),
+              _presetChip(
+                  l10n.historyFilterThisMonth, BillDatePreset.thisMonth, filter),
+              _presetChip(
+                  l10n.historyFilterLastMonth, BillDatePreset.lastMonth, filter),
+              _presetChip(l10n.historyFilterAll, BillDatePreset.all, filter),
+              _presetChip(
+                  l10n.historyFilterCustom, BillDatePreset.custom, filter,
+                  onCustom: _pickDateRange),
+            ],
+          ),
+        ),
+      );
+
+  Widget _presetChip(
+      String label, BillDatePreset preset, BillFilterState filter,
+      {Future<void> Function()? onCustom}) {
+    final selected = filter.preset == preset;
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.space8),
+      child: ChoiceChip(
+        label: Text(
+          label,
+          style: AppFont.style(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? Colors.white : AppColors.textPrimary,
+          ),
+        ),
+        selected: selected,
+        showCheckmark: false,
+        selectedColor: AppColors.primary,
+        backgroundColor: AppColors.surface,
+        side: BorderSide(
+            color: selected ? AppColors.primary : AppColors.border),
+        onSelected: (_) {
+          if (onCustom != null) {
+            onCustom();
+          } else {
+            ref.read(billFilterProvider.notifier).setPreset(preset);
+          }
+        },
+      ),
+    );
+  }
+
   SliverToBoxAdapter _filterRowSliver(
           AppLocalizations l10n, BillFilterState filter) =>
       SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
-              AppSpacing.space16, AppSpacing.space16,
+              AppSpacing.space16, AppSpacing.space8,
               AppSpacing.space16, AppSpacing.space8),
           child: Row(
             children: [
@@ -162,6 +231,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           await ref.read(billsProvider.future);
         },
         child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
+          _presetChipsSliver(l10n, filter),
           _filterRowSliver(l10n, filter),
           SliverFillRemaining(
             child: AppErrorWidget(
@@ -179,7 +249,8 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               await ref.read(billsProvider.future);
             },
             child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-              _filterRowSliver(l10n, filter),
+              _presetChipsSliver(l10n, filter),
+          _filterRowSliver(l10n, filter),
               SliverFillRemaining(
                 child: EmptyState(
                   icon: Icons.receipt_long_outlined,
@@ -196,96 +267,130 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             await ref.read(billsProvider.future);
           },
           child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-            _filterRowSliver(l10n, filter),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.space16, 0, AppSpacing.space16, AppSpacing.space32),
-              sliver: SliverList.separated(
-                itemCount: bills.length,
-                separatorBuilder: (_, __) =>
-                    const SizedBox(height: AppSpacing.space8),
-                itemBuilder: (_, i) {
-              final bill = bills[i];
-              return AppCard(
-                onTap: () => _showBillDetail(bill),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.space16, vertical: AppSpacing.space8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(bill.billNumber,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style:
-                                        Theme.of(context).textTheme.titleMedium),
-                              ),
-                              const SizedBox(width: AppSpacing.space8),
-                              StatusBadge(
-                                label: _billStatusLabel(l10n, bill.status),
-                                status: _billStatusType(bill.status),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            l10n.historyBillMeta(
-                              _timeFmt.format(bill.createdAt.toLocal()),
-                              _paymentModeLabel(l10n, bill.paymentMode),
-                              l10n.historyItemCount(bill.items.length),
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: AppColors.textSecondary),
-                          ),
-                          if (bill.customerName != null)
-                            Text(bill.customerName!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: AppColors.textSecondary)),
-                        ],
-                      ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyLarge
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        if (bill.discountAmount > 0)
-                          Text(
-                            '₹${bill.total.toStringAsFixed(2)}',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: AppColors.textSecondary,
-                                  decoration: TextDecoration.lineThrough,
-                                ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-                },
-              ),
-            ),
+            _presetChipsSliver(l10n, filter),
+          _filterRowSliver(l10n, filter),
+            _billsSliver(l10n, bills),
           ]),
         );
       },
+    );
+  }
+
+  /// Responsive bill list: single column on phones, a grid (2–3 columns) on
+  /// wider screens so large displays don't waste horizontal space.
+  Widget _billsSliver(AppLocalizations l10n, List<Bill> bills) {
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.space16, 0, AppSpacing.space16, AppSpacing.space32),
+      sliver: SliverLayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.crossAxisExtent;
+          // Aim for ~360px per card; cap at 3 columns.
+          final columns = width >= 1100
+              ? 3
+              : width >= 720
+                  ? 2
+                  : 1;
+          if (columns == 1) {
+            return SliverList.separated(
+              itemCount: bills.length,
+              separatorBuilder: (_, __) =>
+                  const SizedBox(height: AppSpacing.space8),
+              itemBuilder: (_, i) => _buildBillCard(l10n, bills[i]),
+            );
+          }
+          return SliverGrid(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: AppSpacing.space8,
+              crossAxisSpacing: AppSpacing.space8,
+              mainAxisExtent: 84,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (_, i) => _buildBillCard(l10n, bills[i]),
+              childCount: bills.length,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildBillCard(AppLocalizations l10n, Bill bill) {
+    return AppCard(
+      onTap: () => _showBillDetail(bill),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.space16, vertical: AppSpacing.space8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(bill.billNumber,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                    const SizedBox(width: AppSpacing.space8),
+                    StatusBadge(
+                      label: _billStatusLabel(l10n, bill.status),
+                      status: _billStatusType(bill.status),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  l10n.historyBillMeta(
+                    _timeFmt.format(bill.createdAt.toLocal()),
+                    _paymentModeLabel(l10n, bill.paymentMode),
+                    l10n.historyItemCount(bill.items.length),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.textSecondary),
+                ),
+                if (bill.customerName != null)
+                  Text(bill.customerName!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyLarge
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              if (bill.discountAmount > 0)
+                Text(
+                  '₹${bill.total.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary,
+                        decoration: TextDecoration.lineThrough,
+                      ),
+                ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

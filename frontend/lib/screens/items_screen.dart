@@ -88,7 +88,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   List<Item> _filtered(List<Item> items) {
     final q = _searchController.text.toLowerCase().trim();
     if (q.isEmpty) return items;
-    return items.where((i) => i.name.toLowerCase().contains(q)).toList();
+    return items.where((i) {
+      final name = i.name.toLowerCase();
+      final category = (i.category ?? '').toLowerCase();
+      return name.contains(q) || category.contains(q);
+    }).toList();
   }
 
   void _showBarcodePrint(Item item) {
@@ -405,17 +409,62 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96);
 
     // In stock mode, item cards with variants expand to a variable-height list
-    // of their variants, so use a variable-height list layout instead of the
-    // fixed-extent grid used for normal item cards.
+    // of their variants. A fixed-extent grid can't handle that, so use a
+    // masonry column layout (same approach as the Kitchen screen): split cards
+    // across N columns, each keeping its natural height, packed into the
+    // shortest column so there are no big gaps.
     if (stockMode) {
+      if (crossAxisCount <= 1) {
+        return SliverPadding(
+          padding: padding,
+          sliver: SliverList.builder(
+            itemCount: items.length,
+            itemBuilder: (_, i) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: animatedCardSwap(true, _buildStockCard(items[i])),
+            ),
+          ),
+        );
+      }
       return SliverPadding(
         padding: padding,
-        sliver: SliverList.builder(
-          itemCount: items.length,
-          itemBuilder: (_, i) => Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: animatedCardSwap(true, _buildStockCard(items[i])),
-          ),
+        sliver: SliverToBoxAdapter(
+          child: LayoutBuilder(builder: (context, constraints) {
+            const spacing = AppSpacing.space8;
+            final cols = crossAxisCount;
+            final cardWidth =
+                (constraints.maxWidth - spacing * (cols - 1)) / cols;
+
+            // Masonry: place each card into the currently shortest column.
+            final columns = List.generate(cols, (_) => <Widget>[]);
+            final columnHeights = List.filled(cols, 0.0);
+            for (var i = 0; i < items.length; i++) {
+              var target = 0;
+              for (var c = 1; c < cols; c++) {
+                if (columnHeights[c] < columnHeights[target]) target = c;
+              }
+              // ~44px header + ~24px per variant row; only relative height matters.
+              final variantCount = items[i].variants.length;
+              columnHeights[target] += 44 + variantCount * 24 + spacing;
+              columns[target].add(Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: animatedCardSwap(true, _buildStockCard(items[i])),
+              ));
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var c = 0; c < cols; c++) ...[
+                  if (c > 0) const SizedBox(width: spacing),
+                  SizedBox(
+                    width: cardWidth,
+                    child: Column(children: columns[c]),
+                  ),
+                ],
+              ],
+            );
+          }),
         ),
       );
     }

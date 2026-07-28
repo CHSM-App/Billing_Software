@@ -231,6 +231,36 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          // Owner account — display only, not editable here.
+                          _buildSection(
+                            context,
+                            label: l10n.businessProfileSectionAccount,
+                            icon: Icons.person_outline,
+                            iconColor: const Color(0xFF0891B2),
+                            children: [
+                              _buildReadOnly(
+                                context,
+                                label: l10n.businessProfileOwnerName,
+                                value: (_profile?['owner_name'] ?? '')
+                                        .toString()
+                                        .isNotEmpty
+                                    ? _profile!['owner_name'].toString()
+                                    : '—',
+                              ),
+                              const SizedBox(height: AppSpacing.space12),
+                              _buildReadOnly(
+                                context,
+                                label: l10n.businessProfileOwnerPhone,
+                                value: (_profile?['owner_phone'] ?? '')
+                                        .toString()
+                                        .isNotEmpty
+                                    ? _profile!['owner_phone'].toString()
+                                    : '—',
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.space24),
+
                           _buildSection(
                             context,
                             label: l10n.businessProfileSectionBasic,

@@ -64,8 +64,4 @@ class ReceiptLabels {
         payment: l10n.receiptPayment,
         thankYou: l10n.receiptThankYou,
       );
-
-  /// True when the receipt must be printed as an image because the script
-  /// (Devanagari) isn't in any thermal-printer code page.
-  bool get needsImageRendering => languageCode == 'mr';
 }
