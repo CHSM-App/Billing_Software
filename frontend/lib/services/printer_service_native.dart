@@ -661,14 +661,16 @@ class PrinterService {
       final ftpInstance = ftp.FlutterThermalPrinter.instance;
       final connected = await ftpInstance.connect(ftpPrinter);
       if (!connected) throw PrinterException('Could not connect to printer');
-      // flutter_thermal_printer hardcodes a 50-byte BLE chunk on Windows +10ms
-      // per chunk, which makes a raster receipt take 20-30s. Override with a
-      // large chunk so a big image transfers in a handful of writes instead of
-      // hundreds. (chunkSize maps to the BLE write size in the package.)
+      // This printer connects over BLE on Windows. BLE is packet-based and the
+      // write size is capped by the ATT MTU — chunks larger than ~512 bytes make
+      // writeCharacteristic.write() fail silently (nothing prints). So keep 512
+      // (safe, proven) and just drop the artificial per-chunk delay for smooth
+      // feed: longData:false removes the 10ms sleep the package adds after every
+      // chunk (that sleep was what made the print head keep stopping / banding).
       await ftpInstance.printData(
         ftpPrinter,
         bytes,
-        longData: true,
+        longData: false,
         chunkSize: 512,
       );
     } catch (e) {

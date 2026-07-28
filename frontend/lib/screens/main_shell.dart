@@ -49,6 +49,19 @@ class _MainShellState extends ConsumerState<MainShell>
     // Route real-time WebSocket events to the relevant providers so every
     // screen updates live across devices, without any notifications.
     _realtimeSub = RealtimeService.instance.events.listen(_onRealtimeEvent);
+
+    // Fresh login mounts a new shell. The open-drafts provider may still hold
+    // stale/empty state from a previous session (it isn't autoDispose), so the
+    // "Open Orders" tab would stay hidden until the next drafts event. Force a
+    // fresh fetch after the first frame so the tab appears right away when
+    // table-less drafts already exist on the server.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final role = ref.read(sessionProvider).valueOrNull?.userRole;
+      if (role != null && role != 'kitchen') {
+        ref.read(openDraftsProvider.notifier).refreshSilently();
+      }
+    });
   }
 
   void _onRealtimeEvent(String type) {

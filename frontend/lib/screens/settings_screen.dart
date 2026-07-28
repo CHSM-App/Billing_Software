@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
+import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/language_selector.dart';
@@ -120,6 +121,9 @@ class _SettingsContentState extends State<_SettingsContent>
     if (confirmed != true) return;
     // Close the real-time socket so it doesn't keep reconnecting after logout.
     await RealtimeService.instance.stop();
+    // Drop cached open-drafts so the next user doesn't inherit stale state (this
+    // is why the Open Orders tab stayed hidden until a new draft was added).
+    widget.ref.invalidate(openDraftsProvider);
     await widget.ref.read(sessionProvider.notifier).clear();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
@@ -277,32 +281,32 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const PrinterSetupScreen()),
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.space8),
-                      _buildNavCard(
-                        context,
-                        icon: Icons.translate_outlined,
-                        iconColor: Colors.deepPurple,
-                        title: 'Marathi Print Test',
-                        subtitle: 'Diagnose Devanagari printing strategies',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const MarathiPrintTestScreen()),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.space8),
-                      _buildNavCard(
-                        context,
-                        icon: Icons.science_outlined,
-                        iconColor: Colors.indigo,
-                        title: 'Raster Lab',
-                        subtitle: 'Staged Devanagari raster diagnostics',
-                        onTap: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => const RasterLabScreen()),
-                        ),
-                      ),
+                      // const SizedBox(height: AppSpacing.space8),
+                      // _buildNavCard(
+                      //   context,
+                      //   icon: Icons.translate_outlined,
+                      //   iconColor: Colors.deepPurple,
+                      //   title: 'Marathi Print Test',
+                      //   subtitle: 'Diagnose Devanagari printing strategies',
+                      //   onTap: () => Navigator.push(
+                      //     context,
+                      //     MaterialPageRoute(
+                      //         builder: (_) => const MarathiPrintTestScreen()),
+                      //   ),
+                      // ),
+                      // const SizedBox(height: AppSpacing.space8),
+                      // _buildNavCard(
+                      //   context,
+                      //   icon: Icons.science_outlined,
+                      //   iconColor: Colors.indigo,
+                      //   title: 'Raster Lab',
+                      //   subtitle: 'Staged Devanagari raster diagnostics',
+                      //   onTap: () => Navigator.push(
+                      //     context,
+                      //     MaterialPageRoute(
+                      //         builder: (_) => const RasterLabScreen()),
+                      //   ),
+                      // ),
                     ],
                     // const SizedBox(height: AppSpacing.space8),
                     // _buildNavCard(
