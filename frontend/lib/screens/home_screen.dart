@@ -25,6 +25,20 @@ extension _StringEx on String {
   String? get nullIfEmpty => isEmpty ? null : this;
 }
 
+/// Reduce a stored phone to the local 10-digit form for display/editing in the
+/// billing card. Customer self-orders store the phone in WhatsApp format
+/// ("91XXXXXXXXXX", 12 digits with the India country code); the billing field
+/// holds 10 digits. Strip a leading "91" so the field doesn't overflow its
+/// 10-digit limit and silently drop the last two digits. Anything already 10
+/// digits (or an unrecognised shape) is returned unchanged.
+String _localPhoneDigits(String phone) {
+  final digits = phone.replaceAll(RegExp(r'\D'), '');
+  if (digits.length == 12 && digits.startsWith('91')) {
+    return digits.substring(2);
+  }
+  return digits;
+}
+
 class HomeScreen extends ConsumerStatefulWidget {
   final String? tableId;
   final String? tableNumber;
@@ -228,7 +242,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             _showCustomerFields = true;
           }
           if (bill.customerPhone != null) {
-            _customerPhoneController.text = bill.customerPhone!;
+            // Stored phones from QR self-orders are "91XXXXXXXXXX"; show the
+            // local 10 digits so the 10-char field doesn't truncate them.
+            _customerPhoneController.text =
+                _localPhoneDigits(bill.customerPhone!);
             _showCustomerFields = true;
           }
           // Restore the saved discount. Setting the amount fires the listener,
