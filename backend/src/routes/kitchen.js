@@ -47,7 +47,8 @@ router.get('/orders', requireAuth, async (req, res) => {
     billIds.forEach((id, i) => itemsReq.input(`p${i}`, sql.UniqueIdentifier, id));
 
     const itemsResult = await itemsReq.query(`
-      SELECT id, bill_id, item_name, quantity, kitchen_status, kitchen_done_at
+      SELECT id, bill_id, item_name, quantity, kitchen_status, kitchen_done_at,
+             source, diner_name, diner_phone
       FROM bill_items
       WHERE bill_id IN (${names.join(',')})
       ORDER BY id ASC

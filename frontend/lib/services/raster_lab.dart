@@ -745,6 +745,43 @@ class RasterLab {
   }
 
   static List<int> _feed(int lines) => List<int>.filled(lines, 0x0A);
+
+  /// Convert an arbitrary square [image] (e.g. a QR code) into a centred
+  /// ESC/POS raster payload ready for the thermal printer. The image is scaled
+  /// to [targetWidth] dots and centre-padded to the full [paperWidth] so it
+  /// prints in the middle of the roll. Returns banded GS v 0 bytes + a feed.
+  static Future<Uint8List> imageToReceiptRaster(
+    ui.Image image, {
+    int paperWidth = dots80mm,
+    int targetWidth = 384,
+    int threshold = 128,
+    int bandHeight = 256,
+  }) async {
+    // Draw the (scaled) image centred on a white, full-paper-width canvas.
+    final w = paperWidth;
+    final scaled = targetWidth.clamp(64, paperWidth);
+    final h = scaled; // square source assumed
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawRect(
+        Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()), Paint()..color = Colors.white);
+    final dx = ((w - scaled) / 2).toDouble();
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Rect.fromLTWH(dx, 0, scaled.toDouble(), scaled.toDouble()),
+      Paint()..filterQuality = FilterQuality.high,
+    );
+    final padded = await recorder.endRecording().toImage(w, h);
+
+    final packed = await _pack(padded, threshold: threshold);
+    final out = BytesBuilder();
+    out.add([0x1B, 0x40]); // ESC @ — init
+    out.add(_gsv0(packed, bandHeight: bandHeight));
+    out.add(_feed(4));
+    padded.dispose();
+    return out.toBytes();
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────

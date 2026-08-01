@@ -5,7 +5,8 @@ import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+// const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.10:5000/api';
 const String _genericApiErrorMessage = 'Something went wrong';
 
 String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
@@ -463,6 +464,36 @@ Future<void> deleteItem(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/items/$id')));
 }
 
+// --- Item photos (owner-only; customer-facing on the QR menu) --------------
+
+/// Owner-only list of items with their current [image_url]. Used by the Menu
+/// Photos screen. The regular [getItems] omits image_url so photos never load
+/// during billing.
+Future<List<dynamic>> getItemsWithImages() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/items/with-images')));
+}
+
+/// Upload a compressed JPEG for [itemId]. [jpegBytes] must already be resized
+/// and compressed on the device. Returns the new image_url (with a cache
+/// buster). Sends the raw image bytes, not JSON.
+Future<String> uploadItemImage(String itemId, List<int> jpegBytes) async {
+  final uri = Uri.parse('$baseUrl/items/$itemId/image');
+  final response = await _withAutoRefresh((h) {
+    // Override the JSON content-type from _authHeaders with the raw image type;
+    // keep the Authorization header.
+    final headers = Map<String, String>.from(h)
+      ..['Content-Type'] = 'image/jpeg';
+    return _put(uri, headers: headers, body: jpegBytes);
+  });
+  final body = _parse(response) as Map<String, dynamic>;
+  return body['image_url'] as String;
+}
+
+/// Remove [itemId]'s photo and clear its image_url.
+Future<void> deleteItemImage(String itemId) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/items/$itemId/image')));
+}
+
 // Variants (sizes) — nested under an item.
 Future<Map<String, dynamic>> createVariant(
     String itemId, Map<String, dynamic> data) async {
@@ -553,6 +584,20 @@ Future<Map<String, dynamic>> updateTable(String id, Map<String, dynamic> data) a
 Future<void> deleteTable(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/tables/$id')));
 }
+
+/// Regenerate a table's QR token, invalidating the old sticker. Owner-only.
+Future<Map<String, dynamic>> rotateTableQr(String id) async {
+  return _parse(
+      await _authPost(Uri.parse('$baseUrl/tables/$id/qr/rotate')));
+}
+
+/// Public customer-ordering base URL (the same host as the API, minus `/api`).
+/// A table's QR encodes `$orderBaseUrl/<qr_token>`.
+final String orderBaseUrl =
+    '${baseUrl.endsWith('/api') ? baseUrl.substring(0, baseUrl.length - 4) : baseUrl}/order';
+
+/// Full customer-menu URL encoded into a table's QR sticker.
+String tableOrderUrl(String qrToken) => '$orderBaseUrl/$qrToken';
 
 // ---------------------------------------------------------------------------
 // Kitchen (restaurant Kitchen Display)

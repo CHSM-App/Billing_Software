@@ -2,6 +2,7 @@
 // All methods throw PrinterException so the UI can handle gracefully.
 
 import 'dart:convert';
+import 'dart:ui' as ui show Image;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
@@ -96,6 +97,10 @@ class PrinterService {
     required double price,
     int copies = 1,
   }) async {
+    throw PrinterException('Printing is not supported in the browser.');
+  }
+
+  Future<void> printQrImage(ui.Image image) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
 }

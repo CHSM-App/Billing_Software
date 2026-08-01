@@ -28,7 +28,10 @@ dependencies:
   permission_handler: ^11.0.0
   esc_pos_utils_plus: ^2.0.4
   barcode_widget: ^2.0.3
+  barcode: ^2.2.0
   image: ^4.2.0
+  image_picker: ^1.1.2
+  share_plus: ^10.0.0
 
   # Firebase – update system
   firebase_core: ^3.3.0
@@ -39,6 +42,7 @@ dependencies:
   url_launcher: ^6.3.0
   in_app_update: ^4.2.3
   web_socket_channel: ^3.0.3
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -52,6 +56,7 @@ flutter:
 
   assets:
     - assets/logo.png
+    - assets/sounds/new_order.mp3
 
   fonts:
     - family: Mangal

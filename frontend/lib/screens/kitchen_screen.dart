@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
@@ -25,6 +26,14 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
   // Item ids currently being toggled — disables the tile to avoid double taps.
   final Set<String> _busy = {};
 
+  // Order ids seen on the last load. When a reload reveals an id not in this
+  // set, a genuinely new order has arrived and we chime — but only while this
+  // screen is alive (i.e. the app is open on the kitchen display).
+  Set<String> _seenOrderIds = {};
+  // First load never chimes; there's no "before" state to compare against.
+  bool _primed = false;
+  final AudioPlayer _chimePlayer = AudioPlayer();
+
   @override
   void initState() {
     super.initState();
@@ -35,18 +44,40 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
   @override
   void dispose() {
     NotificationService.instance.kitchenPing.removeListener(_onPing);
+    _chimePlayer.dispose();
     super.dispose();
   }
 
   void _onPing() => _load(silent: true);
+
+  Future<void> _playNewOrderChime() async {
+    try {
+      await _chimePlayer.stop();
+      await _chimePlayer.play(AssetSource('sounds/new_order.mp3'));
+    } catch (e) {
+      // Sound is a non-critical nicety — never let it break the queue refresh.
+      debugPrint('Kitchen chime failed: $e');
+    }
+  }
 
   Future<void> _load({bool silent = false}) async {
     if (!silent) setState(() => _loading = true);
     try {
       final data = await getKitchenOrders();
       if (!mounted) return;
+      final orders = data.cast<Map<String, dynamic>>();
+      final ids = orders
+          .map((o) => '${o['id']}')
+          .where((id) => id.isNotEmpty)
+          .toSet();
+      // Chime if any order id is new since the last load. Skip the very first
+      // load so opening the screen with a backlog stays silent.
+      final hasNewOrder = _primed && ids.difference(_seenOrderIds).isNotEmpty;
+      _seenOrderIds = ids;
+      _primed = true;
+      if (hasNewOrder) _playNewOrderChime();
       setState(() {
-        _orders = data.cast<Map<String, dynamic>>();
+        _orders = orders;
         _loading = false;
         _error = null;
       });
@@ -330,7 +361,12 @@ class _OrderCard extends StatelessWidget {
             children: [
               for (int i = 0; i < items.length; i++) ...[
                 if (i > 0) const Divider(height: 1),
-                _buildItemTile(context, items[i]),
+                _ItemTile(
+                  item: items[i],
+                  canEdit: canEdit,
+                  busy: busy,
+                  onToggle: onToggle,
+                ),
               ],
             ],
           ),
@@ -339,8 +375,76 @@ class _OrderCard extends StatelessWidget {
     );
   }
 
-  Widget _buildItemTile(BuildContext context, Map<String, dynamic> item) {
-    final ready = item['kitchen_status'] == 'ready';
+}
+
+/// A single dish row in an order card. Stateful so it can play a smooth
+/// scale-in animation on the green "ready" circle the moment a dish is marked
+/// complete — visible to every role (chef, owner, waiter), not just a
+/// strikethrough. The chef taps the row to toggle; other roles are read-only.
+class _ItemTile extends StatefulWidget {
+  final Map<String, dynamic> item;
+  final bool canEdit;
+  final Set<String> busy;
+  final Future<void> Function(Map<String, dynamic>) onToggle;
+
+  const _ItemTile({
+    required this.item,
+    required this.canEdit,
+    required this.busy,
+    required this.onToggle,
+  });
+
+  @override
+  State<_ItemTile> createState() => _ItemTileState();
+}
+
+class _ItemTileState extends State<_ItemTile>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+  late bool _ready;
+
+  bool get _isReady => widget.item['kitchen_status'] == 'ready';
+
+  @override
+  void initState() {
+    super.initState();
+    _ready = _isReady;
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 320),
+      vsync: this,
+      // Already-ready dishes start fully shown (no pop on first paint).
+      value: _ready ? 1.0 : 0.0,
+    );
+    // A gentle over-shoot so the circle "pops" in when a dish becomes ready.
+    _scale = CurvedAnimation(parent: _controller, curve: Curves.elasticOut);
+  }
+
+  @override
+  void didUpdateWidget(_ItemTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // React to readiness changing (e.g. a realtime refresh flips the status):
+    // animate the circle in when it becomes ready, out when it's un-ticked.
+    if (_isReady != _ready) {
+      _ready = _isReady;
+      if (_ready) {
+        _controller.forward(from: 0.0);
+      } else {
+        _controller.reverse();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    final ready = _ready;
     final id = item['id'] as String;
     final qty = (item['quantity'] as num?) ?? 1;
     final qtyLabel =
@@ -348,35 +452,50 @@ class _OrderCard extends StatelessWidget {
 
     // Compact custom row instead of ListTile, which forces a ~48px min height
     // even when dense. This packs more dishes into each card.
-    final enabled = canEdit && !busy.contains(id);
+    final enabled = widget.canEdit && !widget.busy.contains(id);
     return InkWell(
-      onTap: enabled ? () => onToggle(item) : null,
-      child: Padding(
+      onTap: enabled ? () => widget.onToggle(item) : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        color: ready ? AppColors.successLight : Colors.transparent,
         padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.space8, vertical: 6),
         child: Row(
           children: [
-            // Checkbox only for the kitchen chef, who can tick dishes off.
-            // Read-only viewers see readiness via the strikethrough + badge.
-            if (canEdit) ...[
-              Icon(
-                ready ? Icons.check_box : Icons.check_box_outline_blank,
-                size: 18,
-                color: ready ? AppColors.success : AppColors.textSecondary,
-              ),
-              const SizedBox(width: 6),
-            ],
+            // A green check circle marks a completed dish for EVERY role. It
+            // scales in with a little pop the moment the chef ticks it, so
+            // owners and waiters watching the queue see completion clearly —
+            // not just a thin strikethrough. When not ready: the chef sees an
+            // empty tick target; read-only roles see nothing.
+            _buildLeading(ready),
             Expanded(
-              child: Text(
-                '${item['item_name']}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  decoration: ready ? TextDecoration.lineThrough : null,
-                  color:
-                      ready ? AppColors.textSecondary : AppColors.textPrimary,
-                ),
+              child: Row(
+                children: [
+                  // Customer self-orders (from the table QR) get a badge so the
+                  // kitchen knows the diner ordered it, not a waiter.
+                  if (item['source'] == 'customer') ...[
+                    const Icon(Icons.qr_code_2,
+                        size: 15, color: AppColors.primary),
+                    const SizedBox(width: 4),
+                  ],
+                  Flexible(
+                    child: Text(
+                      '${item['item_name']}'
+                      '${item['diner_name'] != null && (item['diner_name'] as String).isNotEmpty ? ' · ${item['diner_name']}' : ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight:
+                            ready ? FontWeight.w500 : FontWeight.normal,
+                        decoration: ready ? TextDecoration.lineThrough : null,
+                        color: ready
+                            ? AppColors.textSecondary
+                            : AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(width: 6),
@@ -389,5 +508,38 @@ class _OrderCard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// The leading indicator: a green filled circle with a white check when
+  /// ready (animated), otherwise an empty tick outline for the chef and a
+  /// blank spacer for read-only roles.
+  Widget _buildLeading(bool ready) {
+    if (ready) {
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: ScaleTransition(
+          scale: _scale,
+          child: Container(
+            width: 20,
+            height: 20,
+            decoration: const BoxDecoration(
+              color: AppColors.success,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.check, size: 14, color: Colors.white),
+          ),
+        ),
+      );
+    }
+    // Not ready: the chef gets a tappable empty circle; other roles get a
+    // matching-width spacer so text stays aligned across rows.
+    if (widget.canEdit) {
+      return const Padding(
+        padding: EdgeInsets.only(right: 6),
+        child: Icon(Icons.radio_button_unchecked,
+            size: 20, color: AppColors.textSecondary),
+      );
+    }
+    return const SizedBox(width: 26);
   }
 }

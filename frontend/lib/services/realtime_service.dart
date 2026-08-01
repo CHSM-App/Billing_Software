@@ -39,10 +39,12 @@ class RealtimeService {
   }
 
   /// Open the connection. Safe to call multiple times; only the first starts it.
+  /// Always clears the disposed latch so a login after a previous logout (which
+  /// called [stop]) reconnects instead of staying permanently dead.
   Future<void> start() async {
+    _disposed = false;
     if (_started) return;
     _started = true;
-    _disposed = false;
     await _connect();
   }
 
@@ -51,26 +53,42 @@ class RealtimeService {
     try {
       final token = await getToken();
       if (token == null || token.isEmpty) {
+        debugPrint('[realtime] no token yet — retrying in 3s');
         _scheduleReconnect();
         return;
       }
       final uri = Uri.parse('${_wsBase()}?token=$token');
+      debugPrint('[realtime] connecting to $uri');
       final channel = WebSocketChannel.connect(uri);
       _channel = channel;
+      // ready surfaces the handshake result (incl. a 401) so failures are
+      // logged instead of vanishing; the stream listener drives reconnects.
+      channel.ready.then((_) {
+        debugPrint('[realtime] connected');
+      }).catchError((e) {
+        debugPrint('[realtime] handshake failed: $e');
+      });
       _sub = channel.stream.listen(
         _onMessage,
         onDone: _onClosed,
-        onError: (_) => _onClosed(),
+        onError: (e) {
+          debugPrint('[realtime] socket error: $e');
+          _onClosed();
+        },
         cancelOnError: true,
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[realtime] connect threw: $e');
       _scheduleReconnect();
     }
   }
 
   void _onMessage(dynamic data) {
     try {
-      final msg = jsonDecode(data as String);
+      // Server sends text frames, but be defensive: some platforms deliver
+      // binary as List<int>. Normalise to a String before decoding.
+      final text = data is String ? data : utf8.decode(data as List<int>);
+      final msg = jsonDecode(text);
       final type = msg is Map ? msg['type'] as String? : null;
       if (type != null && !_controller.isClosed) {
         _controller.add(type);

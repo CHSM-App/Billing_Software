@@ -3,11 +3,14 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  audioplayers_windows
+  file_selector_windows
   firebase_core
   flutter_secure_storage_windows
   flutter_thermal_printer
   permission_handler_windows
   print_bluetooth_thermal
+  share_plus
   universal_ble
   url_launcher_windows
 )

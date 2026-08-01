@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
@@ -13,6 +14,12 @@ function ownerOnly(req, res, next) {
   next();
 }
 
+// Unguessable per-table token embedded in the customer QR URL. 32 hex chars so
+// a customer cannot edit the URL to reach another table.
+function generateQrToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
 const VALID_STATUSES = ['empty', 'occupied', 'billed'];
 
 // GET /api/tables
@@ -23,6 +30,7 @@ router.get('/', requireAuth, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT t.id, t.business_id, t.table_number, t.floor_x, t.floor_y, t.status, t.created_at,
+               t.qr_token,
                b.id AS active_bill_id
         FROM tables t
         LEFT JOIN bills b
@@ -55,11 +63,13 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('table_number', sql.NVarChar(20), table_number)
       .input('floor_x', sql.Decimal(10, 2), floor_x != null ? parseFloat(floor_x) : 0)
       .input('floor_y', sql.Decimal(10, 2), floor_y != null ? parseFloat(floor_y) : 0)
+      .input('qr_token', sql.NVarChar(32), generateQrToken())
       .query(`
-        INSERT INTO tables (business_id, table_number, floor_x, floor_y, status)
+        INSERT INTO tables (business_id, table_number, floor_x, floor_y, status, qr_token)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.table_number,
-               INSERTED.floor_x, INSERTED.floor_y, INSERTED.status, INSERTED.created_at
-        VALUES (@business_id, @table_number, @floor_x, @floor_y, 'empty')
+               INSERTED.floor_x, INSERTED.floor_y, INSERTED.status, INSERTED.created_at,
+               INSERTED.qr_token
+        VALUES (@business_id, @table_number, @floor_x, @floor_y, 'empty', @qr_token)
       `);
 
     return res.status(201).json(result.recordset[0]);
@@ -170,6 +180,33 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
   } catch (err) {
     logger.error({ err }, 'Delete table error');
     return res.status(500).json({ error: 'Failed to delete table' });
+  }
+});
+
+// POST /api/tables/:id/qr/rotate
+// Regenerate a table's QR token, invalidating any previously printed sticker.
+// Owner-only. Use when a QR is compromised/shared.
+router.post('/:id/qr/rotate', requireAuth, ownerOnly, async (req, res) => {
+  try {
+    await poolConnect;
+    const result = await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .input('qr_token', sql.NVarChar(32), generateQrToken())
+      .query(`
+        UPDATE tables
+        SET qr_token = @qr_token
+        OUTPUT INSERTED.id, INSERTED.qr_token
+        WHERE id = @id AND business_id = @business_id
+      `);
+
+    if (result.rowsAffected[0] === 0) {
+      return res.status(404).json({ error: 'Table not found' });
+    }
+    return res.json(result.recordset[0]);
+  } catch (err) {
+    logger.error({ err }, 'Rotate table QR error');
+    return res.status(500).json({ error: 'Failed to rotate QR' });
   }
 });
 

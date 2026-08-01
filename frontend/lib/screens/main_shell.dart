@@ -50,6 +50,12 @@ class _MainShellState extends ConsumerState<MainShell>
     // screen updates live across devices, without any notifications.
     _realtimeSub = RealtimeService.instance.events.listen(_onRealtimeEvent);
 
+    // Ensure the socket is live for this session. The app bootstrap starts it on
+    // cold launch, but a re-login (login screen → new shell) mounts here without
+    // re-running bootstrap; start() is idempotent and clears the disposed latch
+    // set by a prior logout, so realtime works on every session.
+    RealtimeService.instance.start();
+
     // Fresh login mounts a new shell. The open-drafts provider may still hold
     // stale/empty state from a previous session (it isn't autoDispose), so the
     // "Open Orders" tab would stay hidden until the next drafts event. Force a

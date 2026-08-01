@@ -36,6 +36,7 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
         SELECT
           b.id, b.name, b.business_type, b.address, b.phone,
           b.inventory_enabled, b.has_barcode_scanner,
+          b.self_order_enabled,
           b.gst_number, b.pan_number, b.email, b.website,
           b.city, b.state, b.pincode, b.logo_url,
           b.bill_prefix, b.bill_footer_note,
@@ -83,6 +84,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     logo_url,
     bill_prefix,
     bill_footer_note,
+    self_order_enabled,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -145,6 +147,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     logo_url,
     bill_prefix,
     bill_footer_note,
+    self_order_enabled,
   };
 
   const fields = Object.entries(updatable).filter(([, v]) => v !== undefined);
@@ -193,7 +196,11 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
 
     const setClauses = fields.map(([key, value]) => {
       const sqlType = _sqlTypeFor(key);
-      req2.input(key, sqlType, value === '' ? null : value);
+      // BIT columns take a normalised 0/1; text columns treat '' as NULL.
+      const normalised = key === 'self_order_enabled'
+        ? (value ? 1 : 0)
+        : (value === '' ? null : value);
+      req2.input(key, sqlType, normalised);
       return `${key} = @${key}`;
     });
 
@@ -210,6 +217,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
         SELECT
           id, name, business_type, address, phone,
           inventory_enabled, has_barcode_scanner,
+          self_order_enabled,
           gst_number, pan_number, email, website,
           city, state, pincode, logo_url,
           bill_prefix, bill_footer_note,
@@ -253,6 +261,7 @@ function _formatBusiness(row) {
     phone:               row.phone,
     inventory_enabled:   !!row.inventory_enabled,
     has_barcode_scanner: !!row.has_barcode_scanner,
+    self_order_enabled:  !!row.self_order_enabled,
     gst_number:          row.gst_number ?? null,
     pan_number:          row.pan_number ?? null,
     email:               row.email ?? null,
@@ -283,6 +292,7 @@ function _sqlTypeFor(key) {
     logo_url:         sql.NVarChar(1000),
     bill_prefix:      sql.NVarChar(10),
     bill_footer_note: sql.NVarChar(500),
+    self_order_enabled: sql.Bit,
   };
   return map[key] ?? sql.NVarChar(500);
 }

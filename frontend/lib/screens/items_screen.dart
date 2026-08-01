@@ -9,6 +9,7 @@ import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../api.dart';
 import '../services/printer_service.dart';
+import 'menu_photos_screen.dart';
 import 'raw_materials_tab.dart';
 
 /// Localized short label for an item's unit-of-measure (e.g. 'kg', 'plate').
@@ -252,7 +253,23 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           // Navigator.canPop() to true, making a stray back arrow appear.
           ShellAppBar(
               title: Text(l10n.itemsTitle),
-              automaticallyImplyLeading: false),
+              automaticallyImplyLeading: false,
+              // Owners manage customer-facing dish photos here. Photos live in a
+              // dedicated screen and never appear during billing.
+              actions: userRole == 'owner'
+                  ? [
+                      IconButton(
+                        icon: const Icon(Icons.photo_library_outlined),
+                        color: AppColors.textPrimary,
+                        tooltip: l10n.menuPhotosTooltip,
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const MenuPhotosScreen()),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                    ]
+                  : null),
           if (withRawMaterials)
             TabBar(
               controller: _tabController,

@@ -470,6 +470,18 @@ abstract class AppLocalizations {
   /// **'Name, address, GST, billing settings'**
   String get settingsBusinessProfileSubtitle;
 
+  /// No description provided for @settingsSelfOrder.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer QR Ordering'**
+  String get settingsSelfOrder;
+
+  /// No description provided for @settingsSelfOrderSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Let customers scan a table QR to view the menu and order'**
+  String get settingsSelfOrderSubtitle;
+
   /// No description provided for @settingsManageStaff.
   ///
   /// In en, this message translates to:
@@ -1676,6 +1688,90 @@ abstract class AppLocalizations {
   /// **'Items / Menu'**
   String get itemsTitle;
 
+  /// No description provided for @menuPhotosTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Menu Photos'**
+  String get menuPhotosTitle;
+
+  /// No description provided for @menuPhotosTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Menu photos'**
+  String get menuPhotosTooltip;
+
+  /// No description provided for @menuPhotosSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Photos shown to customers on the QR order menu.'**
+  String get menuPhotosSubtitle;
+
+  /// No description provided for @menuPhotosSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search dishes…'**
+  String get menuPhotosSearch;
+
+  /// No description provided for @menuPhotosEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No items yet. Add items first, then add their photos here.'**
+  String get menuPhotosEmpty;
+
+  /// No description provided for @menuPhotosAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add photo'**
+  String get menuPhotosAdd;
+
+  /// No description provided for @menuPhotosChange.
+  ///
+  /// In en, this message translates to:
+  /// **'Change photo'**
+  String get menuPhotosChange;
+
+  /// No description provided for @menuPhotosRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove photo'**
+  String get menuPhotosRemove;
+
+  /// No description provided for @menuPhotosPickCamera.
+  ///
+  /// In en, this message translates to:
+  /// **'Take photo'**
+  String get menuPhotosPickCamera;
+
+  /// No description provided for @menuPhotosPickGallery.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose from gallery'**
+  String get menuPhotosPickGallery;
+
+  /// No description provided for @menuPhotosUploading.
+  ///
+  /// In en, this message translates to:
+  /// **'Uploading…'**
+  String get menuPhotosUploading;
+
+  /// No description provided for @menuPhotosUploadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not upload photo'**
+  String get menuPhotosUploadFailed;
+
+  /// No description provided for @menuPhotosRemoveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not remove photo'**
+  String get menuPhotosRemoveFailed;
+
+  /// No description provided for @menuPhotosRemoveConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this photo?'**
+  String get menuPhotosRemoveConfirm;
+
   /// No description provided for @itemsSearch.
   ///
   /// In en, this message translates to:
@@ -2047,6 +2143,90 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delete table \"{number}\"?'**
   String tablesDeleteBody(String number);
+
+  /// No description provided for @tablesShowQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Show / Print QR'**
+  String get tablesShowQr;
+
+  /// No description provided for @tablesShowQrSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Customers scan to view the menu and order'**
+  String get tablesShowQrSubtitle;
+
+  /// No description provided for @tablesQrNotReady.
+  ///
+  /// In en, this message translates to:
+  /// **'QR code is not ready for this table yet.'**
+  String get tablesQrNotReady;
+
+  /// No description provided for @tablesQrTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Table {number} — Order QR'**
+  String tablesQrTitle(String number);
+
+  /// No description provided for @tablesQrHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Stick this on the table. Customers scan it to see the menu and order to this table.'**
+  String get tablesQrHint;
+
+  /// No description provided for @tablesRotateQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Rotate QR'**
+  String get tablesRotateQr;
+
+  /// No description provided for @tablesRotateQrBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This makes the old printed QR stop working. Print and place a new one after rotating. Continue?'**
+  String get tablesRotateQrBody;
+
+  /// No description provided for @tablesQrRotated.
+  ///
+  /// In en, this message translates to:
+  /// **'QR code rotated. Please reprint the sticker.'**
+  String get tablesQrRotated;
+
+  /// No description provided for @commonShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get commonShare;
+
+  /// No description provided for @tablesPrintQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Print'**
+  String get tablesPrintQr;
+
+  /// No description provided for @tablesQrShareText.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan to order at Table {number}'**
+  String tablesQrShareText(String number);
+
+  /// No description provided for @tablesQrShareFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not share the QR code.'**
+  String get tablesQrShareFailed;
+
+  /// No description provided for @tablesQrPrinted.
+  ///
+  /// In en, this message translates to:
+  /// **'QR sent to printer.'**
+  String get tablesQrPrinted;
+
+  /// No description provided for @tablesQrPrintFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not print the QR code.'**
+  String get tablesQrPrintFailed;
 
   /// No description provided for @historyTitle.
   ///

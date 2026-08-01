@@ -81,7 +81,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get commonRefresh => 'रिफ्रेश करा';
 
   @override
-  String get commonEnterValidNumber => 'वैध संख्या टाका';
+  String get commonEnterValidNumber => 'योग्य अंक टाका';
 
   @override
   String commonErrorWithMessage(String message) {
@@ -167,7 +167,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get settingsTitle => 'प्रोफाइल';
 
   @override
-  String get settingsSectionActivity => 'क्रियाकलाप';
+  String get settingsSectionActivity => 'कार्य';
 
   @override
   String get settingsSectionReports => 'अहवाल';
@@ -212,6 +212,13 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get settingsBusinessProfileSubtitle =>
       'नाव, पत्ता, जीएसटी, बिलिंग सेटिंग्ज';
+
+  @override
+  String get settingsSelfOrder => 'ग्राहक QR ऑर्डरिंग';
+
+  @override
+  String get settingsSelfOrderSubtitle =>
+      'ग्राहकांना टेबल QR स्कॅन करून मेनू पाहू आणि ऑर्डर करू द्या';
 
   @override
   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
@@ -872,6 +879,49 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsTitle => 'वस्तू / मेनू';
 
   @override
+  String get menuPhotosTitle => 'मेनू फोटो';
+
+  @override
+  String get menuPhotosTooltip => 'मेनू फोटो';
+
+  @override
+  String get menuPhotosSubtitle => 'QR ऑर्डर मेनूवर ग्राहकांना दिसणारे फोटो.';
+
+  @override
+  String get menuPhotosSearch => 'पदार्थ शोधा…';
+
+  @override
+  String get menuPhotosEmpty =>
+      'अजून वस्तू नाहीत. आधी वस्तू जोडा, नंतर येथे त्यांचे फोटो जोडा.';
+
+  @override
+  String get menuPhotosAdd => 'फोटो जोडा';
+
+  @override
+  String get menuPhotosChange => 'फोटो बदला';
+
+  @override
+  String get menuPhotosRemove => 'फोटो काढा';
+
+  @override
+  String get menuPhotosPickCamera => 'फोटो काढा';
+
+  @override
+  String get menuPhotosPickGallery => 'गॅलरीमधून निवडा';
+
+  @override
+  String get menuPhotosUploading => 'अपलोड होत आहे…';
+
+  @override
+  String get menuPhotosUploadFailed => 'फोटो अपलोड करता आला नाही';
+
+  @override
+  String get menuPhotosRemoveFailed => 'फोटो काढता आला नाही';
+
+  @override
+  String get menuPhotosRemoveConfirm => 'हा फोटो काढायचा?';
+
+  @override
   String get itemsSearch => 'वस्तू शोधा…';
 
   @override
@@ -1074,6 +1124,55 @@ class AppLocalizationsMr extends AppLocalizations {
   String tablesDeleteBody(String number) {
     return '\"$number\" टेबल हटवायचे?';
   }
+
+  @override
+  String get tablesShowQr => 'QR दाखवा / प्रिंट करा';
+
+  @override
+  String get tablesShowQrSubtitle =>
+      'ग्राहक स्कॅन करून मेनू पाहू आणि ऑर्डर करू शकतात';
+
+  @override
+  String get tablesQrNotReady => 'या टेबलसाठी QR कोड अजून तयार नाही.';
+
+  @override
+  String tablesQrTitle(String number) {
+    return 'टेबल $number — ऑर्डर QR';
+  }
+
+  @override
+  String get tablesQrHint =>
+      'हा QR टेबलावर लावा. ग्राहक स्कॅन करून मेनू पाहतात आणि याच टेबलावर ऑर्डर करतात.';
+
+  @override
+  String get tablesRotateQr => 'QR बदला';
+
+  @override
+  String get tablesRotateQrBody =>
+      'यामुळे जुना प्रिंट केलेला QR बंद होईल. बदलल्यानंतर नवीन QR प्रिंट करून लावा. पुढे जायचे?';
+
+  @override
+  String get tablesQrRotated => 'QR कोड बदलला. कृपया स्टिकर पुन्हा प्रिंट करा.';
+
+  @override
+  String get commonShare => 'शेअर करा';
+
+  @override
+  String get tablesPrintQr => 'प्रिंट करा';
+
+  @override
+  String tablesQrShareText(String number) {
+    return 'टेबल $number वर ऑर्डर करण्यासाठी स्कॅन करा';
+  }
+
+  @override
+  String get tablesQrShareFailed => 'QR कोड शेअर करता आला नाही.';
+
+  @override
+  String get tablesQrPrinted => 'QR प्रिंटरला पाठवला.';
+
+  @override
+  String get tablesQrPrintFailed => 'QR कोड प्रिंट करता आला नाही.';
 
   @override
   String get historyTitle => 'इतिहास';

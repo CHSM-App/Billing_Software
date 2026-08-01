@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:ui' show TextAlign;
+import 'dart:ui' as ui show Image;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -533,6 +534,19 @@ class PrinterService {
       bytes = b;
     }
     await _printBytes(printer, bytes);
+  }
+
+  /// Print a QR image (e.g. a table ordering QR) centred on the roll. The image
+  /// is rasterised — works on both Windows and Classic-BT thermal printers.
+  Future<void> printQrImage(ui.Image image) async {
+    final printer = await getActivePrinter();
+    if (printer == null) throw PrinterException('No printer configured');
+    final raster = await RasterLab.imageToReceiptRaster(image);
+    if (_isWindows) {
+      await _printWindows(printer, raster);
+    } else {
+      await _sendClassicBtTuned(printer, raster, 0, 0);
+    }
   }
 
   // -------------------------------------------------------------------------

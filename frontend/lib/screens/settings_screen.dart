@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb; // used to hide printer ti
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
@@ -230,6 +231,11 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const BusinessProfileScreen()),
                         ),
                       ),
+                      // Customer QR self-ordering — restaurants only.
+                      if (session.businessType == 'restaurant_with_tables') ...[
+                        const SizedBox(height: AppSpacing.space8),
+                        const _SelfOrderToggleCard(),
+                      ],
                       const SizedBox(height: AppSpacing.space24),
 
                       _sectionLabel(context, l10n.settingsSectionTeam),
@@ -727,6 +733,86 @@ class _SyncConflictTileState extends State<_SyncConflictTile> {
                   size: 18, color: AppColors.textSecondary),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Owner toggle (restaurants) to enable customer self-ordering via table QR.
+/// Loads the current business setting and persists changes immediately.
+class _SelfOrderToggleCard extends ConsumerStatefulWidget {
+  const _SelfOrderToggleCard();
+
+  @override
+  ConsumerState<_SelfOrderToggleCard> createState() =>
+      _SelfOrderToggleCardState();
+}
+
+class _SelfOrderToggleCardState extends ConsumerState<_SelfOrderToggleCard> {
+  bool? _enabled;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final profile = await getBusinessProfile();
+      if (mounted) {
+        setState(() => _enabled = profile['self_order_enabled'] == true);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _enabled = false);
+    }
+  }
+
+  Future<void> _toggle(bool value) async {
+    final previous = _enabled;
+    setState(() {
+      _enabled = value;
+      _saving = true;
+    });
+    try {
+      await updateBusinessProfile({'self_order_enabled': value});
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _enabled = previous);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: SwitchListTile(
+        value: _enabled ?? false,
+        onChanged: (_enabled == null || _saving) ? null : _toggle,
+        secondary: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(AppRadius.small),
+          ),
+          child: const Icon(Icons.qr_code_2, color: AppColors.primary, size: 20),
+        ),
+        title: Text(l10n.settingsSelfOrder),
+        subtitle: Text(l10n.settingsSelfOrderSubtitle),
+        activeThumbColor: AppColors.primary,
       ),
     );
   }

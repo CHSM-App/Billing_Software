@@ -1,6 +1,10 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 import '../api.dart';
+import '../services/printer_service.dart';
+import '../services/table_qr_image.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
@@ -204,6 +208,201 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     }
   }
 
+  /// Owner long-press: table management options (QR + delete).
+  void _showTableOptions(TableModel table) {
+    final l10n = context.l10n;
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.space16),
+              child: Text(l10n.tablesTableLabel(table.tableNumber),
+                  style: Theme.of(context).textTheme.titleMedium),
+            ),
+            ListTile(
+              leading: const Icon(Icons.qr_code_2),
+              title: Text(l10n.tablesShowQr),
+              subtitle: Text(l10n.tablesShowQrSubtitle),
+              onTap: () {
+                Navigator.pop(context);
+                _showQrDialog(table);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: AppColors.error),
+              title: Text(l10n.commonDelete,
+                  style: const TextStyle(color: AppColors.error)),
+              onTap: () {
+                Navigator.pop(context);
+                _deleteTable(table);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Shows the table's customer-ordering QR. Customers scan it to open the menu
+  /// and order to this table. Owner can rotate it to invalidate an old sticker.
+  void _showQrDialog(TableModel table) {
+    final l10n = context.l10n;
+    if (table.qrToken == null || table.qrToken!.isEmpty) {
+      _showSnack(l10n.tablesQrNotReady, isError: true);
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        // Read the freshest table (qrToken may change after a rotate).
+        return Consumer(builder: (ctx, dialogRef, __) {
+          final current = dialogRef.watch(tablesProvider).maybeWhen(
+                data: (list) => list.firstWhere((t) => t.id == table.id,
+                    orElse: () => table),
+                orElse: () => table,
+              );
+          final url = tableOrderUrl(current.qrToken ?? table.qrToken!);
+          return AlertDialog(
+            title: Text(l10n.tablesQrTitle(table.tableNumber)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Preview matches exactly what shares/prints — QR with the
+                  // table name in the centre.
+                  FutureBuilder<Uint8List>(
+                    future: TableQrImage.renderPng(
+                        data: url, label: table.tableNumber, pixelSize: 440),
+                    builder: (ctx, snap) {
+                      if (!snap.hasData) {
+                        return const SizedBox(
+                          width: 220,
+                          height: 220,
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      return Container(
+                        color: Colors.white,
+                        padding: const EdgeInsets.all(AppSpacing.space8),
+                        child: Image.memory(snap.data!, width: 220, height: 220),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.space12),
+                  Text(l10n.tablesQrHint,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: AppSpacing.space8),
+                  SelectableText(url,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.textSecondary)),
+                  const SizedBox(height: AppSpacing.space12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () =>
+                            _shareQr(url, table.tableNumber),
+                        icon: const Icon(Icons.share_outlined, size: 18),
+                        label: Text(l10n.commonShare),
+                      ),
+                      TextButton.icon(
+                        onPressed: () =>
+                            _printQr(url, table.tableNumber),
+                        icon: const Icon(Icons.print_outlined, size: 18),
+                        label: Text(l10n.tablesPrintQr),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => _rotateQr(table.id),
+                child: Text(l10n.tablesRotateQr,
+                    style: const TextStyle(color: AppColors.error)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: Text(l10n.commonClose),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+
+  Future<void> _rotateQr(String tableId) async {
+    final l10n = context.l10n;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(l10n.tablesRotateQr),
+        content: Text(l10n.tablesRotateQrBody),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(l10n.commonCancel)),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.tablesRotateQr,
+                style: const TextStyle(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await rotateTableQr(tableId);
+      ref.invalidate(tablesProvider);
+      if (mounted) _showSnack(l10n.tablesQrRotated);
+    } on ApiException catch (e) {
+      _showSnack(e.message, isError: true);
+    }
+  }
+
+  /// Share the table QR as a PNG via the system share sheet.
+  Future<void> _shareQr(String url, String tableNumber) async {
+    final l10n = context.l10n;
+    try {
+      final png = await TableQrImage.renderPng(
+          data: url, label: tableNumber, pixelSize: 800);
+      await Share.shareXFiles(
+        [
+          XFile.fromData(png,
+              name: 'table_${tableNumber}_qr.png', mimeType: 'image/png')
+        ],
+        text: l10n.tablesQrShareText(tableNumber),
+      );
+    } catch (e) {
+      if (mounted) _showSnack(l10n.tablesQrShareFailed, isError: true);
+    }
+  }
+
+  /// Print the table QR to the connected thermal printer.
+  Future<void> _printQr(String url, String tableNumber) async {
+    final l10n = context.l10n;
+    try {
+      final image = await TableQrImage.render(
+          data: url, label: tableNumber, pixelSize: 600);
+      await PrinterService.instance.printQrImage(image);
+      image.dispose();
+      if (mounted) _showSnack(l10n.tablesQrPrinted);
+    } on PrinterException catch (e) {
+      if (mounted) _showSnack(e.message, isError: true);
+    } catch (e) {
+      if (mounted) _showSnack(l10n.tablesQrPrintFailed, isError: true);
+    }
+  }
+
   void _showSnack(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
@@ -315,7 +514,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           top: offset.dy,
           child: GestureDetector(
             onTap: () => _onTableTap(table),
-            onLongPress: userRole == 'owner' ? () => _deleteTable(table) : null,
+            onLongPress:
+                userRole == 'owner' ? () => _showTableOptions(table) : null,
             onPanUpdate: userRole == 'owner'
                 ? (details) {
                     setState(() {

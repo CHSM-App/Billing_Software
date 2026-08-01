@@ -50,6 +50,16 @@ const path = require('path');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 app.use(express.static(PUBLIC_DIR));
 
+// Customer-uploaded item photos live in backend/uploads (OUTSIDE public/, which
+// CI rebuilds and force-pushes on deploy). Served read-only at /uploads so the
+// URL stored in items.image_url ("/uploads/items/<id>.jpg") resolves. Long cache
+// since filenames are stable and the app appends a ?v= cache-buster on change.
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+app.use('/uploads', express.static(UPLOADS_DIR, {
+  maxAge: '7d',
+  fallthrough: true,
+}));
+
 // ---------------------------------------------------------------------------
 // CORS
 // ---------------------------------------------------------------------------
@@ -161,6 +171,7 @@ app.use('/api/items', require('./routes/items'));
 app.use('/api/raw-materials', require('./routes/raw_materials'));
 app.use('/api/bills', require('./routes/bills'));
 app.use('/receipt',  require('./routes/receipt'));
+app.use('/order',    require('./routes/public_order'));
 app.use('/api/tables', require('./routes/tables'));
 app.use('/api/kitchen', require('./routes/kitchen'));
 app.use('/api/reports', require('./routes/reports'));

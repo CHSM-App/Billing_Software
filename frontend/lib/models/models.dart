@@ -111,6 +111,11 @@ class Item {
   final List<ItemVariant> variants;
   final bool isActive;
 
+  /// Customer-facing dish photo URL. Only populated by the owner-only Menu
+  /// Photos endpoints; the billing/items list leaves this null so photos never
+  /// load during billing.
+  final String? imageUrl;
+
   Item({
     required this.id,
     required this.businessId,
@@ -124,6 +129,7 @@ class Item {
     this.unit = 'piece',
     this.variants = const [],
     required this.isActive,
+    this.imageUrl,
   });
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
@@ -141,6 +147,7 @@ class Item {
             .map((v) => ItemVariant.fromJson(v))
             .toList(),
         isActive: j['is_active'] == true || j['is_active'] == 1,
+        imageUrl: j['image_url'] as String?,
       );
 
   /// Whether this item is sold by a divisible measure (kg, g, litre, ...)
@@ -458,6 +465,7 @@ class TableModel {
   final double floorY;
   final String status;
   final String? activeBillId;
+  final String? qrToken;
 
   TableModel({
     required this.id,
@@ -467,6 +475,7 @@ class TableModel {
     required this.floorY,
     required this.status,
     this.activeBillId,
+    this.qrToken,
   });
 
   factory TableModel.fromJson(Map<String, dynamic> j) => TableModel(
@@ -477,5 +486,6 @@ class TableModel {
         floorY: double.parse(j['floor_y'].toString()),
         status: j['status'],
         activeBillId: j['active_bill_id'],
+        qrToken: j['qr_token'] as String?,
       );
 }

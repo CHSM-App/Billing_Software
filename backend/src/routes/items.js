@@ -1,10 +1,35 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const audit = require('../audit');
 
 const router = express.Router();
+
+// Item photos are compressed on the device and uploaded as JPEG. They live on
+// disk under backend/uploads/items and are served by an explicit static mount
+// at /uploads (see server.js); the public URL path is stored in items.image_url.
+//
+// IMPORTANT: this dir is OUTSIDE public/ on purpose. CI rebuilds public/ (the
+// landing page) and force-pushes the backend folder to an orphan branch, so
+// anything under public/ can be clobbered on deploy. uploads/ lives beside it,
+// untouched by that flow, so customer photos persist across deploys.
+//
+// Photos are customer-facing only (shown on the QR order menu) — the staff
+// item/billing payloads never include them. See PUT/DELETE /:id/image below.
+const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'items');
+// Created at server startup too (server.js), but ensure it here so the route is
+// self-sufficient in tests that require this module directly.
+try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (_) {}
+
+// A JPEG always starts with the SOI marker FF D8 FF. We reject anything else so
+// a client can't drop arbitrary bytes (or another image type) onto disk.
+function isJpeg(buf) {
+  return Buffer.isBuffer(buf) && buf.length > 3 &&
+    buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+}
 
 function ownerOnly(req, res, next) {
   if (req.user.role !== 'owner') {
@@ -64,6 +89,28 @@ router.get('/top-sold', requireAuth, async (req, res) => {
   } catch (err) {
     logger.error({ err }, 'Get top-sold error');
     return res.status(500).json({ error: 'Failed to fetch top-sold items' });
+  }
+});
+
+// GET /api/items/with-images — owner-only list for the Menu Photos screen.
+// Defined before /:id so the literal path isn't swallowed by the id param.
+// This is the ONE staff route that returns image_url; the billing/items list
+// (GET /) deliberately omits it so photos never appear during billing.
+router.get('/with-images', requireAuth, ownerOnly, async (req, res) => {
+  try {
+    await poolConnect;
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query(`
+        SELECT id, name, category, price, image_url
+        FROM items
+        WHERE business_id = @business_id AND is_active = 1
+        ORDER BY category ASC, name ASC
+      `);
+    return res.json(result.recordset);
+  } catch (err) {
+    logger.error({ err }, 'Get items with images error');
+    return res.status(500).json({ error: 'Failed to fetch items' });
   }
 });
 
@@ -150,7 +197,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, unit, is_active, created_at
+        SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, unit, is_active, created_at, image_url
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -320,6 +367,79 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
   } catch (err) {
     logger.error({ err }, 'Delete item error');
     return res.status(500).json({ error: 'Failed to delete item' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Item photo (customer-facing only). The owner uploads a JPEG that the device
+// has already resized/compressed. We store it on disk and record its public URL
+// in items.image_url; the QR order menu serves it. Billing never sees photos.
+// ---------------------------------------------------------------------------
+
+// Raw JPEG body, scoped to this route only so no other route pays the cost and
+// the global JSON parser is untouched. 2MB is generous for a ~1000px JPEG.
+const jpegBody = express.raw({ type: 'image/jpeg', limit: '2mb' });
+
+// PUT /api/items/:id/image — replace the item's photo. Body is the JPEG bytes.
+router.put('/:id/image', requireAuth, ownerOnly, jpegBody, async (req, res) => {
+  const buf = req.body;
+  if (!isJpeg(buf)) {
+    return res.status(400).json({ error: 'A JPEG image body is required' });
+  }
+  try {
+    await poolConnect;
+    // Verify ownership before writing anything to disk.
+    const check = await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query('SELECT id FROM items WHERE id = @id AND business_id = @business_id AND is_active = 1');
+    if (check.recordset.length === 0) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    // Filename is the item id; a cache-busting ?v= is added to the URL so a
+    // replaced photo shows immediately despite the stable filename.
+    const fileName = `${req.params.id}.jpg`;
+    await fs.promises.writeFile(path.join(UPLOAD_DIR, fileName), buf);
+    const imageUrl = `/uploads/items/${fileName}?v=${Date.now()}`;
+
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .input('image_url', sql.NVarChar(500), imageUrl)
+      .query('UPDATE items SET image_url = @image_url WHERE id = @id AND business_id = @business_id');
+
+    return res.json({ image_url: imageUrl });
+  } catch (err) {
+    logger.error({ err }, 'Upload item image error');
+    return res.status(500).json({ error: 'Failed to save image' });
+  }
+});
+
+// DELETE /api/items/:id/image — remove the photo and clear image_url.
+router.delete('/:id/image', requireAuth, ownerOnly, async (req, res) => {
+  try {
+    await poolConnect;
+    const check = await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query('SELECT id FROM items WHERE id = @id AND business_id = @business_id');
+    if (check.recordset.length === 0) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query('UPDATE items SET image_url = NULL WHERE id = @id AND business_id = @business_id');
+
+    // Best-effort file removal — a missing file is fine.
+    fs.promises.unlink(path.join(UPLOAD_DIR, `${req.params.id}.jpg`)).catch(() => {});
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Delete item image error');
+    return res.status(500).json({ error: 'Failed to delete image' });
   }
 });
 

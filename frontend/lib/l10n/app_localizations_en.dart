@@ -213,6 +213,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Name, address, GST, billing settings';
 
   @override
+  String get settingsSelfOrder => 'Customer QR Ordering';
+
+  @override
+  String get settingsSelfOrderSubtitle =>
+      'Let customers scan a table QR to view the menu and order';
+
+  @override
   String get settingsManageStaff => 'Manage Staff';
 
   @override
@@ -868,6 +875,50 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsTitle => 'Items / Menu';
 
   @override
+  String get menuPhotosTitle => 'Menu Photos';
+
+  @override
+  String get menuPhotosTooltip => 'Menu photos';
+
+  @override
+  String get menuPhotosSubtitle =>
+      'Photos shown to customers on the QR order menu.';
+
+  @override
+  String get menuPhotosSearch => 'Search dishes…';
+
+  @override
+  String get menuPhotosEmpty =>
+      'No items yet. Add items first, then add their photos here.';
+
+  @override
+  String get menuPhotosAdd => 'Add photo';
+
+  @override
+  String get menuPhotosChange => 'Change photo';
+
+  @override
+  String get menuPhotosRemove => 'Remove photo';
+
+  @override
+  String get menuPhotosPickCamera => 'Take photo';
+
+  @override
+  String get menuPhotosPickGallery => 'Choose from gallery';
+
+  @override
+  String get menuPhotosUploading => 'Uploading…';
+
+  @override
+  String get menuPhotosUploadFailed => 'Could not upload photo';
+
+  @override
+  String get menuPhotosRemoveFailed => 'Could not remove photo';
+
+  @override
+  String get menuPhotosRemoveConfirm => 'Remove this photo?';
+
+  @override
   String get itemsSearch => 'Search items…';
 
   @override
@@ -1069,6 +1120,55 @@ class AppLocalizationsEn extends AppLocalizations {
   String tablesDeleteBody(String number) {
     return 'Delete table \"$number\"?';
   }
+
+  @override
+  String get tablesShowQr => 'Show / Print QR';
+
+  @override
+  String get tablesShowQrSubtitle =>
+      'Customers scan to view the menu and order';
+
+  @override
+  String get tablesQrNotReady => 'QR code is not ready for this table yet.';
+
+  @override
+  String tablesQrTitle(String number) {
+    return 'Table $number — Order QR';
+  }
+
+  @override
+  String get tablesQrHint =>
+      'Stick this on the table. Customers scan it to see the menu and order to this table.';
+
+  @override
+  String get tablesRotateQr => 'Rotate QR';
+
+  @override
+  String get tablesRotateQrBody =>
+      'This makes the old printed QR stop working. Print and place a new one after rotating. Continue?';
+
+  @override
+  String get tablesQrRotated => 'QR code rotated. Please reprint the sticker.';
+
+  @override
+  String get commonShare => 'Share';
+
+  @override
+  String get tablesPrintQr => 'Print';
+
+  @override
+  String tablesQrShareText(String number) {
+    return 'Scan to order at Table $number';
+  }
+
+  @override
+  String get tablesQrShareFailed => 'Could not share the QR code.';
+
+  @override
+  String get tablesQrPrinted => 'QR sent to printer.';
+
+  @override
+  String get tablesQrPrintFailed => 'Could not print the QR code.';
 
   @override
   String get historyTitle => 'History';
