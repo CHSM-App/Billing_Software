@@ -812,7 +812,9 @@ class _SelfOrderToggleCardState extends ConsumerState<_SelfOrderToggleCard> {
         ),
         title: Text(l10n.settingsSelfOrder),
         subtitle: Text(l10n.settingsSelfOrderSubtitle),
-        activeThumbColor: AppColors.primary,
+        // Selected-thumb color comes from the app theme's switchTheme
+        // (AppColors.primary). No per-widget override — it also keeps this
+        // compiling across Flutter versions (the param was renamed in 3.38).
       ),
     );
   }
