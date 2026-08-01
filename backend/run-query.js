@@ -1,7 +1,13 @@
 const { pool, poolConnect } = require('./src/db');
 
 // ─── PUT YOUR SQL QUERY HERE ───────────────────────────────────────────────
-const QUERY = `select * from users`;
+const QUERY = `
+  SELECT t.table_number, t.qr_token, t.business_id,
+         bs.name AS shop_name, bs.self_order_enabled
+  FROM tables t
+  JOIN businesses bs ON bs.id = t.business_id
+  WHERE t.qr_token = '118D6D35D27241749058141BC7305C5D'
+`;
 // ──────────────────────────────────────────────────────────────────────────
 
 async function main() {

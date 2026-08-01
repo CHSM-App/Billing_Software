@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#4F46E5" />
+  <title>Order</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* Palette mirrors the Flutter app's design system (lib/theme/app_theme.dart):
+       indigo primary, emerald accent, slate neutrals, Inter type, matched radii
+       and shadows — so the customer web page feels like the same product. */
+    :root {
+      --brand: #4F46E5;        /* AppColors.primary */
+      --brand-dark: #3730A3;   /* AppColors.primaryDark */
+      --brand-light: #EEF2FF;  /* AppColors.primaryLight */
+      --brand-grad: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); /* primaryGradient */
+      --accent: #10B981;       /* AppColors.accent */
+      --accent-light: #D1FAE5; /* AppColors.accentLight */
+      --bg: #F8F9FC;           /* AppColors.background */
+      --card: #FFFFFF;         /* AppColors.surface */
+      --surface-variant: #F1F5F9;
+      --text: #0F172A;         /* AppColors.textPrimary */
+      --muted: #64748B;        /* AppColors.textSecondary */
+      --line: #E2E8F0;         /* AppColors.border */
+      --danger: #EF4444;       /* AppColors.error */
+      --ok: #10B981;           /* AppColors.success */
+      /* radii — AppRadius */
+      --r-sm: 10px; --r-md: 14px; --r-lg: 20px;
+      /* shadows — AppShadow */
+      --sh-sm: 0 2px 8px rgba(15,23,42,.06);
+      --sh-md: 0 4px 16px rgba(15,23,42,.08), 0 1px 4px rgba(15,23,42,.04);
+      --sh-primary: 0 6px 20px rgba(79,70,229,.30);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text); padding-bottom: 100px;
+      -webkit-font-smoothing: antialiased; letter-spacing: -0.1px;
+    }
+    header {
+      background: var(--brand-grad); color: #fff; padding: 18px 16px; position: sticky; top: 0; z-index: 20;
+      display: flex; align-items: center; gap: 12px; box-shadow: var(--sh-primary);
+    }
+    header img { width: 42px; height: 42px; border-radius: var(--r-sm); object-fit: cover;
+      background: rgba(255,255,255,.18); }
+    header .shop { font-weight: 700; font-size: 18px; line-height: 1.2; letter-spacing: -0.3px; }
+    header .tbl { font-size: 13px; opacity: .85; font-weight: 500; margin-top: 2px; }
+    .cats { position: sticky; top: 78px; z-index: 15; background: rgba(248,249,252,.92);
+      backdrop-filter: saturate(180%) blur(8px); padding: 12px; display: flex; gap: 8px;
+      overflow-x: auto; border-bottom: 1px solid var(--line); }
+    .cats button { flex: 0 0 auto; border: 1px solid var(--line); background: var(--card);
+      color: var(--muted); padding: 8px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
+      font-family: inherit; transition: all .18s ease; }
+    .cats button.active { background: var(--brand-light); color: var(--brand-dark);
+      border-color: var(--brand); }
+    main { padding: 12px; }
+    .cat-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--muted); margin: 18px 4px 8px; font-weight: 700; }
+    .item { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md);
+      padding: 14px; margin-bottom: 10px; display: flex; gap: 12px; box-shadow: var(--sh-sm); }
+    .item img { width: 68px; height: 68px; border-radius: var(--r-sm); object-fit: cover; flex: 0 0 auto;
+      background: var(--surface-variant); cursor: zoom-in; }
+    /* image lightbox — tap a dish photo to see it large */
+    .lightbox { position: fixed; inset: 0; background: rgba(15,23,42,.86); z-index: 60;
+      display: none; align-items: center; justify-content: center; padding: 20px;
+      opacity: 0; transition: opacity .2s ease; }
+    .lightbox.show { display: flex; opacity: 1; }
+    .lightbox img { max-width: 100%; max-height: 80vh; border-radius: var(--r-md);
+      box-shadow: 0 12px 48px rgba(0,0,0,.5); animation: zoomIn .24s cubic-bezier(.16,1,.3,1); }
+    @keyframes zoomIn { from { transform: scale(.9); opacity: .4; } to { transform: scale(1); opacity: 1; } }
+    .lightbox .cap { position: absolute; left: 0; right: 0; bottom: 28px; text-align: center;
+      color: #fff; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; padding: 0 24px;
+      text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+    .lightbox .close { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px;
+      border-radius: 999px; border: none; background: rgba(255,255,255,.18); color: #fff;
+      font-size: 22px; line-height: 1; font-family: inherit; }
+    .item .info { flex: 1; min-width: 0; }
+    .item .name { font-weight: 600; font-size: 15px; letter-spacing: -0.2px; }
+    .item .price { color: var(--brand); font-weight: 700; font-size: 14px; margin-top: 3px; }
+    .variants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .variants button { border: 1px solid var(--line); background: var(--surface-variant);
+      border-radius: var(--r-sm); padding: 6px 12px; font-size: 13px; color: var(--text);
+      font-family: inherit; font-weight: 500; transition: all .18s ease; }
+    .variants button.sel { border-color: var(--brand); background: var(--brand-light);
+      color: var(--brand-dark); font-weight: 600; }
+    .stepper { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .stepper button { width: 34px; height: 34px; border-radius: var(--r-sm); border: none; font-size: 20px;
+      background: var(--brand); color: #fff; line-height: 1; font-family: inherit;
+      box-shadow: 0 2px 6px rgba(79,70,229,.25); transition: transform .12s ease; }
+    .stepper button:active { transform: scale(.92); }
+    .stepper button:disabled { opacity: .35; box-shadow: none; }
+    .stepper .qty { min-width: 22px; text-align: center; font-weight: 700; font-size: 15px; }
+    .stepper .add { width: auto; padding: 0 18px; height: 36px; border-radius: var(--r-sm); font-size: 14px;
+      font-weight: 600; letter-spacing: 0.2px; }
+    .cart-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--brand-grad);
+      color: #fff; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 -4px 20px rgba(79,70,229,.25); z-index: 30; }
+    .cart-bar.hidden { display: none; }
+    .cart-bar .count { font-size: 13px; opacity: .9; font-weight: 500; }
+    .cart-bar .total { font-weight: 800; font-size: 19px; letter-spacing: -0.3px; }
+    .cart-bar button { background: #fff; color: var(--brand-dark); border: none; border-radius: var(--r-sm);
+      padding: 12px 20px; font-weight: 700; font-size: 15px; font-family: inherit;
+      box-shadow: var(--sh-sm); transition: transform .12s ease; }
+    .cart-bar button:active { transform: scale(.96); }
+    .running { background: var(--accent-light); border: 1px solid #a7f3d0; border-radius: var(--r-md);
+      padding: 14px; margin-bottom: 10px; box-shadow: var(--sh-sm); }
+    .running h3 { margin: 0 0 10px; font-size: 14px; color: #047857; font-weight: 700; letter-spacing: -0.2px; }
+    .running .row { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; }
+    .running .row .st { font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 1px; }
+    /* modal */
+    .backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 40; display: none;
+      align-items: flex-end; }
+    .backdrop.show { display: flex; }
+    .sheet { background: var(--card); width: 100%; border-radius: var(--r-lg) var(--r-lg) 0 0; padding: 24px;
+      box-shadow: 0 -8px 40px rgba(15,23,42,.2); animation: sheetUp .28s cubic-bezier(.16,1,.3,1); }
+    @keyframes sheetUp { from { transform: translateY(20px); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
+    .sheet h2 { margin: 0 0 6px; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+    .sheet p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .sheet input { width: 100%; padding: 15px; border: 1px solid var(--line); border-radius: var(--r-sm);
+      font-size: 16px; margin-bottom: 12px; font-family: inherit; background: var(--surface-variant);
+      color: var(--text); transition: border-color .18s ease, background .18s ease; }
+    .sheet input:focus { outline: none; border-color: var(--brand); border-width: 2px;
+      padding: 14px; background: var(--card); }
+    .sheet input::placeholder { color: #94A3B8; }
+    .sheet .btn { width: 100%; padding: 16px; background: var(--brand); color: #fff; border: none;
+      border-radius: var(--r-md); font-size: 16px; font-weight: 600; font-family: inherit;
+      letter-spacing: 0.2px; box-shadow: var(--sh-primary); transition: transform .12s ease; }
+    .sheet .btn:active { transform: scale(.98); }
+    .sheet .btn:disabled { opacity: .5; box-shadow: none; }
+    .sheet .err { color: var(--danger); font-size: 13px; margin: -6px 0 12px; min-height: 16px; font-weight: 500; }
+    .center { text-align: center; padding: 48px 20px; color: var(--muted); font-size: 14px; }
+    .toast { position: fixed; left: 50%; bottom: 116px; transform: translateX(-50%);
+      background: var(--text); color: #fff; padding: 12px 22px; border-radius: 999px; font-weight: 600;
+      z-index: 50; opacity: 0; transition: opacity .25s; font-size: 14px; box-shadow: var(--sh-md); }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <img id="logo" alt="" style="display:none" />
+    <div>
+      <div class="shop" id="shopName">Loading…</div>
+      <div class="tbl" id="tableLabel"></div>
+    </div>
+  </header>
+
+  <div class="cats" id="cats"></div>
+  <main id="main"><div class="center">Loading menu…</div></main>
+
+  <div class="cart-bar hidden" id="cartBar">
+    <div>
+      <div class="count" id="cartCount">0 items</div>
+      <div class="total" id="cartTotal">₹0</div>
+    </div>
+    <button id="placeBtn">Place Order</button>
+  </div>
+
+  <!-- OTP sheet -->
+  <div class="backdrop" id="otpBackdrop">
+    <div class="sheet">
+      <h2 id="otpTitle">Verify your phone</h2>
+      <p id="otpSub">We'll send a one-time code on WhatsApp to confirm your order.</p>
+      <input id="nameInput" type="text" placeholder="Your name (optional)" autocomplete="name" />
+      <input id="phoneInput" type="tel" placeholder="Mobile number" autocomplete="tel" inputmode="numeric" />
+      <input id="otpInput" type="text" placeholder="Enter OTP" inputmode="numeric" style="display:none" />
+      <div class="err" id="otpErr"></div>
+      <button class="btn" id="otpBtn">Send OTP</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Image lightbox — shows a tapped dish photo enlarged -->
+  <div class="lightbox" id="lightbox">
+    <button class="close" id="lightboxClose" aria-label="Close">×</button>
+    <img id="lightboxImg" src="" alt="" />
+    <div class="cap" id="lightboxCap"></div>
+  </div>
+
+  <script>
+  (function () {
+    // qrToken is the last path segment of /order/:qrToken
+    var parts = location.pathname.split('/').filter(Boolean);
+    var qrToken = parts[parts.length - 1];
+    var API = '/order/' + encodeURIComponent(qrToken);
+    var LS_TOKEN = 'order_token_' + qrToken;
+    var LS_PHONE = 'order_phone_' + qrToken;
+
+    var menu = [];            // items
+    var cart = {};            // key -> { item_id, variant_id, name, price, qty }
+    var selVariant = {};      // item_id -> variant_id
+    var activeCat = null;
+    var orderToken = localStorage.getItem(LS_TOKEN) || null;
+
+    var $ = function (id) { return document.getElementById(id); };
+    var rupee = function (n) { return '₹' + Number(n).toFixed(Number(n) % 1 ? 2 : 0); };
+    function esc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+
+    function toast(msg) {
+      var t = $('toast'); t.textContent = msg; t.classList.add('show');
+      setTimeout(function () { t.classList.remove('show'); }, 2200);
+    }
+
+    // ---- image lightbox ----
+    function openLightbox(src, name) {
+      if (!src) return;
+      $('lightboxImg').src = src;
+      $('lightboxImg').alt = name || '';
+      $('lightboxCap').textContent = name || '';
+      $('lightbox').classList.add('show');
+    }
+    function closeLightbox() {
+      $('lightbox').classList.remove('show');
+      // Drop the src so a large image isn't held in memory while hidden.
+      $('lightboxImg').src = '';
+    }
+    $('lightbox').onclick = function (e) {
+      // Tapping the backdrop (not the image) closes it.
+      if (e.target === this) closeLightbox();
+    };
+    $('lightboxClose').onclick = closeLightbox;
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeLightbox();
+    });
+
+    // Persistent, prominent notice when ordering is blocked (table busy or being
+    // settled). Replaces the cart bar with an explanatory banner.
+    function showBlocked(code, message) {
+      cart = {};
+      render();
+      var title = code === 'table_billed'
+        ? 'Table is being settled'
+        : 'Table has a running order';
+      var body = message ||
+        (code === 'table_billed'
+          ? 'This table is being paid for at the counter. Please wait or ask staff.'
+          : 'This table already has a running order. Please ask staff for help.');
+      var el = document.getElementById('blockedBanner');
+      var html =
+        '<div id="blockedBanner" class="running" style="background:#fef2f2;border-color:#fecaca">' +
+        '<h3 style="color:#991b1b">⚠️ ' + esc(title) + '</h3>' +
+        '<div style="font-size:14px;color:#7f1d1d">' + esc(body) + '</div></div>';
+      var main = $('main');
+      if (el) el.outerHTML = html; else main.insertAdjacentHTML('afterbegin', html);
+      $('cartBar').classList.add('hidden');
+    }
+
+    function keyOf(itemId, variantId) { return itemId + '::' + (variantId || ''); }
+
+    function unitPrice(item, variantId) {
+      if (variantId) {
+        var v = (item.variants || []).find(function (x) { return x.id === variantId; });
+        if (v && v.price != null) return Number(v.price);
+      }
+      return Number(item.price);
+    }
+
+    // ---- load menu + running order ----
+    function load() {
+      fetch(API + '/menu').then(function (r) {
+        if (!r.ok) throw new Error('menu');
+        return r.json();
+      }).then(function (data) {
+        $('shopName').textContent = data.shop_name;
+        $('tableLabel').textContent = 'Table ' + data.table_number;
+        document.title = data.shop_name + ' — Table ' + data.table_number;
+        if (data.shop_logo) { $('logo').src = data.shop_logo; $('logo').style.display = 'block'; }
+        menu = data.items || [];
+        renderCats();
+        render();
+        loadCurrent();
+      }).catch(function () {
+        $('main').innerHTML = '<div class="center">Menu is not available right now.</div>';
+      });
+    }
+
+    function loadCurrent() {
+      if (!orderToken) return;
+      fetch(API + '/current', { headers: { Authorization: 'Bearer ' + orderToken } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.verified === false) { orderToken = null; localStorage.removeItem(LS_TOKEN); return; }
+          renderRunning(d);
+        }).catch(function () {});
+    }
+
+    function renderRunning(d) {
+      var el = $('runningBox');
+      if (!d || !d.items || d.items.length === 0) { if (el) el.remove(); return; }
+      var html = '<div class="running" id="runningBox"><h3>Your table\'s order — ' +
+        esc(d.bill_number || '') + '</h3>';
+      d.items.forEach(function (i) {
+        html += '<div class="row"><span>' + esc(i.item_name) + ' × ' + i.quantity +
+          '<div class="st">' + (i.kitchen_status === 'ready' ? '✅ Ready' : '👨‍🍳 Preparing') +
+          '</div></span><span>' + rupee(i.line_total) + '</span></div>';
+      });
+      html += '<div class="row" style="border-top:1px solid #a7f3d0;margin-top:6px;padding-top:6px;font-weight:700"><span>Total</span><span>' +
+        rupee(d.total) + '</span></div></div>';
+      var main = $('main');
+      if (el) el.outerHTML = html; else main.insertAdjacentHTML('afterbegin', html);
+    }
+
+    function categories() {
+      var seen = [], out = [];
+      menu.forEach(function (i) {
+        var c = i.category || 'Menu';
+        if (seen.indexOf(c) === -1) { seen.push(c); out.push(c); }
+      });
+      return out;
+    }
+
+    function renderCats() {
+      var cats = categories();
+      activeCat = activeCat || cats[0] || null;
+      $('cats').innerHTML = cats.map(function (c) {
+        return '<button data-cat="' + esc(c) + '" class="' + (c === activeCat ? 'active' : '') + '">' + esc(c) + '</button>';
+      }).join('');
+      Array.prototype.forEach.call($('cats').children, function (b) {
+        b.onclick = function () { activeCat = b.getAttribute('data-cat'); renderCats(); render(); scrollTo(0, 0); };
+      });
+    }
+
+    function render() {
+      var main = $('main');
+      var running = $('runningBox');
+      var items = menu.filter(function (i) { return (i.category || 'Menu') === activeCat; });
+      var html = '';
+      if (items.length === 0) html = '<div class="center">No items in this category.</div>';
+      items.forEach(function (item) {
+        var vSel = selVariant[item.id] || null;
+        var price = unitPrice(item, vSel);
+        var k = keyOf(item.id, vSel);
+        var inCart = cart[k];
+        html += '<div class="item">';
+        if (item.image_url) html += '<img src="' + esc(item.image_url) + '" alt="' +
+          esc(item.name) + '" data-img="' + esc(item.image_url) + '" data-name="' + esc(item.name) + '" />';
+        html += '<div class="info"><div class="name">' + esc(item.name) + '</div>' +
+          '<div class="price">' + rupee(price) + '</div>';
+        if (item.variants && item.variants.length) {
+          html += '<div class="variants">' + item.variants.map(function (v) {
+            return '<button data-item="' + item.id + '" data-variant="' + v.id + '" class="' +
+              (v.id === vSel ? 'sel' : '') + '">' + esc(v.label) + '</button>';
+          }).join('') + '</div>';
+        }
+        html += '<div class="stepper">';
+        if (inCart) {
+          html += '<button data-dec="' + k + '">−</button><span class="qty">' + inCart.qty +
+            '</span><button data-inc="' + k + '">+</button>';
+        } else {
+          html += '<button class="add" data-add="' + k + '" data-item="' + item.id + '">Add</button>';
+        }
+        html += '</div></div></div>';
+      });
+      main.innerHTML = html;
+      if (running) main.insertAdjacentElement('afterbegin', running);
+      wireItems();
+      renderCart();
+    }
+
+    function wireItems() {
+      // Tap a dish photo to open it enlarged in the lightbox.
+      Array.prototype.forEach.call(document.querySelectorAll('[data-img]'), function (im) {
+        im.onclick = function () {
+          openLightbox(im.getAttribute('data-img'), im.getAttribute('data-name'));
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-variant]'), function (b) {
+        b.onclick = function () {
+          selVariant[b.getAttribute('data-item')] = b.getAttribute('data-variant');
+          render();
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-add]'), function (b) {
+        b.onclick = function () {
+          var itemId = b.getAttribute('data-item');
+          var vSel = selVariant[itemId] || null;
+          var item = menu.find(function (x) { return x.id === itemId; });
+          var k = keyOf(itemId, vSel);
+          cart[k] = { item_id: itemId, variant_id: vSel, name: item.name +
+            (vSel ? ' (' + (item.variants.find(function(v){return v.id===vSel;})||{}).label + ')' : ''),
+            price: unitPrice(item, vSel), qty: 1 };
+          render();
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-inc]'), function (b) {
+        b.onclick = function () { cart[b.getAttribute('data-inc')].qty++; render(); };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-dec]'), function (b) {
+        b.onclick = function () {
+          var k = b.getAttribute('data-dec');
+          cart[k].qty--; if (cart[k].qty <= 0) delete cart[k];
+          render();
+        };
+      });
+    }
+
+    function cartLines() { return Object.keys(cart).map(function (k) { return cart[k]; }); }
+    function cartTotal() { return cartLines().reduce(function (s, l) { return s + l.price * l.qty; }, 0); }
+    function cartCount() { return cartLines().reduce(function (s, l) { return s + l.qty; }, 0); }
+
+    function renderCart() {
+      var n = cartCount();
+      var bar = $('cartBar');
+      if (n === 0) { bar.classList.add('hidden'); return; }
+      bar.classList.remove('hidden');
+      $('cartCount').textContent = n + (n === 1 ? ' item' : ' items');
+      $('cartTotal').textContent = rupee(cartTotal());
+    }
+
+    // ---- place order (with OTP gate) ----
+    $('placeBtn').onclick = function () {
+      if (orderToken) { submitOrder(); }
+      else { openOtp(); }
+    };
+
+    var otpStage = 'phone';
+    function openOtp() {
+      otpStage = 'phone';
+      $('otpErr').textContent = '';
+      $('otpInput').style.display = 'none';
+      $('otpInput').value = '';
+      $('phoneInput').value = localStorage.getItem(LS_PHONE) || '';
+      $('otpBtn').textContent = 'Send OTP';
+      $('otpBtn').disabled = false;
+      $('otpBackdrop').classList.add('show');
+    }
+    $('otpBackdrop').onclick = function (e) { if (e.target === this) this.classList.remove('show'); };
+
+    $('otpBtn').onclick = function () {
+      var phone = $('phoneInput').value.trim();
+      var err = $('otpErr'); err.textContent = '';
+      if (otpStage === 'phone') {
+        if (phone.length < 8) { err.textContent = 'Enter a valid mobile number.'; return; }
+        $('otpBtn').disabled = true; $('otpBtn').textContent = 'Sending…';
+        fetch(API + '/send-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone }) })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            $('otpBtn').disabled = false;
+            if (!res.ok) { err.textContent = res.j.error || 'Failed to send OTP.'; $('otpBtn').textContent = 'Send OTP'; return; }
+            otpStage = 'otp';
+            localStorage.setItem(LS_PHONE, phone);
+            $('otpInput').style.display = 'block';
+            $('otpSub').textContent = 'Enter the code we sent to ' + phone + '.';
+            $('otpBtn').textContent = 'Verify & Order';
+            if (res.j.dev_otp) { $('otpInput').value = res.j.dev_otp; } // dev convenience
+            $('otpInput').focus();
+          }).catch(function () { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Send OTP'; err.textContent = 'Network error.'; });
+      } else {
+        var otp = $('otpInput').value.trim();
+        if (!otp) { err.textContent = 'Enter the OTP.'; return; }
+        $('otpBtn').disabled = true; $('otpBtn').textContent = 'Verifying…';
+        fetch(API + '/verify-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone, otp: otp }) })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok) { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Verify & Order'; err.textContent = res.j.error || 'Invalid OTP.'; return; }
+            orderToken = res.j.order_token;
+            localStorage.setItem(LS_TOKEN, orderToken);
+            submitOrder();
+          }).catch(function () { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Verify & Order'; err.textContent = 'Network error.'; });
+      }
+    };
+
+    function submitOrder() {
+      var lines = cartLines().map(function (l) {
+        return { item_id: l.item_id, variant_id: l.variant_id, quantity: l.qty };
+      });
+      if (lines.length === 0) { $('otpBackdrop').classList.remove('show'); return; }
+      $('placeBtn').disabled = true;
+      fetch(API, { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + orderToken },
+        body: JSON.stringify({ items: lines, name: $('nameInput').value.trim() || undefined }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (res) {
+          $('placeBtn').disabled = false;
+          $('otpBackdrop').classList.remove('show');
+          if (res.status === 401) { // token expired / spent — re-verify by OTP
+            orderToken = null; localStorage.removeItem(LS_TOKEN); openOtp();
+            $('otpErr').textContent =
+              res.j.error || 'Please verify your phone again to place a new order.';
+            return;
+          }
+          if (res.status === 409) {
+            // Table busy (someone else ordering) or being settled at counter.
+            // Clear any stale token so the next attempt re-verifies cleanly.
+            orderToken = null; localStorage.removeItem(LS_TOKEN);
+            showBlocked(res.j.code, res.j.error);
+            return;
+          }
+          if (!res.ok) { toast(res.j.error || 'Could not place order'); return; }
+          cart = {};
+          render();
+          toast('Order sent to the kitchen! 🍽️');
+          loadCurrent();
+        }).catch(function () { $('placeBtn').disabled = false; toast('Network error'); });
+    }
+
+    load();
+  })();
+  </script>
+</body>
+</html>

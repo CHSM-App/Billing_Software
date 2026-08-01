@@ -157,7 +157,10 @@ router.get('/:qrToken', orderLimiter, async (req, res) => {
         .status(404)
         .send('<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;text-align:center;padding:3rem"><h2>Menu not available</h2><p>This QR code is invalid, expired, or online ordering is turned off for this restaurant.</p></body>');
     }
-    return res.sendFile(path.join(__dirname, '..', '..', 'public', 'order', 'index.html'));
+    // Served from src/static (tracked + deployed with the code), NOT public/ —
+    // the landing-page CI build empties public/ (Vite emptyOutDir), which would
+    // otherwise wipe this page on every deploy. See src/static/order/index.html.
+    return res.sendFile(path.join(__dirname, '..', 'static', 'order', 'index.html'));
   } catch (err) {
     logger.error({ err }, 'Serve order page error');
     return res.status(500).send('Something went wrong.');
