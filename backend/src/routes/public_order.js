@@ -30,12 +30,24 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
 const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
 
 const router = express.Router();
+
+// The customer menu HTML shell, shipped with the code (survives CI deploys).
+const ORDER_PAGE_PATH = path.join(__dirname, '..', 'static', 'order', 'index.html');
+// Log at boot whether the page is present + its size, so a bad deploy is obvious
+// in the logs instead of surfacing as a mysterious 404 per request.
+try {
+  const st = fs.statSync(ORDER_PAGE_PATH);
+  logger.info({ path: ORDER_PAGE_PATH, bytes: st.size }, 'order page shell found');
+} catch (e) {
+  logger.error({ path: ORDER_PAGE_PATH, err: e.message }, 'order page shell MISSING at boot');
+}
 
 const ORDER_SECRET = process.env.JWT_ACCESS_SECRET;
 const ORDER_TOKEN_TTL = '4h';            // roughly the length of a dine-in visit
@@ -160,7 +172,20 @@ router.get('/:qrToken', orderLimiter, async (req, res) => {
     // Served from src/static (tracked + deployed with the code), NOT public/ —
     // the landing-page CI build empties public/ (Vite emptyOutDir), which would
     // otherwise wipe this page on every deploy. See src/static/order/index.html.
-    return res.sendFile(path.join(__dirname, '..', 'static', 'order', 'index.html'));
+    //
+    // Read + send the bytes ourselves instead of res.sendFile: under iisnode,
+    // sendFile's internal `send` can 404 on a file that exists (path/stat quirks
+    // via the named-pipe FS), and it swallows the real error. fs.readFile gives
+    // us the true errno and a reliable send.
+    return fs.readFile(ORDER_PAGE_PATH, (err, buf) => {
+      if (err) {
+        logger.error({ err, path: ORDER_PAGE_PATH }, 'Order page file read failed');
+        return res.status(500).send('Menu page is temporarily unavailable.');
+      }
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      res.set('Cache-Control', 'no-cache');
+      return res.send(buf);
+    });
   } catch (err) {
     logger.error({ err }, 'Serve order page error');
     return res.status(500).send('Something went wrong.');
