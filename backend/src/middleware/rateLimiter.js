@@ -1,10 +1,20 @@
 const rateLimit = require('express-rate-limit');
 
-// Shared handler — adds Retry-After and a consistent JSON body
-function onLimitReached(req, res, options) {
-  const retryAfterSec = Math.ceil(options.windowMs / 1000);
-  res.set('Retry-After', retryAfterSec);
-  res.status(429).json({
+// Shared handler — adds Retry-After and a consistent JSON body.
+//
+// NOTE: express-rate-limit v7+ passes the handler as (req, res, next, options).
+// The previous 3-arg signature bound `options` to `next`, so options.windowMs
+// and options.message were undefined — producing a 429 body of
+// {"retry_after_seconds": null} with NO `error` field. Clients then showed a
+// generic "Something went wrong" because there was no message to display.
+function onLimitReached(req, res, next, options) {
+  // Prefer the actual reset time set on the request; fall back to windowMs.
+  const resetMs = req.rateLimit && req.rateLimit.resetTime
+    ? req.rateLimit.resetTime.getTime() - Date.now()
+    : options.windowMs;
+  const retryAfterSec = Math.max(1, Math.ceil(resetMs / 1000));
+  res.set('Retry-After', String(retryAfterSec));
+  res.status(options.statusCode || 429).json({
     error: options.message,
     retry_after_seconds: retryAfterSec,
   });

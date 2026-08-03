@@ -93,7 +93,8 @@ class _OtpScreenState extends State<OtpScreen> {
         Navigator.pop(context, true); // register flow — confirmed
       }
     } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      setState(() =>
+          _error = sanitizeUiErrorMessage(e, fallback: l10n.otpVerifyFailed));
       _clearOtp();
     } catch (_) {
       setState(() => _error = l10n.otpVerifyFailed);
@@ -118,7 +119,8 @@ class _OtpScreenState extends State<OtpScreen> {
         SnackBar(content: Text(l10n.otpResendSuccess)),
       );
     } on ApiException catch (e) {
-      setState(() => _error = e.message);
+      setState(() =>
+          _error = sanitizeUiErrorMessage(e, fallback: l10n.otpResendFailed));
     } catch (_) {
       setState(() => _error = l10n.otpResendFailed);
     } finally {

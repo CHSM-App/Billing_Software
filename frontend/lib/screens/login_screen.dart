@@ -105,7 +105,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   await sendOtp(phoneCtrl.text.trim(), 'forgot_pin');
                   if (ctx.mounted) Navigator.pop(ctx, phoneCtrl.text.trim());
                 } on ApiException catch (e) {
-                  messenger.showSnackBar(SnackBar(content: Text(e.message)));
+                  messenger.showSnackBar(SnackBar(
+                      content: Text(sanitizeUiErrorMessage(e,
+                          fallback: l10n.forgotPinSendFailed))));
                 } catch (_) {
                   messenger.showSnackBar(
                     SnackBar(content: Text(l10n.forgotPinSendFailed)),
@@ -204,7 +206,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                     ),
                   );
                 } on ApiException catch (e) {
-                  pinMessenger.showSnackBar(SnackBar(content: Text(e.message)));
+                  pinMessenger.showSnackBar(SnackBar(
+                      content: Text(sanitizeUiErrorMessage(e,
+                          fallback: l10n.forgotPinResetFailed))));
                 } catch (_) {
                   pinMessenger.showSnackBar(
                     SnackBar(content: Text(l10n.forgotPinResetFailed)),

@@ -152,7 +152,8 @@ class _RegisterScreenState extends State<RegisterScreen>
         ),
       );
     } on ApiException catch (e) {
-      setState(() => _errorMessage = e.message);
+      setState(() => _errorMessage =
+          sanitizeUiErrorMessage(e, fallback: l10n.loginConnectionError));
     } catch (_) {
       setState(() => _errorMessage = l10n.loginConnectionError);
     } finally {
