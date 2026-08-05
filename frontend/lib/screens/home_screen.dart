@@ -1327,6 +1327,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       actions: [
         Row(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             AnimatedBuilder(
               animation: _searchAnim,
@@ -1334,6 +1335,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 final maxWidth = MediaQuery.of(context).size.width - 80;
                 return SizedBox(
                   width: _searchAnim.value * maxWidth,
+                  // Fixed height keeps the expanded field within the toolbar so
+                  // it can't overflow the app bar vertically.
+                  height: 40,
                   child: Opacity(
                     opacity: _searchAnim.value,
                     child: TextField(
@@ -1359,6 +1363,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         suffixIcon: _searchController.text.isNotEmpty
                             ? IconButton(
                                 icon: const Icon(Icons.clear, size: 16),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 32, minHeight: 32),
                                 onPressed: () => _searchController.clear(),
                               )
                             : null,

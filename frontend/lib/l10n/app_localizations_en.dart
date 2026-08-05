@@ -308,6 +308,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Let customers scan a table QR to view the menu and order';
 
   @override
+  String get settingsInventory => 'Inventory Tracking';
+
+  @override
+  String get settingsInventorySubtitle =>
+      'Track stock and reduce it automatically on each sale';
+
+  @override
   String get settingsManageStaff => 'Manage Staff';
 
   @override

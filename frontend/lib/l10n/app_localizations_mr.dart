@@ -309,6 +309,13 @@ class AppLocalizationsMr extends AppLocalizations {
       'ग्राहकांना टेबल QR स्कॅन करून मेनू पाहू आणि ऑर्डर करू द्या';
 
   @override
+  String get settingsInventory => 'इन्व्हेंटरी ट्रॅकिंग';
+
+  @override
+  String get settingsInventorySubtitle =>
+      'स्टॉक ट्रॅक करा आणि प्रत्येक विक्रीवर तो आपोआप कमी करा';
+
+  @override
   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
 
   @override

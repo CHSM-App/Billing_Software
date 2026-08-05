@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
+import '../storage.dart';
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
@@ -234,8 +235,22 @@ class _SettingsContentState extends State<_SettingsContent>
                       // Customer QR self-ordering — restaurants only.
                       if (session.businessType == 'restaurant_with_tables') ...[
                         const SizedBox(height: AppSpacing.space8),
-                        const _SelfOrderToggleCard(),
+                        _BusinessFlagToggle(
+                          field: 'self_order_enabled',
+                          icon: Icons.qr_code_2,
+                          title: l10n.settingsSelfOrder,
+                          subtitle: l10n.settingsSelfOrderSubtitle,
+                        ),
                       ],
+                      // Inventory tracking — any business type. (Barcode
+                      // scanning is always on now, so it has no toggle.)
+                      const SizedBox(height: AppSpacing.space8),
+                      _BusinessFlagToggle(
+                        field: 'inventory_enabled',
+                        icon: Icons.inventory_2_outlined,
+                        title: l10n.settingsInventory,
+                        subtitle: l10n.settingsInventorySubtitle,
+                      ),
                       const SizedBox(height: AppSpacing.space24),
 
                       _sectionLabel(context, l10n.settingsSectionTeam),
@@ -738,17 +753,28 @@ class _SyncConflictTileState extends State<_SyncConflictTile> {
   }
 }
 
-/// Owner toggle (restaurants) to enable customer self-ordering via table QR.
-/// Loads the current business setting and persists changes immediately.
-class _SelfOrderToggleCard extends ConsumerStatefulWidget {
-  const _SelfOrderToggleCard();
+/// Reusable owner toggle for a boolean business-profile flag. Loads the current
+/// value, persists changes immediately, and reverts on failure.
+class _BusinessFlagToggle extends ConsumerStatefulWidget {
+  /// The business-profile field name (e.g. 'inventory_enabled').
+  final String field;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _BusinessFlagToggle({
+    required this.field,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
 
   @override
-  ConsumerState<_SelfOrderToggleCard> createState() =>
-      _SelfOrderToggleCardState();
+  ConsumerState<_BusinessFlagToggle> createState() =>
+      _BusinessFlagToggleState();
 }
 
-class _SelfOrderToggleCardState extends ConsumerState<_SelfOrderToggleCard> {
+class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
   bool? _enabled;
   bool _saving = false;
 
@@ -762,7 +788,7 @@ class _SelfOrderToggleCardState extends ConsumerState<_SelfOrderToggleCard> {
     try {
       final profile = await getBusinessProfile();
       if (mounted) {
-        setState(() => _enabled = profile['self_order_enabled'] == true);
+        setState(() => _enabled = profile[widget.field] == true);
       }
     } catch (_) {
       if (mounted) setState(() => _enabled = false);
@@ -776,7 +802,17 @@ class _SelfOrderToggleCardState extends ConsumerState<_SelfOrderToggleCard> {
       _saving = true;
     });
     try {
-      await updateBusinessProfile({'self_order_enabled': value});
+      await updateBusinessProfile({widget.field: value});
+      // Keep the cached session in sync so the feature turns on/off right away
+      // (hasBarcodeProvider / inventoryEnabledProvider read from the session,
+      // which is otherwise only refreshed at login).
+      if (widget.field == 'inventory_enabled') {
+        await updateInventoryEnabled(value);
+        await ref.read(sessionProvider.notifier).refresh();
+      } else if (widget.field == 'has_barcode_scanner') {
+        await updateHasBarcodeScanner(value);
+        await ref.read(sessionProvider.notifier).refresh();
+      }
     } on ApiException catch (e) {
       if (mounted) {
         setState(() => _enabled = previous);
@@ -791,7 +827,6 @@ class _SelfOrderToggleCardState extends ConsumerState<_SelfOrderToggleCard> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = context.l10n;
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -808,13 +843,10 @@ class _SelfOrderToggleCardState extends ConsumerState<_SelfOrderToggleCard> {
             color: AppColors.primary.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(AppRadius.small),
           ),
-          child: const Icon(Icons.qr_code_2, color: AppColors.primary, size: 20),
+          child: Icon(widget.icon, color: AppColors.primary, size: 20),
         ),
-        title: Text(l10n.settingsSelfOrder),
-        subtitle: Text(l10n.settingsSelfOrderSubtitle),
-        // Selected-thumb color comes from the app theme's switchTheme
-        // (AppColors.primary). No per-widget override — it also keeps this
-        // compiling across Flutter versions (the param was renamed in 3.38).
+        title: Text(widget.title),
+        subtitle: Text(widget.subtitle),
       ),
     );
   }

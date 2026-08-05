@@ -15,6 +15,7 @@ import 'package:flutter_thermal_printer/utils/printer.dart' as ftp
 
 import 'receipt_labels.dart';
 import 'raster_lab.dart';
+import 'barcode_image.dart';
 
 // ---------------------------------------------------------------------------
 // Unified Printer model — wraps both BluetoothInfo and ftp.Printer
@@ -520,7 +521,6 @@ class PrinterService {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
 
-    final List<int> bytes;
     if (_isWindows) {
       // TSPL label with actual barcode graphic
       final name = itemName.length > 38 ? itemName.substring(0, 38) : itemName;
@@ -535,27 +535,25 @@ class PrinterService {
           'TEXT 480,10,"3",0,1,1,"${priceStr.replaceAll('"', '\\"')}"\r\n');
       sb.write('BARCODE 10,40,"128",80,1,0,2,2,"$barcodeValue"\r\n');
       sb.write('PRINT $copies,1\r\n');
-      bytes = _enc(sb.toString());
+      await _printBytes(printer, _enc(sb.toString()));
     } else {
-      // Raw text label for BT printer (no barcode graphic — print value as text)
-      final name =
-          itemName.length > _cols ? itemName.substring(0, _cols) : itemName;
-      final b = <int>[];
-      void addLine(String s) {
-        for (final c in s.codeUnits) {
-          b.add(c > 127 ? 63 : c);
+      // BT thermal printers can't draw a barcode from a command, so render an
+      // actual Code128 barcode (with name/price/value) to an image and print
+      // it as a raster — same pipeline as QR printing. One raster per copy.
+      final image = await BarcodeImage.render(
+        barcodeValue: barcodeValue,
+        itemName: itemName,
+        price: price,
+      );
+      final raster = await RasterLab.imageToReceiptRaster(image);
+      image.dispose();
+      for (var i = 0; i < copies; i++) {
+        await _sendClassicBtTuned(printer, raster, 0, 0);
+        if (i < copies - 1) {
+          await Future.delayed(const Duration(milliseconds: 800));
         }
-        b.add(0x0A);
       }
-
-      addLine(_centre(name, _cols));
-      addLine(_centre('Rs.${price.toStringAsFixed(2)}', _cols));
-      addLine('-' * _cols);
-      addLine(_centre(barcodeValue, _cols));
-      b.addAll([0x0A, 0x0A, 0x0A, 0x0A]);
-      bytes = b;
     }
-    await _printBytes(printer, bytes);
   }
 
   /// Print a QR image (e.g. a table ordering QR) centred on the roll. The image

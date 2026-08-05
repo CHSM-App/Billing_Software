@@ -102,6 +102,8 @@
   "settingsBusinessProfileSubtitle": "Name, address, GST, billing settings",
   "settingsSelfOrder": "Customer QR Ordering",
   "settingsSelfOrderSubtitle": "Let customers scan a table QR to view the menu and order",
+  "settingsInventory": "Inventory Tracking",
+  "settingsInventorySubtitle": "Track stock and reduce it automatically on each sale",
   "settingsManageStaff": "Manage Staff",
   "settingsManageStaffSubtitle": "Add, edit or remove cashiers",
   "settingsPrinterSetup": "Printer Setup",

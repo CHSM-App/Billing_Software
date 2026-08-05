@@ -85,8 +85,9 @@ final businessNameProvider = Provider<String>((ref) =>
 final userNameProvider = Provider<String>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.userName ?? '');
 
-final hasBarcodeProvider = Provider<bool>((ref) =>
-    ref.watch(sessionProvider).valueOrNull?.hasBarcodeScanner ?? false);
+// Barcode scanning is always on now (the per-business toggle was removed), so
+// this is unconditionally true regardless of the (possibly stale) session flag.
+final hasBarcodeProvider = Provider<bool>((ref) => true);
 
 final inventoryEnabledProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.inventoryEnabled ?? false);

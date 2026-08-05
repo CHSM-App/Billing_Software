@@ -85,6 +85,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     bill_prefix,
     bill_footer_note,
     self_order_enabled,
+    inventory_enabled,
+    has_barcode_scanner,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -148,6 +150,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     bill_prefix,
     bill_footer_note,
     self_order_enabled,
+    inventory_enabled,
+    has_barcode_scanner,
   };
 
   const fields = Object.entries(updatable).filter(([, v]) => v !== undefined);
@@ -197,7 +201,9 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     const setClauses = fields.map(([key, value]) => {
       const sqlType = _sqlTypeFor(key);
       // BIT columns take a normalised 0/1; text columns treat '' as NULL.
-      const normalised = key === 'self_order_enabled'
+      const isBit = key === 'self_order_enabled' ||
+          key === 'inventory_enabled' || key === 'has_barcode_scanner';
+      const normalised = isBit
         ? (value ? 1 : 0)
         : (value === '' ? null : value);
       req2.input(key, sqlType, normalised);
@@ -293,6 +299,8 @@ function _sqlTypeFor(key) {
     bill_prefix:      sql.NVarChar(10),
     bill_footer_note: sql.NVarChar(500),
     self_order_enabled: sql.Bit,
+    inventory_enabled: sql.Bit,
+    has_barcode_scanner: sql.Bit,
   };
   return map[key] ?? sql.NVarChar(500);
 }

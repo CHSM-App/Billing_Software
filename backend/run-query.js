@@ -1,7 +1,7 @@
 const { pool, poolConnect } = require('./src/db');
 
 // ─── PUT YOUR SQL QUERY HERE ───────────────────────────────────────────────
-const QUERY = `UPDATE businesses SET whatsapp_mode = 'deeplink' WHERE id = 'D3F50433-53B4-4033-934B-BF68E0D5C392'`;
+const QUERY = `select * from businesses`;
 // ──────────────────────────────────────────────────────────────────────────
 
 

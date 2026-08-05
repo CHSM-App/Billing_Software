@@ -626,6 +626,18 @@ abstract class AppLocalizations {
   /// **'Let customers scan a table QR to view the menu and order'**
   String get settingsSelfOrderSubtitle;
 
+  /// No description provided for @settingsInventory.
+  ///
+  /// In en, this message translates to:
+  /// **'Inventory Tracking'**
+  String get settingsInventory;
+
+  /// No description provided for @settingsInventorySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Track stock and reduce it automatically on each sale'**
+  String get settingsInventorySubtitle;
+
   /// No description provided for @settingsManageStaff.
   ///
   /// In en, this message translates to:

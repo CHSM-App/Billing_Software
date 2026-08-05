@@ -102,6 +102,8 @@
   "settingsBusinessProfileSubtitle": "नाव, पत्ता, जीएसटी, बिलिंग सेटिंग्ज",
   "settingsSelfOrder": "ग्राहक QR ऑर्डरिंग",
   "settingsSelfOrderSubtitle": "ग्राहकांना टेबल QR स्कॅन करून मेनू पाहू आणि ऑर्डर करू द्या",
+  "settingsInventory": "इन्व्हेंटरी ट्रॅकिंग",
+  "settingsInventorySubtitle": "स्टॉक ट्रॅक करा आणि प्रत्येक विक्रीवर तो आपोआप कमी करा",
   "settingsManageStaff": "कर्मचारी व्यवस्थापन",
   "settingsManageStaffSubtitle": "कॅशियर जोडा, बदला किंवा काढा",
   "settingsPrinterSetup": "प्रिंटर सेटअप",

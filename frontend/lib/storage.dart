@@ -84,6 +84,18 @@ class AuthStorage {
     await prefs.setString(_keyBusinessName, name);
   }
 
+  /// Update a cached business flag in the session so its provider reflects the
+  /// change immediately (without waiting for a re-login).
+  Future<void> updateInventoryEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyInventoryEnabled, enabled);
+  }
+
+  Future<void> updateHasBarcodeScanner(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyHasBarcodeScanner, enabled);
+  }
+
   Future<void> saveBillPrefix(String prefix) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyBillPrefix, prefix);
@@ -200,3 +212,5 @@ Future<String?> getUserId()                    => AuthStorage.instance.getUserId
 Future<void>    clearSession()                 => AuthStorage.instance.clearSession();
 Future<void>    saveBillPrefix(String prefix)  => AuthStorage.instance.saveBillPrefix(prefix);
 Future<String>  getBillPrefix()                => AuthStorage.instance.getBillPrefix();
+Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInventoryEnabled(e);
+Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
