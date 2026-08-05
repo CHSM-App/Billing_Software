@@ -15,7 +15,7 @@ import 'services/offline_service.dart';
 import 'services/license_service.dart';
 import 'services/notification_service.dart';
 import 'services/realtime_service.dart';
-// import 'core/services/remote_config_service.dart';  // TODO: enable when Firebase is needed
+import 'core/services/remote_config_service.dart';
 import 'features/splash/vittam_splash_screen.dart';
 
 // Desktop-only SQLite FFI init — imported only on non-web builds.
@@ -32,6 +32,12 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Remote Config drives the force-update gate (see VittamSplashScreen). Init
+  // is best-effort: a fetch failure just leaves defaults so the app still opens.
+  try {
+    await VittamRemoteConfig.instance.initialize();
+  } catch (_) {}
 
   await OfflineService.instance.init();
 

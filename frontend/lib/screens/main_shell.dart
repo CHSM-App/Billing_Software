@@ -12,11 +12,11 @@ import '../widgets/nav_item.dart';
 import '../widgets/bottom_nav_bar.dart';
 import 'home_screen.dart';
 import 'items_screen.dart';
-import 'tables_screen.dart';
+import 'orders_screen.dart';
 import 'kitchen_screen.dart';
-import 'open_drafts_screen.dart';
 import 'settings_screen.dart';
 import '../providers/open_drafts_provider.dart';
+import '../providers/credit_provider.dart';
 
 class MainShell extends ConsumerStatefulWidget {
   final int initialIndex;
@@ -66,6 +66,9 @@ class _MainShellState extends ConsumerState<MainShell>
       final role = ref.read(sessionProvider).valueOrNull?.userRole;
       if (role != null && role != 'kitchen') {
         ref.read(openDraftsProvider.notifier).refreshSilently();
+        // Same reasoning for the Credit tab: fetch once so it appears right
+        // away when credit is already outstanding on the server.
+        ref.read(creditCustomersProvider.notifier).refreshSilently();
       }
     });
   }
@@ -83,6 +86,9 @@ class _MainShellState extends ConsumerState<MainShell>
       case 'drafts':
         ref.read(openDraftsProvider.notifier).refreshSilently();
         break;
+      case 'credit':
+        ref.read(creditCustomersProvider.notifier).refreshSilently();
+        break;
     }
   }
 
@@ -93,8 +99,8 @@ class _MainShellState extends ConsumerState<MainShell>
     super.dispose();
   }
 
-  List<NavItem> _buildNavItems(
-      String userRole, String businessType, bool hasOpenDrafts) {
+  List<NavItem> _buildNavItems(String userRole, String businessType,
+      bool hasOpenDrafts, bool hasCredit) {
     final l10n = context.l10n;
     final isRestaurant = businessType == 'restaurant_with_tables' ||
         businessType == 'restaurant_no_tables';
@@ -116,18 +122,21 @@ class _MainShellState extends ConsumerState<MainShell>
       if (userRole == 'owner')
         NavItem(Icons.inventory_2_outlined, Icons.inventory_2, l10n.navItems,
             const ItemsScreen()),
+      // Orders: one page hosting Tables (table restaurants only), Open Orders
+      // and Credit as sub-tabs. Table restaurants always show it (Tables is
+      // always relevant). Retail / no-table businesses get the SAME page — just
+      // without the Tables sub-tab — and only while there's something in it
+      // (open drafts or outstanding credit), so it doesn't sit empty.
       if (businessType == 'restaurant_with_tables')
         NavItem(Icons.table_restaurant_outlined, Icons.table_restaurant,
-            l10n.navTables, const TablesScreen()),
+            l10n.navOrders, const OrdersScreen(showTables: true))
+      else if (hasOpenDrafts || hasCredit)
+        NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
+            l10n.navOrders, const OrdersScreen(showTables: false)),
       // Waiters and owners at a restaurant can watch the kitchen queue.
       if (isRestaurant)
         NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu,
             l10n.navKitchen, const KitchenScreen()),
-      // Open Orders: table-less drafts awaiting finalization. Only shown while
-      // such drafts exist, so it appears/disappears with the queue.
-      if (hasOpenDrafts)
-        NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
-            l10n.navOpenOrders, const OpenDraftsScreen()),
       // History, Reports and Expenses moved into the Profile screen.
       NavItem(Icons.person_outline, Icons.person, l10n.navProfile,
           const SettingsScreen()),
@@ -162,8 +171,10 @@ class _MainShellState extends ConsumerState<MainShell>
         // Kitchen staff never see billing/orders, so don't even query drafts.
         final hasOpenDrafts = session.userRole != 'kitchen' &&
             ref.watch(hasOpenDraftsProvider);
+        final hasCredit =
+            session.userRole != 'kitchen' && ref.watch(hasCreditProvider);
         final items = _buildNavItems(
-            session.userRole, session.businessType, hasOpenDrafts);
+            session.userRole, session.businessType, hasOpenDrafts, hasCredit);
         final safeIndex = _index.clamp(0, items.length - 1);
         final isWide = MediaQuery.of(context).size.width >= 720;
 

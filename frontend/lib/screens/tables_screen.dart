@@ -13,14 +13,30 @@ import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import 'home_screen.dart';
 
+/// Side length (px) of a table tile on the floor plan. Used both to render the
+/// tile and to bound dragging within the viewport, so the two never drift.
+const double _kTableSize = 80;
+
+/// Public surface the parent [OrdersScreen] uses to drive [TablesScreen] from
+/// its shared FAB (via a GlobalKey), without exposing the private State type.
+abstract class TablesScreenApi {
+  void addTable();
+}
+
 class TablesScreen extends ConsumerStatefulWidget {
-  const TablesScreen({super.key});
+  /// When true, this screen is embedded inside the Orders tab's TabBarView:
+  /// the parent [OrdersScreen] supplies the shared app bar and the "add table"
+  /// FAB, so we render only the tables body/canvas here.
+  final bool embedded;
+
+  const TablesScreen({super.key, this.embedded = false});
 
   @override
   ConsumerState<TablesScreen> createState() => _TablesScreenState();
 }
 
-class _TablesScreenState extends ConsumerState<TablesScreen> {
+class _TablesScreenState extends ConsumerState<TablesScreen>
+    implements TablesScreenApi {
   final Map<String, Offset> _dragOffsets = {};
 
   Color _tableColor(String status) {
@@ -410,11 +426,20 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     ));
   }
 
+  /// Public entry point for the parent [OrdersScreen]'s shared FAB.
+  @override
+  void addTable() => _addTable();
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final userRole = ref.watch(userRoleProvider);
-    final tablesAsync = ref.watch(tablesProvider);
+
+    final body = _buildBody(userRole);
+
+    // Embedded in the Orders tab: the parent provides the app bar + FAB, so
+    // render just the body.
+    if (widget.embedded) return body;
 
     return Scaffold(
       body: Column(children: [
@@ -431,43 +456,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
             ),
           ],
         ),
-        Expanded(child: tablesAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => AppErrorWidget(
-            error: e,
-            onRetry: () => ref.invalidate(tablesProvider),
-          ),
-          data: (tables) {
-            if (tables.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.table_restaurant_outlined,
-                        size: 48, color: AppColors.textDisabled),
-                    const SizedBox(height: AppSpacing.space16),
-                    Text(l10n.tablesNoTablesYet,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: AppColors.textSecondary)),
-                    if (userRole == 'owner') ...[
-                      const SizedBox(height: AppSpacing.space16),
-                      ElevatedButton.icon(
-                        onPressed: _addTable,
-                        icon: const Icon(Icons.add),
-                        label: Text(l10n.tablesAddTable),
-                      ),
-                    ],
-                  ],
-                ),
-              );
-            }
-
-            return _buildCanvas(tables, userRole);
-          },
-        )),
+        Expanded(child: body),
       ]),
       floatingActionButton: userRole == 'owner'
           ? FloatingActionButton.extended(
@@ -485,28 +474,92 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     );
   }
 
-  Widget _buildCanvas(List<TableModel> tables, String userRole) {
-    // Compute canvas size to fit all tables with padding.
-    double maxX = 600;
-    double maxY = 600;
-    for (final t in tables) {
-      final ox = (_dragOffsets[t.id] ?? Offset(t.floorX, t.floorY));
-      if (ox.dx + 100 > maxX) maxX = ox.dx + 100;
-      if (ox.dy + 100 > maxY) maxY = ox.dy + 100;
-    }
+  Widget _buildBody(String userRole) {
+    final l10n = context.l10n;
+    final tablesAsync = ref.watch(tablesProvider);
 
-    return InteractiveViewer(
-      boundaryMargin: const EdgeInsets.all(100),
-      minScale: 0.5,
-      maxScale: 2.0,
-      constrained: false,
-      child: SizedBox(
-        width: maxX,
-        height: maxY,
-        child: Stack(
-          children: tables.map((table) {
-        final offset =
+    return tablesAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => AppErrorWidget(
+        error: e,
+        onRetry: () => ref.invalidate(tablesProvider),
+      ),
+      data: (tables) {
+        if (tables.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.table_restaurant_outlined,
+                    size: 48, color: AppColors.textDisabled),
+                const SizedBox(height: AppSpacing.space16),
+                Text(l10n.tablesNoTablesYet,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodyMedium
+                        ?.copyWith(color: AppColors.textSecondary)),
+                if (userRole == 'owner') ...[
+                  const SizedBox(height: AppSpacing.space16),
+                  ElevatedButton.icon(
+                    onPressed: _addTable,
+                    icon: const Icon(Icons.add),
+                    label: Text(l10n.tablesAddTable),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }
+
+        return _buildCanvas(tables, userRole);
+      },
+    );
+  }
+
+  Widget _buildCanvas(List<TableModel> tables, String userRole) {
+    // The floor is a pan + pinch-zoom canvas (InteractiveViewer):
+    //   - It expands toward the right and bottom as tables are placed, so the
+    //     owner can lay out the room however they like.
+    //   - One-finger drag on a table moves that table; one-finger drag on empty
+    //     space pans the canvas; two-finger pinch zooms in/out.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportWidth = constraints.maxWidth;
+        final viewportHeight = constraints.maxHeight;
+
+        // Grow the canvas to fit the furthest table on each axis, plus a
+        // viewport of headroom to the right and below for placing more tables.
+        // Never smaller than the viewport itself.
+        double maxRight = 0;
+        double maxBottom = 0;
+        for (final t in tables) {
+          final o = _dragOffsets[t.id] ?? Offset(t.floorX, t.floorY);
+          if (o.dx + _kTableSize > maxRight) maxRight = o.dx + _kTableSize;
+          if (o.dy + _kTableSize > maxBottom) maxBottom = o.dy + _kTableSize;
+        }
+        final canvasWidth =
+            (maxRight + viewportWidth).clamp(viewportWidth, double.infinity);
+        final canvasHeight =
+            (maxBottom + viewportHeight).clamp(viewportHeight, double.infinity);
+
+        return InteractiveViewer(
+          constrained: false,
+          minScale: 0.5,
+          maxScale: 3.0,
+          boundaryMargin: const EdgeInsets.all(120),
+          child: SizedBox(
+            width: canvasWidth,
+            height: canvasHeight,
+            child: Stack(
+              children: tables.map((table) {
+        // Keep positions non-negative; the canvas expands right/bottom to fit.
+        final raw =
             _dragOffsets[table.id] ?? Offset(table.floorX, table.floorY);
+        final offset = Offset(
+          raw.dx.clamp(0.0, double.infinity),
+          raw.dy.clamp(0.0, double.infinity),
+        );
         final color = _tableColor(table.status);
 
         return Positioned(
@@ -516,12 +569,20 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
             onTap: () => _onTableTap(table),
             onLongPress:
                 userRole == 'owner' ? () => _showTableOptions(table) : null,
+            // A one-finger pan starting on a table moves it. The GestureDetector
+            // wins the gesture arena over the InteractiveViewer's pan, so the
+            // canvas stays put while a table is being dragged. (Pinch-zoom uses
+            // two pointers, so it never conflicts with this one-finger drag.)
             onPanUpdate: userRole == 'owner'
                 ? (details) {
                     setState(() {
                       final current = _dragOffsets[table.id] ??
                           Offset(table.floorX, table.floorY);
-                      _dragOffsets[table.id] = current + details.delta;
+                      final next = current + details.delta;
+                      _dragOffsets[table.id] = Offset(
+                        next.dx.clamp(0.0, double.infinity),
+                        next.dy.clamp(0.0, double.infinity),
+                      );
                     });
                   }
                 : null,
@@ -542,8 +603,10 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           ),
         );
       }).toList(),
-        ),
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -558,8 +621,8 @@ class _TableWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return Container(
-      width: 80,
-      height: 80,
+      width: _kTableSize,
+      height: _kTableSize,
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.15),

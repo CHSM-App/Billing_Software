@@ -61,7 +61,16 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
-        <!-- Required for in_app_update to communicate with Google Play Store (Android 11+) -->
+        <!-- Play Store package — lets the app resolve the Play Store (opened by
+             the update dialog's "Update now" button) on Android 11+. -->
         <package android:name="com.android.vending" />
+        <!-- Allow launching WhatsApp via the whatsapp:// scheme (Android 11+
+             package visibility). Without this, launchUrl on whatsapp:// fails. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="whatsapp" />
+        </intent>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
     </queries>
 </manifest>

@@ -20,12 +20,20 @@ function onLimitReached(req, res, next, options) {
   });
 }
 
-// POST /api/login — 5 attempts per IP per 15 minutes
+// POST /api/login — 20 failed attempts per (IP + phone) per 15 minutes.
+//
+// Keyed on IP *and* the phone being logged in, not IP alone. On shared/NAT'd
+// networks (one shop's staff behind a single public IP, or CGNAT) an IP-only
+// key means coworkers share one budget and lock each other out. Combining the
+// phone isolates each account's attempts so one user's typos never block
+// others on the same network. Per-account lockout (users.locked_until) still
+// provides the tighter, credential-stuffing-resistant guard.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 20,
   standardHeaders: true,  // RateLimit-* headers (RFC 6585)
   legacyHeaders: false,
+  keyGenerator: (req) => `${req.ip}:${req.body && req.body.phone ? req.body.phone : ''}`,
   message: 'Too many login attempts. Please try again in 15 minutes.',
   handler: onLimitReached,
   skipSuccessfulRequests: true, // only count failures toward the limit

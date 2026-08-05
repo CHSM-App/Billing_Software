@@ -781,7 +781,7 @@ class _SelfOrderToggleCardState extends ConsumerState<_SelfOrderToggleCard> {
       if (mounted) {
         setState(() => _enabled = previous);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+          SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error),
         );
       }
     } finally {

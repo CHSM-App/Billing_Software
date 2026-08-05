@@ -9,11 +9,18 @@ const router = express.Router();
 router.get('/:token', async (req, res) => {
   try {
     await poolConnect;
+    // Strip ALL whitespace that some WhatsApp/link renderers inject mid-token
+    // (e.g. "6pWhWmV -Yaf93HJn" → "6pWhWmV-Yaf93HJn"). A valid receipt token is
+    // URL-safe base64 and never contains spaces. Cap at 16 so an over-long
+    // value returns a clean 404 instead of a SQL "invalid data length" (8016).
+    const token = String(req.params.token || '').replace(/\s+/g, '').slice(0, 16);
+    if (!token) return res.status(404).send('<h2>Receipt not found</h2>');
     const row = await pool.request()
-      .input('token', sql.NVarChar(16), req.params.token)
+      .input('token', sql.NVarChar(16), token)
       .query(`
         SELECT b.bill_number, b.customer_name, b.customer_phone,
                b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.created_at,
+               b.payment_status, b.settled_payment_mode,
                t.table_number,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
@@ -31,7 +38,7 @@ router.get('/:token', async (req, res) => {
     const bill = row.recordset[0];
 
     const itemsResult = await pool.request()
-      .input('token', sql.NVarChar(16), req.params.token)
+      .input('token', sql.NVarChar(16), token)
       .query(`
         SELECT bi.item_name, bi.quantity, bi.unit_price, bi.line_total
         FROM bill_items bi
@@ -52,7 +59,17 @@ router.get('/:token', async (req, res) => {
 
     const addrParts = [bill.address, bill.city, bill.state, bill.pincode].filter(Boolean);
     const addressLine = addrParts.length ? esc(addrParts.join(', ')) : '';
-    const payLabel = bill.payment_mode.charAt(0).toUpperCase() + bill.payment_mode.slice(1);
+
+    // A settled credit bill (payment_mode='credit', payment_status='paid') was
+    // actually collected via settled_payment_mode — show that. Only an UNPAID
+    // credit bill still reads "Credit" (and stays red below).
+    const isUnpaidCredit =
+      bill.payment_mode === 'credit' && bill.payment_status === 'unpaid';
+    const effectiveMode =
+      bill.payment_mode === 'credit' && bill.payment_status === 'paid' && bill.settled_payment_mode
+        ? bill.settled_payment_mode
+        : bill.payment_mode;
+    const payLabel = effectiveMode.charAt(0).toUpperCase() + effectiveMode.slice(1);
 
     const itemRows = items.map((i) => {
       const qty = Number(i.quantity) % 1 === 0 ? Number(i.quantity) : fmt(i.quantity);
@@ -94,6 +111,8 @@ router.get('/:token', async (req, res) => {
   .meta-item .label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#9a9aaa;margin-bottom:3px}
   .meta-item .value{font-size:13px;font-weight:600;color:#1c1c1e}
   .badge{display:inline-block;padding:3px 10px;border-radius:3px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;background:#e8f4ec;color:#1e7e34}
+  /* Credit (udhaari): unpaid — flag it red instead of the paid-green. */
+  .badge-credit{background:#fdecec;color:#c0392b}
 
   /* ── customer ── */
   .customer{padding:12px 24px;background:#f9f9fb;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0}
@@ -178,7 +197,7 @@ router.get('/:token', async (req, res) => {
     </div>
     <div class="meta-item">
       <div class="label">Payment</div>
-      <div class="value"><span class="badge">${esc(payLabel)}</span></div>
+      <div class="value"><span class="badge${isUnpaidCredit ? ' badge-credit' : ''}">${esc(payLabel)}</span></div>
     </div>
   </div>
 

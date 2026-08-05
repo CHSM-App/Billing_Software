@@ -2,40 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
-import '../providers.dart';
-import '../providers/open_drafts_provider.dart';
+import '../providers/credit_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
-import 'home_screen.dart';
+import 'credit_customer_bills_screen.dart';
 
-/// The "Open Orders" queue: table-less draft bills a server saved from the
-/// billing page. Tapping one opens it pre-loaded in the billing screen where a
-/// cashier/owner finalizes it (or a server edits and re-saves it).
-class OpenDraftsScreen extends ConsumerWidget {
-  /// When true, embedded inside the Orders tab's TabBarView — the parent
-  /// [OrdersScreen] supplies the shared app bar, so render only the list body.
+/// The Credit (udhaari) tab: a list of customers who owe money on credit bills.
+/// Tapping a customer opens their unpaid bills to settle/print/send.
+class CreditScreen extends ConsumerWidget {
+  /// When true, embedded inside the Orders tab — the parent supplies the app
+  /// bar, so render only the debtor list body.
   final bool embedded;
 
-  const OpenDraftsScreen({super.key, this.embedded = false});
+  const CreditScreen({super.key, this.embedded = false});
 
-  void _openDraft(BuildContext context, WidgetRef ref, Bill draft) {
-    // Start from a clean cart; HomeScreen loads the draft's items itself.
-    ref.read(cartProvider.notifier).clear();
+  void _openCustomer(BuildContext context, CreditCustomer customer) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => HomeScreen(
-          activeBillId: draft.id,
-          activeBillFuture: Future.value(draft),
-        ),
+        builder: (_) => CreditCustomerBillsScreen(customer: customer),
       ),
-    ).then((_) {
-      // Back from the billing screen — reconcile the queue and drop the
-      // borrowed cart so a draft's items never leak into a fresh order.
-      ref.read(cartProvider.notifier).clear();
-      ref.read(openDraftsProvider.notifier).refreshSilently();
-    });
+    );
   }
 
   @override
@@ -43,19 +31,17 @@ class OpenDraftsScreen extends ConsumerWidget {
     final l10n = context.l10n;
     final body = _buildBody(context, ref);
 
-    // Embedded in the Orders tab: parent supplies the app bar.
     if (embedded) return body;
 
     return Scaffold(
       body: Column(children: [
         ShellAppBar(
-          // Bottom-bar root tab: never show a back arrow.
           automaticallyImplyLeading: false,
-          title: Text(l10n.openOrdersTitle),
+          title: Text(l10n.creditTitle),
           actions: [
             IconButton(
               icon: const Icon(Icons.refresh_outlined),
-              onPressed: () => ref.invalidate(openDraftsProvider),
+              onPressed: () => ref.invalidate(creditCustomersProvider),
               tooltip: l10n.commonRefresh,
             ),
           ],
@@ -67,25 +53,25 @@ class OpenDraftsScreen extends ConsumerWidget {
 
   Widget _buildBody(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
-    final draftsAsync = ref.watch(openDraftsProvider);
+    final customersAsync = ref.watch(creditCustomersProvider);
 
-    return draftsAsync.when(
+    return customersAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => AppErrorWidget(
         error: e,
-        onRetry: () => ref.invalidate(openDraftsProvider),
+        onRetry: () => ref.invalidate(creditCustomersProvider),
       ),
-      data: (drafts) {
-        if (drafts.isEmpty) {
+      data: (customers) {
+        if (customers.isEmpty) {
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.receipt_long_outlined,
+                const Icon(Icons.account_balance_wallet_outlined,
                     size: 48, color: AppColors.textDisabled),
                 const SizedBox(height: AppSpacing.space16),
                 Text(
-                  l10n.openOrdersEmpty,
+                  l10n.creditEmpty,
                   textAlign: TextAlign.center,
                   style: Theme.of(context)
                       .textTheme
@@ -97,15 +83,16 @@ class OpenDraftsScreen extends ConsumerWidget {
           );
         }
         return RefreshIndicator(
-          onRefresh: () => ref.read(openDraftsProvider.notifier).reload(),
+          onRefresh: () => ref.read(creditCustomersProvider.notifier).reload(),
           child: ListView.separated(
             padding: const EdgeInsets.all(AppSpacing.space12),
-            itemCount: drafts.length,
+            itemCount: customers.length,
             separatorBuilder: (_, __) =>
                 const SizedBox(height: AppSpacing.space8),
-            itemBuilder: (context, i) => _DraftCard(
-                draft: drafts[i],
-                onTap: () => _openDraft(context, ref, drafts[i])),
+            itemBuilder: (context, i) => _CustomerCard(
+              customer: customers[i],
+              onTap: () => _openCustomer(context, customers[i]),
+            ),
           ),
         );
       },
@@ -113,20 +100,19 @@ class OpenDraftsScreen extends ConsumerWidget {
   }
 }
 
-class _DraftCard extends StatelessWidget {
-  final Bill draft;
+class _CustomerCard extends StatelessWidget {
+  final CreditCustomer customer;
   final VoidCallback onTap;
 
-  const _DraftCard({required this.draft, required this.onTap});
+  const _CustomerCard({required this.customer, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final itemCount = draft.items.fold<double>(0, (s, it) => s + it.quantity);
-    final title = (draft.customerName != null &&
-            draft.customerName!.trim().isNotEmpty)
-        ? draft.customerName!.trim()
-        : l10n.openOrdersBillNumber(draft.billNumber);
+    final name = (customer.customerName != null &&
+            customer.customerName!.trim().isNotEmpty)
+        ? customer.customerName!.trim()
+        : customer.customerPhone;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -145,11 +131,10 @@ class _DraftCard extends StatelessWidget {
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.12),
+                  color: AppColors.error.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(AppRadius.small),
                 ),
-                child: const Icon(Icons.receipt_long_outlined,
-                    color: AppColors.primary),
+                child: const Icon(Icons.person_outline, color: AppColors.error),
               ),
               const SizedBox(width: AppSpacing.space12),
               Expanded(
@@ -157,7 +142,7 @@ class _DraftCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      title,
+                      name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context)
@@ -167,7 +152,7 @@ class _DraftCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      l10n.openOrdersItemCount(itemCount.toInt()),
+                      l10n.creditUnpaidBills(customer.unpaidCount),
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -177,12 +162,22 @@ class _DraftCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.space8),
-              Text(
-                '₹${(draft.total - draft.discountAmount).toStringAsFixed(2)}',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '₹${customer.outstanding.toStringAsFixed(2)}',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700, color: AppColors.error),
+                  ),
+                  Text(
+                    l10n.creditOutstanding,
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: AppColors.textDisabled),
+                  ),
+                ],
               ),
               const Icon(Icons.chevron_right, color: AppColors.textDisabled),
             ],

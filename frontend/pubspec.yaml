@@ -1,7 +1,7 @@
 name: Vittam
 description: "Billing app for small Indian businesses."
 publish_to: 'none'
-version: 1.1.8+20
+version: 1.1.9+21
   
 environment:
   sdk: ^3.5.0
@@ -40,7 +40,6 @@ dependencies:
   flutter_local_notifications: ^18.0.0
   package_info_plus: ^8.0.2
   url_launcher: ^6.3.0
-  in_app_update: ^4.2.3
   web_socket_channel: ^3.0.3
   audioplayers: ^6.1.0
 

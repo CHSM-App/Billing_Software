@@ -227,7 +227,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
+            SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error));
       }
     }
   }
@@ -716,7 +716,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+          SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error),
         );
       }
     } finally {
@@ -1075,7 +1075,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       Navigator.pop(context);
     } on ApiException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(e.message),
+        content: Text(sanitizeUiErrorMessage(e)),
         backgroundColor: AppColors.error,
       ));
     } finally {
@@ -1354,7 +1354,8 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(e.toString()), backgroundColor: AppColors.error),
+              content: Text(sanitizeUiErrorMessage(e)),
+              backgroundColor: AppColors.error),
         );
       }
     } finally {
@@ -1518,7 +1519,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
       });
       widget.onChanged(List.unmodifiable(_variants));
     } on ApiException catch (e) {
-      _snack(e.message);
+      _snack(sanitizeUiErrorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1549,7 +1550,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
       setState(() => _variants.removeWhere((x) => x.id == v.id));
       widget.onChanged(List.unmodifiable(_variants));
     } on ApiException catch (e) {
-      _snack(e.message);
+      _snack(sanitizeUiErrorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1724,7 +1725,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+          SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error),
         );
       }
     } finally {

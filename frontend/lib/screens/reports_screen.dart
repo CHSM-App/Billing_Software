@@ -8,10 +8,21 @@ import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../l10n/l10n_ext.dart';
 
-final _amt = NumberFormat('#,##0.00');
-final _dateFmt = DateFormat('dd MMM yyyy');
-final _dayFmt = DateFormat('dd MMM');
+final _amt = NumberFormat('#,##0');
+final _timeFmt = DateFormat('h:mm a');
+final _weekdayFmt = DateFormat('EEE'); // Mon, Tue, …
+final _fullDayFmt = DateFormat('EEE, dd MMM yyyy');
 
+/// One bar in the last-7-days chart (a calendar day + its net sales).
+class _ChartDay {
+  final DateTime date;
+  final double revenue;
+  const _ChartDay({required this.date, required this.revenue});
+}
+
+/// Sales-only report page. Shows total sales, orders, average bill, a last-7-days
+/// bar chart, top-selling items, the cash/UPI split and recent bills.
+/// (No net-revenue or expenses — sales figures only.)
 class ReportsScreen extends ConsumerStatefulWidget {
   const ReportsScreen({super.key});
 
@@ -20,117 +31,102 @@ class ReportsScreen extends ConsumerStatefulWidget {
 }
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
+  // Tapped day in the 7-day chart; null = show the peak day by default.
+  int? _selectedDayIndex;
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final filter = ref.watch(reportSummaryFilterProvider);
     final summaryAsync = ref.watch(reportSummaryProvider);
-    final isWide = MediaQuery.of(context).size.width >= 720;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(children: [
-          ShellAppBar(
-            title: Text(l10n.reportsTitle),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.calendar_month_outlined),
-                tooltip: l10n.reportsChangePeriod,
-                onPressed: () => _showPeriodPicker(context, filter),
+        ShellAppBar(
+          title: Text(l10n.reportsTitle),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.calendar_month_outlined),
+              tooltip: l10n.reportsChangePeriod,
+              onPressed: () => _showPeriodPicker(context, filter),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh_outlined),
+              tooltip: l10n.commonRefresh,
+              onPressed: () {
+                ref.invalidate(reportSummaryProvider);
+                ref.invalidate(weeklySalesProvider);
+              },
+            ),
+          ],
+        ),
+        Expanded(
+          child: summaryAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => AppErrorWidget(
+              error: e,
+              onRetry: () => ref.invalidate(reportSummaryProvider),
+            ),
+            data: (summary) => RefreshIndicator(
+              onRefresh: () async => ref.invalidate(reportSummaryProvider),
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                children: [
+                  _buildPeriodChips(l10n, filter),
+                  const SizedBox(height: 12),
+                  _buildSalesCard(l10n, summary, filter),
+                  const SizedBox(height: 16),
+                  // Last-7-days chart uses its OWN provider (not the period
+                  // filter), so it always shows the real last week.
+                  _buildLast7DaysSection(l10n),
+                  const SizedBox(height: 16),
+                  if (summary.topItems.isNotEmpty) ...[
+                    _buildTopItems(l10n, summary),
+                    const SizedBox(height: 16),
+                  ],
+                  _buildPaymentSplit(l10n, summary),
+                  const SizedBox(height: 16),
+                  if (summary.recentBills.isNotEmpty)
+                    _buildRecentBills(l10n, summary),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Icons.refresh_outlined),
-                tooltip: l10n.commonRefresh,
-                onPressed: () => ref.invalidate(reportSummaryProvider),
-              ),
-            ],
+            ),
           ),
-          Expanded(child: summaryAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => AppErrorWidget(
-            error: e,
-            onRetry: () => ref.invalidate(reportSummaryProvider),
-          ),
-          data: (summary) => ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-            children: [
-              _buildPeriodBar(l10n, filter),
-              const SizedBox(height: 12),
-              _buildSummaryCards(l10n, summary, isWide),
-              const SizedBox(height: 20),
-              _buildPaymentBreakdown(l10n, summary),
-              const SizedBox(height: 20),
-              if (summary.expensesByCategory.isNotEmpty) ...[
-                _buildExpenseByCategory(l10n, summary),
-                const SizedBox(height: 20),
-              ],
-              if (summary.daily.isNotEmpty) ...[
-                _buildDailyBreakdown(l10n, summary),
-                const SizedBox(height: 20),
-              ],
-            ],
-          ),
-        )),
-        ]),
+        ),
+      ]),
     );
   }
 
-  // ── Period bar ─────────────────────────────────────────────────────────────
-  Widget _buildPeriodBar(AppLocalizations l10n, ReportSummaryFilter filter) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.medium),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.date_range_outlined, size: 16, color: AppColors.textSecondary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '${_dateFmt.format(filter.from)}  –  ${_dateFmt.format(filter.to)}',
-                  style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Flexible(
-                child: _PeriodChip(
-                    label: l10n.reportsToday, onTap: () => _setToday()),
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: _PeriodChip(
-                    label: l10n.reportsMonth, onTap: () => _setThisMonth()),
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: _PeriodChip(
-                    label: l10n.reportsYear, onTap: () => _setThisYear()),
-              ),
-            ],
-          ),
-        ],
-      ),
+  bool _isToday(ReportSummaryFilter f) {
+    final now = DateTime.now();
+    return f.from.year == now.year &&
+        f.from.month == now.month &&
+        f.from.day == now.day &&
+        f.to.year == now.year &&
+        f.to.month == now.month &&
+        f.to.day == now.day;
+  }
+
+  // ── Period quick-chips ──────────────────────────────────────────────────────
+  Widget _buildPeriodChips(AppLocalizations l10n, ReportSummaryFilter filter) {
+    return Row(
+      children: [
+        Expanded(child: _PeriodChip(label: l10n.reportsToday, onTap: _setToday)),
+        const SizedBox(width: 8),
+        Expanded(
+            child: _PeriodChip(label: l10n.reportsMonth, onTap: _setThisMonth)),
+        const SizedBox(width: 8),
+        Expanded(child: _PeriodChip(label: l10n.reportsYear, onTap: _setThisYear)),
+      ],
     );
   }
 
   void _setToday() {
     final now = DateTime.now();
-    ref.read(reportSummaryFilterProvider.notifier).state =
-        ReportSummaryFilter(from: DateTime(now.year, now.month, now.day), to: now);
+    ref.read(reportSummaryFilterProvider.notifier).state = ReportSummaryFilter(
+        from: DateTime(now.year, now.month, now.day), to: now);
   }
 
   void _setThisMonth() {
@@ -146,15 +142,16 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
         from: DateTime(now.year, 1, 1), to: DateTime(now.year, 12, 31));
   }
 
-  Future<void> _showPeriodPicker(BuildContext context, ReportSummaryFilter current) async {
+  Future<void> _showPeriodPicker(
+      BuildContext context, ReportSummaryFilter current) async {
     final picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
       initialDateRange: DateTimeRange(start: current.from, end: current.to),
       builder: (ctx, child) => Theme(
-        data: Theme.of(ctx).copyWith(
-            colorScheme: ColorScheme.light(primary: AppColors.primary)),
+        data: Theme.of(ctx)
+            .copyWith(colorScheme: ColorScheme.light(primary: AppColors.primary)),
         child: child!,
       ),
     );
@@ -164,100 +161,279 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     }
   }
 
-  // ── Summary cards ──────────────────────────────────────────────────────────
-  Widget _buildSummaryCards(
-      AppLocalizations l10n, ReportSummary s, bool isWide) {
-    final netRevenue = s.totalRevenue - s.totalDiscount;
-    final cards = [
-      _StatCard(
-        label: l10n.reportsNetRevenue,
-        value: 'Rs. ${_amt.format(netRevenue)}',
-        icon: Icons.trending_up_rounded,
-        gradient: AppColors.primaryGradient,
-        sub: s.totalDiscount > 0
-            ? l10n.reportsBillsWithDiscount(
-                l10n.reportsBills(s.billCount), _amt.format(s.totalDiscount))
-            : l10n.reportsBills(s.billCount),
-      ),
-      _StatCard(
-        label: l10n.reportsExpenses,
-        value: 'Rs. ${_amt.format(s.totalExpenses)}',
-        icon: Icons.trending_down_rounded,
-        gradient: LinearGradient(colors: [AppColors.error, const Color(0xFFFF6B6B)]),
-        sub: s.expensesByCategory.isNotEmpty
-            ? l10n.reportsCategoryCount(s.expensesByCategory.length)
-            : l10n.reportsNoExpenses,
-      ),
-    ];
+  // ── Sales header card ───────────────────────────────────────────────────────
+  Widget _buildSalesCard(
+      AppLocalizations l10n, ReportSummary s, ReportSummaryFilter filter) {
+    final title = _isToday(filter)
+        ? l10n.reportsTotalSalesToday
+        : l10n.reportsTotalSalesPeriod;
 
-    if (isWide) {
-      return Row(
-        children: cards
-            .asMap()
-            .entries
-            .map((e) => Expanded(
-                child: Padding(
-                    padding: EdgeInsets.only(right: e.key < cards.length - 1 ? 12 : 0),
-                    child: e.value)))
-            .toList(),
-      );
-    }
-    return Column(
-      children: cards.map((c) => Padding(
-          padding: const EdgeInsets.only(bottom: 12), child: c)).toList(),
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: AppColors.primaryGradient,
+        borderRadius: BorderRadius.circular(AppRadius.large),
+        boxShadow: AppShadow.medium,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  fontSize: 13, color: Colors.white70,
+                  fontWeight: FontWeight.w500)),
+          const SizedBox(height: 6),
+          Text('₹${_amt.format(s.netSales)}',
+              style: const TextStyle(
+                  fontSize: 34, fontWeight: FontWeight.w800, color: Colors.white)),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _headerStat(l10n.reportsOrders, '${s.billCount}'),
+              const SizedBox(width: 28),
+              _headerStat(l10n.reportsAvgBill, '₹${_amt.format(s.avgBill)}'),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
-  // ── Payment mode breakdown ─────────────────────────────────────────────────
-  Widget _buildPaymentBreakdown(AppLocalizations l10n, ReportSummary s) {
-    final modes = s.byPaymentMode.entries
-        .where((e) => e.value > 0)
-        .toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final total = modes.fold(0.0, (sum, e) => sum + e.value);
+  Widget _headerStat(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(fontSize: 11, color: Colors.white60)),
+        const SizedBox(height: 2),
+        Text(value,
+            style: const TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+      ],
+    );
+  }
+
+  // ── Last 7 days bar chart ───────────────────────────────────────────────────
+  // Watches its own weeklySalesProvider so the chart is unaffected by the date
+  // filter — it always shows the true last 7 days.
+  Widget _buildLast7DaysSection(AppLocalizations l10n) {
+    final weeklyAsync = ref.watch(weeklySalesProvider);
+    return weeklyAsync.when(
+      loading: () => _SectionCard(
+        title: l10n.reportsLast7Days,
+        child: const SizedBox(
+            height: 120, child: Center(child: CircularProgressIndicator())),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (weekly) => _buildLast7DaysChart(l10n, weekly),
+    );
+  }
+
+  Widget _buildLast7DaysChart(AppLocalizations l10n, List<DailyReport> weekly) {
+    // Build a fixed 7-day window ending today. Days with no bills get ₹0 bars,
+    // so the chart always shows all 7 weekdays. Data comes from the weekly
+    // provider (independent of the report period).
+    final today = DateTime.now();
+    final byDay = {for (final d in weekly) d.day: d.revenue};
+    final days = List.generate(7, (i) {
+      final date = DateTime(today.year, today.month, today.day)
+          .subtract(Duration(days: 6 - i));
+      final key = DateFormat('yyyy-MM-dd').format(date);
+      return _ChartDay(date: date, revenue: byDay[key] ?? 0.0);
+    });
+
+    final maxRev = days.fold(0.0, (m, d) => d.revenue > m ? d.revenue : m);
+    // Default selection = the peak day (highlighted), until the user taps one.
+    var peakIndex = 0;
+    for (var i = 1; i < days.length; i++) {
+      if (days[i].revenue > days[peakIndex].revenue) peakIndex = i;
+    }
+    final selectedIndex = _selectedDayIndex ?? peakIndex;
+    final selected = days[selectedIndex];
 
     return _SectionCard(
-      title: l10n.reportsRevenueByPaymentMode,
-      icon: Icons.payments_outlined,
+      title: l10n.reportsLast7Days,
       child: Column(
-        children: modes.map((e) {
-          final pct = total > 0 ? e.value / total : 0.0;
-          return _BarRow(
-            label: _paymentLabel(l10n, e.key).toUpperCase(),
-            value: 'Rs. ${_amt.format(e.value)}',
-            percent: pct,
-            color: _paymentColor(e.key),
-          );
-        }).toList(),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 120,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(days.length, (i) {
+                final d = days[i];
+                final frac = maxRev > 0 ? d.revenue / maxRev : 0.0;
+                final isSelected = i == selectedIndex;
+                return Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() => _selectedDayIndex = i),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: FractionallySizedBox(
+                              alignment: Alignment.bottomCenter,
+                              // Min 6% so a ₹0 day still shows a visible stub.
+                              heightFactor: frac == 0 ? 0.06 : frac,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? AppColors.primary
+                                      : AppColors.primaryLight,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _weekdayFmt.format(d.date),
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: isSelected
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                                color: isSelected
+                                    ? AppColors.primary
+                                    : AppColors.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Selected-day detail strip.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.primaryLight,
+              borderRadius: BorderRadius.circular(AppRadius.small),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.calendar_today_outlined,
+                    size: 14, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _fullDayFmt.format(selected.date),
+                    style: const TextStyle(
+                        fontSize: 13, color: AppColors.textPrimary),
+                  ),
+                ),
+                Text('₹${_amt.format(selected.revenue)}',
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary)),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  /// Display label for a default expense category. Custom categories entered by
-  /// the user are shown as-is.
-  String _expenseCategoryLabel(AppLocalizations l10n, String cat) {
-    switch (cat) {
-      case 'Rent':
-        return l10n.expensesCatRent;
-      case 'Salary':
-        return l10n.expensesCatSalary;
-      case 'Utilities':
-        return l10n.expensesCatUtilities;
-      case 'Stock Purchase':
-        return l10n.expensesCatStockPurchase;
-      case 'Transport':
-        return l10n.expensesCatTransport;
-      case 'Marketing':
-        return l10n.expensesCatMarketing;
-      case 'Maintenance':
-        return l10n.expensesCatMaintenance;
-      case 'Taxes':
-        return l10n.expensesCatTaxes;
-      case 'Other':
-        return l10n.expensesCatOther;
-      default:
-        return cat;
+  // ── Top selling items ───────────────────────────────────────────────────────
+  Widget _buildTopItems(AppLocalizations l10n, ReportSummary s) {
+    final items = s.topItems.length > 5 ? s.topItems.sublist(0, 5) : s.topItems;
+    return _SectionCard(
+      title: l10n.reportsTopSellingItems,
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) const Divider(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(items[i].itemName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                      const SizedBox(height: 2),
+                      Text(l10n.reportsSoldCount(items[i].qtySold.toInt()),
+                          style: const TextStyle(
+                              fontSize: 12, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text('₹${_amt.format(items[i].revenue)}',
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Payment split ───────────────────────────────────────────────────────────
+  // Shows every payment mode that has sales, so the tiles sum exactly to Total
+  // Sales. Cash + UPI always shown (even at ₹0); card/credit/other only when > 0.
+  Widget _buildPaymentSplit(AppLocalizations l10n, ReportSummary s) {
+    final order = ['cash', 'upi', 'card', 'credit', 'other'];
+    final present = order.where((m) {
+      final v = s.byPaymentMode[m] ?? 0;
+      return m == 'cash' || m == 'upi' || v > 0;
+    }).toList();
+
+    Widget tile(String mode) => Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.large),
+            border: Border.all(color: AppColors.border),
+            boxShadow: AppShadow.small,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_paymentLabel(l10n, mode),
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary)),
+              const SizedBox(height: 6),
+              Text('₹${_amt.format(s.byPaymentMode[mode] ?? 0)}',
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+            ],
+          ),
+        );
+
+    // Lay out two per row so it stays tidy with 2–5 modes.
+    final rows = <Widget>[];
+    for (var i = 0; i < present.length; i += 2) {
+      final left = present[i];
+      final right = i + 1 < present.length ? present[i + 1] : null;
+      rows.add(Row(
+        children: [
+          Expanded(child: tile(left)),
+          const SizedBox(width: 12),
+          Expanded(child: right != null ? tile(right) : const SizedBox()),
+        ],
+      ));
+      if (i + 2 < present.length) rows.add(const SizedBox(height: 12));
     }
+    return Column(children: rows);
   }
 
   String _paymentLabel(AppLocalizations l10n, String mode) {
@@ -268,6 +444,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
         return l10n.paymentUpi;
       case 'card':
         return l10n.paymentCard;
+      case 'credit':
+        return l10n.paymentCredit;
       case 'other':
         return l10n.paymentOther;
       default:
@@ -275,123 +453,55 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     }
   }
 
-  // ── Expense by category ────────────────────────────────────────────────────
-  Widget _buildExpenseByCategory(AppLocalizations l10n, ReportSummary s) {
-    final total = s.expensesByCategory.fold(0.0, (sum, e) => sum + e.value);
+  // ── Recent bills ────────────────────────────────────────────────────────────
+  Widget _buildRecentBills(AppLocalizations l10n, ReportSummary s) {
     return _SectionCard(
-      title: l10n.reportsExpensesByCategory,
-      icon: Icons.pie_chart_outline_rounded,
+      title: l10n.reportsRecentBills,
       child: Column(
-        children: s.expensesByCategory.map((e) {
-          final pct = total > 0 ? e.value / total : 0.0;
-          return _BarRow(
-            label: _expenseCategoryLabel(l10n, e.key),
-            value: 'Rs. ${_amt.format(e.value)}',
-            percent: pct,
-            color: _categoryColor(e.key),
-            subtitle: '${(pct * 100).toStringAsFixed(1)}%',
-          );
-        }).toList(),
+        children: [
+          for (var i = 0; i < s.recentBills.length; i++) ...[
+            if (i > 0) const Divider(height: 18),
+            _recentBillRow(l10n, s.recentBills[i]),
+          ],
+        ],
       ),
     );
   }
 
-  // ── Daily breakdown ────────────────────────────────────────────────────────
-  Widget _buildDailyBreakdown(AppLocalizations l10n, ReportSummary s) {
-    final maxRevenue = s.daily.fold(0.0, (m, d) => d.revenue > m ? d.revenue : m);
-    return _SectionCard(
-      title: l10n.reportsDailyBreakdown,
-      icon: Icons.calendar_view_week_outlined,
-      child: Column(
-        children: s.daily.map((d) {
-          final isProfit = d.profit >= 0;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 64,
-                      child: Text(_dayFmt.format(DateTime.parse(d.day)),
-                          style: const TextStyle(
-                              fontSize: 12, color: AppColors.textSecondary)),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Revenue bar
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: LinearProgressIndicator(
-                              value: maxRevenue > 0 ? d.revenue / maxRevenue : 0,
-                              minHeight: 8,
-                              backgroundColor: AppColors.surfaceVariant,
-                              valueColor: const AlwaysStoppedAnimation(AppColors.primary),
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          // Expense bar
-                          if (d.expenses > 0)
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: maxRevenue > 0 ? d.expenses / maxRevenue : 0,
-                                minHeight: 5,
-                                backgroundColor: AppColors.surfaceVariant,
-                                valueColor: const AlwaysStoppedAnimation(AppColors.error),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('Rs. ${_amt.format(d.revenue)}',
-                            style: const TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w600,
-                                color: AppColors.success)),
-                        Text(
-                          isProfit
-                              ? '+${_amt.format(d.profit)}'
-                              : '-${_amt.format(d.profit.abs())}',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: isProfit ? AppColors.success : AppColors.error),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const Divider(height: 12),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
+  Widget _recentBillRow(AppLocalizations l10n, RecentBill b) {
+    final where = (b.tableNumber != null && b.tableNumber!.isNotEmpty)
+        ? l10n.reportsTableLabel(b.tableNumber!)
+        : ((b.customerName != null && b.customerName!.trim().isNotEmpty)
+            ? b.customerName!.trim()
+            : l10n.reportsParcel);
+    return Row(
+      children: [
+        SizedBox(
+          width: 52,
+          child: Text('#${b.billNumber.split('-').last}',
+              style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.primary)),
+        ),
+        Expanded(
+          child: Text(where,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 13, color: AppColors.textPrimary)),
+        ),
+        Text(_timeFmt.format(b.createdAt.toLocal()),
+            style:
+                const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        const SizedBox(width: 12),
+        Text('₹${_amt.format(b.net)}',
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary)),
+      ],
     );
-  }
-
-  Color _paymentColor(String mode) {
-    switch (mode) {
-      case 'cash': return AppColors.success;
-      case 'upi': return AppColors.primary;
-      case 'card': return AppColors.accent;
-      case 'credit': return AppColors.warning;
-      default: return AppColors.textSecondary;
-    }
-  }
-
-  Color _categoryColor(String cat) {
-    const colors = [
-      Color(0xFF4F46E5), Color(0xFF7C3AED), Color(0xFFDB2777),
-      Color(0xFFDC2626), Color(0xFFD97706), Color(0xFF059669),
-      Color(0xFF0891B2), Color(0xFF7C3AED),
-    ];
-    return colors[cat.hashCode.abs() % colors.length];
   }
 }
 
@@ -399,68 +509,11 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
 // Reusable sub-widgets
 // ---------------------------------------------------------------------------
 
-class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
-  final String sub;
-  final IconData icon;
-  final LinearGradient gradient;
-
-  const _StatCard({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.gradient,
-    required this.sub,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(AppRadius.large),
-        boxShadow: AppShadow.medium,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: Colors.white70, size: 18),
-              const SizedBox(width: 8),
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 13, color: Colors.white70,
-                      fontWeight: FontWeight.w500)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(value,
-              style: const TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
-          if (sub.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(sub,
-                style: const TextStyle(fontSize: 11, color: Colors.white60)),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _SectionCard extends StatelessWidget {
   final String title;
-  final IconData icon;
   final Widget child;
 
-  const _SectionCard({
-    required this.title,
-    required this.icon,
-    required this.child,
-  });
+  const _SectionCard({required this.title, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -475,76 +528,13 @@ class _SectionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, size: 18, color: AppColors.primary),
-              const SizedBox(width: 8),
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-            ],
-          ),
+          Text(title,
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
           const SizedBox(height: 16),
           child,
-        ],
-      ),
-    );
-  }
-}
-
-class _BarRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final double percent;
-  final Color color;
-  final String? subtitle;
-
-  const _BarRow({
-    required this.label,
-    required this.value,
-    required this.percent,
-    required this.color,
-    this.subtitle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(width: 10, height: 10,
-                  decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(label,
-                    style: const TextStyle(
-                        fontSize: 13, color: AppColors.textPrimary)),
-              ),
-              if (subtitle != null)
-                Text(subtitle!,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppColors.textSecondary)),
-              const SizedBox(width: 8),
-              Text(value,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: percent,
-              minHeight: 7,
-              backgroundColor: AppColors.surfaceVariant,
-              valueColor: AlwaysStoppedAnimation(color),
-            ),
-          ),
         ],
       ),
     );
@@ -562,14 +552,16 @@ class _PeriodChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: AppColors.primary.withValues(alpha: 0.1),
+          color: AppColors.primary.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(AppRadius.small),
         ),
         child: Text(label,
             style: const TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
                 color: AppColors.primary)),
       ),
     );

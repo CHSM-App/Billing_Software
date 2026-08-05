@@ -73,12 +73,11 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
         return;
       }
       setState(() {
-        // `rawError` is already a human-readable string built by LicenseService
-        // (e.g. "Server error (500): …" or a socket/handshake message). Show it
-        // as-is; running it through sanitizeUiErrorMessage — which only unwraps
-        // ApiException — would always collapse it to a generic "Something went
-        // wrong" and hide the real cause.
-        _errorMessage = rawError ?? _messageForState(l10n, status.state);
+        // Show a clean, localized per-state message — never the raw technical
+        // string from LicenseService (e.g. "Server error (500): …" or a socket/
+        // handshake message), which is confusing to end users. rawError is still
+        // used above to detect session expiry (401); it's just not surfaced.
+        _errorMessage = _messageForState(l10n, status.state);
       });
     } catch (e) {
       if (!mounted) return;

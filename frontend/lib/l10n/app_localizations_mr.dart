@@ -113,10 +113,98 @@ class AppLocalizationsMr extends AppLocalizations {
   String get navOpenOrders => 'खुल्या ऑर्डर';
 
   @override
+  String get navOrders => 'ऑर्डर';
+
+  @override
   String get navSettings => 'सेटिंग्ज';
 
   @override
   String get navProfile => 'प्रोफाइल';
+
+  @override
+  String get ordersTabTables => 'टेबल्स';
+
+  @override
+  String get ordersTabOpenOrders => 'खुल्या ऑर्डर';
+
+  @override
+  String get ordersTabCredit => 'उधारी';
+
+  @override
+  String get billingCreditCustomerRequired =>
+      'उधारीच्या बिलासाठी ग्राहकाचे नाव आणि फोन आवश्यक आहे.';
+
+  @override
+  String billingPrevCreditDue(String amount, int count) {
+    return 'मागील उधारी: ₹$amount ($count बिल)';
+  }
+
+  @override
+  String get billingClearPrevCredit => 'या बिलासोबत मागील उधारी भरा';
+
+  @override
+  String get billingPreviousDue => 'मागील येणे';
+
+  @override
+  String get creditTitle => 'उधारी';
+
+  @override
+  String get creditEmpty =>
+      'कोणतीही उधारी शिल्लक नाही. ज्यांच्याकडे पैसे येणे आहे ते येथे दिसतील.';
+
+  @override
+  String get creditOutstanding => 'शिल्लक';
+
+  @override
+  String creditUnpaidBills(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count न भरलेली बिले',
+      one: '१ न भरलेले बिल',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get creditNoPhone => 'फोन नाही';
+
+  @override
+  String get creditCustomerBillsTitle => 'न भरलेली बिले';
+
+  @override
+  String creditSelectedTotal(String amount) {
+    return 'निवडलेले: ₹$amount';
+  }
+
+  @override
+  String get creditMarkPaid => 'भरले म्हणून चिन्हांकित करा';
+
+  @override
+  String get creditSelectAll => 'सर्व निवडा';
+
+  @override
+  String get creditPrint => 'प्रिंट';
+
+  @override
+  String get creditSendWhatsapp => 'व्हॉट्सअ‍ॅप';
+
+  @override
+  String get creditChoosePaymentMode => 'पैसे कसे मिळाले?';
+
+  @override
+  String creditSettleConfirm(int count) {
+    return '$count बिल भरले म्हणून नोंदवायचे?';
+  }
+
+  @override
+  String get creditSettledSuccess => 'भरले म्हणून नोंदवले.';
+
+  @override
+  String get creditSettleFailed => 'नोंदवता आले नाही. पुन्हा प्रयत्न करा.';
+
+  @override
+  String get creditSelectAtLeastOne => 'किमान एक बिल निवडा.';
 
   @override
   String get openOrdersTitle => 'खुल्या ऑर्डर';
@@ -1351,6 +1439,40 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get reportsDailyBreakdown => 'दैनिक तपशील';
+
+  @override
+  String get reportsTotalSalesToday => 'आजची एकूण विक्री';
+
+  @override
+  String get reportsTotalSalesPeriod => 'एकूण विक्री';
+
+  @override
+  String get reportsOrders => 'ऑर्डर';
+
+  @override
+  String get reportsAvgBill => 'सरासरी बिल';
+
+  @override
+  String get reportsLast7Days => 'गेले ७ दिवस';
+
+  @override
+  String get reportsTopSellingItems => 'सर्वाधिक विकले जाणारे पदार्थ';
+
+  @override
+  String get reportsRecentBills => 'अलीकडील बिले';
+
+  @override
+  String reportsSoldCount(int count) {
+    return '$count विकले';
+  }
+
+  @override
+  String get reportsParcel => 'पार्सल';
+
+  @override
+  String reportsTableLabel(String number) {
+    return 'टेबल $number';
+  }
 
   @override
   String get expensesTitle => 'खर्च';

@@ -302,6 +302,12 @@ abstract class AppLocalizations {
   /// **'Open Orders'**
   String get navOpenOrders;
 
+  /// No description provided for @navOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Orders'**
+  String get navOrders;
+
   /// No description provided for @navSettings.
   ///
   /// In en, this message translates to:
@@ -313,6 +319,144 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Profile'**
   String get navProfile;
+
+  /// No description provided for @ordersTabTables.
+  ///
+  /// In en, this message translates to:
+  /// **'Tables'**
+  String get ordersTabTables;
+
+  /// No description provided for @ordersTabOpenOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Orders'**
+  String get ordersTabOpenOrders;
+
+  /// No description provided for @ordersTabCredit.
+  ///
+  /// In en, this message translates to:
+  /// **'Credit'**
+  String get ordersTabCredit;
+
+  /// No description provided for @billingCreditCustomerRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer name and phone are required for a credit bill.'**
+  String get billingCreditCustomerRequired;
+
+  /// No description provided for @billingPrevCreditDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous credit due: ₹{amount} ({count} bill(s))'**
+  String billingPrevCreditDue(String amount, int count);
+
+  /// No description provided for @billingClearPrevCredit.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear previous credit with this bill'**
+  String get billingClearPrevCredit;
+
+  /// No description provided for @billingPreviousDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous Due'**
+  String get billingPreviousDue;
+
+  /// No description provided for @creditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Credit'**
+  String get creditTitle;
+
+  /// No description provided for @creditEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No credit due. Customers who owe money appear here.'**
+  String get creditEmpty;
+
+  /// No description provided for @creditOutstanding.
+  ///
+  /// In en, this message translates to:
+  /// **'Outstanding'**
+  String get creditOutstanding;
+
+  /// No description provided for @creditUnpaidBills.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 unpaid bill} other{{count} unpaid bills}}'**
+  String creditUnpaidBills(int count);
+
+  /// No description provided for @creditNoPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'No phone'**
+  String get creditNoPhone;
+
+  /// No description provided for @creditCustomerBillsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpaid bills'**
+  String get creditCustomerBillsTitle;
+
+  /// No description provided for @creditSelectedTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected: ₹{amount}'**
+  String creditSelectedTotal(String amount);
+
+  /// No description provided for @creditMarkPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark paid'**
+  String get creditMarkPaid;
+
+  /// No description provided for @creditSelectAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all'**
+  String get creditSelectAll;
+
+  /// No description provided for @creditPrint.
+  ///
+  /// In en, this message translates to:
+  /// **'Print'**
+  String get creditPrint;
+
+  /// No description provided for @creditSendWhatsapp.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp'**
+  String get creditSendWhatsapp;
+
+  /// No description provided for @creditChoosePaymentMode.
+  ///
+  /// In en, this message translates to:
+  /// **'How was it paid?'**
+  String get creditChoosePaymentMode;
+
+  /// No description provided for @creditSettleConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle {count} bill(s) as paid?'**
+  String creditSettleConfirm(int count);
+
+  /// No description provided for @creditSettledSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Marked as paid.'**
+  String get creditSettledSuccess;
+
+  /// No description provided for @creditSettleFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not settle. Please try again.'**
+  String get creditSettleFailed;
+
+  /// No description provided for @creditSelectAtLeastOne.
+  ///
+  /// In en, this message translates to:
+  /// **'Select at least one bill.'**
+  String get creditSelectAtLeastOne;
 
   /// No description provided for @openOrdersTitle.
   ///
@@ -2515,6 +2659,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Daily Breakdown'**
   String get reportsDailyBreakdown;
+
+  /// No description provided for @reportsTotalSalesToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Total sales today'**
+  String get reportsTotalSalesToday;
+
+  /// No description provided for @reportsTotalSalesPeriod.
+  ///
+  /// In en, this message translates to:
+  /// **'Total sales'**
+  String get reportsTotalSalesPeriod;
+
+  /// No description provided for @reportsOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Orders'**
+  String get reportsOrders;
+
+  /// No description provided for @reportsAvgBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Avg bill'**
+  String get reportsAvgBill;
+
+  /// No description provided for @reportsLast7Days.
+  ///
+  /// In en, this message translates to:
+  /// **'Last 7 days'**
+  String get reportsLast7Days;
+
+  /// No description provided for @reportsTopSellingItems.
+  ///
+  /// In en, this message translates to:
+  /// **'Top selling items'**
+  String get reportsTopSellingItems;
+
+  /// No description provided for @reportsRecentBills.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent bills'**
+  String get reportsRecentBills;
+
+  /// No description provided for @reportsSoldCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} sold'**
+  String reportsSoldCount(int count);
+
+  /// No description provided for @reportsParcel.
+  ///
+  /// In en, this message translates to:
+  /// **'Parcel'**
+  String get reportsParcel;
+
+  /// No description provided for @reportsTableLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Table {number}'**
+  String reportsTableLabel(String number);
 
   /// No description provided for @expensesTitle.
   ///

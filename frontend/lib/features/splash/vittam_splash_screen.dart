@@ -1,8 +1,9 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:in_app_update/in_app_update.dart';
 
 import '../../core/update/update_provider.dart';
+import '../update/vittam_update_dialog.dart';
 import '../../l10n/l10n_ext.dart';
 import '../../theme/app_theme.dart';
 
@@ -53,41 +54,40 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
   }
 
   Future<void> _run() async {
-    // Wait minimum 2 seconds then check for update
+    // Wait minimum 2 seconds then run the update gate.
     await Future.delayed(_minSplashDuration);
     if (!mounted) return;
 
-    await _checkUpdate();
+    // Firebase Remote Config decides WHETHER an update is needed and whether
+    // it's forced (with a custom message). If it forces, the gate blocks and we
+    // do NOT enter the app; the dialog's "Update now" opens the Play Store.
+    final proceed = await _remoteConfigGate();
+    if (!proceed) return; // forced update — stay on the gate
 
     if (mounted) Navigator.pushReplacementNamed(context, '/home');
   }
 
-  /// Checks Play Store for updates directly — no Firebase RC needed.
-  ///
-  /// Priority is set via deploy.js at publish time:
-  ///   0–3 → bottom sheet popup  (optional, user can dismiss)
-  ///   4–5 → full screen forced  (user cannot dismiss)
-  ///
-  /// Silently ignored in debug builds or sideloaded APKs.
-  Future<void> _checkUpdate() async {
+  /// Reads the RC-driven update decision and shows [VittamUpdateDialog].
+  /// Returns true if the app may proceed, false if a FORCED update blocks it.
+  Future<bool> _remoteConfigGate() async {
+    // The update dialog's "Update now" opens the Play Store, so this gate only
+    // makes sense on Android. On iOS/web/desktop, skip it and open the app.
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return true;
+    }
     try {
-      final info = await InAppUpdate.checkForUpdate();
-      debugPrint('in_app_update: availability=${info.updateAvailability}, priority=${info.updatePriority}');
+      final state = await ref.read(updateCheckProvider.future);
+      if (!state.updateAvailable) return true;
 
-      if (info.updateAvailability != UpdateAvailability.updateAvailable) return;
+      if (!mounted) return true;
+      // Non-dismissible when forced (barrierDismissible + PopScope handle it).
+      await VittamUpdateDialog.showIfNeeded(context, state);
 
-      if (info.updatePriority >= 4) {
-        // Full-screen forced update — user cannot dismiss
-        await InAppUpdate.performImmediateUpdate();
-      } else {
-        // Bottom sheet — user can dismiss; download happens in background
-        final result = await InAppUpdate.startFlexibleUpdate();
-        debugPrint('in_app_update: flexible result=$result');
-        // Note: completeFlexibleUpdate() must be called only after
-        // InstallStatus.downloaded — Play Store notifies user when ready
-      }
-    } catch (e, st) {
-      debugPrint('in_app_update ERROR: $e\n$st');
+      // If forced, the only way past the dialog is to update — so block here.
+      return !state.forceUpdate;
+    } catch (e) {
+      debugPrint('remote-config update gate error: $e');
+      return true; // never let an RC failure lock the user out
     }
   }
 

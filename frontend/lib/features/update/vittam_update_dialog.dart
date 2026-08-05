@@ -3,10 +3,15 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/update/update_state.dart';
 import '../../l10n/l10n_ext.dart';
+import '../../theme/app_theme.dart';
 
+/// Update prompt styled to match the app's design system (indigo primary,
+/// gradient icon badge, app radii/spacing). Non-dismissible when the update
+/// is forced.
 class VittamUpdateDialog extends StatelessWidget {
-  static const _packageId = 'com.vengurlatech.vittam';
-  static const _brandGreen = Color(0xFF1DB954);
+  // Must match android/app applicationId EXACTLY — Play Store package IDs are
+  // case-sensitive, so a lowercase 'vittam' returns "item not found".
+  static const _packageId = 'com.vengurlatech.Vittam';
 
   final UpdateState state;
 
@@ -34,7 +39,6 @@ class VittamUpdateDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final textTheme = Theme.of(context).textTheme;
 
     // dialogTitle/dialogMessage are optional remote-config overrides; when the
     // server does not supply them fall back to the localized defaults.
@@ -45,68 +49,123 @@ class VittamUpdateDialog extends StatelessWidget {
 
     return PopScope(
       canPop: !state.forceUpdate,
-      child: AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          title,
-          style: textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: _brandGreen,
-          ),
+      child: Dialog(
+        backgroundColor: AppColors.surface,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.large),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message, style: textTheme.bodyMedium),
-            const SizedBox(height: 12),
-            Center(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.space24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Vittam logo badge — matches the splash's logo card.
+              Container(
+                width: 72,
+                height: 72,
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: _brandGreen.withValues(alpha:0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _brandGreen.withValues(alpha:0.4)),
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.large),
+                  boxShadow: AppShadow.medium,
+                  border: Border.all(color: AppColors.border),
                 ),
-                child: Text(
-                  '${state.currentVersion}  →  ${state.latestVersion}',
-                  style: textTheme.labelMedium?.copyWith(
-                    color: _brandGreen,
-                    fontWeight: FontWeight.w600,
+                child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+              ),
+              const SizedBox(height: AppSpacing.space16),
+
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: AppFont.style(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.space8),
+
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: AppFont.style(
+                  fontSize: 14,
+                  color: AppColors.textSecondary,
+                  height: 1.5,
+                ),
+              ),
+
+              if (state.forceUpdate) ...[
+                const SizedBox(height: AppSpacing.space16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.space8),
+                  decoration: BoxDecoration(
+                    color: AppColors.warningLight,
+                    borderRadius: BorderRadius.circular(AppRadius.small),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline_rounded,
+                          size: 16, color: AppColors.warning),
+                      const SizedBox(width: AppSpacing.space8),
+                      Expanded(
+                        child: Text(
+                          l10n.updateForceNote,
+                          style: AppFont.style(
+                              fontSize: 12,
+                              color: const Color(0xFF92400E),
+                              fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: AppSpacing.space24),
+
+              // Actions
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await _openPlayStore();
+                    if (context.mounted && !state.forceUpdate) {
+                      Navigator.pop(context, true);
+                    }
+                  },
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: Text(l10n.updateNow),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.space12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
                   ),
                 ),
               ),
-            ),
-            if (state.forceUpdate) ...[
-              const SizedBox(height: 12),
-              Text(
-                l10n.updateForceNote,
-                style: textTheme.bodySmall?.copyWith(
-                  color: Colors.red.shade700,
-                  fontStyle: FontStyle.italic,
+              if (!state.forceUpdate) ...[
+                const SizedBox(height: AppSpacing.space8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      padding: const EdgeInsets.symmetric(
+                          vertical: AppSpacing.space12),
+                    ),
+                    child: Text(l10n.updateLater),
+                  ),
                 ),
-              ),
+              ],
             ],
-          ],
-        ),
-        actions: [
-          if (!state.forceUpdate)
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(l10n.updateLater),
-            ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: _brandGreen),
-            onPressed: () async {
-              await _openPlayStore();
-              if (context.mounted && !state.forceUpdate) {
-                Navigator.pop(context, true);
-              }
-            },
-            child: Text(l10n.updateNow),
           ),
-        ],
+        ),
       ),
     );
   }

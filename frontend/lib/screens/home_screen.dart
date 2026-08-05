@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
@@ -63,6 +64,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   String _selectedCategory = '';
   bool _showCustomerFields = true;
   String _paymentMode = 'cash';
+  // Inline error shown inside the billing card when a credit bill is missing
+  // the required customer name/phone. Cleared once both are provided.
+  String? _creditError;
+  // On phones the cart lives in a bottom sheet built by its own builder, which
+  // a parent setState won't rebuild. Capture its setter so credit-error changes
+  // also refresh the open sheet.
+  StateSetter? _sheetSetState;
+
+  // Outstanding credit ("previous due") for the currently-entered phone, looked
+  // up as the cashier types a 10-digit number. When _settlePrevCredit is on and
+  // the bill is finalized, these bill_ids are settled with the same mode.
+  double _prevCreditDue = 0;
+  List<String> _prevCreditBillIds = const [];
+  bool _settlePrevCredit = false;
+  String? _prevCreditPhone; // the phone the lookup result belongs to
+  Timer? _prevCreditDebounce;
+  // Previous credit bills that were just settled with the current bill — each
+  // is printed as its OWN receipt (never merged) when the finalize action is
+  // Print. Consumed and cleared by _autoPrint / _sendBillWhatsApp.
+  List<Bill> _justSettledPrevBills = const [];
   bool _generatingBill = false;
   bool _savingDraft = false;
   bool _draftLoaded = false;
@@ -106,6 +127,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _searchController.addListener(() => setState(() {}));
     _discountPctController.addListener(_onDiscountPctChanged);
     _discountAmtController.addListener(_onDiscountAmtChanged);
+    // Clear the inline credit error as soon as both name + phone are present.
+    _customerNameController.addListener(_maybeClearCreditError);
+    _customerPhoneController.addListener(_maybeClearCreditError);
+    // Look up any previous credit for the entered phone (10-digit trigger).
+    _customerPhoneController.addListener(_onPhoneChangedForCredit);
     // Auto-scroll focused field above the keyboard
     _customerNameFocus.addListener(() {
       if (_customerNameFocus.hasFocus) _ensureVisible(_customerNameKey);
@@ -160,6 +186,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _customerPhoneFocus.dispose();
     _discountPctFocus.dispose();
     _discountAmtFocus.dispose();
+    _prevCreditDebounce?.cancel();
     super.dispose();
   }
 
@@ -503,6 +530,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     if (!_validateCustomerPhone()) return;
+    if (!_validateCreditCustomer()) return;
     if (widget.activeBillId != null || widget.tableId != null) {
       // Table billing — always online
       await _generateBillOnline(cart, onBillReady: onBillReady);
@@ -578,6 +606,96 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return false;
   }
 
+  /// Updates the inline credit error and rebuilds both the inline card (parent)
+  /// and, if open, the phone bottom sheet.
+  void _setCreditError(String? msg) {
+    setState(() => _creditError = msg);
+    _sheetSetState?.call(() {});
+  }
+
+  /// Debounced reaction to phone edits: when a full 10-digit number is entered,
+  /// look up that customer's outstanding credit; clear the banner otherwise.
+  void _onPhoneChangedForCredit() {
+    final phone = _customerPhoneController.text.trim();
+    _prevCreditDebounce?.cancel();
+
+    // Not a complete number (or changed away): drop any stale banner.
+    if (!RegExp(r'^\d{10}$').hasMatch(phone)) {
+      if (_prevCreditDue > 0 || _prevCreditPhone != null) {
+        setState(() {
+          _prevCreditDue = 0;
+          _prevCreditBillIds = const [];
+          _prevCreditPhone = null;
+          _settlePrevCredit = false;
+        });
+        _sheetSetState?.call(() {});
+      }
+      return;
+    }
+
+    // Already have this phone's result — nothing to do.
+    if (_prevCreditPhone == phone) return;
+
+    _prevCreditDebounce = Timer(const Duration(milliseconds: 400),
+        () => _lookupPrevCredit(phone));
+  }
+
+  Future<void> _lookupPrevCredit(String phone) async {
+    try {
+      final summary = await getCreditSummary(phone);
+      // The user may have edited the phone while the request was in flight.
+      if (!mounted || _customerPhoneController.text.trim() != phone) return;
+      final due = double.tryParse('${summary['outstanding'] ?? 0}') ?? 0.0;
+      final ids = (summary['bill_ids'] as List?)?.cast<String>() ?? const [];
+      setState(() {
+        _prevCreditPhone = phone;
+        _prevCreditDue = due;
+        _prevCreditBillIds = ids;
+        // Default the toggle off; the cashier opts in per bill.
+        _settlePrevCredit = false;
+      });
+      _sheetSetState?.call(() {});
+    } catch (_) {
+      // Best-effort: a failed lookup just means no banner. Don't disrupt billing.
+    }
+  }
+
+  /// Clears the inline credit error once both name + phone are filled in, so
+  /// the message disappears as the user completes the fields.
+  void _maybeClearCreditError() {
+    if (_creditError == null) return;
+    if (_customerNameController.text.trim().isNotEmpty &&
+        _customerPhoneController.text.trim().isNotEmpty) {
+      _setCreditError(null);
+    }
+  }
+
+  /// A credit (udhaari) bill must identify the debtor: name + phone are
+  /// mandatory. Reveals and focuses the customer fields if either is missing.
+  bool _validateCreditCustomer() {
+    if (_paymentMode != 'credit') {
+      if (_creditError != null) _setCreditError(null);
+      return true;
+    }
+    final name = _customerNameController.text.trim();
+    final phone = _customerPhoneController.text.trim();
+    if (name.isNotEmpty && phone.isNotEmpty) {
+      if (_creditError != null) _setCreditError(null);
+      return true;
+    }
+    // Show the message inline inside the card (not a snackbar), and reveal +
+    // focus the missing field without closing the billing card.
+    _showCustomerFields = true;
+    _setCreditError(context.l10n.billingCreditCustomerRequired);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final key = name.isEmpty ? _customerNameKey : _customerPhoneKey;
+      _ensureVisible(key);
+      (name.isEmpty ? _customerNameFocus : _customerPhoneFocus).requestFocus();
+    });
+    return false;
+  }
+
   void _navigateAfterBill() {
     if (!mounted) return;
     if (widget.onBillDone != null) {
@@ -614,6 +732,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         result = await finalizeBill(draft['id']);
       }
       final bill = Bill.fromJson(result);
+
+      // If the cashier opted to clear this customer's previous credit, settle
+      // those unpaid bills with the SAME payment mode as this bill. The current
+      // bill itself is separate. Best-effort: a settle failure is surfaced but
+      // doesn't undo the finalized sale.
+      if (_settlePrevCredit &&
+          _prevCreditBillIds.isNotEmpty &&
+          _paymentMode != 'credit') {
+        final idsToSettle = List<String>.from(_prevCreditBillIds);
+        final settleMode = _paymentMode;
+        try {
+          final res = await settleCreditBills(idsToSettle, settleMode);
+          // Keep the settled bills so the print/WhatsApp action can handle each
+          // on its own (bills are never merged). Stamp the settled mode so a
+          // printed receipt shows how it was collected, not "Credit".
+          _justSettledPrevBills = (res['bills'] as List? ?? [])
+              .map((j) {
+                final b = Bill.fromJson(j as Map<String, dynamic>);
+                return _copyBillWithMode(b, settleMode);
+              })
+              .toList();
+          _prevCreditBillIds = const [];
+          _prevCreditDue = 0;
+          _settlePrevCredit = false;
+          _prevCreditPhone = null;
+        } catch (e) {
+          if (mounted) {
+            _showSnack(l10n.creditSettleFailed, isError: true);
+          }
+        }
+      }
+
       // Cache the invoice prefix from the authoritative bill number (e.g. the
       // 'INV' in 'INV-0007'), so offline receipts reuse the same prefix.
       final dash = bill.billNumber.lastIndexOf('-');
@@ -862,13 +1012,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  /// Copy of [bill] with [mode] as its payment mode, so a settled credit bill's
+  /// printed receipt shows how it was collected instead of "Credit". Nothing is
+  /// merged — this is one bill.
+  Bill _copyBillWithMode(Bill bill, String mode) => Bill(
+        id: bill.id,
+        businessId: bill.businessId,
+        billNumber: bill.billNumber,
+        tableId: bill.tableId,
+        tableNumber: bill.tableNumber,
+        customerName: bill.customerName,
+        customerPhone: bill.customerPhone,
+        subtotal: bill.subtotal,
+        taxAmount: bill.taxAmount,
+        discountAmount: bill.discountAmount,
+        total: bill.total,
+        paymentMode: mode,
+        status: bill.status,
+        paymentStatus: 'paid',
+        createdByUserId: bill.createdByUserId,
+        createdAt: bill.createdAt,
+        items: bill.items,
+      );
+
   Future<void> _autoPrint(Bill bill) async {
     final l10n = context.l10n;
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
+    // Consume any previous credit bills that were settled with this bill —
+    // each prints as its OWN receipt (never merged), one tap prints them all.
+    // printBills settles the BT link between jobs so a later receipt doesn't
+    // print garbage.
+    final prevBills = _justSettledPrevBills;
+    _justSettledPrevBills = const [];
     try {
-      await PrinterService.instance
-          .printBill(bill, businessName: businessName, labels: labels);
+      await PrinterService.instance.printBills([bill, ...prevBills],
+          businessName: businessName, labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {
       // 'No printer configured' is an internal sentinel, not a user string.
@@ -881,9 +1060,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Future<void> _sendBillWhatsApp(Bill bill) async {
     final l10n = context.l10n;
+    // Also handle each settled previous credit bill's receipt separately.
+    final prevBills = _justSettledPrevBills;
+    _justSettledPrevBills = const [];
     try {
-      await sendBillWhatsApp(bill.id);
-      if (mounted) _showSnack(l10n.billingWhatsappSent);
+      // --- API-template send (WhatsApp Business API) — disabled for now ---
+      // await sendBillWhatsApp(bill.id);
+      // for (final b in prevBills) {
+      //   await sendBillWhatsApp(b.id);
+      // }
+
+      // Deep-link send: open the user's own WhatsApp with a prefilled message
+      // to the customer's number. The cashier taps Send. Opening several chats
+      // at once isn't possible, so we open the current bill; any settled
+      // previous bills open in sequence after a short gap.
+      await _openWhatsAppForBill(bill.id);
+      for (final b in prevBills) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        await _openWhatsAppForBill(b.id);
+      }
     } on ApiException catch (e) {
       if (mounted) {
         _showSnack(l10n.billingWhatsappFailedWithError(e.message),
@@ -891,6 +1086,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       }
     } catch (_) {
       if (mounted) _showSnack(l10n.billingWhatsappFailed, isError: true);
+    }
+  }
+
+  /// Delivers the bill's receipt over WhatsApp. The backend decides by the
+  /// business's mode: 'api' (paid) sends the template server-side — we just
+  /// confirm; 'deeplink' (free) returns phone + message and we open the
+  /// cashier's WhatsApp (whatsapp:// first, then wa.me).
+  Future<void> _openWhatsAppForBill(String billId) async {
+    final data = await whatsAppBill(billId);
+
+    // Paid API mode: backend already sent it. Nothing to open.
+    if (data['mode'] == 'api') {
+      if (data['sent'] == true) {
+        if (mounted) _showSnack(context.l10n.billingWhatsappSent);
+      } else if (mounted) {
+        _showSnack(
+          (data['error'] ?? context.l10n.billingWhatsappFailed).toString(),
+          isError: true,
+        );
+      }
+      return;
+    }
+
+    // Free deeplink mode: open the cashier's WhatsApp with the prefilled text.
+    final phone = (data['phone'] ?? '').toString();
+    final message = (data['message'] ?? '').toString();
+    if (phone.isEmpty) {
+      if (mounted) _showSnack(context.l10n.billingWhatsappFailed, isError: true);
+      return;
+    }
+    final text = Uri.encodeComponent(message);
+    final candidates = [
+      Uri.parse('whatsapp://send?phone=$phone&text=$text'),
+      Uri.parse('https://wa.me/$phone?text=$text'),
+      Uri.parse('https://api.whatsapp.com/send?phone=$phone&text=$text'),
+    ];
+    Object? lastError;
+    for (final uri in candidates) {
+      try {
+        final ok =
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (ok) return; // opened successfully
+      } catch (e) {
+        lastError = e; // try the next candidate
+      }
+    }
+    // Every strategy failed — surface the real reason so we can diagnose.
+    if (mounted) {
+      _showSnack(
+        lastError != null
+            ? 'WhatsApp could not open: $lastError'
+            : context.l10n.billingWhatsappFailed,
+        isError: true,
+      );
     }
   }
 
@@ -1332,23 +1581,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ),
       builder: (sheetCtx) {
         final keyboardHeight = MediaQuery.of(sheetCtx).viewInsets.bottom;
-        return AnimatedPadding(
-          padding: EdgeInsets.only(bottom: keyboardHeight),
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.decelerate,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(sheetCtx).size.height * 0.88,
-            ),
-            child: SingleChildScrollView(
-              primary: false,
-              physics: const ClampingScrollPhysics(),
-              child: _buildCartPanel(inSheet: true),
-            ),
-          ),
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            // Expose the sheet's setter so credit-error changes (driven from
+            // button handlers) can rebuild the sheet, not just the parent.
+            _sheetSetState = setSheet;
+            return AnimatedPadding(
+              padding: EdgeInsets.only(bottom: keyboardHeight),
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.decelerate,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(sheetCtx).size.height * 0.88,
+                ),
+                child: SingleChildScrollView(
+                  primary: false,
+                  physics: const ClampingScrollPhysics(),
+                  child: _buildCartPanel(inSheet: true),
+                ),
+              ),
+            );
+          },
         );
       },
-    );
+    ).whenComplete(() => _sheetSetState = null);
   }
 
   // ---------------------------------------------------------------------------
@@ -1610,6 +1866,89 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
             const Divider(height: 1),
 
+            // Payment mode — placed before customer details so the payment
+            // choice is made first (and, for Credit, prompts for the now-visible
+            // name/phone below). Hidden for servers; taking payment is a
+            // cashier/owner step.
+            if (canFinalize)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.space16),
+              child: DropdownButtonFormField<String>(
+                value: _paymentMode,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: l10n.billingPaymentMode,
+                  prefixIcon: const Icon(Icons.payments_outlined,
+                      size: 18, color: AppColors.textSecondary),
+                ),
+                items: [
+                  DropdownMenuItem(
+                      value: 'cash',
+                      child: Text(l10n.paymentCash,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(
+                      value: 'upi',
+                      child: Text(l10n.paymentUpi,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(
+                      value: 'card',
+                      child: Text(l10n.paymentCard,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(
+                      value: 'other',
+                      child: Text(l10n.paymentOther,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  // Credit (udhaari): finalize the sale now, collect later.
+                  // Requires customer name + phone (enforced at checkout).
+                  DropdownMenuItem(
+                      value: 'credit',
+                      child: Text(l10n.paymentCredit,
+                          maxLines: 1, overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) {
+                  setState(() => _paymentMode = v!);
+                  // Leaving credit clears any pending "name/phone required"
+                  // message; the fields are only mandatory for credit.
+                  if (_paymentMode != 'credit' && _creditError != null) {
+                    _setCreditError(null);
+                  } else {
+                    _sheetSetState?.call(() {});
+                  }
+                },
+              ),
+            ),
+
+            // Inline credit validation message — shown inside the card (no
+            // snackbar, no closing) when a credit bill lacks name/phone.
+            if (canFinalize && _creditError != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
+                    AppSpacing.space8, AppSpacing.space16, 0),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.space8),
+                  decoration: BoxDecoration(
+                    color: AppColors.errorLight,
+                    borderRadius: BorderRadius.circular(AppRadius.small),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline,
+                          size: 16, color: AppColors.error),
+                      const SizedBox(width: AppSpacing.space8),
+                      Expanded(
+                        child: Text(
+                          _creditError!,
+                          style: const TextStyle(
+                              fontSize: 12, color: AppColors.error),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
             // Customer info — local StatefulBuilder so toggle works in both
             // the wide layout and the bottom sheet independently
             StatefulBuilder(
@@ -1696,41 +2035,61 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
-            // Payment mode — hidden for servers; taking payment is a
-            // cashier/owner step, so servers don't choose it.
-            if (canFinalize)
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.space16),
-              child: DropdownButtonFormField<String>(
-                value: _paymentMode,
-                isExpanded: true,
-                decoration: InputDecoration(
-                  labelText: l10n.billingPaymentMode,
-                  prefixIcon: const Icon(Icons.payments_outlined,
-                      size: 18, color: AppColors.textSecondary),
+            // Previous credit due for this phone — shown below the customer
+            // fields with a toggle to clear it together with the current bill.
+            if (canFinalize && _prevCreditDue > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
+                    AppSpacing.space8, AppSpacing.space16, 0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.warningLight,
+                    borderRadius: BorderRadius.circular(AppRadius.small),
+                    border: Border.all(color: AppColors.warning),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(AppSpacing.space12,
+                            AppSpacing.space8, AppSpacing.space12, 0),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.account_balance_wallet_outlined,
+                                size: 16, color: AppColors.warning),
+                            const SizedBox(width: AppSpacing.space8),
+                            Expanded(
+                              child: Text(
+                                l10n.billingPrevCreditDue(
+                                    _prevCreditDue.toStringAsFixed(2),
+                                    _prevCreditBillIds.length),
+                                style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF92400E)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.space12),
+                        value: _settlePrevCredit,
+                        activeThumbColor: AppColors.primary,
+                        title: Text(l10n.billingClearPrevCredit,
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w600)),
+                        onChanged: (v) {
+                          setState(() => _settlePrevCredit = v);
+                          _sheetSetState?.call(() {});
+                        },
+                      ),
+                    ],
+                  ),
                 ),
-                items: [
-                  DropdownMenuItem(
-                      value: 'cash',
-                      child: Text(l10n.paymentCash,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(
-                      value: 'upi',
-                      child: Text(l10n.paymentUpi,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(
-                      value: 'card',
-                      child: Text(l10n.paymentCard,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(
-                      value: 'other',
-                      child: Text(l10n.paymentOther,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (v) => setState(() => _paymentMode = v!),
               ),
-            ),
 
             // Discount row — also cashier/owner only; servers don't apply
             // discounts when building an order.
@@ -1778,7 +2137,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   final discountAmt =
                       (double.tryParse(_discountAmtController.text) ?? 0.0)
                           .clamp(0.0, total);
-                  final netPayable = total - discountAmt;
+                  // When "clear previous credit" is on, the old due is added to
+                  // this bill's payable, so the customer pays one combined
+                  // amount and those old bills are settled on finalize.
+                  final prevDue =
+                      _settlePrevCredit ? _prevCreditDue : 0.0;
+                  final netPayable = total - discountAmt + prevDue;
                   return Container(
                     decoration: BoxDecoration(
                       border: Border.all(color: AppColors.border),
@@ -1855,6 +2219,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                                         fontWeight: FontWeight.w600,
                                         color: const Color(0xFF16A34A),
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        // Previous Due row — added to payable when the toggle
+                        // above is on.
+                        if (prevDue > 0) ...[
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space12, vertical: 10),
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    l10n.billingPreviousDue,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                          color: AppColors.textSecondary,
+                                        ),
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '+ ₹${prevDue.toStringAsFixed(2)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.warning,
                                       ),
                                 ),
                               ],
@@ -1988,6 +2385,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       onPressed: (cart.isEmpty || _generatingBill)
                           ? null
                           : () {
+                              // Credit needs name + phone. Validate BEFORE
+                              // popping so the card stays open with the inline
+                              // message (same pattern as the phone guard below).
+                              if (!_validateCreditCustomer()) return;
                               // WhatsApp needs a phone. Without one, don't
                               // finalize/clear the bill — prompt for the number.
                               if (!_ensureCustomerPhoneForWhatsApp()) return;
@@ -2004,6 +2405,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       onPressed: (cart.isEmpty || _generatingBill)
                           ? null
                           : () {
+                              // Credit needs name + phone. Validate BEFORE
+                              // popping so the card stays open with the inline
+                              // message instead of closing then failing.
+                              if (!_validateCreditCustomer()) return;
                               if (inSheet) Navigator.pop(context);
                               _generateBillAndPrint();
                             },

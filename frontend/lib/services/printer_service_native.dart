@@ -437,6 +437,28 @@ class PrinterService {
     }
   }
 
+  /// Prints several bills as SEPARATE receipts (never merged), one after
+  /// another. Between bills it pauses so the printer's buffer fully drains and
+  /// the BT link settles before the next job's connect/disconnect cycle —
+  /// without this, back-to-back jobs collide and a later receipt prints garbage.
+  Future<void> printBills(List<Bill> bills,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      ReceiptLabels? labels}) async {
+    for (var i = 0; i < bills.length; i++) {
+      await printBill(bills[i],
+          businessName: businessName,
+          businessPhone: businessPhone,
+          businessAddress: businessAddress,
+          labels: labels);
+      // Let the printer finish and the SPP link settle before the next job.
+      if (i < bills.length - 1) {
+        await Future.delayed(const Duration(milliseconds: 1200));
+      }
+    }
+  }
+
   /// Send a pre-built ESC/POS byte stream to the active printer as-is.
   /// Used by the Marathi print-test page to compare rendering strategies.
   /// [slow] uses smaller BT chunks with longer delays so the printer's buffer

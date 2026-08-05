@@ -1,15 +1,12 @@
 const { pool, poolConnect } = require('./src/db');
 
 // ─── PUT YOUR SQL QUERY HERE ───────────────────────────────────────────────
-const QUERY = `
-  SELECT t.table_number, t.qr_token, t.business_id,
-         bs.name AS shop_name, bs.self_order_enabled
-  FROM tables t
-  JOIN businesses bs ON bs.id = t.business_id
-  WHERE t.qr_token = '118D6D35D27241749058141BC7305C5D'
-`;
+const QUERY = `UPDATE businesses SET whatsapp_mode = 'deeplink' WHERE id = 'D3F50433-53B4-4033-934B-BF68E0D5C392'`;
 // ──────────────────────────────────────────────────────────────────────────
 
+
+// UPDATE businesses SET whatsapp_mode = 'api' WHERE id = '<business-id>';
+// UPDATE businesses SET whatsapp_mode = 'deeplink' WHERE id = '<business-id>';
 async function main() {
   await poolConnect;
   try {

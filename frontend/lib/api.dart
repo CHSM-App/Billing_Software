@@ -5,8 +5,8 @@ import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
-
+// const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.3:5000/api';
 const String _genericApiErrorMessage = 'Something went wrong';
 
 String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
@@ -416,6 +416,22 @@ Future<Map<String, dynamic>> sendBillWhatsApp(String billId) async {
   return _parse(response);
 }
 
+/// Returns { phone, message, receipt_url } for opening the user's own WhatsApp
+/// (wa.me deep link) with a prefilled receipt message for [billId].
+Future<Map<String, dynamic>> getBillWhatsAppText(String billId) async {
+  final data = _parse(await _authGet(Uri.parse('$baseUrl/bills/$billId/whatsapp-text')));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+/// Single WhatsApp entry point. The backend decides by the business's
+/// whatsapp_mode:
+///   - 'api'      → it already sent the template; returns { mode:'api', sent:true }.
+///   - 'deeplink' → returns { mode:'deeplink', phone, message } to open WhatsApp.
+Future<Map<String, dynamic>> whatsAppBill(String billId) async {
+  final data = _parse(await _authPost(Uri.parse('$baseUrl/bills/$billId/whatsapp')));
+  return Map<String, dynamic>.from(data as Map);
+}
+
 /// Resets the PIN for the user associated with [verifiedToken].
 Future<void> resetPin(String verifiedToken, String newPin) async {
   final response = await _post(
@@ -645,6 +661,39 @@ Future<Map<String, dynamic>> createBill(Map<String, dynamic> data) async {
   return _parse(await _authPost(Uri.parse('$baseUrl/bills'), body: jsonEncode(data)));
 }
 
+// ---------------------------------------------------------------------------
+// Credit (udhaari)
+// ---------------------------------------------------------------------------
+
+/// Debtor list for the Credit tab — one entry per customer who owes money.
+Future<List<dynamic>> getCreditCustomers() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/credit/customers')));
+}
+
+/// All unpaid credit bills for one customer (by phone), each with line items.
+Future<List<dynamic>> getCreditCustomerBills(String phone) async {
+  return _parse(await _authGet(
+      Uri.parse('$baseUrl/credit/customers/${Uri.encodeComponent(phone)}/bills')));
+}
+
+/// Lightweight outstanding-credit summary for one phone. Returns
+/// { outstanding, unpaid_count, bill_ids }. Used on the billing screen.
+Future<Map<String, dynamic>> getCreditSummary(String phone) async {
+  final data = _parse(await _authGet(Uri.parse(
+      '$baseUrl/credit/customers/${Uri.encodeComponent(phone)}/summary')));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+/// Marks the given credit bills paid in one settlement with [paymentMode].
+/// Returns the settled bills (with items) for building a merged receipt.
+Future<Map<String, dynamic>> settleCreditBills(
+    List<String> billIds, String paymentMode) async {
+  return _parse(await _authPost(
+    Uri.parse('$baseUrl/credit/settle'),
+    body: jsonEncode({'bill_ids': billIds, 'payment_mode': paymentMode}),
+  ));
+}
+
 Future<Map<String, dynamic>> finalizeBill(String id) async {
   return _parse(await _authPut(Uri.parse('$baseUrl/bills/$id/finalize')));
 }
@@ -696,6 +745,16 @@ Future<Map<String, dynamic>> getReportSummary({required String from, required St
   final uri = Uri.parse('$baseUrl/reports/summary')
       .replace(queryParameters: {'from': from, 'to': to});
   return _parse(await _authGet(uri));
+}
+
+/// Last-7-days net sales per day, independent of the report period filter.
+/// [date] is the device's local today (YYYY-MM-DD) so the window is correct
+/// for non-UTC timezones. Returns { days: [{day, revenue}, …] } (7 entries).
+Future<Map<String, dynamic>> getWeeklySales({String? date}) async {
+  final uri = Uri.parse('$baseUrl/reports/weekly-sales').replace(
+      queryParameters: date != null ? {'date': date} : null);
+  final data = _parse(await _authGet(uri));
+  return Map<String, dynamic>.from(data as Map);
 }
 
 // ---------------------------------------------------------------------------

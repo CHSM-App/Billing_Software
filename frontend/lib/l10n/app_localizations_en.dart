@@ -113,10 +113,98 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navOpenOrders => 'Open Orders';
 
   @override
+  String get navOrders => 'Orders';
+
+  @override
   String get navSettings => 'Settings';
 
   @override
   String get navProfile => 'Profile';
+
+  @override
+  String get ordersTabTables => 'Tables';
+
+  @override
+  String get ordersTabOpenOrders => 'Open Orders';
+
+  @override
+  String get ordersTabCredit => 'Credit';
+
+  @override
+  String get billingCreditCustomerRequired =>
+      'Customer name and phone are required for a credit bill.';
+
+  @override
+  String billingPrevCreditDue(String amount, int count) {
+    return 'Previous credit due: ₹$amount ($count bill(s))';
+  }
+
+  @override
+  String get billingClearPrevCredit => 'Clear previous credit with this bill';
+
+  @override
+  String get billingPreviousDue => 'Previous Due';
+
+  @override
+  String get creditTitle => 'Credit';
+
+  @override
+  String get creditEmpty =>
+      'No credit due. Customers who owe money appear here.';
+
+  @override
+  String get creditOutstanding => 'Outstanding';
+
+  @override
+  String creditUnpaidBills(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count unpaid bills',
+      one: '1 unpaid bill',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get creditNoPhone => 'No phone';
+
+  @override
+  String get creditCustomerBillsTitle => 'Unpaid bills';
+
+  @override
+  String creditSelectedTotal(String amount) {
+    return 'Selected: ₹$amount';
+  }
+
+  @override
+  String get creditMarkPaid => 'Mark paid';
+
+  @override
+  String get creditSelectAll => 'Select all';
+
+  @override
+  String get creditPrint => 'Print';
+
+  @override
+  String get creditSendWhatsapp => 'WhatsApp';
+
+  @override
+  String get creditChoosePaymentMode => 'How was it paid?';
+
+  @override
+  String creditSettleConfirm(int count) {
+    return 'Settle $count bill(s) as paid?';
+  }
+
+  @override
+  String get creditSettledSuccess => 'Marked as paid.';
+
+  @override
+  String get creditSettleFailed => 'Could not settle. Please try again.';
+
+  @override
+  String get creditSelectAtLeastOne => 'Select at least one bill.';
 
   @override
   String get openOrdersTitle => 'Open Orders';
@@ -1346,6 +1434,40 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get reportsDailyBreakdown => 'Daily Breakdown';
+
+  @override
+  String get reportsTotalSalesToday => 'Total sales today';
+
+  @override
+  String get reportsTotalSalesPeriod => 'Total sales';
+
+  @override
+  String get reportsOrders => 'Orders';
+
+  @override
+  String get reportsAvgBill => 'Avg bill';
+
+  @override
+  String get reportsLast7Days => 'Last 7 days';
+
+  @override
+  String get reportsTopSellingItems => 'Top selling items';
+
+  @override
+  String get reportsRecentBills => 'Recent bills';
+
+  @override
+  String reportsSoldCount(int count) {
+    return '$count sold';
+  }
+
+  @override
+  String get reportsParcel => 'Parcel';
+
+  @override
+  String reportsTableLabel(String number) {
+    return 'Table $number';
+  }
 
   @override
   String get expensesTitle => 'Expenses';

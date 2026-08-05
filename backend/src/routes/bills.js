@@ -13,8 +13,15 @@ const { broadcast } = require('../realtime');
 const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
 
 function generateReceiptToken() {
-  // 16 URL-safe chars (base62) — ~95 bits of entropy, unguessable
-  return crypto.randomBytes(12).toString('base64url').slice(0, 16);
+  // 16 alphanumeric chars (base62) — ~95 bits of entropy, unguessable.
+  // Deliberately avoids base64url's '-' and '_': some WhatsApp/link renderers
+  // munge those (e.g. inserting a space before a leading '-'), producing a
+  // broken receipt URL. Pure [A-Za-z0-9] survives every renderer intact.
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.randomBytes(16);
+  let out = '';
+  for (let i = 0; i < 16; i++) out += ALPHABET[bytes[i] % 62];
+  return out;
 }
 
 const router = express.Router();
@@ -267,6 +274,7 @@ async function fetchBill(billId, businessId) {
     .query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
              b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.status,
+             b.payment_status, b.settled_at, b.settled_payment_mode,
              b.created_by_user_id, b.created_at, b.receipt_token,
              t.table_number
       FROM bills b
@@ -313,6 +321,17 @@ router.post('/', requireAuth, async (req, res) => {
   if (billStatus === 'finalized' && req.user.role === 'server') {
     return res.status(403).json({ error: 'A server can only send orders to the kitchen; a cashier finalizes the bill and takes payment' });
   }
+  // Credit (udhaari): the sale is finalized but unpaid — money is collected
+  // later via the Credit tab. We must know *who* owes, so name + phone are
+  // mandatory. A draft is never "on credit" (it's just an open order).
+  const isCredit = billStatus === 'finalized' && payment_mode === 'credit';
+  if (isCredit) {
+    if (!customer_name || !customer_name.trim() || !customer_phone || !customer_phone.trim()) {
+      return res.status(400).json({ error: 'Customer name and phone are required for a credit bill' });
+    }
+  }
+  // Unpaid only for credit sales; everything else is paid at creation.
+  const paymentStatus = isCredit ? 'unpaid' : 'paid';
   // client_bill_id must be a UUID v4 when supplied
   if (client_bill_id !== undefined && (typeof client_bill_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(client_bill_id))) {
     return res.status(400).json({ error: 'client_bill_id must be a valid UUID' });
@@ -463,17 +482,18 @@ router.post('/', requireAuth, async (req, res) => {
         .input('discount_amount', sql.Decimal(10, 2),   discountAmount)
         .input('total',           sql.Decimal(10, 2),   total)
         .input('payment_mode',    sql.NVarChar(20),     payment_mode)
+        .input('payment_status',  sql.NVarChar(20),     paymentStatus)
         .input('status',          sql.NVarChar(20),     billStatus)
         .input('created_by_user_id', sql.UniqueIdentifier, req.user.user_id)
         .input('client_bill_id',  sql.NVarChar(36),     client_bill_id || null)
         .input('receipt_token',   sql.NVarChar(16),     receiptToken)
         .query(`
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
-                             subtotal, tax_amount, discount_amount, total, payment_mode, status,
+                             subtotal, tax_amount, discount_amount, total, payment_mode, payment_status, status,
                              created_by_user_id, client_bill_id, receipt_token)
           OUTPUT INSERTED.id
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
-                  @subtotal, @tax_amount, @discount_amount, @total, @payment_mode, @status,
+                  @subtotal, @tax_amount, @discount_amount, @total, @payment_mode, @payment_status, @status,
                   @created_by_user_id, @client_bill_id, @receipt_token)
         `);
 
@@ -724,17 +744,35 @@ router.get('/:id', requireAuth, async (req, res) => {
 router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   try {
     await poolConnect;
+    // The app finalizes a bill in two steps: create as draft, then finalize.
+    // So the credit → unpaid decision has to happen HERE, not only at create.
+    // A credit bill becomes a finalized-but-unpaid sale (money collected later
+    // via the Credit tab); every other mode is paid on finalize.
     const result = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        UPDATE bills SET status = 'finalized'
-        OUTPUT INSERTED.id, INSERTED.table_id, INSERTED.bill_number
+        UPDATE bills
+        SET status = 'finalized',
+            payment_status = CASE WHEN payment_mode = 'credit' THEN 'unpaid' ELSE 'paid' END
+        OUTPUT INSERTED.id, INSERTED.table_id, INSERTED.bill_number,
+               INSERTED.payment_mode, INSERTED.customer_name, INSERTED.customer_phone
         WHERE id = @id AND business_id = @business_id AND status = 'draft'
       `);
 
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: 'Draft bill not found' });
+    }
+
+    // A credit finalize with no customer is unrecoverable in the Credit tab
+    // (nothing to group by). The client enforces name+phone, but guard here too.
+    const finalizedRow = result.recordset[0];
+    if (finalizedRow.payment_mode === 'credit' &&
+        (!finalizedRow.customer_name || !finalizedRow.customer_phone)) {
+      logger.warn(
+        { bill_id: req.params.id },
+        'credit bill finalized without customer name/phone',
+      );
     }
 
     const { table_id: tableId, bill_number: billNumber } = result.recordset[0];
@@ -759,6 +797,10 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
     // table or the open-orders list.
     broadcast(req.user.business_id, { type: 'kitchen' });
     broadcast(req.user.business_id, { type: bill.table_id ? 'tables' : 'drafts' });
+    // A finalized credit bill adds to the debtor list — refresh the Credit tab.
+    if (finalizedRow.payment_mode === 'credit') {
+      broadcast(req.user.business_id, { type: 'credit' });
+    }
 
     return res.json(bill);
   } catch (err) {
@@ -1356,6 +1398,130 @@ router.post('/send-whatsapp', requireAuth, async (req, res) => {
     return res.status(500).json({ error: result.error || 'Failed to send WhatsApp message' });
   } catch (err) {
     logger.error({ err }, 'send-whatsapp error');
+    return res.status(500).json({ error: 'Failed to send WhatsApp message' });
+  }
+});
+
+// GET /api/bills/:id/whatsapp-text
+// Returns the normalised phone + a prefilled receipt message for opening the
+// user's own WhatsApp (wa.me deep link) — no Business-API template needed.
+// The receipt base URL and the message wording stay server-side (one source
+// of truth), so the app just launches WhatsApp with what we return.
+router.get('/:id/whatsapp-text', requireAuth, async (req, res) => {
+  try {
+    await poolConnect;
+    const row = await pool.request()
+      .input('id',          sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query(`
+        SELECT b.receipt_token, b.customer_phone, b.bill_number,
+               bs.name AS shop_name
+        FROM bills b
+        JOIN businesses bs ON bs.id = b.business_id
+        WHERE b.id = @id AND b.business_id = @business_id
+      `);
+
+    if (row.recordset.length === 0) {
+      return res.status(404).json({ error: 'Bill not found' });
+    }
+
+    const { receipt_token, customer_phone, bill_number, shop_name } = row.recordset[0];
+
+    if (!customer_phone) {
+      return res.status(400).json({ error: 'This bill has no customer phone number' });
+    }
+    const phone = normalisePhone(customer_phone);
+    if (!phone) {
+      return res.status(400).json({ error: 'Invalid customer phone number' });
+    }
+
+    const receiptUrl = `${RECEIPT_BASE}/receipt/${receipt_token}`;
+    const message =
+      `Your bill from ${shop_name} is ready!\n\n` +
+      `Bill No: ${bill_number}\n` +
+      `View your receipt here: ${receiptUrl}\n\n` +
+      `Thank you for shopping with us!`;
+
+    return res.json({ phone, message, receipt_url: receiptUrl });
+  } catch (err) {
+    logger.error({ err }, 'whatsapp-text error');
+    return res.status(500).json({ error: 'Failed to build WhatsApp message' });
+  }
+});
+
+// POST /api/bills/:id/whatsapp
+// Single decision point for sending a receipt over WhatsApp. Reads the
+// business's whatsapp_mode:
+//   'api'      (paid) — backend sends the Business-API template itself and
+//                       returns { mode:'api', sent:true }. On failure it
+//                       reports the error (NO fallback — paid tier is API-only).
+//   'deeplink' (free) — returns { mode:'deeplink', phone, message } so the app
+//                       opens the cashier's own WhatsApp with a prefilled text.
+router.post('/:id/whatsapp', requireAuth, async (req, res) => {
+  try {
+    await poolConnect;
+    const row = await pool.request()
+      .input('id',          sql.UniqueIdentifier, req.params.id)
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query(`
+        SELECT b.receipt_token, b.customer_phone, b.bill_number,
+               bs.name AS shop_name, bs.whatsapp_mode
+        FROM bills b
+        JOIN businesses bs ON bs.id = b.business_id
+        WHERE b.id = @id AND b.business_id = @business_id
+      `);
+
+    if (row.recordset.length === 0) {
+      return res.status(404).json({ error: 'Bill not found' });
+    }
+
+    const { receipt_token, customer_phone, bill_number, shop_name, whatsapp_mode } =
+      row.recordset[0];
+
+    if (!customer_phone) {
+      return res.status(400).json({ error: 'This bill has no customer phone number' });
+    }
+    const phone = normalisePhone(customer_phone);
+    if (!phone) {
+      return res.status(400).json({ error: 'Invalid customer phone number' });
+    }
+
+    const receiptUrl = `${RECEIPT_BASE}/receipt/${receipt_token}`;
+    const message =
+      `Your bill from ${shop_name} is ready!\n\n` +
+      `Bill No: ${bill_number}\n` +
+      `View your receipt here: ${receiptUrl}\n\n` +
+      `Thank you for shopping with us!`;
+
+    // Paid: send via the Business API. Report failure; no deeplink fallback.
+    if (whatsapp_mode === 'api') {
+      const result = await sendBillLink({
+        phone: customer_phone,
+        shopName: shop_name,
+        billNumber: bill_number,
+        receiptUrl,
+      });
+      if (result.sent) {
+        return res.json({ mode: 'api', sent: true, campaign_id: result.campaignId });
+      }
+      if (result.skipped) {
+        return res.status(503).json({
+          mode: 'api',
+          sent: false,
+          error: 'WhatsApp API sending is disabled',
+        });
+      }
+      return res.status(502).json({
+        mode: 'api',
+        sent: false,
+        error: result.error || 'Failed to send WhatsApp message',
+      });
+    }
+
+    // Free: hand the app the phone + message to open WhatsApp itself.
+    return res.json({ mode: 'deeplink', phone, message, receipt_url: receiptUrl });
+  } catch (err) {
+    logger.error({ err }, 'whatsapp send error');
     return res.status(500).json({ error: 'Failed to send WhatsApp message' });
   }
 });

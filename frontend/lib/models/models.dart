@@ -250,8 +250,11 @@ class BillItem {
   });
 
   factory BillItem.fromJson(Map<String, dynamic> j) => BillItem(
-        id: j['id'],
-        billId: j['bill_id'],
+        // The credit endpoints return a receipt-only item shape without id /
+        // bill_id (not needed to display or print a line). Default them so the
+        // model parses there as well as on the full bill responses.
+        id: j['id'] ?? '',
+        billId: j['bill_id'] ?? '',
         itemId: j['item_id'],
         variantId: j['variant_id'],
         itemName: j['item_name'],
@@ -278,9 +281,15 @@ class Bill {
   final double total;
   final String paymentMode;
   final String status;
+  /// 'paid' | 'unpaid'. Unpaid means a credit (udhaari) bill awaiting
+  /// settlement. Defaults to 'paid' for older bills / partial responses.
+  final String paymentStatus;
   final String createdByUserId;
   final DateTime createdAt;
   final List<BillItem> items;
+
+  /// True when this is a credit bill that hasn't been settled yet.
+  bool get isUnpaidCredit => paymentStatus == 'unpaid';
 
   Bill({
     required this.id,
@@ -296,6 +305,7 @@ class Bill {
     required this.total,
     required this.paymentMode,
     required this.status,
+    this.paymentStatus = 'paid',
     required this.createdByUserId,
     required this.createdAt,
     required this.items,
@@ -303,7 +313,9 @@ class Bill {
 
   factory Bill.fromJson(Map<String, dynamic> j) => Bill(
         id: j['id'],
-        businessId: j['business_id'],
+        // The credit endpoints return a lighter bill shape without these
+        // fields; default them so the model parses in both contexts.
+        businessId: j['business_id'] ?? '',
         billNumber: j['bill_number'],
         tableId: j['table_id'],
         tableNumber: j['table_number'],
@@ -316,10 +328,39 @@ class Bill {
             : 0.0,
         total: double.parse(j['total'].toString()),
         paymentMode: j['payment_mode'],
-        status: j['status'],
-        createdByUserId: j['created_by_user_id'],
+        status: j['status'] ?? 'finalized',
+        paymentStatus: j['payment_status'] ?? 'paid',
+        createdByUserId: j['created_by_user_id'] ?? '',
         createdAt: DateTime.parse(j['created_at']),
         items: (j['items'] as List? ?? []).map((i) => BillItem.fromJson(i)).toList(),
+      );
+}
+
+/// A debtor row for the Credit tab: one customer (grouped by phone) with their
+/// total outstanding and how many unpaid bills make it up.
+class CreditCustomer {
+  final String? customerName;
+  final String customerPhone;
+  final int unpaidCount;
+  final double outstanding;
+  final DateTime? lastBillAt;
+
+  CreditCustomer({
+    required this.customerName,
+    required this.customerPhone,
+    required this.unpaidCount,
+    required this.outstanding,
+    this.lastBillAt,
+  });
+
+  factory CreditCustomer.fromJson(Map<String, dynamic> j) => CreditCustomer(
+        customerName: j['customer_name'],
+        customerPhone: j['customer_phone'] ?? '',
+        unpaidCount: (j['unpaid_count'] as num?)?.toInt() ?? 0,
+        outstanding: double.parse((j['outstanding'] ?? 0).toString()),
+        lastBillAt: j['last_bill_at'] != null
+            ? DateTime.tryParse(j['last_bill_at'].toString())
+            : null,
       );
 }
 
@@ -396,8 +437,13 @@ class DailyReport {
   factory DailyReport.fromJson(Map<String, dynamic> j) => DailyReport(
         day: j['day'],
         revenue: double.parse(j['revenue'].toString()),
-        expenses: double.parse(j['expenses'].toString()),
-        profit: double.parse(j['profit'].toString()),
+        // expenses/profit are absent from the weekly-sales (sales-only) shape.
+        expenses: j['expenses'] != null
+            ? double.parse(j['expenses'].toString())
+            : 0.0,
+        profit: j['profit'] != null
+            ? double.parse(j['profit'].toString())
+            : 0.0,
       );
 }
 
@@ -414,6 +460,8 @@ class ReportSummary {
   final List<DailyReport> daily;
   final List<MapEntry<String, double>> expensesByCategory;
   final List<MapEntry<String, double>> revenueByPaymentMode;
+  final List<TopItem> topItems;
+  final List<RecentBill> recentBills;
 
   ReportSummary({
     required this.from,
@@ -428,7 +476,16 @@ class ReportSummary {
     required this.daily,
     required this.expensesByCategory,
     required this.revenueByPaymentMode,
+    this.topItems = const [],
+    this.recentBills = const [],
   });
+
+  /// Net sales for the period. total_revenue is already net of discount from
+  /// the summary endpoint (SUM(total - discount)), so no further subtraction.
+  double get netSales => totalRevenue;
+
+  /// Average bill value over the period (0 when no bills).
+  double get avgBill => billCount > 0 ? netSales / billCount : 0.0;
 
   factory ReportSummary.fromJson(Map<String, dynamic> j) {
     final bpm = (j['by_payment_mode'] as Map<String, dynamic>? ?? {});
@@ -453,8 +510,59 @@ class ReportSummary {
       daily: (j['daily'] as List? ?? []).map((d) => DailyReport.fromJson(d)).toList(),
       expensesByCategory: expCat,
       revenueByPaymentMode: revMode,
+      topItems: (j['top_items'] as List? ?? [])
+          .map((e) => TopItem.fromJson(e))
+          .toList(),
+      recentBills: (j['recent_bills'] as List? ?? [])
+          .map((e) => RecentBill.fromJson(e))
+          .toList(),
     );
   }
+}
+
+/// A top-selling item over a report period.
+class TopItem {
+  final String itemName;
+  final double qtySold;
+  final double revenue;
+
+  TopItem({required this.itemName, required this.qtySold, required this.revenue});
+
+  factory TopItem.fromJson(Map<String, dynamic> j) => TopItem(
+        itemName: j['item_name'] ?? '',
+        qtySold: double.parse((j['qty_sold'] ?? 0).toString()),
+        revenue: double.parse((j['revenue'] ?? 0).toString()),
+      );
+}
+
+/// A recent bill row for the report list.
+class RecentBill {
+  final String billNumber;
+  final double total;
+  final double discountAmount;
+  final DateTime createdAt;
+  final String? customerName;
+  final String? tableNumber;
+
+  RecentBill({
+    required this.billNumber,
+    required this.total,
+    required this.discountAmount,
+    required this.createdAt,
+    this.customerName,
+    this.tableNumber,
+  });
+
+  double get net => total - discountAmount;
+
+  factory RecentBill.fromJson(Map<String, dynamic> j) => RecentBill(
+        billNumber: j['bill_number'] ?? '',
+        total: double.parse((j['total'] ?? 0).toString()),
+        discountAmount: double.parse((j['discount_amount'] ?? 0).toString()),
+        createdAt: DateTime.parse(j['created_at']),
+        customerName: j['customer_name'],
+        tableNumber: j['table_number']?.toString(),
+      );
 }
 
 class TableModel {

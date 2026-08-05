@@ -372,7 +372,7 @@ class _RawMaterialsTabState extends ConsumerState<RawMaterialsTab> {
     } on ApiException catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
+            SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error));
       }
     }
   }
@@ -604,7 +604,7 @@ class _RawMaterialFormDialogState extends State<RawMaterialFormDialog> {
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
+            SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -747,7 +747,7 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
     } on ApiException catch (e) {
       if (mounted) {
         setState(() {
-          _error = e.message;
+          _error = sanitizeUiErrorMessage(e);
           _loading = false;
         });
       }
@@ -786,7 +786,7 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
       if (mounted) {
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
+            SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error));
       }
     }
   }

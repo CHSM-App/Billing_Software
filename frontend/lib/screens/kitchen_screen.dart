@@ -108,7 +108,9 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
       if (mounted) {
         setState(() => item['kitchen_status'] = current); // revert
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: AppColors.error),
+          SnackBar(
+              content: Text(sanitizeUiErrorMessage(e)),
+              backgroundColor: AppColors.error),
         );
       }
     } finally {

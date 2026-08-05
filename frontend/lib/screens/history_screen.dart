@@ -436,7 +436,7 @@ class _BillDetailDialog extends StatelessWidget {
       onVoided();
     } on ApiException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: AppColors.error),
+        SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error),
       );
     }
   }

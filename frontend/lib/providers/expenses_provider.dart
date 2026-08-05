@@ -117,3 +117,16 @@ final reportSummaryProvider = FutureProvider.autoDispose<ReportSummary>((ref) as
   final raw = await api.getReportSummary(from: filter.fromStr, to: filter.toStr);
   return ReportSummary.fromJson(raw);
 });
+
+/// Last-7-days net sales, independent of [reportSummaryFilterProvider] so the
+/// chart always shows the real last week regardless of the selected period.
+final weeklySalesProvider =
+    FutureProvider.autoDispose<List<DailyReport>>((ref) async {
+  final now = DateTime.now();
+  final today =
+      '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  final raw = await api.getWeeklySales(date: today);
+  return (raw['days'] as List? ?? [])
+      .map((d) => DailyReport.fromJson(d))
+      .toList();
+});
