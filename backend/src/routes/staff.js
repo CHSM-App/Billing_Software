@@ -126,10 +126,43 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
       return res.status(404).json({ error: 'Staff member not found' });
     }
 
-    await pool.request()
+    // A staff member who created bills or expenses has financial records that
+    // must NOT be deleted (their created_by_user_id FK is NO ACTION on purpose).
+    // Block the delete with a clear message instead of a raw FK 500.
+    const refs = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
-      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query(`DELETE FROM users WHERE id = @id AND business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})`);
+      .query(`
+        SELECT
+          (SELECT COUNT(*) FROM bills    WHERE created_by_user_id = @id) AS bill_count,
+          (SELECT COUNT(*) FROM expenses WHERE created_by_user_id = @id) AS expense_count
+      `);
+    const { bill_count, expense_count } = refs.recordset[0];
+    if (bill_count > 0 || expense_count > 0) {
+      return res.status(409).json({
+        error: 'This staff member has billing/expense history and cannot be deleted. Deactivate the account instead.',
+      });
+    }
+
+    const transaction = pool.transaction();
+    await transaction.begin();
+    try {
+      // Remove the user's device push tokens first — fcm_tokens.user_id is a
+      // NO ACTION FK, so it blocks the user delete otherwise. refresh_tokens
+      // cascade automatically. (A device token is safe to drop.)
+      await transaction.request()
+        .input('id', sql.UniqueIdentifier, req.params.id)
+        .query(`DELETE FROM fcm_tokens WHERE user_id = @id`);
+
+      await transaction.request()
+        .input('id', sql.UniqueIdentifier, req.params.id)
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .query(`DELETE FROM users WHERE id = @id AND business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})`);
+
+      await transaction.commit();
+    } catch (inner) {
+      try { await transaction.rollback(); } catch (_) {}
+      throw inner;
+    }
 
     audit.logStaffDeleted(
       { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },

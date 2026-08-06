@@ -177,7 +177,12 @@ describe('DELETE /api/staff/:id', () => {
 
   test('deletes staff and returns success', async () => {
     mockRequest.query
+      // snapshot lookup
       .mockResolvedValueOnce({ recordset: [sampleStaff], rowsAffected: [1] })
+      // bills/expenses reference counts (none → deletable)
+      .mockResolvedValueOnce({ recordset: [{ bill_count: 0, expense_count: 0 }], rowsAffected: [1] })
+      // fcm_tokens delete + users delete (inside the transaction)
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
 
     const res = await request(app)
@@ -185,6 +190,17 @@ describe('DELETE /api/staff/:id', () => {
       .set(authHeader({ role: 'owner' }));
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+  });
+
+  test('blocks deletion when staff has billing history', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleStaff], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ bill_count: 3, expense_count: 0 }], rowsAffected: [1] });
+
+    const res = await request(app)
+      .delete(`/api/staff/${STAFF_ID}`)
+      .set(authHeader({ role: 'owner' }));
+    expect(res.status).toBe(409);
   });
 
   test('returns 404 when staff member not found', async () => {
