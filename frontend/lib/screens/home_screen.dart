@@ -2084,7 +2084,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: AppSpacing.space12),
                         value: _settlePrevCredit,
-                        activeThumbColor: AppColors.primary,
+                        // Selected color comes from the theme's switchTheme; no
+                        // per-widget override (the param name differs across
+                        // Flutter versions — activeColor vs activeThumbColor).
                         title: Text(l10n.billingClearPrevCredit,
                             style: const TextStyle(
                                 fontSize: 13, fontWeight: FontWeight.w600)),
