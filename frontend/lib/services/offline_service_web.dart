@@ -93,11 +93,30 @@ class OfflineService {
   static String _normaliseBarcode(String barcode) =>
       barcode.replaceAll(RegExp(r'[\s\-\.]'), '');
 
-  Future<Item?> getCachedItemByBarcode(String barcode, String businessId) async {
+  /// Resolves a scanned barcode against the cache. The code may belong to an
+  /// item OR to one of its sizes (variants); returns the item plus the matched
+  /// variant (null when the item itself matched). Returns null if nothing
+  /// matched.
+  Future<({Item item, ItemVariant? variant})?> getBarcodeMatch(
+      String barcode, String businessId) async {
     final normalised = _normaliseBarcode(barcode);
-    return (_itemCache[businessId] ?? []).where((i) {
+    final items = _itemCache[businessId] ?? [];
+
+    // 1) Item-level barcode.
+    final itemMatch = items.where((i) {
       return i.barcode != null && _normaliseBarcode(i.barcode!) == normalised;
     }).firstOrNull;
+    if (itemMatch != null) return (item: itemMatch, variant: null);
+
+    // 2) Size (variant) barcode.
+    for (final i in items) {
+      final v = i.variants.where((v) {
+        return v.barcode != null &&
+            _normaliseBarcode(v.barcode!) == normalised;
+      }).firstOrNull;
+      if (v != null) return (item: i, variant: v);
+    }
+    return null;
   }
 
   // ── Offline bill queue (in-memory only) ────────────────────────────────────

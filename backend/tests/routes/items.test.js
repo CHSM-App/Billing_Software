@@ -102,6 +102,36 @@ describe('GET /api/items', () => {
       .set(authHeader());
     expect(res.status).toBe(404);
   });
+
+  test('resolves a size (variant) barcode to its parent item', async () => {
+    const VARIANT_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+    // Query order: (1) item lookup misses, (2) variant lookup hits,
+    // (3) attachVariants for the parent item.
+    mockRequest.query
+      .mockImplementationOnce(() =>
+        Promise.resolve({ recordset: [], rowsAffected: [0] }))
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          recordset: [{ ...sampleItem, matched_variant_id: VARIANT_ID }],
+          rowsAffected: [1],
+        }))
+      .mockImplementationOnce(() =>
+        Promise.resolve({
+          recordset: [
+            { id: VARIANT_ID, item_id: ITEM_ID, label: 'Large', price: 80 },
+          ],
+          rowsAffected: [1],
+        }));
+
+    const res = await request(app)
+      .get('/api/items?barcode=VARIANTCODE')
+      .set(authHeader());
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(ITEM_ID);
+    expect(res.body.matched_variant_id).toBe(VARIANT_ID);
+    expect(res.body.variants).toHaveLength(1);
+  });
 });
 
 // ------------------------------------------------------------------

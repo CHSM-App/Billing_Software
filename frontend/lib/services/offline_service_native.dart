@@ -90,7 +90,7 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
     );
@@ -118,6 +118,7 @@ class OfflineService {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_cached_items_business ON cached_items (business_id)',
     );
+    await _createVariantCacheTable(db);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS offline_bills (
         local_id        TEXT    NOT NULL PRIMARY KEY,
@@ -177,6 +178,32 @@ class OfflineService {
     );
   }
 
+  /// Variant (size) cache — mirrors the item cache so a scanned size barcode
+  /// resolves to its parent item + size while offline. Rebuilt wholesale on
+  /// every [replaceItemCache].
+  Future<void> _createVariantCacheTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cached_variants (
+        id                  TEXT    NOT NULL PRIMARY KEY,
+        item_id             TEXT    NOT NULL,
+        business_id         TEXT    NOT NULL,
+        label               TEXT    NOT NULL,
+        price               REAL,
+        barcode             TEXT,
+        stock_quantity      REAL,
+        low_stock_threshold REAL,
+        sort_order          INTEGER NOT NULL DEFAULT 0,
+        is_active           INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cached_variants_barcode ON cached_variants (barcode)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cached_variants_item ON cached_variants (item_id)',
+    );
+  }
+
   /// Incremental migrations.
   Future<void> _migrateSchema(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
@@ -203,6 +230,10 @@ class OfflineService {
       // v3 → v4: add the offline draft queue.
       await _createDraftsTable(db);
     }
+    if (oldVersion < 5) {
+      // v4 → v5: add the variant (size) cache so size barcodes scan offline.
+      await _createVariantCacheTable(db);
+    }
   }
 
   Database get _database {
@@ -219,6 +250,8 @@ class OfflineService {
     await db.transaction((txn) async {
       await txn.delete('cached_items',
           where: 'business_id = ?', whereArgs: [businessId]);
+      await txn.delete('cached_variants',
+          where: 'business_id = ?', whereArgs: [businessId]);
       for (final item in items) {
         await txn.insert('cached_items', {
           'id': item.id,
@@ -232,18 +265,70 @@ class OfflineService {
           'is_active': item.isActive ? 1 : 0,
           'cached_at': now,
         });
+        for (final v in item.variants) {
+          await txn.insert('cached_variants', {
+            'id': v.id,
+            'item_id': item.id,
+            'business_id': businessId,
+            'label': v.label,
+            'price': v.price,
+            'barcode': v.barcode,
+            'stock_quantity': v.stockQuantity,
+            'low_stock_threshold': v.lowStockThreshold,
+            'sort_order': v.sortOrder,
+            'is_active': v.isActive ? 1 : 0,
+          });
+        }
       }
     });
   }
 
-  /// Returns all active cached items for the business.
+  /// Returns all active cached items for the business, each with its sizes
+  /// (variants) attached so size selection works offline.
   Future<List<Item>> getCachedItems(String businessId) async {
     final rows = await _database.query(
       'cached_items',
       where: 'business_id = ? AND is_active = 1',
       whereArgs: [businessId],
     );
-    return rows.map(_rowToItem).toList();
+    return _attachCachedVariants(rows, businessId);
+  }
+
+  /// Attach cached variants to a set of item rows in ONE query (avoids an
+  /// N+1 lookup when building the full catalog).
+  Future<List<Item>> _attachCachedVariants(
+      List<Map<String, dynamic>> itemRows, String businessId) async {
+    if (itemRows.isEmpty) return [];
+    final variantRows = await _database.query(
+      'cached_variants',
+      where: 'business_id = ? AND is_active = 1',
+      whereArgs: [businessId],
+      orderBy: 'sort_order ASC, label ASC',
+    );
+    final byItem = <String, List<ItemVariant>>{};
+    for (final r in variantRows) {
+      (byItem[r['item_id'] as String] ??= []).add(_rowToVariant(r));
+    }
+    return itemRows.map((row) {
+      final base = _rowToItem(row);
+      final variants = byItem[base.id];
+      if (variants == null || variants.isEmpty) return base;
+      return Item(
+        id: base.id,
+        businessId: base.businessId,
+        name: base.name,
+        barcode: base.barcode,
+        category: base.category,
+        price: base.price,
+        taxRate: base.taxRate,
+        stockQuantity: base.stockQuantity,
+        lowStockThreshold: base.lowStockThreshold,
+        unit: base.unit,
+        variants: variants,
+        isActive: base.isActive,
+        imageUrl: base.imageUrl,
+      );
+    }).toList();
   }
 
   /// Returns the [CacheStatus] for a business without loading all rows.
@@ -275,7 +360,7 @@ class OfflineService {
       return (items: <Item>[], status: CacheStatus.empty);
     }
 
-    final items = rows.map(_rowToItem).toList();
+    final items = await _attachCachedVariants(rows, businessId);
 
     // Determine age from the freshest row in this result set.
     int newest = 0;
@@ -322,22 +407,52 @@ class OfflineService {
   static String _normaliseBarcode(String barcode) =>
       barcode.replaceAll(RegExp(r'[\s\-\.]'), '');
 
-  Future<Item?> getCachedItemByBarcode(
+  /// Resolves a scanned barcode against the cache. The code may belong to an
+  /// item OR to one of its sizes (variants); returns the item plus the matched
+  /// variant (null when the item itself matched). Returns null if nothing
+  /// matched. Filtering happens in Dart because SQLite has no regex replace.
+  Future<({Item item, ItemVariant? variant})?> getBarcodeMatch(
       String barcode, String businessId) async {
     final normalised = _normaliseBarcode(barcode);
-    // Query all active items for this business and filter in Dart after
-    // normalising the stored barcode — SQLite has no regex replace built-in.
-    final rows = await _database.query(
+
+    // 1) Try the item-level barcode first.
+    final itemRows = await _database.query(
       'cached_items',
       where: 'business_id = ? AND is_active = 1 AND barcode IS NOT NULL',
       whereArgs: [businessId],
     );
-    final match = rows.where((r) {
+    final itemMatch = itemRows.where((r) {
       final stored = r['barcode'] as String?;
       return stored != null && _normaliseBarcode(stored) == normalised;
     }).firstOrNull;
-    if (match == null) return null;
-    return _rowToItem(match);
+    if (itemMatch != null) {
+      return (item: await _rowToItemWithVariants(itemMatch), variant: null);
+    }
+
+    // 2) Fall back to a size (variant) barcode.
+    final variantRows = await _database.query(
+      'cached_variants',
+      where: 'business_id = ? AND is_active = 1 AND barcode IS NOT NULL',
+      whereArgs: [businessId],
+    );
+    final variantMatch = variantRows.where((r) {
+      final stored = r['barcode'] as String?;
+      return stored != null && _normaliseBarcode(stored) == normalised;
+    }).firstOrNull;
+    if (variantMatch == null) return null;
+
+    final parentRows = await _database.query(
+      'cached_items',
+      where: 'id = ? AND is_active = 1',
+      whereArgs: [variantMatch['item_id']],
+      limit: 1,
+    );
+    if (parentRows.isEmpty) return null;
+    final item = await _rowToItemWithVariants(parentRows.first);
+    final variant = item.variants
+        .where((v) => v.id == variantMatch['id'])
+        .firstOrNull;
+    return (item: item, variant: variant);
   }
 
   Item _rowToItem(Map<String, dynamic> row) {
@@ -354,6 +469,56 @@ class OfflineService {
           ? (row['stock_quantity'] as num).toDouble()
           : null,
       isActive: (row['is_active'] as int) == 1,
+    );
+  }
+
+  ItemVariant _rowToVariant(Map<String, dynamic> row) {
+    return ItemVariant(
+      id: row['id'] as String,
+      itemId: row['item_id'] as String,
+      label: row['label'] as String,
+      price: row['price'] != null ? (row['price'] as num).toDouble() : null,
+      barcode: row['barcode'] as String?,
+      stockQuantity: row['stock_quantity'] != null
+          ? (row['stock_quantity'] as num).toDouble()
+          : null,
+      lowStockThreshold: row['low_stock_threshold'] != null
+          ? (row['low_stock_threshold'] as num).toDouble()
+          : null,
+      sortOrder: (row['sort_order'] as int?) ?? 0,
+      isActive: (row['is_active'] as int) == 1,
+    );
+  }
+
+  /// Load the cached variants (sizes) for a single item, ordered like the API.
+  Future<List<ItemVariant>> _variantsForItem(String itemId) async {
+    final rows = await _database.query(
+      'cached_variants',
+      where: 'item_id = ? AND is_active = 1',
+      whereArgs: [itemId],
+      orderBy: 'sort_order ASC, label ASC',
+    );
+    return rows.map(_rowToVariant).toList();
+  }
+
+  Future<Item> _rowToItemWithVariants(Map<String, dynamic> row) async {
+    final base = _rowToItem(row);
+    final variants = await _variantsForItem(base.id);
+    if (variants.isEmpty) return base;
+    return Item(
+      id: base.id,
+      businessId: base.businessId,
+      name: base.name,
+      barcode: base.barcode,
+      category: base.category,
+      price: base.price,
+      taxRate: base.taxRate,
+      stockQuantity: base.stockQuantity,
+      lowStockThreshold: base.lowStockThreshold,
+      unit: base.unit,
+      variants: variants,
+      isActive: base.isActive,
+      imageUrl: base.imageUrl,
     );
   }
 

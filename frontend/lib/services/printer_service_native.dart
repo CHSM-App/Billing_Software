@@ -556,42 +556,36 @@ class PrinterService {
     required String barcodeValue,
     required String itemName,
     required double price,
+    String? subtitle,
     int copies = 1,
   }) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
 
-    if (_isWindows) {
-      // TSPL label with actual barcode graphic
-      final name = itemName.length > 38 ? itemName.substring(0, 38) : itemName;
-      final priceStr = 'Rs.${price.toStringAsFixed(2)}';
-      final sb = StringBuffer();
-      sb.write('SIZE 72 mm,40 mm\r\n');
-      sb.write('GAP 2 mm,0 mm\r\n');
-      sb.write('CODEPAGE 437\r\n');
-      sb.write('CLS\r\n');
-      sb.write('TEXT 10,10,"3",0,1,1,"${name.replaceAll('"', '\\"')}"\r\n');
-      sb.write(
-          'TEXT 480,10,"3",0,1,1,"${priceStr.replaceAll('"', '\\"')}"\r\n');
-      sb.write('BARCODE 10,40,"128",80,1,0,2,2,"$barcodeValue"\r\n');
-      sb.write('PRINT $copies,1\r\n');
-      await _printBytes(printer, _enc(sb.toString()));
-    } else {
-      // BT thermal printers can't draw a barcode from a command, so render an
-      // actual Code128 barcode (with name/price/value) to an image and print
-      // it as a raster — same pipeline as QR printing. One raster per copy.
-      final image = await BarcodeImage.render(
-        barcodeValue: barcodeValue,
-        itemName: itemName,
-        price: price,
-      );
-      final raster = await RasterLab.imageToReceiptRaster(image);
-      image.dispose();
-      for (var i = 0; i < copies; i++) {
+    // Render an actual Code128 barcode (with name/optional size/price/value) to
+    // a 2-inch label image and print it as a raster. We use raster on BOTH
+    // Windows and Bluetooth: the thermal printers in the field are ESC/POS, not
+    // TSPL label printers, so a TSPL BARCODE command would print as literal text
+    // instead of drawing bars. Raster draws the real barcode on any ESC/POS
+    // printer. The label preserves its aspect ratio (labelImageToRaster) so the
+    // bars aren't squashed.
+    final image = await BarcodeImage.render(
+      barcodeValue: barcodeValue,
+      itemName: itemName,
+      price: price,
+      subtitle: subtitle,
+    );
+    final raster = await RasterLab.labelImageToRaster(image);
+    image.dispose();
+
+    for (var i = 0; i < copies; i++) {
+      if (_isWindows) {
+        await _printWindows(printer, raster);
+      } else {
         await _sendClassicBtTuned(printer, raster, 0, 0);
-        if (i < copies - 1) {
-          await Future.delayed(const Duration(milliseconds: 800));
-        }
+      }
+      if (i < copies - 1) {
+        await Future.delayed(const Duration(milliseconds: 800));
       }
     }
   }
@@ -783,10 +777,6 @@ class PrinterService {
     final space = width - label.length - value.length;
     return '$label${' ' * (space < 1 ? 1 : space)}$value';
   }
-
-  /// Encode string to Latin-1 bytes (for TSPL commands)
-  static List<int> _enc(String s) =>
-      s.codeUnits.map((c) => c > 255 ? 0x3F : c).toList();
 
   String _formatDate(DateTime dt) {
     final d = dt.day.toString().padLeft(2, '0');

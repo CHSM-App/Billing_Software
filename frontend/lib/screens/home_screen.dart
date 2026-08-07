@@ -342,13 +342,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     try {
       final businessId = await getBusinessId();
       final cached = await OfflineService.instance
-          .getCachedItemByBarcode(barcode, businessId ?? '');
+          .getBarcodeMatch(barcode, businessId ?? '');
       if (cached != null) {
-        ref.read(cartProvider.notifier).addItem(cached);
+        ref
+            .read(cartProvider.notifier)
+            .addItem(cached.item, variant: cached.variant);
         return;
       }
       final data = await getItemByBarcode(barcode);
-      ref.read(cartProvider.notifier).addItem(Item.fromJson(data));
+      final item = Item.fromJson(data);
+      // A size (variant) barcode resolves to its parent item plus which size
+      // matched — add that specific size so its price/label is used.
+      final matchedVariantId = data['matched_variant_id'] as String?;
+      final variant = matchedVariantId == null
+          ? null
+          : item.variants
+              .where((v) => v.id == matchedVariantId)
+              .firstOrNull;
+      ref.read(cartProvider.notifier).addItem(item, variant: variant);
       // _animateCartBadge();
     } on ApiException catch (e) {
       _showSnack(e.message, isError: true);
@@ -1932,6 +1943,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // Cart panel
   // ---------------------------------------------------------------------------
 
+  /// Empty-cart placeholder. When [flexible] (wide layout) it expands to fill
+  /// the space the cart list would occupy so the footer actions stay pinned to
+  /// the bottom and never overflow. In the bottom sheet it stays intrinsic.
+  Widget _emptyCartPlaceholder(AppLocalizations l10n, {required bool flexible}) {
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(
+          vertical: AppSpacing.space32, horizontal: AppSpacing.space16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant,
+              borderRadius: BorderRadius.circular(AppRadius.large),
+            ),
+            child: const Icon(Icons.shopping_cart_outlined,
+                size: 28, color: AppColors.textDisabled),
+          ),
+          const SizedBox(height: AppSpacing.space12),
+          Text(l10n.billingNoItemsAddedYet,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+              textAlign: TextAlign.center),
+        ],
+      ),
+    );
+    if (!flexible) return content;
+    // Center the placeholder within the flexible space; a scroll view guards
+    // against overflow if the panel is ever shorter than the placeholder.
+    return Expanded(
+      child: SingleChildScrollView(
+        child: Center(child: content),
+      ),
+    );
+  }
+
   Widget _buildCartPanel({bool inSheet = false}) {
     return Consumer(builder: (context, ref, _) {
       final l10n = context.l10n;
@@ -2008,31 +2058,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
             // Scrollable cart items — takes all available space
             if (cart.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    vertical: AppSpacing.space32,
-                    horizontal: AppSpacing.space16),
-                child: Column(
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceVariant,
-                        borderRadius: BorderRadius.circular(AppRadius.large),
-                      ),
-                      child: const Icon(Icons.shopping_cart_outlined,
-                          size: 28, color: AppColors.textDisabled),
-                    ),
-                    const SizedBox(height: AppSpacing.space12),
-                    Text(l10n.billingNoItemsAddedYet,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
-                        textAlign: TextAlign.center),
-                  ],
-                ),
-              )
+              // In the wide layout the empty placeholder must FLEX so it absorbs
+              // the leftover vertical space; a fixed-height placeholder here is
+              // what pushed the footer actions off-screen (bottom overflow).
+              // In the bottom sheet the column is min-sized, so keep it fixed.
+              _emptyCartPlaceholder(l10n, flexible: !inSheet)
             else if (inSheet)
               // In bottom sheet: not constrained, just list
               Column(

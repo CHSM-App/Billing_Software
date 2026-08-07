@@ -7,27 +7,35 @@ import 'package:flutter/material.dart';
 /// printing (raster). Used on Bluetooth printers which can't draw a barcode
 /// from a text command the way TSPL (Windows) can.
 class BarcodeImage {
-  /// [pixelWidth] is the raster width in device pixels (match the printer's
-  /// dot width, e.g. 576 for 80mm). Height is derived from the content.
+  /// [pixelWidth] is the raster width in device pixels. Defaults to 406 —
+  /// a 2-inch label at 203 dpi (the standard thermal density). Height is derived
+  /// from the content. [subtitle] is an optional extra line under the name (e.g.
+  /// a variant/size label like "Large").
   static Future<ui.Image> render({
     required String barcodeValue,
     required String itemName,
     required double price,
-    int pixelWidth = 576,
+    String? subtitle,
+    int pixelWidth = 406, // 2 inch @ 203 dpi
   }) async {
     final width = pixelWidth.toDouble();
     final margin = width * 0.06;
     final contentWidth = width - margin * 2;
 
     // Layout metrics (device pixels).
-    const nameSize = 30.0;
-    const priceSize = 30.0;
-    const valueSize = 24.0;
+    const nameSize = 26.0;
+    const subtitleSize = 22.0;
+    const priceSize = 26.0;
+    const valueSize = 22.0;
     const barcodeHeight = 90.0;
-    const gap = 12.0;
+    const gap = 10.0;
 
     final namePainter = _textPainter(itemName, nameSize, FontWeight.w700,
         maxWidth: contentWidth, center: true);
+    final subtitlePainter = (subtitle != null && subtitle.isNotEmpty)
+        ? _textPainter(subtitle, subtitleSize, FontWeight.w500,
+            maxWidth: contentWidth, center: true)
+        : null;
     final pricePainter = _textPainter('Rs. ${price.toStringAsFixed(2)}',
         priceSize, FontWeight.w600,
         maxWidth: contentWidth, center: true);
@@ -36,6 +44,7 @@ class BarcodeImage {
 
     final totalHeight = margin +
         namePainter.height +
+        (subtitlePainter != null ? gap + subtitlePainter.height : 0) +
         gap +
         pricePainter.height +
         gap +
@@ -55,6 +64,12 @@ class BarcodeImage {
     // Item name (centred).
     namePainter.paint(canvas, Offset(margin + (contentWidth - namePainter.width) / 2, y));
     y += namePainter.height + gap;
+    // Optional variant/size label (centred).
+    if (subtitlePainter != null) {
+      subtitlePainter.paint(
+          canvas, Offset(margin + (contentWidth - subtitlePainter.width) / 2, y));
+      y += subtitlePainter.height + gap;
+    }
     // Price (centred).
     pricePainter.paint(canvas, Offset(margin + (contentWidth - pricePainter.width) / 2, y));
     y += pricePainter.height + gap;

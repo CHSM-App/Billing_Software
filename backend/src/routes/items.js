@@ -147,11 +147,14 @@ router.get('/', requireAuth, async (req, res) => {
 
     let where = 'business_id = @business_id AND is_active = 1';
 
+    // Normalised (spaces/dashes/dots stripped) form of the scanned barcode.
+    // Declared out here so the variant fallback below can reuse it.
+    let normalised = null;
     if (barcode) {
       // Normalise: strip spaces, dashes, dots so scanner formatting doesn't
       // matter. Both the stored value and the incoming value are compared after
       // stripping non-alphanumeric characters via REPLACE chains.
-      const normalised = barcode.replace(/[\s\-\.]/g, '');
+      normalised = barcode.replace(/[\s\-\.]/g, '');
       request.input('barcode', sql.NVarChar(100), normalised);
       // Match against stored barcode after stripping the same characters
       where += ` AND REPLACE(REPLACE(REPLACE(barcode, '-', ''), ' ', ''), '.', '') = @barcode`;
@@ -172,10 +175,37 @@ router.get('/', requireAuth, async (req, res) => {
       ORDER BY name ASC
     `);
 
-    // Barcode lookup returns single item
+    // Barcode lookup returns a single item. The scanned code may belong to the
+    // item itself OR to one of its sizes (variants), so if the item-level match
+    // misses, fall back to matching a variant barcode and return that variant's
+    // parent item tagged with `matched_variant_id` so the client can select the
+    // right size/price.
     if (barcode) {
       if (result.recordset.length === 0) {
-        return res.status(404).json({ error: 'Item not found' });
+        const variantReq = pool.request()
+          .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+          .input('barcode', sql.NVarChar(100), normalised);
+        const variantMatch = await variantReq.query(`
+          SELECT TOP 1 i.id, i.business_id, i.name, i.barcode, i.category, i.price,
+                 i.tax_rate, i.stock_quantity, i.low_stock_threshold, i.unit,
+                 i.is_active, i.created_at, v.id AS matched_variant_id
+          FROM item_variants v
+          JOIN items i ON i.id = v.item_id
+          WHERE i.business_id = @business_id
+            AND i.is_active = 1
+            AND v.is_active = 1
+            AND v.barcode IS NOT NULL
+            AND REPLACE(REPLACE(REPLACE(v.barcode, '-', ''), ' ', ''), '.', '') = @barcode
+        `);
+        if (variantMatch.recordset.length === 0) {
+          return res.status(404).json({ error: 'Item not found' });
+        }
+        const row = variantMatch.recordset[0];
+        const matchedVariantId = row.matched_variant_id;
+        delete row.matched_variant_id;
+        await attachVariants(req.user.business_id, [row]);
+        row.matched_variant_id = matchedVariantId;
+        return res.json(row);
       }
       await attachVariants(req.user.business_id, result.recordset);
       return res.json(result.recordset[0]);

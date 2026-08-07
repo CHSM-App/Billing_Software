@@ -782,6 +782,45 @@ class RasterLab {
     padded.dispose();
     return out.toBytes();
   }
+
+  /// Convert a NON-square label [image] (e.g. a barcode label — wider than tall)
+  /// into a centred ESC/POS raster payload. Unlike [imageToReceiptRaster] this
+  /// preserves the image's aspect ratio, so a barcode's bars keep their true
+  /// proportions instead of being squashed into a square. The image is scaled to
+  /// [targetWidth] dots (e.g. 406 for a 2-inch label @ 203 dpi) and centre-padded
+  /// to the full [paperWidth] so it prints in the middle of the roll.
+  static Future<Uint8List> labelImageToRaster(
+    ui.Image image, {
+    int paperWidth = dots80mm,
+    int targetWidth = 406, // 2 inch @ 203 dpi
+    int threshold = 128,
+    int bandHeight = 256,
+  }) async {
+    final w = paperWidth;
+    final scaled = targetWidth.clamp(64, paperWidth);
+    // Preserve aspect ratio: derive height from the source's proportions.
+    final h = (scaled * image.height / image.width).round();
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawRect(Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+        Paint()..color = Colors.white);
+    final dx = ((w - scaled) / 2).toDouble();
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Rect.fromLTWH(dx, 0, scaled.toDouble(), h.toDouble()),
+      Paint()..filterQuality = FilterQuality.high,
+    );
+    final padded = await recorder.endRecording().toImage(w, h);
+
+    final packed = await _pack(padded, threshold: threshold);
+    final out = BytesBuilder();
+    out.add([0x1B, 0x40]); // ESC @ — init
+    out.add(_gsv0(packed, bandHeight: bandHeight));
+    out.add(_feed(4));
+    padded.dispose();
+    return out.toBytes();
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────

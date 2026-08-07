@@ -1268,10 +1268,15 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
 
 class _BarcodePrintDialog extends StatefulWidget {
   final Item item;
+
+  /// When set, the dialog generates/prints a barcode for this size (variant)
+  /// rather than the whole item. The label shows the size name and its price.
+  final ItemVariant? variant;
   final Future<void> Function(String barcode) onBarcodeGenerated;
 
   const _BarcodePrintDialog({
     required this.item,
+    this.variant,
     required this.onBarcodeGenerated,
   });
 
@@ -1286,11 +1291,18 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   bool _printing = false;
   bool _saved = false;
 
+  // Effective target — a size (variant) if one was passed, else the whole item.
+  String? get _existingBarcode => widget.variant?.barcode ?? widget.item.barcode;
+  String get _targetId => widget.variant?.id ?? widget.item.id;
+  double get _targetPrice =>
+      widget.variant?.price ?? widget.item.price;
+  String? get _subtitle => widget.variant?.label;
+
   @override
   void initState() {
     super.initState();
-    // Use existing barcode or auto-generate one from the item id
-    _barcodeValue = widget.item.barcode ?? _generateBarcode(widget.item.id);
+    // Use existing barcode or auto-generate one from the target's id
+    _barcodeValue = _existingBarcode ?? _generateBarcode(_targetId);
     _barcodeCtrl = TextEditingController(text: _barcodeValue);
     _barcodeCtrl.addListener(() {
       final v = _barcodeCtrl.text.trim();
@@ -1326,15 +1338,16 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
     final sentMessage = context.l10n.itemsBarcodeSentToPrinter;
     setState(() => _printing = true);
     try {
-      // If item had no barcode, save the generated one first
-      if (widget.item.barcode == null && !_saved) {
+      // If the target had no barcode, save the generated one first
+      if (_existingBarcode == null && !_saved) {
         await widget.onBarcodeGenerated(_barcodeValue);
         _saved = true;
       }
       await PrinterService.instance.printBarcodeLabel(
         barcodeValue: _barcodeValue,
         itemName: widget.item.name,
-        price: widget.item.price,
+        price: _targetPrice,
+        subtitle: _subtitle,
         copies: copies,
       );
       if (mounted) {
@@ -1365,7 +1378,7 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final isNew = widget.item.barcode == null;
+    final isNew = _existingBarcode == null;
     final l10n = context.l10n;
     return AlertDialog(
       title: Text(isNew
@@ -1408,9 +1421,18 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
                   textAlign: TextAlign.center,
                 ),
               ),
+              if (_subtitle != null)
+                Center(
+                  child: Text(
+                    _subtitle!,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w500),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               Center(
                 child: Text(
-                  '₹${widget.item.price.toStringAsFixed(2)}',
+                  '₹${_targetPrice.toStringAsFixed(2)}',
                   style: Theme.of(context)
                       .textTheme
                       .bodyMedium
@@ -1562,6 +1584,29 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
         SnackBar(content: Text(msg), backgroundColor: AppColors.error));
   }
 
+  /// Generate/print a barcode label for a single size. Persists the generated
+  /// barcode onto the variant so future scans and reprints match.
+  void _printVariantBarcode(ItemVariant v) {
+    showDialog(
+      context: context,
+      builder: (_) => _BarcodePrintDialog(
+        item: widget.item,
+        variant: v,
+        onBarcodeGenerated: (newBarcode) async {
+          final result =
+              await updateVariant(widget.item.id, v.id, {'barcode': newBarcode});
+          final updated = ItemVariant.fromJson(result);
+          if (!mounted) return;
+          setState(() {
+            final i = _variants.indexWhere((x) => x.id == v.id);
+            if (i != -1) _variants[i] = updated;
+          });
+          widget.onChanged(List.unmodifiable(_variants));
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -1598,10 +1643,26 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                     title: Text(v.label,
                         style: const TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: Text(sub),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline,
-                          size: 18, color: AppColors.error),
-                      onPressed: _busy ? null : () => _delete(v),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: l10n.itemsBarcodePrintTitle,
+                          icon: Icon(
+                            v.barcode != null
+                                ? Icons.qr_code_2
+                                : Icons.qr_code_2_outlined,
+                            size: 18,
+                            color: AppColors.primary,
+                          ),
+                          onPressed: _busy ? null : () => _printVariantBarcode(v),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline,
+                              size: 18, color: AppColors.error),
+                          onPressed: _busy ? null : () => _delete(v),
+                        ),
+                      ],
                     ),
                   );
                 }),

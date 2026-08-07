@@ -113,6 +113,7 @@ class PrinterService {
     required String barcodeValue,
     required String itemName,
     required double price,
+    String? subtitle,
     int copies = 1,
   }) async {
     throw PrinterException('Printing is not supported in the browser.');
