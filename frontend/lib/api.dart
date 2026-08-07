@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as dev;
 import 'package:flutter/services.dart' show PlatformException;
@@ -5,8 +6,8 @@ import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
-// const String baseUrl = 'https://vittam.vengurlatech.com/api';
-const String baseUrl = 'http://192.168.1.3:5000/api';
+const String baseUrl = 'https://vittam.vengurlatech.com/api';
+// const String baseUrl = 'http://192.168.1.3:5000/api';
 const String _genericApiErrorMessage = 'Something went wrong';
 
 String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiErrorMessage}) {
@@ -71,34 +72,38 @@ Future<http.Response> _delete(Uri uri, {Map<String, String>? headers}) async {
 // Safe wrappers — mark offline on network failure
 // ---------------------------------------------------------------------------
 
-Future<http.Response> _safeGet(Uri uri, {Map<String, String>? headers}) async {
+/// Runs [send] and, if it fails because the server was unreachable, flips the
+/// connectivity state to offline and rethrows a typed [NetworkException] so the
+/// UI can show a "No internet" message instead of "Something went wrong". Any
+/// other error (a real HTTP response, an ApiException) passes through untouched.
+Future<http.Response> _safeSend(Future<http.Response> Function() send) async {
   try {
-    return await _get(uri, headers: headers);
-  } on http.ClientException {
-    _connectivityNotifier?.markOffline();
-    rethrow;
+    return await send();
   } catch (e) {
-    // Catches dart:io SocketException on native platforms
-    _connectivityNotifier?.markOffline();
+    if (isNetworkError(e)) {
+      _connectivityNotifier?.markOffline();
+      throw const NetworkException();
+    }
     rethrow;
   }
 }
 
-Future<http.Response> _safePost(Uri uri, {Map<String, String>? headers, Object? body}) async {
-  try {
-    return await _post(uri, headers: headers, body: body);
-  } on http.ClientException {
-    _connectivityNotifier?.markOffline();
-    rethrow;
-  } catch (e) {
-    // Catches dart:io SocketException on native platforms
-    _connectivityNotifier?.markOffline();
-    rethrow;
-  }
-}
+Future<http.Response> _safeGet(Uri uri, {Map<String, String>? headers}) =>
+    _safeSend(() => _get(uri, headers: headers));
+
+Future<http.Response> _safePost(Uri uri, {Map<String, String>? headers, Object? body}) =>
+    _safeSend(() => _post(uri, headers: headers, body: body));
+
+Future<http.Response> _safePut(Uri uri, {Map<String, String>? headers, Object? body}) =>
+    _safeSend(() => _put(uri, headers: headers, body: body));
+
+Future<http.Response> _safeDelete(Uri uri, {Map<String, String>? headers}) =>
+    _safeSend(() => _delete(uri, headers: headers));
 
 // Auth-aware wrappers — automatically refresh the access token on 401 and retry.
-// Use these for all authenticated endpoints.
+// Use these for all authenticated endpoints. All go through the safe* wrappers
+// so a network failure on ANY verb marks the app offline and surfaces a typed
+// NetworkException.
 
 Future<http.Response> _authGet(Uri uri) =>
     _withAutoRefresh((h) => _safeGet(uri, headers: h));
@@ -107,10 +112,10 @@ Future<http.Response> _authPost(Uri uri, {Object? body}) =>
     _withAutoRefresh((h) => _safePost(uri, headers: h, body: body));
 
 Future<http.Response> _authPut(Uri uri, {Object? body}) =>
-    _withAutoRefresh((h) => _put(uri, headers: h, body: body));
+    _withAutoRefresh((h) => _safePut(uri, headers: h, body: body));
 
 Future<http.Response> _authDelete(Uri uri) =>
-    _withAutoRefresh((h) => _delete(uri, headers: h));
+    _withAutoRefresh((h) => _safeDelete(uri, headers: h));
 
 void _logRequest(String method, Uri uri, Map<String, String>? headers, {Object? body}) {
   final buf = StringBuffer();
@@ -120,6 +125,10 @@ void _logRequest(String method, Uri uri, Map<String, String>? headers, {Object? 
 }
 
 void _logResponse(String method, Uri uri, http.Response response) {
+  // We reached the server and got an HTTP response — we are online. This clears
+  // a stale "offline" state after connectivity is restored, without waiting for
+  // a manual pull-to-refresh.
+  _connectivityNotifier?.markOnline();
   final ok = response.statusCode >= 200 && response.statusCode < 300;
   final tag = ok ? '✓' : '✗';
   dev.log(
@@ -260,6 +269,31 @@ class ApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// Thrown when a request could not reach the server at all — no DNS, no route,
+/// connection refused, or a timeout. Distinct from [ApiException] (which means
+/// the server WAS reached and returned an error). The UI uses this to show a
+/// "No internet" message instead of a generic "Something went wrong".
+class NetworkException implements Exception {
+  final String message;
+  const NetworkException([this.message = 'No internet connection']);
+
+  @override
+  String toString() => message;
+}
+
+/// True when [error] indicates the device could not reach the server — either an
+/// explicit [NetworkException], or the raw socket/client errors that slip
+/// through before classification. Used to pick the right UI message.
+bool isNetworkError(Object? error) {
+  if (error is NetworkException) return true;
+  if (error is http.ClientException) return true;
+  if (error is TimeoutException) return true;
+  // dart:io SocketException — matched by name to avoid importing dart:io here
+  // (this file is also compiled for web, where SocketException doesn't exist).
+  final name = error.runtimeType.toString();
+  return name == 'SocketException' || name == 'HttpException';
 }
 
 // ---------------------------------------------------------------------------

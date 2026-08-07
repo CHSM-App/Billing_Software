@@ -541,15 +541,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           color: AppColors.warning,
                         ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    l10n.loginSupportEmail,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.warning,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                        ),
-                  ),
+                  const SizedBox(height: 6),
+                  const SupportContactRow(color: AppColors.warning),
                 ],
               ),
             ),

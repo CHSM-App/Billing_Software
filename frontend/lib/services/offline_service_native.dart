@@ -90,7 +90,7 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
     );
@@ -141,6 +141,40 @@ class OfflineService {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_offline_bills_status ON offline_bills (sync_status)',
     );
+    await _createDraftsTable(db);
+  }
+
+  /// Offline draft queue — mirrors [offline_bills] but for `status:'draft'`
+  /// (open orders / table drafts) created while disconnected. Kept in its own
+  /// table because a draft is reopened and edited before it is finalized, so it
+  /// must persist the full priced line items for local display — unlike a
+  /// finalized offline bill which is fire-and-forget.
+  Future<void> _createDraftsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS offline_drafts (
+        local_id        TEXT    NOT NULL PRIMARY KEY,
+        client_bill_id  TEXT    NOT NULL UNIQUE,
+        business_id     TEXT    NOT NULL,
+        user_id         TEXT    NOT NULL,
+        table_id        TEXT,
+        table_number    TEXT,
+        customer_name   TEXT,
+        customer_phone  TEXT,
+        subtotal        REAL    NOT NULL,
+        tax_amount      REAL    NOT NULL,
+        discount_amount REAL    NOT NULL DEFAULT 0,
+        total           REAL    NOT NULL,
+        payment_mode    TEXT    NOT NULL,
+        items_json      TEXT    NOT NULL,
+        created_at      INTEGER NOT NULL,
+        sync_status     TEXT    NOT NULL DEFAULT '${SyncStatus.pending}',
+        sync_error      TEXT,
+        retry_count     INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_offline_drafts_status ON offline_drafts (sync_status)',
+    );
   }
 
   /// Incremental migrations.
@@ -165,6 +199,10 @@ class OfflineService {
     }
     // v2 → v3: no schema change — cached_at was already present.
     // Version bump records that TTL logic is now active.
+    if (oldVersion < 4) {
+      // v3 → v4: add the offline draft queue.
+      await _createDraftsTable(db);
+    }
   }
 
   Database get _database {
@@ -483,5 +521,96 @@ class OfflineService {
   /// Decode items_json back into a list for display.
   static List<Map<String, dynamic>> decodeItems(String itemsJson) {
     return List<Map<String, dynamic>>.from(jsonDecode(itemsJson));
+  }
+
+  // ── Offline draft queue ────────────────────────────────────────────────────
+  //
+  // A draft is an *open order* (status:'draft') saved while disconnected. It is
+  // queued here and pushed to POST /bills with client_bill_id on reconnect. The
+  // full priced items_json is stored so the draft can be shown in Open Orders
+  // and reopened for editing before the sync lands.
+
+  /// Queues a draft. Returns its [localId] and generated [clientBillId].
+  Future<({String localId, String clientBillId})> queueOfflineDraft(
+      Map<String, dynamic> data) async {
+    final localId      = 'LOCAL-${DateTime.now().millisecondsSinceEpoch}';
+    final clientBillId = _generateUuidV4();
+
+    await _database.insert('offline_drafts', {
+      'local_id':        localId,
+      'client_bill_id':  clientBillId,
+      'business_id':     data['business_id'],
+      'user_id':         data['user_id'],
+      'table_id':        data['table_id'],
+      'table_number':    data['table_number'],
+      'customer_name':   data['customer_name'],
+      'customer_phone':  data['customer_phone'],
+      'subtotal':        data['subtotal'],
+      'tax_amount':      data['tax_amount'],
+      'discount_amount': data['discount_amount'] ?? 0,
+      'total':           data['total'],
+      'payment_mode':    data['payment_mode'],
+      'items_json':      data['items_json'],
+      'created_at':      data['created_at'],
+      'sync_status':     SyncStatus.pending,
+      'retry_count':     0,
+    });
+
+    return (localId: localId, clientBillId: clientBillId);
+  }
+
+  /// All queued drafts (any status) for local display in Open Orders.
+  Future<List<Map<String, dynamic>>> getAllDrafts() async {
+    return _database.query('offline_drafts', orderBy: 'created_at ASC');
+  }
+
+  /// A single queued draft by its local id, or null.
+  Future<Map<String, dynamic>?> getDraftByLocalId(String localId) async {
+    final rows = await _database.query('offline_drafts',
+        where: 'local_id = ?', whereArgs: [localId], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Drafts eligible for the next sync attempt (pending/failed under retry cap).
+  Future<List<Map<String, dynamic>>> getPendingDrafts() async {
+    return _database.query(
+      'offline_drafts',
+      where:
+          "sync_status IN ('${SyncStatus.pending}', '${SyncStatus.failed}') AND retry_count < $maxRetries",
+      orderBy: 'created_at ASC',
+    );
+  }
+
+  Future<void> markDraftSyncing(String localId) async {
+    await _database.update('offline_drafts', {'sync_status': SyncStatus.syncing},
+        where: 'local_id = ?', whereArgs: [localId]);
+  }
+
+  /// Deletes the draft row after it has been created on the server.
+  Future<void> markDraftSynced(String localId) async {
+    await _database.delete('offline_drafts',
+        where: 'local_id = ?', whereArgs: [localId]);
+  }
+
+  Future<void> markDraftFailed(String localId, String error) async {
+    await _database.rawUpdate('''
+      UPDATE offline_drafts
+      SET sync_status = '${SyncStatus.failed}',
+          sync_error  = ?,
+          retry_count = retry_count + 1
+      WHERE local_id = ?
+    ''', [error, localId]);
+  }
+
+  Future<void> markDraftConflict(String localId, String error) async {
+    await _database.update('offline_drafts',
+        {'sync_status': SyncStatus.conflict, 'sync_error': error},
+        where: 'local_id = ?', whereArgs: [localId]);
+  }
+
+  /// On startup, reset drafts stuck in 'syncing' (from a crash mid-sync).
+  Future<void> resetStaleSyncingDrafts() async {
+    await _database.update('offline_drafts', {'sync_status': SyncStatus.pending},
+        where: "sync_status = '${SyncStatus.syncing}'");
   }
 }

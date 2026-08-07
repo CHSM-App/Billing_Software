@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:ui' show TextAlign;
 import 'dart:ui' as ui show Image;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
@@ -72,6 +72,14 @@ class PrinterService {
   PrinterService._();
   static final PrinterService instance = PrinterService._();
 
+  /// Ticks whenever the active printer is selected or cleared. UI providers
+  /// (e.g. canPrintProvider) listen to this so removing/changing the printer
+  /// anywhere — Settings, the setup page — updates the billing screen live.
+  final ValueNotifier<int> activePrinterRevision = ValueNotifier<int>(0);
+
+  void _bumpPrinterRevision() =>
+      activePrinterRevision.value = activePrinterRevision.value + 1;
+
   // -------------------------------------------------------------------------
   // Discovery
   // -------------------------------------------------------------------------
@@ -134,6 +142,7 @@ class PrinterService {
   Future<void> setActivePrinter(Printer printer) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKey, jsonEncode(printer.toJson()));
+    _bumpPrinterRevision();
   }
 
   Future<Printer?> getActivePrinter() async {
@@ -147,9 +156,40 @@ class PrinterService {
     }
   }
 
+  /// Whether a receipt could actually be printed right now — not just whether a
+  /// printer is saved. Checks the live preconditions the print path itself
+  /// requires, so the UI reflects reality when Bluetooth is turned off or the
+  /// printer is unpaired/out of range:
+  ///
+  ///   • a printer is configured, AND
+  ///   • (Classic-BT / Android) Bluetooth permission is granted AND Bluetooth
+  ///     is currently enabled.
+  ///
+  /// It deliberately does NOT open a connection (that is slow and would churn
+  /// the BT link); the actual connect still happens at print time. On Windows
+  /// (BLE/USB) reachability is only known at connect time, so "configured" is
+  /// treated as printable.
+  Future<bool> canPrint() async {
+    final printer = await getActivePrinter();
+    if (printer == null) return false;
+    if (_isWindows) return true;
+    try {
+      final permitted =
+          await PrintBluetoothThermal.isPermissionBluetoothGranted;
+      if (!permitted) return false;
+      final btOn = await PrintBluetoothThermal.bluetoothEnabled;
+      return btOn;
+    } catch (_) {
+      // If we can't determine BT state, assume not printable so the UI falls
+      // back to "Save" rather than promising a print that would fail.
+      return false;
+    }
+  }
+
   Future<void> clearActivePrinter() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefKey);
+    _bumpPrinterRevision();
   }
 
   // -------------------------------------------------------------------------

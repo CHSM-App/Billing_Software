@@ -157,6 +157,8 @@
   "loginPendingTitle": "खाते सक्रिय नाही",
   "loginPendingBody": "तुमचे खाते सक्रिय होण्याच्या प्रतीक्षेत आहे. खाते सक्रिय करण्यासाठी आमच्या सपोर्ट टीमशी संपर्क साधा.",
   "loginSupportEmail": "support@vengurlatech.com",
+  "supportPhone": "9422229951",
+  "supportEmail": "support@vengurlatech.com",
 
   "forgotPinTitle": "पिन विसरलात",
   "forgotPinPhoneLabel": "नोंदणीकृत मोबाइल नंबर",
@@ -272,6 +274,7 @@
   "billingReleaseTableBody": "सर्व वस्तू काढल्यास हा जतन केलेला ड्राफ्ट रद्द होईल. हे पूर्ववत करता येणार नाही.",
   "billingReleaseTableFailed": "ड्राफ्ट काढता आला नाही.",
   "billingDraftOfflineError": "ऑफलाइन असताना ड्राफ्ट जतन करता येणार नाही",
+  "billingDraftPendingSync": "ही ऑर्डर अजून जतन होत आहे. संपादित किंवा अंतिम करण्यासाठी पुन्हा कनेक्ट करा.",
   "billingDraftSaved": "ड्राफ्ट जतन झाला.",
   "billingSaveFailed": "जतन करता आले नाही. तुमचे कनेक्शन तपासा.",
   "billingGenerateFailed": "बिल तयार करता आले नाही. तुमचे कनेक्शन तपासा.",
@@ -315,6 +318,8 @@
   "billingDiscountApplied": "दिलेली सूट",
   "billingNetPayable": "देय रक्कम",
   "billingWhatsapp": "व्हॉट्सअ‍ॅप",
+  "billingPrinterNotConnected": "प्रिंटर कनेक्ट नाही.",
+  "billingPrinterConnect": "कनेक्ट करा",
   "billingColItem": "वस्तू",
   "billingColPrice": "किंमत",
   "billingColQty": "संख्या",
@@ -744,6 +749,9 @@
 
   "noInternetTitle": "इंटरनेट कनेक्शन नाही",
   "noInternetBody": "सुरू करण्यासाठी नेटवर्कला जोडा.\nतुमची माहिती आपोआप लोड होईल.",
+  "errorNoInternetBody": "या पानासाठी इंटरनेट कनेक्शन आवश्यक आहे. तुमचे नेटवर्क तपासा आणि पुन्हा प्रयत्न करा.",
+  "connectivityNoConnection": "कनेक्शन नाही",
+  "connectivityBackOnline": "पुन्हा ऑनलाइन",
   "errorSomethingWentWrong": "काहीतरी चूक झाली",
 
   "itemsTabItems": "वस्तू",

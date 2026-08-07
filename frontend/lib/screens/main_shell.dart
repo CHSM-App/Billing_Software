@@ -10,6 +10,7 @@ import '../services/realtime_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/nav_item.dart';
 import '../widgets/bottom_nav_bar.dart';
+import '../widgets/connectivity_bar.dart';
 import 'home_screen.dart';
 import 'items_screen.dart';
 import 'orders_screen.dart';
@@ -164,6 +165,9 @@ class _MainShellState extends ConsumerState<MainShell>
               ref.invalidate(itemsProvider);
               ref.invalidate(categoriesProvider);
               ref.invalidate(tablesProvider);
+              // Queued offline drafts were just pushed; refresh Open Orders so
+              // their local copies are replaced by the authoritative server ones.
+              ref.invalidate(openDraftsProvider);
             });
           }
         });
@@ -238,6 +242,10 @@ class _MainShellState extends ConsumerState<MainShell>
                   ],
                 ),
               ),
+              // Wide (rail) layout has no bottom nav to anchor the strip to, so
+              // pin it to the bottom of the body instead. Narrow layouts get it
+              // above the bottom nav in _buildBottomNav.
+              if (isWide) const ConnectivityBar(),
             ],
           ),
           ),
@@ -290,26 +298,40 @@ class _MainShellState extends ConsumerState<MainShell>
   }
 
   Widget _buildBottomNav(List<NavItem> items, int safeIndex) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: const Border(top: BorderSide(color: AppColors.border)),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.textPrimary.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
+    // The connectivity strip sits BELOW the nav bar (YouTube-style), pinned to
+    // the very bottom edge of the screen. When it is showing it also owns the
+    // bottom safe-area inset; otherwise the nav bar keeps it.
+    final banner = ref.watch(connectivityBannerProvider);
+    final barVisible = banner != ConnectivityBanner.online;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            border: const Border(top: BorderSide(color: AppColors.border)),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.textPrimary.withValues(alpha: 0.08),
+                blurRadius: 16,
+                offset: const Offset(0, -4),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        child: AppBottomNavBar(
-          items: items,
-          selectedIndex: safeIndex,
-          onDestinationSelected: _onNav,
+          child: SafeArea(
+            top: false,
+            // While the bar is visible it hugs the bottom edge and takes the
+            // inset, so the nav bar must not also pad the bottom (double gap).
+            bottom: !barVisible,
+            child: AppBottomNavBar(
+              items: items,
+              selectedIndex: safeIndex,
+              onDestinationSelected: _onNav,
+            ),
+          ),
         ),
-      ),
+        const ConnectivityBar(),
+      ],
     );
   }
 }

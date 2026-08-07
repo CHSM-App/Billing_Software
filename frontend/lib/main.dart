@@ -92,8 +92,9 @@ class _AppEntryState extends ConsumerState<_AppEntry> {
   }
 
   Future<void> _route() async {
-    // Reset any bills stuck in 'syncing' from a previous crash
+    // Reset any bills/drafts stuck in 'syncing' from a previous crash
     await OfflineService.instance.resetStaleSyncing();
+    await OfflineService.instance.resetStaleSyncingDrafts();
 
     final ok = await checkHealth();
 

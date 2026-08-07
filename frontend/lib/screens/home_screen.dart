@@ -1,6 +1,7 @@
 import 'dart:async' show Timer, unawaited;
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -21,6 +22,7 @@ import '../services/notification_service.dart';
 import '../storage.dart';
 import '../main.dart' show rootMessengerKey;
 import 'login_screen.dart';
+import 'printer_setup_screen.dart';
 
 extension _StringEx on String {
   String? get nullIfEmpty => isEmpty ? null : this;
@@ -60,7 +62,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   String _selectedCategory = '';
   bool _showCustomerFields = true;
   String _paymentMode = 'cash';
@@ -119,6 +121,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   @override
   void initState() {
     super.initState();
+    // Observe app lifecycle so we can re-check printer reachability on resume —
+    // the user may have toggled Bluetooth or powered the printer off/on while
+    // the app was backgrounded. See didChangeAppLifecycleState.
+    WidgetsBinding.instance.addObserver(this);
     _searchAnimCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 250),
@@ -156,6 +162,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back to the foreground: Bluetooth / the printer may have changed
+    // while we were away, so re-run the reachability check. This is what makes
+    // the Save↔Print button and the hint update in realtime.
+    if (state == AppLifecycleState.resumed) {
+      ref.invalidate(canPrintProvider);
+    }
+  }
+
   void _ensureVisible(GlobalKey key) {
     // Two frames: first applies viewInsets padding, second has final layout.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -174,6 +190,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_globalKeyHandler);
     _searchAnimCtrl.dispose();
     _searchFocus.dispose();
@@ -406,19 +423,146 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  /// Queues a brand-new draft locally while offline and shows it optimistically.
+  /// Mirrors [_generateBillOffline] but stores it in the offline_drafts queue
+  /// (status:'draft') so it syncs to POST /bills on reconnect. Only called when
+  /// [widget.activeBillId] is null (a fresh draft, not an edit of a synced one).
+  Future<void> _saveDraftOffline(List<CartEntry> cart) async {
+    final l10n = context.l10n;
+    if (_savingDraft) return;
+    setState(() => _savingDraft = true);
+    try {
+      final businessId = await getBusinessId() ?? '';
+      final userId = await getUserId() ?? '';
+      final billPrefix = await getBillPrefix();
+
+      double subtotal = 0;
+      double taxAmount = 0;
+      final lineItems = cart.map((e) {
+        final lineSub = e.effectivePrice * e.quantity;
+        final lineTax =
+            e.item.taxRate != null ? lineSub * (e.item.taxRate! / 100) : 0.0;
+        subtotal += lineSub;
+        taxAmount += lineTax;
+        return {
+          'item_id': e.item.id,
+          'variant_id': e.variant?.id,
+          'item_name': e.displayName,
+          'quantity': e.quantity,
+          'unit_price': e.effectivePrice,
+          'tax_rate': e.item.taxRate,
+          'line_total': double.parse((lineSub + lineTax).toStringAsFixed(2)),
+        };
+      }).toList();
+      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+      final discountAmt =
+          (double.tryParse(_discountAmtController.text) ?? 0.0).clamp(0.0, total);
+      final customerName = _customerNameController.text.trim().nullIfEmpty;
+      final customerPhone = _customerPhoneController.text.trim().nullIfEmpty;
+      final tableId = widget.tableId;
+
+      final queued = await OfflineService.instance.queueOfflineDraft({
+        'business_id': businessId,
+        'user_id': userId,
+        'table_id': tableId,
+        'table_number': widget.tableNumber,
+        'customer_name': customerName,
+        'customer_phone': customerPhone,
+        'subtotal': subtotal,
+        'tax_amount': taxAmount,
+        'discount_amount': discountAmt,
+        'total': total,
+        'payment_mode': _paymentMode,
+        'items_json': jsonEncode(lineItems),
+        'created_at': DateTime.now().millisecondsSinceEpoch,
+      });
+      final localId = queued.localId;
+      final ts = localId.replaceAll(RegExp(r'\D'), '');
+      final draftNumber =
+          '$billPrefix-${ts.length > 6 ? ts.substring(ts.length - 6) : ts}';
+
+      // Build an optimistic Bill so a table draft can be reopened offline from
+      // the tables cache, and so the Open Orders queue can show it immediately.
+      final localBill = Bill(
+        id: localId,
+        businessId: businessId,
+        billNumber: draftNumber,
+        tableId: tableId,
+        tableNumber: widget.tableNumber,
+        customerName: customerName,
+        customerPhone: customerPhone,
+        subtotal: subtotal,
+        taxAmount: taxAmount,
+        discountAmount: discountAmt,
+        total: total,
+        paymentMode: _paymentMode,
+        status: 'draft',
+        createdByUserId: userId,
+        createdAt: DateTime.now(),
+        items: lineItems
+            .map((li) => BillItem(
+                  id: li['item_id'] as String,
+                  billId: localId,
+                  itemId: li['item_id'] as String,
+                  variantId: li['variant_id'] as String?,
+                  itemName: li['item_name'] as String,
+                  quantity: (li['quantity'] as double),
+                  unitPrice: (li['unit_price'] as double),
+                  taxRate: li['tax_rate'] as double?,
+                  lineTotal: (li['line_total'] as double),
+                ))
+            .toList(),
+      );
+
+      if (tableId != null) {
+        ref.read(tablesProvider.notifier).applyDraftSaved(tableId, bill: localBill);
+      } else {
+        ref.read(openDraftsProvider.notifier).addLocalDraft(localBill);
+      }
+      if (!mounted) return;
+      _showSnack(l10n.billingDraftSaved);
+
+      if (widget.onBillDone != null) {
+        widget.onBillDone!();
+      } else if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      } else {
+        ref.read(cartProvider.notifier).clear();
+        _customerNameController.clear();
+        _customerPhoneController.clear();
+        _discountPctController.clear();
+        _discountAmtController.clear();
+        if (mounted) setState(() => _savingDraft = false);
+      }
+    } catch (e) {
+      final msg = e is ApiException ? e.message : l10n.billingSaveFailed;
+      _showSnack(msg, isError: true);
+      if (mounted) setState(() => _savingDraft = false);
+    }
+  }
+
   Future<void> _saveDraft() async {
     final l10n = context.l10n;
-    final isOnline = ref.read(connectivityProvider);
-    if (!isOnline) {
-      _showSnack(l10n.billingDraftOfflineError, isError: true);
-      return;
-    }
+    if (_blockedUnsyncedLocalDraft()) return;
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) {
       _showSnack(l10n.billingAddAtLeastOneItemFirst, isError: true);
       return;
     }
     if (!_validateCustomerPhone()) return;
+
+    // Offline: a brand-new draft is queued locally and synced on reconnect.
+    // Editing an existing (already-synced) draft still needs the server, since
+    // its items live under a real bill id there — keep that path online-only.
+    final isOnline = ref.read(connectivityProvider);
+    if (!isOnline) {
+      if (widget.activeBillId != null) {
+        _showSnack(l10n.billingDraftPendingSync, isError: true);
+        return;
+      }
+      await _saveDraftOffline(cart);
+      return;
+    }
     if (_savingDraft) return; // guard against a double-tap before we pop
     setState(() => _savingDraft = true);
 
@@ -523,12 +667,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }());
   }
 
+  /// A reopened draft whose id is still a local queue id ("LOCAL-…") has not
+  /// synced to the server yet, so it has no real bill id to finalize or edit
+  /// against. Block those actions and tell the user to reconnect. Returns true
+  /// if the action should be blocked.
+  bool _blockedUnsyncedLocalDraft() {
+    if (widget.activeBillId?.startsWith('LOCAL-') ?? false) {
+      _showSnack(context.l10n.billingDraftPendingSync, isError: true);
+      return true;
+    }
+    return false;
+  }
+
   Future<void> _generateBill({void Function(Bill)? onBillReady}) async {
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) {
       _showSnack(context.l10n.billingAddAtLeastOneItem, isError: true);
       return;
     }
+    if (_blockedUnsyncedLocalDraft()) return;
     if (!_validateCustomerPhone()) return;
     if (!_validateCreditCustomer()) return;
     if (widget.activeBillId != null || widget.tableId != null) {
@@ -564,6 +721,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _navigateAfterBill();
       _autoPrint(bill);
     });
+  }
+
+  /// Opens the printer setup page, then refreshes the active-printer state so
+  /// the finalize card immediately reflects a newly connected printer (Save →
+  /// Print, hint disappears).
+  Future<void> _openPrinterSetup() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const PrinterSetupScreen()),
+    );
+    ref.invalidate(canPrintProvider);
   }
 
   Future<void> _generateBillAndWhatsApp() async {
@@ -1050,10 +1218,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           businessName: businessName, labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {
+      // The print just failed (BT off, out of range, unpaired…): re-check
+      // reachability so the finalize button reflects it (Print → Save).
+      ref.invalidate(canPrintProvider);
       // 'No printer configured' is an internal sentinel, not a user string.
       if (e.message == 'No printer configured') return;
       if (mounted) _showSnack(l10n.billingPrintFailed(e.message), isError: true);
     } catch (e) {
+      ref.invalidate(canPrintProvider);
       if (mounted) _showSnack(l10n.billingPrintFailed('$e'), isError: true);
     }
   }
@@ -1770,6 +1942,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // A server takes/builds orders and sends them to the kitchen but cannot
       // finalize or take payment — hide the finalize (WhatsApp/Print) actions.
       final canFinalize = ref.watch(userRoleProvider) != 'server';
+      // Can we actually print right now (printer configured AND Bluetooth on)?
+      // If not, the primary action becomes "Save" (finalize without printing)
+      // and a compact hint offers a link to connect. Re-checked on app resume.
+      final hasPrinter = ref.watch(printReadyProvider);
 
       return Container(
         color: AppColors.surface,
@@ -2356,7 +2532,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 AppSpacing.space16,
                 AppSpacing.space16 + MediaQuery.of(context).padding.bottom,
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Compact printer hint — shown only when no printer is set up.
+                  // Kept to a single small red line so it never crowds the UI;
+                  // "Connect" links straight to printer setup.
+                  if (!hasPrinter)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.print_disabled_outlined,
+                              size: 13, color: AppColors.error),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text.rich(
+                              TextSpan(
+                                text: l10n.billingPrinterNotConnected,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.error,
+                                ),
+                                children: [
+                                  const TextSpan(text: ' '),
+                                  TextSpan(
+                                    text: l10n.billingPrinterConnect,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.error,
+                                      fontWeight: FontWeight.w700,
+                                      decoration: TextDecoration.underline,
+                                    ),
+                                    recognizer: TapGestureRecognizer()
+                                      ..onTap = _openPrinterSetup,
+                                  ),
+                                ],
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  Row(
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
@@ -2409,8 +2630,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   const SizedBox(width: AppSpacing.space12),
                   Expanded(
                     child: PrimaryButton(
-                      text: l10n.commonPrint,
-                      icon: Icons.print_outlined,
+                      // With a printer set up the primary action prints the
+                      // receipt; without one it just saves (finalizes) the bill
+                      // so the sale is never blocked on printer setup.
+                      text: hasPrinter ? l10n.commonPrint : l10n.commonSave,
+                      icon: hasPrinter
+                          ? Icons.print_outlined
+                          : Icons.save_outlined,
                       onPressed: (cart.isEmpty || _generatingBill)
                           ? null
                           : () {
@@ -2419,10 +2645,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               // message instead of closing then failing.
                               if (!_validateCreditCustomer()) return;
                               if (inSheet) Navigator.pop(context);
-                              _generateBillAndPrint();
+                              if (hasPrinter) {
+                                _generateBillAndPrint();
+                              } else {
+                                // No printer — finalize without printing.
+                                _generateBill(onBillReady: (_) {
+                                  _navigateAfterBill();
+                                });
+                              }
                             },
                       isLoading: _generatingBill,
                     ),
+                  ),
+                    ],
                   ),
                 ],
               ),

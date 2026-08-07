@@ -468,6 +468,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get loginSupportEmail => 'support@vengurlatech.com';
 
   @override
+  String get supportPhone => '9422229951';
+
+  @override
+  String get supportEmail => 'support@vengurlatech.com';
+
+  @override
   String get forgotPinTitle => 'Forgot PIN';
 
   @override
@@ -797,6 +803,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingDraftOfflineError => 'Cannot save draft while offline';
 
   @override
+  String get billingDraftPendingSync =>
+      'This order is still saving. Reconnect to edit or finalize it.';
+
+  @override
   String get billingDraftSaved => 'Draft saved.';
 
   @override
@@ -918,6 +928,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingWhatsapp => 'WhatsApp';
+
+  @override
+  String get billingPrinterNotConnected => 'Printer not connected.';
+
+  @override
+  String get billingPrinterConnect => 'Connect';
 
   @override
   String get billingColItem => 'Item';
@@ -2200,6 +2216,16 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get noInternetBody =>
       'Connect to the network to get started.\nYour data will load automatically.';
+
+  @override
+  String get errorNoInternetBody =>
+      'This page needs an internet connection. Check your network and try again.';
+
+  @override
+  String get connectivityNoConnection => 'No connection';
+
+  @override
+  String get connectivityBackOnline => 'Back online';
 
   @override
   String get errorSomethingWentWrong => 'Something went wrong';

@@ -45,10 +45,13 @@ class OfflineService {
   final Map<String, List<Item>> _itemCache = {};
   final Map<String, int> _itemCacheTime = {};
   final Map<String, Map<String, dynamic>> _bills = {};
+  final Map<String, Map<String, dynamic>> _drafts = {};
 
   Future<void> init() async {}
 
   Future<void> resetStaleSyncing() async {}
+
+  Future<void> resetStaleSyncingDrafts() async {}
 
   // ── Item cache ─────────────────────────────────────────────────────────────
 
@@ -167,4 +170,56 @@ class OfflineService {
 
   static List<Map<String, dynamic>> decodeItems(String itemsJson) =>
       List<Map<String, dynamic>>.from(jsonDecode(itemsJson));
+
+  // ── Offline draft queue (in-memory only) ───────────────────────────────────
+
+  Future<({String localId, String clientBillId})> queueOfflineDraft(
+      Map<String, dynamic> data) async {
+    final localId      = 'LOCAL-${DateTime.now().millisecondsSinceEpoch}';
+    final clientBillId = _generateUuidV4();
+    _drafts[localId] = {
+      ...data,
+      'local_id':        localId,
+      'client_bill_id':  clientBillId,
+      'discount_amount': data['discount_amount'] ?? 0,
+      'sync_status':     SyncStatus.pending,
+      'retry_count':     0,
+    };
+    return (localId: localId, clientBillId: clientBillId);
+  }
+
+  Future<List<Map<String, dynamic>>> getAllDrafts() async =>
+      _drafts.values.toList()
+        ..sort((a, b) =>
+            (a['created_at'] as int).compareTo(b['created_at'] as int));
+
+  Future<Map<String, dynamic>?> getDraftByLocalId(String localId) async =>
+      _drafts[localId];
+
+  Future<List<Map<String, dynamic>>> getPendingDrafts() async => _drafts.values
+      .where((d) =>
+          (d['sync_status'] == SyncStatus.pending ||
+           d['sync_status'] == SyncStatus.failed) &&
+          (d['retry_count'] as int) < maxRetries)
+      .toList();
+
+  Future<void> markDraftSyncing(String localId) async =>
+      _drafts[localId]?['sync_status'] = SyncStatus.syncing;
+
+  Future<void> markDraftSynced(String localId) async => _drafts.remove(localId);
+
+  Future<void> markDraftFailed(String localId, String error) async {
+    final d = _drafts[localId];
+    if (d == null) return;
+    d['sync_status'] = SyncStatus.failed;
+    d['sync_error']  = error;
+    d['retry_count'] = (d['retry_count'] as int) + 1;
+  }
+
+  Future<void> markDraftConflict(String localId, String error) async {
+    final d = _drafts[localId];
+    if (d == null) return;
+    d['sync_status'] = SyncStatus.conflict;
+    d['sync_error']  = error;
+  }
 }

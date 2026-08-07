@@ -157,6 +157,8 @@
   "loginPendingTitle": "Account not activated",
   "loginPendingBody": "Your account is pending activation. Please contact our support team to activate your account.",
   "loginSupportEmail": "support@vengurlatech.com",
+  "supportPhone": "9422229951",
+  "supportEmail": "support@vengurlatech.com",
 
   "forgotPinTitle": "Forgot PIN",
   "forgotPinPhoneLabel": "Registered phone number",
@@ -272,6 +274,7 @@
   "billingReleaseTableBody": "Clearing all items will discard this saved draft. This cannot be undone.",
   "billingReleaseTableFailed": "Failed to discard draft.",
   "billingDraftOfflineError": "Cannot save draft while offline",
+  "billingDraftPendingSync": "This order is still saving. Reconnect to edit or finalize it.",
   "billingDraftSaved": "Draft saved.",
   "billingSaveFailed": "Failed to save. Check your connection.",
   "billingGenerateFailed": "Failed to generate bill. Check your connection.",
@@ -315,6 +318,8 @@
   "billingDiscountApplied": "Discount Applied",
   "billingNetPayable": "Net Payable",
   "billingWhatsapp": "WhatsApp",
+  "billingPrinterNotConnected": "Printer not connected.",
+  "billingPrinterConnect": "Connect",
   "billingColItem": "Item",
   "billingColPrice": "Price",
   "billingColQty": "Qty",
@@ -744,6 +749,9 @@
 
   "noInternetTitle": "No Internet Connection",
   "noInternetBody": "Connect to the network to get started.\nYour data will load automatically.",
+  "errorNoInternetBody": "This page needs an internet connection. Check your network and try again.",
+  "connectivityNoConnection": "No connection",
+  "connectivityBackOnline": "Back online",
   "errorSomethingWentWrong": "Something went wrong",
 
   "itemsTabItems": "Items",

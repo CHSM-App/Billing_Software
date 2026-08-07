@@ -89,8 +89,48 @@ class SyncService {
           failed++;
         }
       }
+
+      // Then push queued drafts (open orders). Same idempotency contract via
+      // client_bill_id; the server upserts on status:'draft'.
+      final draftResult = await _syncDrafts();
+      synced     += draftResult.synced;
+      failed     += draftResult.failed;
+      conflicted += draftResult.conflicted;
     } finally {
       _running = false;
+    }
+
+    return SyncResult(synced: synced, failed: failed, conflicted: conflicted);
+  }
+
+  /// Push queued offline drafts to POST /bills with status:'draft'. Because a
+  /// draft carries a client_bill_id, a replay after a flaky first attempt is
+  /// idempotent — the server returns the existing draft instead of duplicating.
+  Future<SyncResult> _syncDrafts() async {
+    int synced = 0, failed = 0, conflicted = 0;
+
+    final pending = await OfflineService.instance.getPendingDrafts();
+    for (final row in pending) {
+      final localId = row['local_id'] as String;
+      await OfflineService.instance.markDraftSyncing(localId);
+
+      try {
+        await createBill(_buildDraftPayload(row));
+        await OfflineService.instance.markDraftSynced(localId);
+        synced++;
+      } on ApiException catch (e) {
+        if (_isPermanentRejection(e.statusCode)) {
+          await OfflineService.instance
+              .markDraftConflict(localId, _friendlyError(e));
+          conflicted++;
+        } else {
+          await OfflineService.instance.markDraftFailed(localId, e.toString());
+          failed++;
+        }
+      } catch (e) {
+        await OfflineService.instance.markDraftFailed(localId, e.toString());
+        failed++;
+      }
     }
 
     return SyncResult(synced: synced, failed: failed, conflicted: conflicted);
@@ -145,6 +185,33 @@ class SyncService {
       if (row['customer_phone'] != null) 'customer_phone': row['customer_phone'],
       'payment_mode': row['payment_mode'],
       'status': 'finalized',
+    };
+  }
+
+  /// Converts a stored offline_drafts row into a POST /api/bills draft payload.
+  /// The server re-prices from item_id + quantity, so only the thin line form is
+  /// sent; the stored priced items_json is for local display only.
+  Map<String, dynamic> _buildDraftPayload(Map<String, dynamic> row) {
+    final lineItems = List<Map<String, dynamic>>.from(
+      jsonDecode(row['items_json'] as String),
+    );
+    final discount = (row['discount_amount'] as num?)?.toDouble() ?? 0.0;
+
+    return {
+      'client_bill_id': row['client_bill_id'] as String,
+      'items': lineItems
+          .map((li) => {
+                'item_id':  li['item_id'],
+                if (li['variant_id'] != null) 'variant_id': li['variant_id'],
+                'quantity': li['quantity'],
+              })
+          .toList(),
+      if (row['table_id']       != null) 'table_id':       row['table_id'],
+      if (row['customer_name']  != null) 'customer_name':  row['customer_name'],
+      if (row['customer_phone'] != null) 'customer_phone': row['customer_phone'],
+      if (discount > 0)                  'discount_amount': discount,
+      'payment_mode': row['payment_mode'],
+      'status': 'draft',
     };
   }
 }

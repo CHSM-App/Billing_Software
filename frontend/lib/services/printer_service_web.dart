@@ -3,6 +3,7 @@
 
 import 'dart:convert';
 import 'dart:ui' as ui show Image;
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
@@ -44,11 +45,16 @@ class PrinterService {
   PrinterService._();
   static final PrinterService instance = PrinterService._();
 
+  /// Ticks whenever the active printer changes — kept for parity with the
+  /// native service so canPrintProvider can listen the same way on all targets.
+  final ValueNotifier<int> activePrinterRevision = ValueNotifier<int>(0);
+
   Future<List<Printer>> listPrinters() async => [];
 
   Future<void> setActivePrinter(Printer printer) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefKey, jsonEncode(printer.toJson()));
+    activePrinterRevision.value++;
   }
 
   Future<Printer?> getActivePrinter() async {
@@ -62,9 +68,13 @@ class PrinterService {
     }
   }
 
+  /// Printing is unsupported in the browser, so a print can never succeed.
+  Future<bool> canPrint() async => false;
+
   Future<void> clearActivePrinter() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefKey);
+    activePrinterRevision.value++;
   }
 
   Future<void> printBill(Bill bill,

@@ -914,6 +914,18 @@ abstract class AppLocalizations {
   /// **'support@vengurlatech.com'**
   String get loginSupportEmail;
 
+  /// No description provided for @supportPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'9422229951'**
+  String get supportPhone;
+
+  /// No description provided for @supportEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'support@vengurlatech.com'**
+  String get supportEmail;
+
   /// No description provided for @forgotPinTitle.
   ///
   /// In en, this message translates to:
@@ -1544,6 +1556,12 @@ abstract class AppLocalizations {
   /// **'Cannot save draft while offline'**
   String get billingDraftOfflineError;
 
+  /// No description provided for @billingDraftPendingSync.
+  ///
+  /// In en, this message translates to:
+  /// **'This order is still saving. Reconnect to edit or finalize it.'**
+  String get billingDraftPendingSync;
+
   /// No description provided for @billingDraftSaved.
   ///
   /// In en, this message translates to:
@@ -1747,6 +1765,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'WhatsApp'**
   String get billingWhatsapp;
+
+  /// No description provided for @billingPrinterNotConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer not connected.'**
+  String get billingPrinterNotConnected;
+
+  /// No description provided for @billingPrinterConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get billingPrinterConnect;
 
   /// No description provided for @billingColItem.
   ///
@@ -3961,6 +3991,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Connect to the network to get started.\nYour data will load automatically.'**
   String get noInternetBody;
+
+  /// No description provided for @errorNoInternetBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This page needs an internet connection. Check your network and try again.'**
+  String get errorNoInternetBody;
+
+  /// No description provided for @connectivityNoConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'No connection'**
+  String get connectivityNoConnection;
+
+  /// No description provided for @connectivityBackOnline.
+  ///
+  /// In en, this message translates to:
+  /// **'Back online'**
+  String get connectivityBackOnline;
 
   /// No description provided for @errorSomethingWentWrong.
   ///

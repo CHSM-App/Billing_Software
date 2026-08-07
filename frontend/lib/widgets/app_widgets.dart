@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../theme/app_theme.dart';
@@ -549,6 +550,10 @@ class AppErrorWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    // An offline failure must never read as a bug. Show a dedicated "No
+    // internet" state (wifi-off icon, its own copy) instead of the generic
+    // error card, so the user knows to check their connection, not retry blindly.
+    final offline = isNetworkError(error);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.space48),
@@ -559,24 +564,30 @@ class AppErrorWidget extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: AppColors.errorLight,
+                color: offline ? AppColors.surfaceVariant : AppColors.errorLight,
                 borderRadius: BorderRadius.circular(AppRadius.large),
               ),
-              child: const Icon(
-                Icons.error_outline_rounded,
+              child: Icon(
+                offline
+                    ? Icons.wifi_off_rounded
+                    : Icons.error_outline_rounded,
                 size: 34,
-                color: AppColors.error,
+                color: offline ? AppColors.textSecondary : AppColors.error,
               ),
             ),
             const SizedBox(height: AppSpacing.space16),
             Text(
-              title ?? l10n.errorSomethingWentWrong,
+              offline
+                  ? l10n.noInternetTitle
+                  : (title ?? l10n.errorSomethingWentWrong),
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: AppSpacing.space8),
             Text(
-              sanitizeUiErrorMessage(error),
+              offline
+                  ? l10n.errorNoInternetBody
+                  : sanitizeUiErrorMessage(error),
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme
@@ -596,6 +607,75 @@ class AppErrorWidget extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Tappable support contact block: email (opens mail app) and phone (dials).
+/// Shared by the pending-activation and subscription-expired screens so a
+/// locked-out owner always has a way to reach support. [color] tints the text
+/// and icons to match the surrounding card (warning vs error styling).
+class SupportContactRow extends StatelessWidget {
+  final Color color;
+  final MainAxisAlignment alignment;
+
+  const SupportContactRow({
+    super.key,
+    required this.color,
+    this.alignment = MainAxisAlignment.start,
+  });
+
+  Future<void> _launch(Uri uri) async {
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      // No mail/dialer app available — nothing to do; the number/email is still
+      // shown on screen for the user to copy manually.
+    }
+  }
+
+  Widget _line(IconData icon, String text, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.small),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: alignment,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 13,
+                color: color,
+                fontWeight: FontWeight.w600,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final phone = l10n.supportPhone;
+    final email = l10n.supportEmail;
+    return Column(
+      crossAxisAlignment: alignment == MainAxisAlignment.center
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
+      children: [
+        _line(Icons.phone_outlined, phone,
+            () => _launch(Uri(scheme: 'tel', path: phone))),
+        _line(Icons.email_outlined, email,
+            () => _launch(Uri(scheme: 'mailto', path: email))),
+      ],
     );
   }
 }

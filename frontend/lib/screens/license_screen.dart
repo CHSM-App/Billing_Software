@@ -5,6 +5,7 @@ import '../l10n/l10n_ext.dart';
 import '../services/license_service.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_widgets.dart';
 import 'login_screen.dart';
 
 /// Shown when the app is hard-blocked due to:
@@ -170,6 +171,16 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
                   ),
                   textAlign: TextAlign.center,
                 ),
+                // Contact support (phone + email) — the resolution for an
+                // expired/pending/verify-failed block. Not shown for the offline
+                // block, where the action is to reconnect and retry.
+                if (!isOfflineBlock) ...[
+                  const SizedBox(height: 16),
+                  const SupportContactRow(
+                    color: AppColors.error,
+                    alignment: MainAxisAlignment.center,
+                  ),
+                ],
                 if (_errorMessage != null) ...[
                   const SizedBox(height: 16),
                   Container(

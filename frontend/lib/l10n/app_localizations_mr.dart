@@ -468,6 +468,12 @@ class AppLocalizationsMr extends AppLocalizations {
   String get loginSupportEmail => 'support@vengurlatech.com';
 
   @override
+  String get supportPhone => '9422229951';
+
+  @override
+  String get supportEmail => 'support@vengurlatech.com';
+
+  @override
   String get forgotPinTitle => 'पिन विसरलात';
 
   @override
@@ -800,6 +806,10 @@ class AppLocalizationsMr extends AppLocalizations {
       'ऑफलाइन असताना ड्राफ्ट जतन करता येणार नाही';
 
   @override
+  String get billingDraftPendingSync =>
+      'ही ऑर्डर अजून जतन होत आहे. संपादित किंवा अंतिम करण्यासाठी पुन्हा कनेक्ट करा.';
+
+  @override
   String get billingDraftSaved => 'ड्राफ्ट जतन झाला.';
 
   @override
@@ -921,6 +931,12 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingWhatsapp => 'व्हॉट्सअ‍ॅप';
+
+  @override
+  String get billingPrinterNotConnected => 'प्रिंटर कनेक्ट नाही.';
+
+  @override
+  String get billingPrinterConnect => 'कनेक्ट करा';
 
   @override
   String get billingColItem => 'वस्तू';
@@ -2206,6 +2222,16 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get noInternetBody =>
       'सुरू करण्यासाठी नेटवर्कला जोडा.\nतुमची माहिती आपोआप लोड होईल.';
+
+  @override
+  String get errorNoInternetBody =>
+      'या पानासाठी इंटरनेट कनेक्शन आवश्यक आहे. तुमचे नेटवर्क तपासा आणि पुन्हा प्रयत्न करा.';
+
+  @override
+  String get connectivityNoConnection => 'कनेक्शन नाही';
+
+  @override
+  String get connectivityBackOnline => 'पुन्हा ऑनलाइन';
 
   @override
   String get errorSomethingWentWrong => 'काहीतरी चूक झाली';
