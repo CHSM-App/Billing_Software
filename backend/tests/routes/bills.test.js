@@ -259,6 +259,58 @@ describe('POST /api/bills', () => {
     expect(res.status).toBe(201);
   });
 
+  test('snapshots hsn_code onto bill_items without changing totals', async () => {
+    // A taxed item (5%) that carries an HSN code.
+    const taxedItem = { ...sampleItem, tax_rate: 5, hsn_code: '9963' };
+
+    // Capture every .input() binding across all transaction requests so we can
+    // assert the bill_items INSERT received hsn_code, and totals are unchanged.
+    const capturedInputs = [];
+    const txQueryMock = jest.fn()
+      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [taxedItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
+      .mockResolvedValue({ recordset: [], rowsAffected: [1] });
+
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      capturedInputs.push(inputs);
+      return {
+        inputs,
+        input: jest.fn(function (name, _type, value) { inputs[name] = value; return this; }),
+        query: txQueryMock,
+      };
+    });
+
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({
+        items: [{ item_id: ITEM_ID, quantity: 2 }],
+        payment_mode: 'cash',
+      });
+    expect(res.status).toBe(201);
+
+    // The bill INSERT binds subtotal/tax computed exactly as before:
+    // 2 × 50 = 100 taxable, 5% tax = 5, total = 105.
+    const billInsert = capturedInputs.find((i) => 'subtotal' in i);
+    expect(billInsert.subtotal).toBe(100);
+    expect(billInsert.tax_amount).toBe(5);
+    expect(billInsert.total).toBe(105);
+
+    // The bill_items INSERT carries the HSN snapshot.
+    const lineInsert = capturedInputs.find((i) => 'hsn_code' in i);
+    expect(lineInsert).toBeDefined();
+    expect(lineInsert.hsn_code).toBe('9963');
+  });
+
   test('returns 200 for duplicate client_bill_id (idempotent)', async () => {
     mockRequest.query
       .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })

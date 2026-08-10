@@ -141,6 +141,43 @@ describe('GET /receipt/:token', () => {
     expect(res.text).toContain('&lt;script&gt;');
   });
 
+  test('GST off (default): no CGST/SGST or GST Summary, renders as before', async () => {
+    // A taxed bill but gst_enabled is falsy → single behaviour, no split.
+    const taxedBill = { ...sampleBillRow, tax_amount: 5, total: 105 };
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [taxedBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('>Tax<');
+    expect(res.text).not.toContain('>CGST<');
+    expect(res.text).not.toContain('GST Summary');
+  });
+
+  test('GST on: shows CGST/SGST split and a GST Summary', async () => {
+    const gstBill = {
+      ...sampleBillRow,
+      tax_amount: 5, total: 105,
+      gst_enabled: true, default_sac_code: '9963',
+    };
+    const gstItems = [
+      { item_name: 'Thali', quantity: 2, unit_price: 50, tax_rate: 5, hsn_code: '9963', line_total: 105 },
+    ];
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [gstBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: gstItems, rowsAffected: [1] });
+
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('>CGST<');
+    expect(res.text).toContain('>SGST<');
+    expect(res.text).toContain('GST Summary');
+    expect(res.text).toContain('GSTIN123');
+    expect(res.text).toContain('9963');
+    expect(res.text).not.toContain('>Tax<'); // combined Tax row replaced by the split
+  });
+
   test('handles items with decimal quantities', async () => {
     const decimalItems = [{ item_name: 'Sugar', quantity: 1.5, unit_price: 40, line_total: 60 }];
     mockRequest.query

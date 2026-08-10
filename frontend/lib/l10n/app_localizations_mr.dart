@@ -316,6 +316,13 @@ class AppLocalizationsMr extends AppLocalizations {
       'स्टॉक ट्रॅक करा आणि प्रत्येक विक्रीवर तो आपोआप कमी करा';
 
   @override
+  String get settingsGst => 'GST बिल';
+
+  @override
+  String get settingsGstSubtitle =>
+      'वस्तूंना कर दर व HSN/SAC जोडा आणि बिलावर CGST/SGST दाखवा';
+
+  @override
   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
 
   @override
@@ -718,6 +725,15 @@ class AppLocalizationsMr extends AppLocalizations {
   String get receiptTax => 'कर:';
 
   @override
+  String get receiptCgst => 'CGST:';
+
+  @override
+  String get receiptSgst => 'SGST:';
+
+  @override
+  String get receiptGstin => 'GSTIN:';
+
+  @override
   String get receiptDiscount => 'सूट:';
 
   @override
@@ -924,6 +940,16 @@ class AppLocalizationsMr extends AppLocalizations {
   }
 
   @override
+  String billingCgst(String rate) {
+    return 'CGST ($rate%)';
+  }
+
+  @override
+  String billingSgst(String rate) {
+    return 'SGST ($rate%)';
+  }
+
+  @override
   String get billingDiscountApplied => 'दिलेली सूट';
 
   @override
@@ -1079,6 +1105,12 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsFieldTaxRateHint => 'उदा. ५, १२, १८';
+
+  @override
+  String get itemsFieldHsn => 'HSN/SAC कोड (ऐच्छिक)';
+
+  @override
+  String get itemsFieldHsnHint => 'उदा. रेस्टॉरंट सेवेसाठी ९९६३';
 
   @override
   String get itemsFieldBarcode => 'बारकोड (ऐच्छिक)';
@@ -1867,6 +1899,13 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get businessProfilePanInvalid => 'पॅन क्रमांक चुकीचा आहे';
+
+  @override
+  String get businessProfileDefaultSac => 'डिफॉल्ट HSN/SAC (ऐच्छिक)';
+
+  @override
+  String get businessProfileDefaultSacHint =>
+      'उदा. ९९६३ — वस्तूला कोड नसल्यास वापरला जातो';
 
   @override
   String get businessProfileBillPrefix => 'बिल क्रमांकाचा प्रिफिक्स';

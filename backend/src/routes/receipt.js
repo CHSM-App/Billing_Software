@@ -24,7 +24,8 @@ router.get('/:token', async (req, res) => {
                t.table_number,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
-               bs.gst_number, bs.logo_url, bs.bill_footer_note
+               bs.gst_number, bs.logo_url, bs.bill_footer_note,
+               bs.gst_enabled, bs.default_sac_code
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
         LEFT JOIN tables t ON t.id = b.table_id
@@ -40,7 +41,7 @@ router.get('/:token', async (req, res) => {
     const itemsResult = await pool.request()
       .input('token', sql.NVarChar(16), token)
       .query(`
-        SELECT bi.item_name, bi.quantity, bi.unit_price, bi.line_total
+        SELECT bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total
         FROM bill_items bi
         JOIN bills b ON b.id = bi.bill_id
         WHERE b.receipt_token = @token
@@ -60,6 +61,42 @@ router.get('/:token', async (req, res) => {
     const addrParts = [bill.address, bill.city, bill.state, bill.pincode].filter(Boolean);
     const addressLine = addrParts.length ? esc(addrParts.join(', ')) : '';
 
+    // GST tax-invoice extras only render when the business has GST enabled AND
+    // the bill actually carries tax. Otherwise the receipt is byte-for-byte as
+    // before. CGST/SGST are a display split (each = tax_amount / 2); nothing is
+    // recomputed from line items, so totals never drift.
+    const gstEnabled = !!bill.gst_enabled && Number(bill.tax_amount) > 0;
+    // Per-line HSN/SAC: the item's own code, else the business default SAC.
+    const codeFor = (i) => i.hsn_code || bill.default_sac_code || '';
+    const showHsnCol = gstEnabled && items.some((i) => codeFor(i));
+
+    // Rate-wise GST summary rows: group taxable value + tax by tax_rate.
+    // taxable = qty×unit_price; lineTax = line_total − taxable; cgst = sgst = lineTax/2.
+    const gstByRate = {};
+    if (gstEnabled) {
+      for (const i of items) {
+        const rate = i.tax_rate != null ? Number(i.tax_rate) : 0;
+        if (rate <= 0) continue;
+        const taxable = Number(i.quantity) * Number(i.unit_price);
+        const lineTax = Number(i.line_total) - taxable;
+        const g = (gstByRate[rate] = gstByRate[rate] || { taxable: 0, tax: 0 });
+        g.taxable += taxable;
+        g.tax += lineTax;
+      }
+    }
+    const gstSummaryRows = Object.keys(gstByRate)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map((rate) => {
+        const g = gstByRate[rate];
+        const half = rate / 2;
+        return `<tr>
+          <td>${fmt(g.taxable)}</td>
+          <td class="r">${half}% &nbsp;&#8377;${fmt(g.tax / 2)}</td>
+          <td class="r">${half}% &nbsp;&#8377;${fmt(g.tax / 2)}</td>
+        </tr>`;
+      }).join('');
+
     // A settled credit bill (payment_mode='credit', payment_status='paid') was
     // actually collected via settled_payment_mode — show that. Only an UNPAID
     // credit bill still reads "Credit" (and stays red below).
@@ -74,7 +111,7 @@ router.get('/:token', async (req, res) => {
     const itemRows = items.map((i) => {
       const qty = Number(i.quantity) % 1 === 0 ? Number(i.quantity) : fmt(i.quantity);
       return `<tr>
-          <td class="item-name">${esc(i.item_name)}</td>
+          <td class="item-name">${esc(i.item_name)}${showHsnCol ? '<span class="hsn">' + esc(codeFor(i)) + '</span>' : ''}</td>
           <td class="r col-qty">${qty}</td>
           <td class="r col-rate">&#8377;${fmt(i.unit_price)}</td>
           <td class="r amount col-amt">&#8377;${fmt(i.line_total)}</td>
@@ -137,7 +174,16 @@ router.get('/:token', async (req, res) => {
   tbody tr:last-child td{border-bottom:none}
   td.r{text-align:right}
   td.item-name{font-weight:500;word-break:break-word;overflow-wrap:anywhere}
+  td.item-name .hsn{display:block;font-size:10px;font-weight:500;color:#9a9aaa;margin-top:2px}
   td.amount{font-weight:600}
+
+  /* ── GST summary ── */
+  .gst-summary{padding:12px 24px 4px;background:#f9f9fb}
+  .gst-summary .gst-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#9a9aaa;margin-bottom:6px}
+  .gst-summary table{font-size:12px}
+  .gst-summary th{padding:4px 0;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;text-align:left}
+  .gst-summary th.r,.gst-summary td.r{text-align:right}
+  .gst-summary td{padding:4px 0;color:#555}
 
   /* ── totals ── */
   .totals{padding:14px 24px;background:#f9f9fb;border-top:1px solid #eee}
@@ -236,10 +282,17 @@ router.get('/:token', async (req, res) => {
       <span>Subtotal</span>
       <span>&#8377;${fmt(bill.subtotal)}</span>
     </div>
-    ${Number(bill.tax_amount) > 0 ? `<div class="t-row">
+    ${Number(bill.tax_amount) > 0 ? (gstEnabled ? `<div class="t-row">
+      <span>CGST</span>
+      <span>&#8377;${fmt(Number(bill.tax_amount) / 2)}</span>
+    </div>
+    <div class="t-row">
+      <span>SGST</span>
+      <span>&#8377;${fmt(Number(bill.tax_amount) / 2)}</span>
+    </div>` : `<div class="t-row">
       <span>Tax</span>
       <span>&#8377;${fmt(bill.tax_amount)}</span>
-    </div>` : ''}
+    </div>`) : ''}
     ${Number(bill.discount_amount) > 0 ? `<div class="t-row">
       <span>Discount</span>
       <span>&minus;&#8377;${fmt(bill.discount_amount)}</span>
@@ -249,6 +302,18 @@ router.get('/:token', async (req, res) => {
       <span>&#8377;${fmt(Number(bill.total) - Number(bill.discount_amount || 0))}</span>
     </div>
   </div>
+
+  ${gstSummaryRows ? `
+  <!-- GST summary -->
+  <div class="gst-summary">
+    <div class="gst-label">GST Summary</div>
+    <table>
+      <thead>
+        <tr><th>Taxable Value</th><th class="r">CGST</th><th class="r">SGST</th></tr>
+      </thead>
+      <tbody>${gstSummaryRows}</tbody>
+    </table>
+  </div>` : ''}
 
   <!-- Footer -->
   <div class="footer">

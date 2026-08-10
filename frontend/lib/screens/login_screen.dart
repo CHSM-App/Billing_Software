@@ -247,6 +247,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         businessType: business['business_type'],
         inventoryEnabled: business['inventory_enabled'] == true,
         hasBarcodeScanner: business['has_barcode_scanner'] == true,
+        gstEnabled: business['gst_enabled'] == true,
+      );
+      // Cache GST invoice details so the thermal receipt can print GSTIN offline.
+      await saveGstProfile(
+        gstNumber: business['gst_number'] as String?,
+        businessAddress: business['address'] as String?,
+        defaultSacCode: business['default_sac_code'] as String?,
       );
       NotificationService.instance.init();
       await ref.read(sessionProvider.notifier).refresh();

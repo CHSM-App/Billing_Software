@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../services/printer_service.dart';
 import '../services/receipt_labels.dart';
+import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
@@ -547,8 +548,21 @@ class _BillDetailDialog extends StatelessWidget {
             Navigator.pop(context);
             final labels = ReceiptLabels.from(
                 l10n, Localizations.localeOf(context).languageCode);
+            // Reprint a GST invoice with its GSTIN + address when the bill
+            // carries tax; otherwise the cached GSTIN is empty and it prints as
+            // a plain receipt (GST off).
+            String? gstin;
+            String? address;
+            if (bill.taxAmount > 0) {
+              final gstProfile = await getGstProfile();
+              final g = gstProfile['gst_number'] ?? '';
+              final a = gstProfile['business_address'] ?? '';
+              gstin = g.isNotEmpty ? g : null;
+              address = a.isNotEmpty ? a : null;
+            }
             try {
-              await PrinterService.instance.printBill(bill, labels: labels);
+              await PrinterService.instance.printBill(bill,
+                  businessAddress: address, businessGstin: gstin, labels: labels);
             } on PrinterException catch (e) {
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(

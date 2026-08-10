@@ -38,6 +38,12 @@ class AuthStorage {
   static const _keyBusinessType     = 'business_type';
   static const _keyInventoryEnabled = 'inventory_enabled';
   static const _keyHasBarcodeScanner = 'has_barcode_scanner';
+  static const _keyGstEnabled       = 'gst_enabled';
+  // Cached GST invoice details, refreshed whenever the business profile is
+  // fetched — used so the thermal receipt can print GSTIN even offline.
+  static const _keyGstNumber        = 'gst_number';
+  static const _keyBusinessAddress  = 'business_address';
+  static const _keyDefaultSacCode   = 'default_sac_code';
   // Cached bill-number prefix (e.g. 'INV'), so offline receipts use the same
   // invoice prefix as online instead of a jarring 'LOCAL-'. Refreshed whenever
   // the business profile is fetched.
@@ -58,6 +64,7 @@ class AuthStorage {
     required String businessType,
     bool inventoryEnabled = false,
     bool hasBarcodeScanner = false,
+    bool gstEnabled = false,
   }) async {
     // Tokens go to secure storage
     await Future.wait([
@@ -76,6 +83,7 @@ class AuthStorage {
       prefs.setString(_keyBusinessType, businessType),
       prefs.setBool(_keyInventoryEnabled, inventoryEnabled),
       prefs.setBool(_keyHasBarcodeScanner, hasBarcodeScanner),
+      prefs.setBool(_keyGstEnabled, gstEnabled),
     ]);
   }
 
@@ -94,6 +102,36 @@ class AuthStorage {
   Future<void> updateHasBarcodeScanner(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyHasBarcodeScanner, enabled);
+  }
+
+  Future<void> updateGstEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyGstEnabled, enabled);
+  }
+
+  /// Cache the GST invoice details from the business profile so the thermal
+  /// receipt can print the GSTIN / address / default SAC even without a live
+  /// profile fetch. Values are cleared (empty string) when not set.
+  Future<void> saveGstProfile({
+    String? gstNumber,
+    String? businessAddress,
+    String? defaultSacCode,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await Future.wait([
+      prefs.setString(_keyGstNumber, gstNumber ?? ''),
+      prefs.setString(_keyBusinessAddress, businessAddress ?? ''),
+      prefs.setString(_keyDefaultSacCode, defaultSacCode ?? ''),
+    ]);
+  }
+
+  Future<Map<String, String>> getGstProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'gst_number': prefs.getString(_keyGstNumber) ?? '',
+      'business_address': prefs.getString(_keyBusinessAddress) ?? '',
+      'default_sac_code': prefs.getString(_keyDefaultSacCode) ?? '',
+    };
   }
 
   Future<void> saveBillPrefix(String prefix) async {
@@ -144,6 +182,7 @@ class AuthStorage {
       'business_type'    : prefs.getString(_keyBusinessType),
       'inventory_enabled': prefs.getBool(_keyInventoryEnabled) ?? false,
       'has_barcode_scanner': prefs.getBool(_keyHasBarcodeScanner) ?? false,
+      'gst_enabled'      : prefs.getBool(_keyGstEnabled) ?? false,
     };
   }
 
@@ -189,6 +228,7 @@ Future<void> saveSession({
   required String businessType,
   bool inventoryEnabled = false,
   bool hasBarcodeScanner = false,
+  bool gstEnabled = false,
 }) => AuthStorage.instance.saveSession(
       accessToken: accessToken,
       refreshToken: refreshToken,
@@ -200,6 +240,7 @@ Future<void> saveSession({
       businessType: businessType,
       inventoryEnabled: inventoryEnabled,
       hasBarcodeScanner: hasBarcodeScanner,
+      gstEnabled: gstEnabled,
     );
 
 Future<void> updateBusinessName(String name)   => AuthStorage.instance.updateBusinessName(name);
@@ -214,3 +255,7 @@ Future<void>    saveBillPrefix(String prefix)  => AuthStorage.instance.saveBillP
 Future<String>  getBillPrefix()                => AuthStorage.instance.getBillPrefix();
 Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInventoryEnabled(e);
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
+Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);
+Future<void>    saveGstProfile({String? gstNumber, String? businessAddress, String? defaultSacCode}) =>
+    AuthStorage.instance.saveGstProfile(gstNumber: gstNumber, businessAddress: businessAddress, defaultSacCode: defaultSacCode);
+Future<Map<String, String>> getGstProfile()    => AuthStorage.instance.getGstProfile();

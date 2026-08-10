@@ -169,7 +169,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, unit, is_active, created_at
+      SELECT id, business_id, name, barcode, category, price, tax_rate, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at
       FROM items
       WHERE ${where}
       ORDER BY name ASC
@@ -187,7 +187,7 @@ router.get('/', requireAuth, async (req, res) => {
           .input('barcode', sql.NVarChar(100), normalised);
         const variantMatch = await variantReq.query(`
           SELECT TOP 1 i.id, i.business_id, i.name, i.barcode, i.category, i.price,
-                 i.tax_rate, i.stock_quantity, i.low_stock_threshold, i.unit,
+                 i.tax_rate, i.hsn_code, i.stock_quantity, i.low_stock_threshold, i.unit,
                  i.is_active, i.created_at, v.id AS matched_variant_id
           FROM item_variants v
           JOIN items i ON i.id = v.item_id
@@ -227,7 +227,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, category, price, tax_rate, stock_quantity, low_stock_threshold, unit, is_active, created_at, image_url
+        SELECT id, business_id, name, barcode, category, price, tax_rate, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at, image_url
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -245,7 +245,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 
 // POST /api/items
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
-  const { name, barcode, category, price, tax_rate, stock_quantity, unit } = req.body;
+  const { name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit } = req.body;
 
   if (!name || price === undefined || price === null) {
     return res.status(400).json({ error: 'name and price are required' });
@@ -263,13 +263,14 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('category', sql.NVarChar(100), category || null)
       .input('price', sql.Decimal(10, 2), parseFloat(price))
       .input('tax_rate', sql.Decimal(5, 2), tax_rate != null ? parseFloat(tax_rate) : null)
+      .input('hsn_code', sql.NVarChar(10), hsn_code || null)
       .input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null)
       .input('unit', sql.NVarChar(20), unit || 'piece')
       .query(`
-        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, stock_quantity, unit, low_stock_threshold)
+        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit, low_stock_threshold)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
-               INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @stock_quantity, @unit, 50)
+               INSERTED.price, INSERTED.tax_rate, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
+        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @hsn_code, @stock_quantity, @unit, 50)
       `);
 
     const created = result.recordset[0];
@@ -288,9 +289,9 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
 // PUT /api/items/:id
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
-  const { name, barcode, category, price, tax_rate, stock_quantity, unit } = req.body;
+  const { name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit } = req.body;
 
-  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && stock_quantity === undefined && unit === undefined) {
+  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   if (price !== undefined && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
@@ -335,6 +336,10 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       sets.push('tax_rate = @tax_rate');
       request.input('tax_rate', sql.Decimal(5, 2), tax_rate != null ? parseFloat(tax_rate) : null);
     }
+    if (hsn_code !== undefined) {
+      sets.push('hsn_code = @hsn_code');
+      request.input('hsn_code', sql.NVarChar(10), hsn_code || null);
+    }
     if (stock_quantity !== undefined) {
       sets.push('stock_quantity = @stock_quantity');
       request.input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null);
@@ -347,7 +352,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       UPDATE items
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
-             INSERTED.price, INSERTED.tax_rate, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
+             INSERTED.price, INSERTED.tax_rate, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);
 

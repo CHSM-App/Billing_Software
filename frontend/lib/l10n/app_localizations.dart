@@ -638,6 +638,18 @@ abstract class AppLocalizations {
   /// **'Track stock and reduce it automatically on each sale'**
   String get settingsInventorySubtitle;
 
+  /// No description provided for @settingsGst.
+  ///
+  /// In en, this message translates to:
+  /// **'GST Invoices'**
+  String get settingsGst;
+
+  /// No description provided for @settingsGstSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add tax rate & HSN/SAC to items and show CGST/SGST on bills'**
+  String get settingsGstSubtitle;
+
   /// No description provided for @settingsManageStaff.
   ///
   /// In en, this message translates to:
@@ -1388,6 +1400,24 @@ abstract class AppLocalizations {
   /// **'Tax:'**
   String get receiptTax;
 
+  /// No description provided for @receiptCgst.
+  ///
+  /// In en, this message translates to:
+  /// **'CGST:'**
+  String get receiptCgst;
+
+  /// No description provided for @receiptSgst.
+  ///
+  /// In en, this message translates to:
+  /// **'SGST:'**
+  String get receiptSgst;
+
+  /// No description provided for @receiptGstin.
+  ///
+  /// In en, this message translates to:
+  /// **'GSTIN:'**
+  String get receiptGstin;
+
   /// No description provided for @receiptDiscount.
   ///
   /// In en, this message translates to:
@@ -1748,6 +1778,18 @@ abstract class AppLocalizations {
   /// **'₹{subtotal} + ₹{tax} GST'**
   String billingSubtotalPlusGst(String subtotal, String tax);
 
+  /// No description provided for @billingCgst.
+  ///
+  /// In en, this message translates to:
+  /// **'CGST ({rate}%)'**
+  String billingCgst(String rate);
+
+  /// No description provided for @billingSgst.
+  ///
+  /// In en, this message translates to:
+  /// **'SGST ({rate}%)'**
+  String billingSgst(String rate);
+
   /// No description provided for @billingDiscountApplied.
   ///
   /// In en, this message translates to:
@@ -2047,6 +2089,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'e.g. 5, 12, 18'**
   String get itemsFieldTaxRateHint;
+
+  /// No description provided for @itemsFieldHsn.
+  ///
+  /// In en, this message translates to:
+  /// **'HSN/SAC code (optional)'**
+  String get itemsFieldHsn;
+
+  /// No description provided for @itemsFieldHsnHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. 9963 for restaurant service'**
+  String get itemsFieldHsnHint;
 
   /// No description provided for @itemsFieldBarcode.
   ///
@@ -3439,6 +3493,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Invalid PAN format'**
   String get businessProfilePanInvalid;
+
+  /// No description provided for @businessProfileDefaultSac.
+  ///
+  /// In en, this message translates to:
+  /// **'Default HSN/SAC (optional)'**
+  String get businessProfileDefaultSac;
+
+  /// No description provided for @businessProfileDefaultSacHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. 9963 — used when an item has none'**
+  String get businessProfileDefaultSacHint;
 
   /// No description provided for @businessProfileBillPrefix.
   ///

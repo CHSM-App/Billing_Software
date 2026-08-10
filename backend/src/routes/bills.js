@@ -288,7 +288,7 @@ async function fetchBill(billId, businessId) {
   const itemsResult = await pool.request()
     .input('bill_id', sql.UniqueIdentifier, billId)
     .query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total,
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total,
              kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id = @bill_id
@@ -376,7 +376,7 @@ router.post('/', requireAuth, async (req, res) => {
       const itemsData = await bindItems(transaction.request())
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT id, name, price, tax_rate, stock_quantity, low_stock_threshold
+          SELECT id, name, price, tax_rate, hsn_code, stock_quantity, low_stock_threshold
           FROM items
           WHERE id IN (${itemClause}) AND business_id = @business_id AND is_active = 1
         `);
@@ -427,6 +427,7 @@ router.post('/', requireAuth, async (req, res) => {
           quantity: qty,
           unit_price: unitPrice,
           tax_rate: taxRate,
+          hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat(lineTotal.toFixed(2)),
         };
       });
@@ -509,10 +510,11 @@ router.post('/', requireAuth, async (req, res) => {
           .input('quantity', sql.Decimal(10, 2), li.quantity)
           .input('unit_price', sql.Decimal(10, 2), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
+          .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
           .query(`
-            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total)
-            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
+            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
+            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @hsn_code, @line_total)
           `);
       }
 
@@ -654,7 +656,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total,
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total,
              kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id IN (${billClause})
@@ -703,7 +705,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total,
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total,
              kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id IN (${billClause})
@@ -852,7 +854,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       const itemsData = await bindItems2(transaction.request())
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT id, name, price, tax_rate, stock_quantity, low_stock_threshold
+          SELECT id, name, price, tax_rate, hsn_code, stock_quantity, low_stock_threshold
           FROM items
           WHERE id IN (${itemClause2}) AND business_id = @business_id AND is_active = 1
         `);
@@ -893,6 +895,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           quantity: qty,
           unit_price: unitPrice,
           tax_rate: taxRate,
+          hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
         };
       });
@@ -919,10 +922,11 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           .input('quantity', sql.Decimal(10, 2), li.quantity)
           .input('unit_price', sql.Decimal(10, 2), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
+          .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
           .query(`
-            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total)
-            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total)
+            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
+            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @hsn_code, @line_total)
           `);
       }
 
@@ -1046,7 +1050,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       const itemsData = await bindItems3(transaction.request())
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT id, name, price, tax_rate, stock_quantity
+          SELECT id, name, price, tax_rate, hsn_code, stock_quantity
           FROM items
           WHERE id IN (${itemClause3}) AND business_id = @business_id AND is_active = 1
         `);
@@ -1087,6 +1091,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           quantity: qty,
           unit_price: unitPrice,
           tax_rate: taxRate,
+          hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
         };
       });
@@ -1163,12 +1168,13 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           .input('quantity', sql.Decimal(10, 2), li.quantity)
           .input('unit_price', sql.Decimal(10, 2), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
+          .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
           .input('kitchen_status', sql.NVarChar(20), k.kitchen_status)
           .input('kitchen_done_at', sql.DateTime2, k.kitchen_done_at)
           .query(`
-            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, line_total, kitchen_status, kitchen_done_at)
-            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @line_total, @kitchen_status, @kitchen_done_at)
+            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, kitchen_status, kitchen_done_at)
+            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @hsn_code, @line_total, @kitchen_status, @kitchen_done_at)
           `);
       }
 

@@ -218,8 +218,12 @@ class PrinterService {
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
+      String? businessGstin,
       ReceiptLabels? labels}) {
     final grandTotal = bill.total - bill.discountAmount;
+    // GSTIN is passed only when GST is enabled — its presence gates the
+    // GSTIN line + the CGST/SGST split. Without it the receipt is as before.
+    final gst = businessGstin != null && businessGstin.isNotEmpty;
     final lines = <String>[];
 
     // Header
@@ -231,6 +235,9 @@ class PrinterService {
     if (businessPhone != null && businessPhone.isNotEmpty) {
       lines.add(
           _centre('${labels?.phonePrefix ?? 'Ph:'} $businessPhone', _cols));
+    }
+    if (gst) {
+      lines.add(_centre('${labels?.gstin ?? 'GSTIN:'} $businessGstin', _cols));
     }
     lines.add('-' * _cols);
 
@@ -277,8 +284,18 @@ class PrinterService {
         'Rs.${bill.subtotal.toStringAsFixed(2)}'));
 
     if (bill.taxAmount > 0) {
-      lines.add(_twoCol(
-          labels?.tax ?? 'Tax:', 'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
+      if (gst) {
+        // Intra-state split: CGST and SGST are each half the total tax.
+        // The rate shown is the effective half-rate derived from the bill's
+        // taxable value (subtotal) — e.g. 18% GST prints as CGST 9% / SGST 9%.
+        final half = (bill.taxAmount / 2).toStringAsFixed(2);
+        final halfRate = _halfGstRateLabel(bill);
+        lines.add(_twoCol('${labels?.cgst ?? 'CGST:'}$halfRate', 'Rs.$half'));
+        lines.add(_twoCol('${labels?.sgst ?? 'SGST:'}$halfRate', 'Rs.$half'));
+      } else {
+        lines.add(_twoCol(
+            labels?.tax ?? 'Tax:', 'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
+      }
     }
 
     if (bill.discountAmount > 0) {
@@ -304,8 +321,10 @@ class PrinterService {
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
+      String? businessGstin,
       ReceiptLabels? labels}) {
     final grandTotal = bill.total - bill.discountAmount;
+    final gst = businessGstin != null && businessGstin.isNotEmpty;
     final rows = <ReceiptRow>[];
 
     // Header
@@ -318,6 +337,10 @@ class PrinterService {
     if (businessPhone != null && businessPhone.isNotEmpty) {
       rows.add(ReceiptRow.center(
           '${labels?.phonePrefix ?? 'Ph:'} $businessPhone', size: 26));
+    }
+    if (gst) {
+      rows.add(ReceiptRow.center(
+          '${labels?.gstin ?? 'GSTIN:'} $businessGstin', size: 26));
     }
     rows.add(ReceiptRow.rule());
 
@@ -389,8 +412,15 @@ class PrinterService {
     rows.add(total(labels?.subtotal ?? 'Subtotal:',
         'Rs.${bill.subtotal.toStringAsFixed(2)}'));
     if (bill.taxAmount > 0) {
-      rows.add(total(labels?.tax ?? 'Tax:',
-          'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
+      if (gst) {
+        final half = (bill.taxAmount / 2).toStringAsFixed(2);
+        final halfRate = _halfGstRateLabel(bill);
+        rows.add(total('${labels?.cgst ?? 'CGST:'}$halfRate', 'Rs.$half'));
+        rows.add(total('${labels?.sgst ?? 'SGST:'}$halfRate', 'Rs.$half'));
+      } else {
+        rows.add(total(labels?.tax ?? 'Tax:',
+            'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
+      }
     }
     if (bill.discountAmount > 0) {
       rows.add(total(labels?.discount ?? 'Discount:',
@@ -445,6 +475,7 @@ class PrinterService {
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
+      String? businessGstin,
       ReceiptLabels? labels}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
@@ -453,6 +484,7 @@ class PrinterService {
         businessName: businessName,
         businessPhone: businessPhone,
         businessAddress: businessAddress,
+        businessGstin: businessGstin,
         labels: labels);
 
     if (_hasNonAscii(lines)) {
@@ -465,6 +497,7 @@ class PrinterService {
           businessName: businessName,
           businessPhone: businessPhone,
           businessAddress: businessAddress,
+          businessGstin: businessGstin,
           labels: labels);
       final raster = await RasterLab.rowsToReceiptRaster(rows);
       if (_isWindows) {
@@ -486,12 +519,14 @@ class PrinterService {
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
+      String? businessGstin,
       ReceiptLabels? labels}) async {
     for (var i = 0; i < bills.length; i++) {
       await printBill(bills[i],
           businessName: businessName,
           businessPhone: businessPhone,
           businessAddress: businessAddress,
+          businessGstin: businessGstin,
           labels: labels);
       // Let the printer finish and the SPP link settle before the next job.
       if (i < bills.length - 1) {
@@ -776,6 +811,20 @@ class PrinterService {
   static String _twoColN(String label, String value, int width) {
     final space = width - label.length - value.length;
     return '$label${' ' * (space < 1 ? 1 : space)}$value';
+  }
+
+  /// The half-GST-rate suffix shown next to CGST/SGST, e.g. " 9%".
+  /// Derived from the bill's effective GST rate (tax / taxable value); CGST and
+  /// SGST are each half of it. Returns '' when the rate can't be determined so
+  /// the label degrades gracefully to just "CGST:".
+  String _halfGstRateLabel(Bill bill) {
+    if (bill.subtotal <= 0) return '';
+    final effectiveRate = bill.taxAmount / bill.subtotal * 100;
+    final half = effectiveRate / 2;
+    if (half <= 0) return '';
+    // Whole numbers print clean (9%), fractional keep one decimal (2.5%).
+    final r = half % 1 == 0 ? half.toStringAsFixed(0) : half.toStringAsFixed(1);
+    return ' $r%';
   }
 
   String _formatDate(DateTime dt) {

@@ -105,6 +105,7 @@ class Item {
   final String? category;
   final double price;
   final double? taxRate;
+  final String? hsnCode;
   final double? stockQuantity;
   final double? lowStockThreshold;
   final String unit;
@@ -124,6 +125,7 @@ class Item {
     this.category,
     required this.price,
     this.taxRate,
+    this.hsnCode,
     this.stockQuantity,
     this.lowStockThreshold,
     this.unit = 'piece',
@@ -140,6 +142,7 @@ class Item {
         category: j['category'],
         price: double.parse(j['price'].toString()),
         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
+        hsnCode: j['hsn_code'] as String?,
         stockQuantity: j['stock_quantity'] != null ? double.parse(j['stock_quantity'].toString()) : null,
         lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
         unit: (j['unit'] as String?) ?? 'piece',
@@ -235,6 +238,7 @@ class BillItem {
   final double quantity;
   final double unitPrice;
   final double? taxRate;
+  final String? hsnCode;
   final double lineTotal;
 
   BillItem({
@@ -246,6 +250,7 @@ class BillItem {
     required this.quantity,
     required this.unitPrice,
     this.taxRate,
+    this.hsnCode,
     required this.lineTotal,
   });
 
@@ -261,6 +266,7 @@ class BillItem {
         quantity: double.parse(j['quantity'].toString()),
         unitPrice: double.parse(j['unit_price'].toString()),
         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
+        hsnCode: j['hsn_code'] as String?,
         lineTotal: double.parse(j['line_total'].toString()),
       );
 }

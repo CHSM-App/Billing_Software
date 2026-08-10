@@ -10,6 +10,7 @@ class SessionData {
   final String businessType;
   final bool inventoryEnabled;
   final bool hasBarcodeScanner;
+  final bool gstEnabled;
 
   const SessionData({
     required this.userId,
@@ -20,6 +21,7 @@ class SessionData {
     required this.businessType,
     required this.inventoryEnabled,
     required this.hasBarcodeScanner,
+    required this.gstEnabled,
   });
 
   static SessionData empty() => const SessionData(
@@ -31,6 +33,7 @@ class SessionData {
         businessType: '',
         inventoryEnabled: false,
         hasBarcodeScanner: false,
+        gstEnabled: false,
       );
 
   static SessionData fromMap(Map<String, dynamic> m) => SessionData(
@@ -42,6 +45,7 @@ class SessionData {
         businessType: m['business_type'] ?? '',
         inventoryEnabled: m['inventory_enabled'] == true,
         hasBarcodeScanner: m['has_barcode_scanner'] == true,
+        gstEnabled: m['gst_enabled'] == true,
       );
 }
 
@@ -91,3 +95,8 @@ final hasBarcodeProvider = Provider<bool>((ref) => true);
 
 final inventoryEnabledProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.inventoryEnabled ?? false);
+
+// Master GST toggle. When false (the default), all GST UI and receipt sections
+// are hidden and the app behaves exactly as before.
+final gstEnabledProvider = Provider<bool>((ref) =>
+    ref.watch(sessionProvider).valueOrNull?.gstEnabled ?? false);

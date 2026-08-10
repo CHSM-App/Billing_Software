@@ -11,6 +11,9 @@ CREATE TABLE businesses (
     inventory_enabled    BIT          NOT NULL DEFAULT 0,
     has_barcode_scanner  BIT          NOT NULL DEFAULT 0,
     is_verified          BIT          NOT NULL DEFAULT 0,
+    -- GST (added via migration 025) — optional, OFF by default.
+    gst_enabled      BIT              NOT NULL DEFAULT 0,   -- master toggle for all GST UI/receipt
+    default_sac_code NVARCHAR(10)     NULL,   -- bill-level fallback HSN/SAC (e.g. restaurant 9963)
     -- Extended profile fields (added via migration 005)
     gst_number       NVARCHAR(15)     NULL,   -- 15-char GSTIN
     pan_number       NVARCHAR(10)     NULL,   -- 10-char PAN
@@ -59,6 +62,7 @@ CREATE TABLE items (
     category        NVARCHAR(100)    NULL,
     price           DECIMAL(10,2)    NOT NULL,
     tax_rate        DECIMAL(5,2)     NULL,
+    hsn_code        NVARCHAR(10)     NULL,   -- optional per-item HSN/SAC (GST)
     stock_quantity  DECIMAL(10,2)    NULL,
     unit            NVARCHAR(20)     NOT NULL DEFAULT 'piece',
     is_active       BIT              NOT NULL DEFAULT 1,
@@ -167,6 +171,7 @@ CREATE TABLE bill_items (
     quantity    DECIMAL(10,2)    NOT NULL,
     unit_price  DECIMAL(10,2)    NOT NULL,
     tax_rate    DECIMAL(5,2)     NULL,
+    hsn_code    NVARCHAR(10)     NULL,   -- snapshot of the item's HSN/SAC at sale time
     line_total  DECIMAL(10,2)    NOT NULL,
 
     -- CASCADE: line items are owned by the bill.

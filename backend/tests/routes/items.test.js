@@ -198,6 +198,27 @@ describe('POST /api/items', () => {
     expect(res.body.name).toBe('Rice');
   });
 
+  test('persists hsn_code when provided', async () => {
+    mockRequest.recordset = [{ ...sampleItem, hsn_code: '9963' }];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Thali', price: 120, tax_rate: 5, hsn_code: '9963' });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.hsn_code).toBe('9963');
+    expect(res.body.hsn_code).toBe('9963');
+  });
+
+  test('binds hsn_code as null when omitted (unchanged behaviour)', async () => {
+    mockRequest.recordset = [sampleItem];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50 });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.hsn_code).toBeNull();
+  });
+
   test('returns 403 for non-owner role', async () => {
     const res = await request(app)
       .post('/api/items')

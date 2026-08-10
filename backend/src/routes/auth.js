@@ -274,7 +274,8 @@ router.post('/login', loginLimiter, async (req, res) => {
         SELECT u.id, u.business_id, u.name, u.phone, u.pin_hash, u.role,
                u.failed_attempts, u.locked_until,
                b.name AS business_name, b.business_type, b.is_verified,
-               b.inventory_enabled, b.has_barcode_scanner, b.address
+               b.inventory_enabled, b.has_barcode_scanner, b.address,
+               b.gst_enabled, b.gst_number, b.default_sac_code
         FROM users u
         JOIN businesses b ON u.business_id = b.id
         WHERE u.phone = @phone
@@ -381,6 +382,9 @@ router.post('/login', loginLimiter, async (req, res) => {
         address: row.address,
         inventory_enabled: !!row.inventory_enabled,
         has_barcode_scanner: !!row.has_barcode_scanner,
+        gst_enabled: !!row.gst_enabled,
+        gst_number: row.gst_number ?? null,
+        default_sac_code: row.default_sac_code ?? null,
       },
     });
   } catch (err) {

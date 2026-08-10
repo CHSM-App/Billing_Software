@@ -40,6 +40,7 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
           b.gst_number, b.pan_number, b.email, b.website,
           b.city, b.state, b.pincode, b.logo_url,
           b.bill_prefix, b.bill_footer_note,
+          b.gst_enabled, b.default_sac_code,
           b.created_at,
           u.name  AS owner_name,
           u.phone AS owner_phone
@@ -87,6 +88,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     self_order_enabled,
     inventory_enabled,
     has_barcode_scanner,
+    gst_enabled,
+    default_sac_code,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -152,6 +155,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     self_order_enabled,
     inventory_enabled,
     has_barcode_scanner,
+    gst_enabled,
+    default_sac_code,
   };
 
   const fields = Object.entries(updatable).filter(([, v]) => v !== undefined);
@@ -169,7 +174,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
         SELECT
           name, address, phone, email, website,
           city, state, pincode, gst_number, pan_number,
-          logo_url, bill_prefix, bill_footer_note
+          logo_url, bill_prefix, bill_footer_note,
+          gst_enabled, default_sac_code
         FROM businesses WHERE id = @id
       `);
 
@@ -202,7 +208,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       const sqlType = _sqlTypeFor(key);
       // BIT columns take a normalised 0/1; text columns treat '' as NULL.
       const isBit = key === 'self_order_enabled' ||
-          key === 'inventory_enabled' || key === 'has_barcode_scanner';
+          key === 'inventory_enabled' || key === 'has_barcode_scanner' ||
+          key === 'gst_enabled';
       const normalised = isBit
         ? (value ? 1 : 0)
         : (value === '' ? null : value);
@@ -227,6 +234,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           gst_number, pan_number, email, website,
           city, state, pincode, logo_url,
           bill_prefix, bill_footer_note,
+          gst_enabled, default_sac_code,
           created_at
         FROM businesses WHERE id = @id
       `);
@@ -278,6 +286,8 @@ function _formatBusiness(row) {
     logo_url:            row.logo_url ?? null,
     bill_prefix:         row.bill_prefix ?? 'INV',
     bill_footer_note:    row.bill_footer_note ?? null,
+    gst_enabled:         !!row.gst_enabled,
+    default_sac_code:    row.default_sac_code ?? null,
     created_at:          row.created_at,
   };
 }
@@ -301,6 +311,8 @@ function _sqlTypeFor(key) {
     self_order_enabled: sql.Bit,
     inventory_enabled: sql.Bit,
     has_barcode_scanner: sql.Bit,
+    gst_enabled:       sql.Bit,
+    default_sac_code:  sql.NVarChar(10),
   };
   return map[key] ?? sql.NVarChar(500);
 }

@@ -315,6 +315,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Track stock and reduce it automatically on each sale';
 
   @override
+  String get settingsGst => 'GST Invoices';
+
+  @override
+  String get settingsGstSubtitle =>
+      'Add tax rate & HSN/SAC to items and show CGST/SGST on bills';
+
+  @override
   String get settingsManageStaff => 'Manage Staff';
 
   @override
@@ -716,6 +723,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get receiptTax => 'Tax:';
 
   @override
+  String get receiptCgst => 'CGST:';
+
+  @override
+  String get receiptSgst => 'SGST:';
+
+  @override
+  String get receiptGstin => 'GSTIN:';
+
+  @override
   String get receiptDiscount => 'Discount:';
 
   @override
@@ -921,6 +937,16 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String billingCgst(String rate) {
+    return 'CGST ($rate%)';
+  }
+
+  @override
+  String billingSgst(String rate) {
+    return 'SGST ($rate%)';
+  }
+
+  @override
   String get billingDiscountApplied => 'Discount Applied';
 
   @override
@@ -1075,6 +1101,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsFieldTaxRateHint => 'e.g. 5, 12, 18';
+
+  @override
+  String get itemsFieldHsn => 'HSN/SAC code (optional)';
+
+  @override
+  String get itemsFieldHsnHint => 'e.g. 9963 for restaurant service';
 
   @override
   String get itemsFieldBarcode => 'Barcode (optional)';
@@ -1861,6 +1893,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get businessProfilePanInvalid => 'Invalid PAN format';
+
+  @override
+  String get businessProfileDefaultSac => 'Default HSN/SAC (optional)';
+
+  @override
+  String get businessProfileDefaultSacHint =>
+      'e.g. 9963 — used when an item has none';
 
   @override
   String get businessProfileBillPrefix => 'Bill Number Prefix';

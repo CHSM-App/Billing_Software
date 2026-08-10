@@ -9,6 +9,7 @@ import '../providers.dart';
 import '../providers/credit_provider.dart';
 import '../services/printer_service.dart';
 import '../services/receipt_labels.dart';
+import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
@@ -167,13 +168,26 @@ class _CreditCustomerBillsScreenState
     }
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
+    // GSTIN + address only when GST is enabled (else null → receipt as before).
+    String? gstin;
+    String? address;
+    if (ref.read(gstEnabledProvider)) {
+      final gstProfile = await getGstProfile();
+      final g = gstProfile['gst_number'] ?? '';
+      final a = gstProfile['business_address'] ?? '';
+      gstin = g.isNotEmpty ? g : null;
+      address = a.isNotEmpty ? a : null;
+    }
     try {
       // Print each bill on its own (never merged); the service settles the BT
       // link between jobs so a later receipt doesn't print garbage.
       final printables =
           bills.map((b) => _asSettled(b, settledMode)).toList();
-      await PrinterService.instance
-          .printBills(printables, businessName: businessName, labels: labels);
+      await PrinterService.instance.printBills(printables,
+          businessName: businessName,
+          businessAddress: address,
+          businessGstin: gstin,
+          labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {
       if (e.message == 'No printer configured') return;

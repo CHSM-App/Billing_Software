@@ -152,6 +152,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
 
   void _showItemForm({Item? item}) {
     final inventoryEnabled = ref.read(inventoryEnabledProvider);
+    final gstEnabled = ref.read(gstEnabledProvider);
     final businessType = ref.read(businessTypeProvider);
     final isRestaurant = businessType == 'restaurant_with_tables' ||
         businessType == 'restaurant_no_tables';
@@ -165,6 +166,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
       builder: (_) => _ItemFormDialog(
         item: item,
         inventoryEnabled: inventoryEnabled,
+        gstEnabled: gstEnabled,
         categories: categories,
         onSaved: (data) async {
           if (item == null) {
@@ -883,6 +885,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
 class _ItemFormDialog extends StatefulWidget {
   final Item? item;
   final bool inventoryEnabled;
+  final bool gstEnabled;
   final List<String> categories;
   final Future<void> Function(Map<String, dynamic> data) onSaved;
   final VoidCallback? onManageSizes;
@@ -891,6 +894,7 @@ class _ItemFormDialog extends StatefulWidget {
   const _ItemFormDialog(
       {this.item,
       required this.inventoryEnabled,
+      this.gstEnabled = false,
       this.categories = const [],
       required this.onSaved,
       this.onManageSizes,
@@ -907,6 +911,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _categoryFocus = FocusNode();
   final _priceCtrl = TextEditingController();
   final _taxCtrl = TextEditingController();
+  final _hsnCtrl = TextEditingController();
   final _barcodeCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
   String _unit = 'piece';
@@ -932,6 +937,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _categoryCtrl.text = item.category ?? '';
       _priceCtrl.text = item.price.toString();
       _taxCtrl.text = item.taxRate?.toString() ?? '';
+      _hsnCtrl.text = item.hsnCode ?? '';
       _barcodeCtrl.text = item.barcode ?? '';
       _stockCtrl.text = item.stockQuantity?.toString() ?? '';
       _unit = _units.contains(item.unit) ? item.unit : 'piece';
@@ -967,6 +973,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _categoryFocus.dispose();
     _priceCtrl.dispose();
     _taxCtrl.dispose();
+    _hsnCtrl.dispose();
     _barcodeCtrl.dispose();
     _stockCtrl.dispose();
     super.dispose();
@@ -1061,6 +1068,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       'price': double.parse(_priceCtrl.text.trim()),
       if (_taxCtrl.text.trim().isNotEmpty)
         'tax_rate': double.parse(_taxCtrl.text.trim()),
+      if (widget.gstEnabled)
+        'hsn_code': _hsnCtrl.text.trim().isNotEmpty ? _hsnCtrl.text.trim() : null,
       'barcode': barcodeInput.isNotEmpty ? barcodeInput : autoBarcode,
       'unit': _unit,
       if (widget.inventoryEnabled && hasVariants)
@@ -1138,20 +1147,31 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   ],
                   onChanged: (v) => setState(() => _unit = v ?? 'piece'),
                 ),
-                const SizedBox(height: AppSpacing.space12),
-                AppTextField(
-                  label: l10n.itemsFieldTaxRate,
-                  controller: _taxCtrl,
-                  hint: l10n.itemsFieldTaxRateHint,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) {
-                    if (v != null && v.isNotEmpty && double.tryParse(v) == null) {
-                      return l10n.commonEnterValidNumber;
-                    }
-                    return null;
-                  },
-                ),
+                // Tax rate + HSN/SAC only appear when GST is enabled for the
+                // business. When off, the item form has no tax fields at all —
+                // exactly as before GST support existed.
+                if (widget.gstEnabled) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  AppTextField(
+                    label: l10n.itemsFieldTaxRate,
+                    controller: _taxCtrl,
+                    hint: l10n.itemsFieldTaxRateHint,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    validator: (v) {
+                      if (v != null && v.isNotEmpty && double.tryParse(v) == null) {
+                        return l10n.commonEnterValidNumber;
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.space12),
+                  AppTextField(
+                    label: l10n.itemsFieldHsn,
+                    controller: _hsnCtrl,
+                    hint: l10n.itemsFieldHsnHint,
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.space12),
                 AppTextField(
                   label: l10n.itemsFieldBarcode,

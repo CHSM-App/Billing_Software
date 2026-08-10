@@ -48,6 +48,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
   final _pincodeCtrl      = TextEditingController();
   final _gstCtrl          = TextEditingController();
   final _panCtrl          = TextEditingController();
+  final _sacCtrl          = TextEditingController();
   final _billPrefixCtrl   = TextEditingController();
   final _footerNoteCtrl   = TextEditingController();
 
@@ -69,6 +70,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     _pincodeCtrl.dispose();
     _gstCtrl.dispose();
     _panCtrl.dispose();
+    _sacCtrl.dispose();
     _billPrefixCtrl.dispose();
     _footerNoteCtrl.dispose();
     super.dispose();
@@ -103,6 +105,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     _pincodeCtrl.text     = p['pincode']          ?? '';
     _gstCtrl.text         = p['gst_number']       ?? '';
     _panCtrl.text         = p['pan_number']       ?? '';
+    _sacCtrl.text         = p['default_sac_code'] ?? '';
     _billPrefixCtrl.text  = p['bill_prefix']      ?? 'INV';
     _footerNoteCtrl.text  = p['bill_footer_note'] ?? '';
   }
@@ -131,6 +134,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
       addIfChanged('pincode',          _pincodeCtrl,     _profile?['pincode']);
       addIfChanged('gst_number',       _gstCtrl,         _profile?['gst_number']);
       addIfChanged('pan_number',       _panCtrl,         _profile?['pan_number']);
+      addIfChanged('default_sac_code', _sacCtrl,         _profile?['default_sac_code']);
       addIfChanged('bill_prefix',      _billPrefixCtrl,  _profile?['bill_prefix']);
       addIfChanged('bill_footer_note', _footerNoteCtrl,  _profile?['bill_footer_note']);
 
@@ -151,6 +155,14 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
         await updateBusinessName(updated['name'] as String);
         await ref.read(sessionProvider.notifier).refresh();
       }
+
+      // Keep the cached GST details in sync so the thermal receipt prints the
+      // latest GSTIN / address / default SAC without waiting for a re-login.
+      await saveGstProfile(
+        gstNumber: updated['gst_number'] as String?,
+        businessAddress: updated['address'] as String?,
+        defaultSacCode: updated['default_sac_code'] as String?,
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -417,6 +429,17 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                   return null;
                                 },
                               ),
+                              // Default HSN/SAC only matters when GST invoices
+                              // are enabled — e.g. a restaurant setting 9963 once.
+                              if (ref.watch(gstEnabledProvider)) ...[
+                                const SizedBox(height: AppSpacing.space12),
+                                _buildField(
+                                  controller: _sacCtrl,
+                                  label: l10n.businessProfileDefaultSac,
+                                  hint: l10n.businessProfileDefaultSacHint,
+                                  maxLength: 10,
+                                ),
+                              ],
                             ],
                           ),
                           const SizedBox(height: AppSpacing.space24),

@@ -81,6 +81,7 @@ class PrinterService {
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
+      String? businessGstin,
       dynamic labels}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
@@ -89,6 +90,7 @@ class PrinterService {
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
+      String? businessGstin,
       dynamic labels}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }

@@ -17,6 +17,9 @@ class ReceiptLabels {
   final String colTotal;
   final String subtotal;
   final String tax;
+  final String cgst;
+  final String sgst;
+  final String gstin;
   final String discount;
   final String total;
   final String payment;
@@ -37,6 +40,9 @@ class ReceiptLabels {
     required this.colTotal,
     required this.subtotal,
     required this.tax,
+    required this.cgst,
+    required this.sgst,
+    required this.gstin,
     required this.discount,
     required this.total,
     required this.payment,
@@ -59,6 +65,9 @@ class ReceiptLabels {
         colTotal: l10n.receiptColTotal,
         subtotal: l10n.receiptSubtotal,
         tax: l10n.receiptTax,
+        cgst: l10n.receiptCgst,
+        sgst: l10n.receiptSgst,
+        gstin: l10n.receiptGstin,
         discount: l10n.receiptDiscount,
         total: l10n.receiptTotal,
         payment: l10n.receiptPayment,

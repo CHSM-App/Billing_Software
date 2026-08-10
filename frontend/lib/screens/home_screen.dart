@@ -1218,6 +1218,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final l10n = context.l10n;
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
+    // Only print GST invoice details (GSTIN + address) when GST is enabled.
+    // gstin stays null when off, so the receipt is byte-for-byte as before.
+    String? gstin;
+    String? address;
+    if (ref.read(gstEnabledProvider)) {
+      final gstProfile = await getGstProfile();
+      final g = gstProfile['gst_number'] ?? '';
+      final a = gstProfile['business_address'] ?? '';
+      gstin = g.isNotEmpty ? g : null;
+      address = a.isNotEmpty ? a : null;
+    }
     // Consume any previous credit bills that were settled with this bill —
     // each prints as its OWN receipt (never merged), one tap prints them all.
     // printBills settles the BT link between jobs so a later receipt doesn't
@@ -1226,7 +1237,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _justSettledPrevBills = const [];
     try {
       await PrinterService.instance.printBills([bill, ...prevBills],
-          businessName: businessName, labels: labels);
+          businessName: businessName,
+          businessAddress: address,
+          businessGstin: gstin,
+          labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {
       // The print just failed (BT off, out of range, unpaired…): re-check
@@ -1982,6 +1996,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Build the CGST/SGST rows for the cart totals when GST is enabled.
+  /// Each is half the [tax]; the rate is derived from the taxable [subtotal]
+  /// (e.g. 18% GST → CGST 9% / SGST 9%). Returns (label, amount) pairs.
+  List<(String, String)> _gstSplitRows(
+      AppLocalizations l10n, double subtotal, double tax) {
+    final half = (tax / 2).toStringAsFixed(2);
+    // Effective half-rate for the label; blank-safe when subtotal is 0.
+    String rate = '';
+    if (subtotal > 0) {
+      final r = tax / subtotal * 100 / 2;
+      rate = r % 1 == 0 ? r.toStringAsFixed(0) : r.toStringAsFixed(1);
+    }
+    return [
+      (l10n.billingCgst(rate), half),
+      (l10n.billingSgst(rate), half),
+    ];
+  }
+
   Widget _buildCartPanel({bool inSheet = false}) {
     return Consumer(builder: (context, ref, _) {
       final l10n = context.l10n;
@@ -1989,6 +2021,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final subtotal = ref.watch(cartSubtotalProvider);
       final tax = ref.watch(cartTaxProvider);
       final total = ref.watch(cartTotalProvider);
+      // When GST is enabled, the tax is shown split as CGST + SGST (each half)
+      // in the totals summary below, mirroring the printed receipt.
+      final gstEnabled = ref.watch(gstEnabledProvider);
       // A server takes/builds orders and sends them to the kitchen but cannot
       // finalize or take payment — hide the finalize (WhatsApp/Print) actions.
       final canFinalize = ref.watch(userRoleProvider) != 'server';
@@ -2077,6 +2112,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ),
               ),
 
+            // Footer (payment, customer, discount, totals, actions). In the wide
+            // layout it's wrapped in a scrollable Flexible so it can never
+            // overflow the panel — on a short window, or when extra rows appear
+            // (CGST/SGST, discount, previous due), the footer scrolls instead of
+            // clipping. In the bottom sheet the column is already min-sized and
+            // the sheet scrolls, so the footer renders inline (a Flexible in an
+            // unbounded column would be a layout error there).
+            _wrapFooter(
+              inSheet,
+              [
             const Divider(height: 1),
 
             // Payment mode — placed before customer details so the payment
@@ -2085,8 +2130,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             // cashier/owner step.
             if (canFinalize)
             Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.space16),
+              padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
+                  AppSpacing.space16, AppSpacing.space16, 0),
               child: DropdownButtonFormField<String>(
                 value: _paymentMode,
                 isExpanded: true,
@@ -2382,7 +2427,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 ),
                               ),
                               const Spacer(),
-                              if (tax > 0)
+                              // The compact "+ GST" hint is only shown when GST
+                              // is NOT enabled; with GST on, the split is broken
+                              // out in its own CGST/SGST rows below.
+                              if (tax > 0 && !gstEnabled)
                                 Flexible(
                                   child: Text(
                                     l10n.billingSubtotalPlusGst(
@@ -2396,7 +2444,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         ),
                                   ),
                                 ),
-                              if (tax > 0) const SizedBox(width: 6),
+                              if (tax > 0 && !gstEnabled) const SizedBox(width: 6),
                               Text(
                                 '₹${total.toStringAsFixed(2)}',
                                 maxLines: 1,
@@ -2408,6 +2456,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ],
                           ),
                         ),
+                        // CGST / SGST split — shown when GST is enabled and the
+                        // cart carries tax. Each is half the tax; the rate is
+                        // derived from the taxable subtotal (e.g. 18% → 9%+9%).
+                        // Kept in one compact block (single divider, tight rows)
+                        // so it never pushes the footer actions off-screen.
+                        if (gstEnabled && tax > 0) ...[
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space12, vertical: 6),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (final line
+                                    in _gstSplitRows(l10n, subtotal, tax))
+                                  Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 2),
+                                    child: Row(
+                                      children: [
+                                        Text(
+                                          line.$1,
+                                          style: Theme.of(ctx)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: AppColors.textSecondary,
+                                              ),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          '₹${line.$2}',
+                                          style: Theme.of(ctx)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: AppColors.textSecondary,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
                         // Discount row — only when applied
                         if (discountAmt > 0) ...[
                           const Divider(height: 1),
@@ -2692,10 +2786,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ],
               ),
             ),
+              ],
+            ),
           ],
         ),
       );
     });
+  }
+
+  /// Wraps the cart-panel footer widgets. In the wide layout it returns a
+  /// scrollable Flexible so the footer can never overflow (extra CGST/SGST /
+  /// discount / previous-due rows scroll instead of clipping). In the bottom
+  /// sheet the surrounding column is min-sized and the sheet scrolls itself, so
+  /// the children render inline (a Flexible in an unbounded column would throw).
+  Widget _wrapFooter(bool inSheet, List<Widget> children) {
+    final column = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    );
+    if (inSheet) return column;
+    return Flexible(
+      fit: FlexFit.loose,
+      child: SingleChildScrollView(child: column),
+    );
   }
 
   Widget _buildCartRow(CartEntry entry) {
