@@ -1136,6 +1136,14 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsSizeStock => 'स्टॉक';
 
   @override
+  String get itemsSizeBarcodeOptional => 'बारकोड (ऐच्छिक)';
+
+  @override
+  String itemsSizeBarcodeEditTitle(String label) {
+    return 'बारकोड — $label';
+  }
+
+  @override
   String get itemsAddSize => 'प्रकार जोडा';
 
   @override

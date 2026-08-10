@@ -1132,6 +1132,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsSizeStock => 'Stock';
 
   @override
+  String get itemsSizeBarcodeOptional => 'Barcode (optional)';
+
+  @override
+  String itemsSizeBarcodeEditTitle(String label) {
+    return 'Barcode — $label';
+  }
+
+  @override
   String get itemsAddSize => 'Add variant';
 
   @override

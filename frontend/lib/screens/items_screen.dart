@@ -1503,6 +1503,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
   final _labelCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
+  final _barcodeCtrl = TextEditingController();
   bool _busy = false;
 
   @override
@@ -1516,6 +1517,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
     _labelCtrl.dispose();
     _priceCtrl.dispose();
     _stockCtrl.dispose();
+    _barcodeCtrl.dispose();
     super.dispose();
   }
 
@@ -1524,10 +1526,12 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
     if (label.isEmpty) return;
     setState(() => _busy = true);
     try {
+      final barcode = _barcodeCtrl.text.trim();
       final data = <String, dynamic>{
         'label': label,
         if (_priceCtrl.text.trim().isNotEmpty)
           'price': double.tryParse(_priceCtrl.text.trim()),
+        if (barcode.isNotEmpty) 'barcode': barcode,
         if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
           'stock_quantity': double.tryParse(_stockCtrl.text.trim()),
         'sort_order': _variants.length,
@@ -1538,6 +1542,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
         _labelCtrl.clear();
         _priceCtrl.clear();
         _stockCtrl.clear();
+        _barcodeCtrl.clear();
       });
       widget.onChanged(List.unmodifiable(_variants));
     } on ApiException catch (e) {
@@ -1607,6 +1612,56 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
     );
   }
 
+  /// Edit (or clear) the barcode value of an existing size. Persists the change
+  /// and patches the local list so scans/prints use the new value immediately.
+  Future<void> _editVariantBarcode(ItemVariant v) async {
+    final l10n = context.l10n;
+    final ctrl = TextEditingController(text: v.barcode ?? '');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: Text(l10n.itemsSizeBarcodeEditTitle(v.label)),
+        content: AppTextField(
+          label: l10n.itemsSizeBarcodeOptional,
+          controller: ctrl,
+          keyboardType: TextInputType.text,
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dctx, false),
+              child: Text(l10n.commonCancel)),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(dctx, true),
+              child: Text(l10n.commonSave)),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (saved != true) return;
+
+    final newBarcode = ctrl.text.trim();
+    // No change → skip the round-trip.
+    if (newBarcode == (v.barcode ?? '')) return;
+
+    setState(() => _busy = true);
+    try {
+      // Empty string clears the barcode (backend maps '' → null).
+      final result = await updateVariant(
+          widget.item.id, v.id, {'barcode': newBarcode.isEmpty ? null : newBarcode});
+      final updated = ItemVariant.fromJson(result);
+      if (!mounted) return;
+      setState(() {
+        final i = _variants.indexWhere((x) => x.id == v.id);
+        if (i != -1) _variants[i] = updated;
+      });
+      widget.onChanged(List.unmodifiable(_variants));
+    } on ApiException catch (e) {
+      _snack(sanitizeUiErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -1641,13 +1696,29 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                     dense: true,
                     contentPadding: EdgeInsets.zero,
                     title: Text(v.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(sub),
+                    subtitle: Text(sub,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
+                          tooltip: l10n.itemsSizeBarcodeEditTitle(v.label),
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(),
+                          padding: const EdgeInsets.all(6),
+                          icon: const Icon(Icons.edit_outlined,
+                              size: 18, color: AppColors.textSecondary),
+                          onPressed:
+                              _busy ? null : () => _editVariantBarcode(v),
+                        ),
+                        IconButton(
                           tooltip: l10n.itemsBarcodePrintTitle,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(),
+                          padding: const EdgeInsets.all(6),
                           icon: Icon(
                             v.barcode != null
                                 ? Icons.qr_code_2
@@ -1658,6 +1729,9 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                           onPressed: _busy ? null : () => _printVariantBarcode(v),
                         ),
                         IconButton(
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(),
+                          padding: const EdgeInsets.all(6),
                           icon: const Icon(Icons.delete_outline,
                               size: 18, color: AppColors.error),
                           onPressed: _busy ? null : () => _delete(v),
@@ -1687,6 +1761,14 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                       const TextInputType.numberWithOptions(decimal: true),
                 ),
               ],
+              const SizedBox(height: AppSpacing.space8),
+              // Optional barcode for this size. Leave blank to auto-generate
+              // one later via the print (QR) button on the size row.
+              AppTextField(
+                label: l10n.itemsSizeBarcodeOptional,
+                controller: _barcodeCtrl,
+                keyboardType: TextInputType.text,
+              ),
             ],
           ),
         ),

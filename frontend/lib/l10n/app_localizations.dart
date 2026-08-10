@@ -2150,6 +2150,18 @@ abstract class AppLocalizations {
   /// **'Stock'**
   String get itemsSizeStock;
 
+  /// No description provided for @itemsSizeBarcodeOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Barcode (optional)'**
+  String get itemsSizeBarcodeOptional;
+
+  /// No description provided for @itemsSizeBarcodeEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Barcode — {label}'**
+  String itemsSizeBarcodeEditTitle(String label);
+
   /// No description provided for @itemsAddSize.
   ///
   /// In en, this message translates to:
