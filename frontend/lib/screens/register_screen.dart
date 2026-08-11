@@ -245,7 +245,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                         ...([
                           ('retail', l10n.businessTypeRetail,
                               Icons.shopping_bag_outlined),
-                          ('restaurant_with_tables',
+                          ('restaurant',
                               l10n.businessTypeRestaurantTables,
                               Icons.table_restaurant_outlined),
                         ].map((entry) => _buildTypeOption(

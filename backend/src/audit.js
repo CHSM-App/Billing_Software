@@ -355,6 +355,52 @@ async function logUserLogin(businessId, userId, userName) {
 }
 
 /**
+ * Record a successful login in the dedicated login_logs table, capturing the
+ * client IP address and user-agent (device / app identifier).
+ *
+ * This is separate from logUserLogin (which writes to the general audit_logs
+ * trail). Like the rest of this module it NEVER throws — a failed login-log
+ * write is logged and swallowed so it can't block the login itself.
+ *
+ * @param {object} opts
+ * @param {string}       opts.business_id
+ * @param {string}       opts.user_id
+ * @param {string|null}  opts.user_name
+ * @param {string|null}  opts.phone
+ * @param {string|null}  opts.ip_address
+ * @param {string|null}  opts.user_agent
+ */
+async function logLoginToTable(opts) {
+  const {
+    business_id,
+    user_id,
+    user_name = null,
+    phone = null,
+    ip_address = null,
+    user_agent = null,
+  } = opts;
+
+  try {
+    await poolConnect;
+    await pool.request()
+      .input('business_id', sql.UniqueIdentifier, business_id)
+      .input('user_id',     sql.UniqueIdentifier, user_id)
+      .input('user_name',   sql.NVarChar(200),    user_name)
+      .input('phone',       sql.NVarChar(20),     phone)
+      .input('ip_address',  sql.NVarChar(64),     ip_address ? String(ip_address).slice(0, 64) : null)
+      .input('user_agent',  sql.NVarChar(500),    user_agent ? String(user_agent).slice(0, 500) : null)
+      .query(`
+        INSERT INTO login_logs
+          (business_id, user_id, user_name, phone, ip_address, user_agent)
+        VALUES
+          (@business_id, @user_id, @user_name, @phone, @ip_address, @user_agent)
+      `);
+  } catch (err) {
+    logger.error({ err, user_id }, 'login_logs write failed');
+  }
+}
+
+/**
  * Log a failed login attempt.  entity_id is null (we may not know the user).
  */
 async function logLoginFailed(businessId, phone) {
@@ -459,6 +505,7 @@ module.exports = {
   logStaffDeleted,
   // Auth
   logUserLogin,
+  logLoginToTable,
   logLoginFailed,
   logUserLocked,
   // Business

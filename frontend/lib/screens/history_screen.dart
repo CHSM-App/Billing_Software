@@ -548,21 +548,23 @@ class _BillDetailDialog extends StatelessWidget {
             Navigator.pop(context);
             final labels = ReceiptLabels.from(
                 l10n, Localizations.localeOf(context).languageCode);
-            // Reprint a GST invoice with its GSTIN + address when the bill
-            // carries tax; otherwise the cached GSTIN is empty and it prints as
-            // a plain receipt (GST off).
+            // Address + FSSAI print whenever available. GSTIN prints only when
+            // the bill carries tax; otherwise it stays null and the receipt is a
+            // plain (non-GST) receipt as before.
+            final profile = await getGstProfile();
+            final addr = profile['business_address'] ?? '';
+            final fss = profile['fssai_number'] ?? '';
+            final String? address = addr.isNotEmpty ? addr : null;
+            final String? fssai = fss.isNotEmpty ? fss : null;
             String? gstin;
-            String? address;
             if (bill.taxAmount > 0) {
-              final gstProfile = await getGstProfile();
-              final g = gstProfile['gst_number'] ?? '';
-              final a = gstProfile['business_address'] ?? '';
+              final g = profile['gst_number'] ?? '';
               gstin = g.isNotEmpty ? g : null;
-              address = a.isNotEmpty ? a : null;
             }
             try {
               await PrinterService.instance.printBill(bill,
-                  businessAddress: address, businessGstin: gstin, labels: labels);
+                  businessAddress: address, businessGstin: gstin,
+                  businessFssai: fssai, labels: labels);
             } on PrinterException catch (e) {
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(

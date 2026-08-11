@@ -11,11 +11,14 @@ import '../services/notification_service.dart';
 import '../widgets/nav_item.dart';
 import '../widgets/bottom_nav_bar.dart';
 import '../widgets/connectivity_bar.dart';
+import '../features/splash/splash_loading_view.dart';
 import 'home_screen.dart';
 import 'items_screen.dart';
 import 'orders_screen.dart';
 import 'kitchen_screen.dart';
 import 'settings_screen.dart';
+import 'license_screen.dart';
+import 'login_screen.dart';
 import '../providers/open_drafts_provider.dart';
 import '../providers/credit_provider.dart';
 
@@ -29,16 +32,21 @@ class MainShell extends ConsumerStatefulWidget {
 }
 
 class _MainShellState extends ConsumerState<MainShell>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _index = 0;
   late final AnimationController _railAnimController;
   late final Animation<double> _railFadeAnim;
   StreamSubscription<String>? _realtimeSub;
+  bool _deviceCheckInFlight = false;
 
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
+    // Observe lifecycle so we can re-check the device-access policy when the app
+    // returns to the foreground — enforcing a restriction the admin applied
+    // while the app was backgrounded, without needing a full restart.
+    WidgetsBinding.instance.addObserver(this);
     _railAnimController = AnimationController(
       duration: const Duration(milliseconds: 400),
       vsync: this,
@@ -94,7 +102,47 @@ class _MainShellState extends ConsumerState<MainShell>
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _recheckDeviceAccess();
+    }
+  }
+
+  /// Re-evaluate the device-access policy when the app resumes. Fetches the
+  /// latest license (which refreshes the cached device policy) and, if this
+  /// device is now forbidden, routes to the block screen. Network-free fallback:
+  /// if the fetch can't reach the server, the offline evaluation still enforces
+  /// the LAST KNOWN policy from cache. Guarded so overlapping resumes don't
+  /// stack navigations.
+  Future<void> _recheckDeviceAccess() async {
+    if (_deviceCheckInFlight) return;
+    _deviceCheckInFlight = true;
+    try {
+      final status = await LicenseService.instance.check(isOnline: true);
+      if (!mounted) return;
+      if (status.state == LicenseState.blockedDevice) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => LicenseBlockedScreen(
+              reason: LicenseState.blockedDevice,
+              onUnblocked: () => Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              ),
+            ),
+          ),
+          (_) => false,
+        );
+      }
+    } catch (_) {
+      // Never let a resume-time check crash the app; the next launch re-checks.
+    } finally {
+      _deviceCheckInFlight = false;
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _realtimeSub?.cancel();
     _railAnimController.dispose();
     super.dispose();
@@ -154,10 +202,12 @@ class _MainShellState extends ConsumerState<MainShell>
     final sessionAsync = ref.watch(sessionProvider);
 
     return sessionAsync.when(
-      loading: () => const Scaffold(
-          body: Center(child: CircularProgressIndicator())),
-      error: (_, __) => const Scaffold(
-          body: Center(child: CircularProgressIndicator())),
+      // Continue the branded splash visual instead of a bare spinner. In
+      // practice sessionProvider is already resolved by the _AppEntry bootstrap
+      // before MainShell mounts, so this rarely shows — but when it does it
+      // stays visually continuous with the splash.
+      loading: () => const SplashLoadingView(),
+      error: (_, __) => const SplashLoadingView(),
       data: (session) {
         ref.listen<bool>(connectivityProvider, (prev, next) {
           if (prev == false && next == true) {

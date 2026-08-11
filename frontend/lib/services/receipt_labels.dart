@@ -20,6 +20,9 @@ class ReceiptLabels {
   final String cgst;
   final String sgst;
   final String gstin;
+  // FSSAI is a proper acronym — identical across all supported languages, so it
+  // isn't routed through the ARB files. Defaults to 'FSSAI:'.
+  final String fssai;
   final String discount;
   final String total;
   final String payment;
@@ -43,6 +46,7 @@ class ReceiptLabels {
     required this.cgst,
     required this.sgst,
     required this.gstin,
+    this.fssai = 'FSSAI:',
     required this.discount,
     required this.total,
     required this.payment,

@@ -7,6 +7,7 @@ import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/skeletons.dart';
 import 'home_screen.dart';
 
 /// The "Open Orders" queue: table-less draft bills a server saved from the
@@ -70,7 +71,7 @@ class OpenDraftsScreen extends ConsumerWidget {
     final draftsAsync = ref.watch(openDraftsProvider);
 
     return draftsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const OrdersListSkeleton(),
       error: (e, _) => AppErrorWidget(
         error: e,
         onRetry: () => ref.invalidate(openDraftsProvider),

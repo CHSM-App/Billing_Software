@@ -24,7 +24,7 @@ router.get('/:token', async (req, res) => {
                t.table_number,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
-               bs.gst_number, bs.logo_url, bs.bill_footer_note,
+               bs.gst_number, bs.fssai_number, bs.logo_url, bs.bill_footer_note,
                bs.gst_enabled, bs.default_sac_code
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
@@ -223,6 +223,7 @@ router.get('/:token', async (req, res) => {
       ${bill.shop_phone && bill.shop_email ? '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}
       ${bill.shop_email ? '<a href="mailto:' + esc(bill.shop_email) + '">' + esc(bill.shop_email) + '</a>' : ''}
       ${bill.gst_number ? '<br/>GSTIN: ' + esc(bill.gst_number) : ''}
+      ${bill.fssai_number ? '<br/>FSSAI: ' + esc(bill.fssai_number) : ''}
     </div>
   </div>
 

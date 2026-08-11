@@ -59,6 +59,27 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       return res.status(409).json({ error: 'This phone number is already registered.' });
     }
 
+    // Enforce the per-business staff cap (subscriptions.max_staff). Owners are
+    // not staff and never count. A missing subscription row or a NULL max_staff
+    // is treated as unlimited so a misconfigured account can never be locked out
+    // of adding staff. Checked before the bcrypt hash so a rejected add is cheap.
+    const capResult = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query(`
+        SELECT
+          (SELECT COUNT(*) FROM users
+             WHERE business_id = @business_id
+               AND role IN (${MANAGED_ROLES_SQL})) AS staff_count,
+          (SELECT max_staff FROM subscriptions
+             WHERE business_id = @business_id) AS max_staff
+      `);
+    const { staff_count, max_staff } = capResult.recordset[0];
+    if (max_staff != null && staff_count >= max_staff) {
+      return res.status(409).json({
+        error: `Staff limit reached (${max_staff} max). Contact support to add more.`,
+      });
+    }
+
     const pinHash = await bcrypt.hash(pin, 10);
 
     const result = await pool.request()

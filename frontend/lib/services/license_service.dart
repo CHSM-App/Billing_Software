@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../api.dart';
 import '../storage.dart';
+import '../utils/platform_utils.dart' show isDesktopDevice;
 
 // ---------------------------------------------------------------------------
 // LicenseStatus — result of a license check
@@ -18,6 +20,10 @@ enum LicenseState {
   blockedSubscription,
   /// No subscription row yet (pending review) — hard block
   blockedPending,
+  /// This business isn't allowed to use the app on the current device type
+  /// (mobile vs desktop, per the subscription's allow_mobile/allow_desktop) —
+  /// hard block. Going online can't fix it; it's an entitlement mismatch.
+  blockedDevice,
 }
 
 class LicenseStatus {
@@ -59,6 +65,8 @@ class LicenseService {
   static const _keyMaxOfflineDays   = 'lic_max_offline_days';
   static const _keyGracePeriodDays  = 'lic_grace_period_days';
   static const _keyVerifiedAt       = 'lic_verified_at';
+  static const _keyAllowMobile      = 'lic_allow_mobile';
+  static const _keyAllowDesktop     = 'lic_allow_desktop';
 
   // -------------------------------------------------------------------------
   // check() — call on every app startup after login
@@ -95,6 +103,11 @@ class LicenseService {
       // ignore: avoid_print
       print('[LICENSE] server response: $data');
 
+      // Device-access flags. Absent (older backend) → default allowed so we
+      // never block on a field the server didn't send.
+      final allowMobile  = data['allow_mobile']  as bool? ?? true;
+      final allowDesktop = data['allow_desktop'] as bool? ?? true;
+
       // Save to secure storage
       await Future.wait([
         _secure.write(key: _keyStatus,          value: data['status'] as String),
@@ -102,6 +115,8 @@ class LicenseService {
         _secure.write(key: _keyMaxOfflineDays,   value: '${data['max_offline_days']}'),
         _secure.write(key: _keyGracePeriodDays,  value: '${data['grace_period_days']}'),
         _secure.write(key: _keyVerifiedAt,       value: data['verified_at'] as String),
+        _secure.write(key: _keyAllowMobile,      value: allowMobile  ? '1' : '0'),
+        _secure.write(key: _keyAllowDesktop,     value: allowDesktop ? '1' : '0'),
       ]);
 
       final result = _evaluate(
@@ -110,6 +125,8 @@ class LicenseService {
         maxOfflineDays:  data['max_offline_days'] as int,
         gracePeriodDays: data['grace_period_days'] as int,
         verifiedAt:      DateTime.parse(data['verified_at'] as String),
+        allowMobile:     allowMobile,
+        allowDesktop:    allowDesktop,
       );
 
       // If server says blocked, clear local cache so offline fallback also blocks
@@ -190,6 +207,8 @@ class LicenseService {
       _secure.read(key: _keyMaxOfflineDays),
       _secure.read(key: _keyGracePeriodDays),
       _secure.read(key: _keyVerifiedAt),
+      _secure.read(key: _keyAllowMobile),
+      _secure.read(key: _keyAllowDesktop),
     ]);
 
     final status          = values[0];
@@ -197,6 +216,17 @@ class LicenseService {
     final maxOfflineDays  = int.tryParse(values[2] ?? '') ?? 30;
     final gracePeriodDays = int.tryParse(values[3] ?? '') ?? 5;
     final verifiedAtStr   = values[4];
+    // Absent cache (old install, never fetched) → default allowed, so a missing
+    // value never locks the user out of their own device.
+    final allowMobile     = values[5] != '0';
+    final allowDesktop    = values[6] != '0';
+
+    // Device-access is enforced FIRST — before the "no license cache" bailout —
+    // so a forbidden device is blocked even when we're offline and the rest of
+    // the license cache is missing. The device policy is a local fact once known.
+    if (_deviceForbidden(allowMobile: allowMobile, allowDesktop: allowDesktop)) {
+      return const LicenseStatus(LicenseState.blockedDevice);
+    }
 
     // No cached license at all — never verified online
     if (status == null || expiresAtStr == null || verifiedAtStr == null) {
@@ -209,6 +239,8 @@ class LicenseService {
       maxOfflineDays:  maxOfflineDays,
       gracePeriodDays: gracePeriodDays,
       verifiedAt:      DateTime.parse(verifiedAtStr),
+      allowMobile:     allowMobile,
+      allowDesktop:    allowDesktop,
     );
   }
 
@@ -218,7 +250,21 @@ class LicenseService {
     required int maxOfflineDays,
     required int gracePeriodDays,
     required DateTime verifiedAt,
+    bool allowMobile = true,
+    bool allowDesktop = true,
   }) {
+    // Device-access entitlement — checked first because it's independent of the
+    // subscription's time/status. "Desktop" = Windows native or web; everything
+    // else (Android/iOS) is mobile. A forbidden device is a hard block that
+    // going online can't fix.
+    final onDesktop = kIsWeb || isDesktopDevice;
+    if (onDesktop && !allowDesktop) {
+      return const LicenseStatus(LicenseState.blockedDevice);
+    }
+    if (!onDesktop && !allowMobile) {
+      return const LicenseStatus(LicenseState.blockedDevice);
+    }
+
     final now = DateTime.now().toUtc();
 
     // Subscription expired or suspended
@@ -254,6 +300,55 @@ class LicenseService {
     return const LicenseStatus(LicenseState.blockedOffline);
   }
 
+  /// True when the current build is running on a "desktop" device (Windows
+  /// native or web). Android/iOS report false. This is a purely local fact —
+  /// it never depends on the network.
+  static bool get isDesktop => kIsWeb || isDesktopDevice;
+
+  /// Whether the current device type is blocked given a device policy.
+  /// Returns true when this device is NOT allowed.
+  static bool _deviceForbidden({required bool allowMobile, required bool allowDesktop}) {
+    final onDesktop = isDesktop;
+    if (onDesktop && !allowDesktop) return true;
+    if (!onDesktop && !allowMobile) return true;
+    return false;
+  }
+
+  /// Persist the device policy (called from login and every /license fetch) so
+  /// it survives offline relaunches and mid-session resume checks. `null` means
+  /// "unknown" and is stored as allowed.
+  Future<void> cacheDevicePolicy({bool? allowMobile, bool? allowDesktop}) async {
+    await Future.wait([
+      _secure.write(key: _keyAllowMobile,  value: (allowMobile  ?? true) ? '1' : '0'),
+      _secure.write(key: _keyAllowDesktop, value: (allowDesktop ?? true) ? '1' : '0'),
+    ]);
+  }
+
+  /// Immediate, network-free device-access check against an explicit policy
+  /// (e.g. the flags returned in the login response). Also caches the policy.
+  /// Returns [LicenseState.blockedDevice] if this device isn't allowed, else
+  /// null (caller proceeds with the normal license flow).
+  Future<LicenseState?> checkDevicePolicy({bool? allowMobile, bool? allowDesktop}) async {
+    await cacheDevicePolicy(allowMobile: allowMobile, allowDesktop: allowDesktop);
+    final forbidden = _deviceForbidden(
+      allowMobile: allowMobile ?? true,
+      allowDesktop: allowDesktop ?? true,
+    );
+    // ignore: avoid_print
+    print('[LICENSE] device check — isDesktop=$isDesktop '
+        'allowMobile=$allowMobile allowDesktop=$allowDesktop forbidden=$forbidden');
+    return forbidden ? LicenseState.blockedDevice : null;
+  }
+
+  /// Network-free re-check of the LAST KNOWN device policy from cache. Used on
+  /// app resume to enforce a policy change mid-session. If no policy was ever
+  /// cached, treats the device as allowed (we can't lock out before we knew).
+  Future<bool> isDeviceBlockedByCache() async {
+    final m = await _secure.read(key: _keyAllowMobile);
+    final d = await _secure.read(key: _keyAllowDesktop);
+    return _deviceForbidden(allowMobile: m != '0', allowDesktop: d != '0');
+  }
+
   /// Clear cached license (call on logout)
   Future<void> clear() async {
     await Future.wait([
@@ -262,6 +357,8 @@ class LicenseService {
       _secure.delete(key: _keyMaxOfflineDays),
       _secure.delete(key: _keyGracePeriodDays),
       _secure.delete(key: _keyVerifiedAt),
+      _secure.delete(key: _keyAllowMobile),
+      _secure.delete(key: _keyAllowDesktop),
     ]);
   }
 }

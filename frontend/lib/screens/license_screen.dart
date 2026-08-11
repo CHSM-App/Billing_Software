@@ -108,24 +108,31 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
     final l10n = context.l10n;
     final isOfflineBlock = widget.reason == LicenseState.blockedOffline;
     final isPending = widget.reason == LicenseState.blockedPending;
+    final isDeviceBlock = widget.reason == LicenseState.blockedDevice;
 
     final icon = isOfflineBlock
         ? Icons.wifi_off_rounded
         : isPending
             ? Icons.hourglass_top_rounded
-            : Icons.lock_outline_rounded;
+            : isDeviceBlock
+                ? Icons.devices_other_rounded
+                : Icons.lock_outline_rounded;
 
     final title = isOfflineBlock
         ? l10n.licenseTitleOffline
         : isPending
             ? l10n.licenseTitlePending
-            : l10n.licenseTitleExpired;
+            : isDeviceBlock
+                ? l10n.licenseTitleDevice
+                : l10n.licenseTitleExpired;
 
     final subtitle = isOfflineBlock
         ? l10n.licenseSubtitleOffline
         : isPending
             ? l10n.licenseSubtitlePending
-            : l10n.licenseSubtitleExpired;
+            : isDeviceBlock
+                ? l10n.licenseSubtitleDevice
+                : l10n.licenseSubtitleExpired;
 
     return Scaffold(
       backgroundColor: AppColors.background,

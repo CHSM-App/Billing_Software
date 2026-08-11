@@ -3494,6 +3494,24 @@ abstract class AppLocalizations {
   /// **'Invalid PAN format'**
   String get businessProfilePanInvalid;
 
+  /// No description provided for @businessProfileFssai.
+  ///
+  /// In en, this message translates to:
+  /// **'FSSAI No. (optional)'**
+  String get businessProfileFssai;
+
+  /// No description provided for @businessProfileFssaiHint.
+  ///
+  /// In en, this message translates to:
+  /// **'14-digit license number'**
+  String get businessProfileFssaiHint;
+
+  /// No description provided for @businessProfileFssaiInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'FSSAI number must be exactly 14 digits'**
+  String get businessProfileFssaiInvalid;
+
   /// No description provided for @businessProfileDefaultSac.
   ///
   /// In en, this message translates to:
@@ -3733,6 +3751,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your subscription has expired or been suspended.\nContact support to renew.'**
   String get licenseSubtitleExpired;
+
+  /// No description provided for @licenseTitleDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'Device Not Allowed'**
+  String get licenseTitleDevice;
+
+  /// No description provided for @licenseSubtitleDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'Your account isn\'t enabled for this type of device.\nContact support to use the app here.'**
+  String get licenseSubtitleDevice;
 
   /// No description provided for @licenseChecking.
   ///

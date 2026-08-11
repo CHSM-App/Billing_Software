@@ -7,6 +7,7 @@ import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/skeletons.dart';
 import '../services/notification_service.dart';
 
 /// Kitchen Display for restaurants. Shows active orders (draft bills) with each
@@ -152,7 +153,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
 
   Widget _buildBody(AppLocalizations l10n) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const KitchenSkeleton();
     }
     if (_error != null && _orders.isEmpty) {
       return ListView(

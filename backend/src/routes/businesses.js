@@ -21,6 +21,8 @@ const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
 // Pincode: 6 digits
 const PIN_RE = /^[0-9]{6}$/;
+// FSSAI license number: exactly 14 digits
+const FSSAI_RE = /^[0-9]{14}$/;
 
 // ---------------------------------------------------------------------------
 // GET /api/businesses/profile
@@ -37,7 +39,7 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
           b.id, b.name, b.business_type, b.address, b.phone,
           b.inventory_enabled, b.has_barcode_scanner,
           b.self_order_enabled,
-          b.gst_number, b.pan_number, b.email, b.website,
+          b.gst_number, b.pan_number, b.fssai_number, b.email, b.website,
           b.city, b.state, b.pincode, b.logo_url,
           b.bill_prefix, b.bill_footer_note,
           b.gst_enabled, b.default_sac_code,
@@ -82,6 +84,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     pincode,
     gst_number,
     pan_number,
+    fssai_number,
     logo_url,
     bill_prefix,
     bill_footer_note,
@@ -114,6 +117,11 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
   if (pan_number !== undefined && pan_number !== null && pan_number !== '') {
     if (!PAN_RE.test(pan_number)) {
       return res.status(400).json({ error: 'Invalid PAN format (e.g. ABCDE1234F)' });
+    }
+  }
+  if (fssai_number !== undefined && fssai_number !== null && fssai_number !== '') {
+    if (!FSSAI_RE.test(fssai_number)) {
+      return res.status(400).json({ error: 'Invalid FSSAI number — must be exactly 14 digits' });
     }
   }
   if (pincode !== undefined && pincode !== null && pincode !== '') {
@@ -149,6 +157,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     pincode,
     gst_number,
     pan_number,
+    fssai_number,
     logo_url,
     bill_prefix,
     bill_footer_note,
@@ -173,7 +182,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       .query(`
         SELECT
           name, address, phone, email, website,
-          city, state, pincode, gst_number, pan_number,
+          city, state, pincode, gst_number, pan_number, fssai_number,
           logo_url, bill_prefix, bill_footer_note,
           gst_enabled, default_sac_code
         FROM businesses WHERE id = @id
@@ -231,7 +240,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           id, name, business_type, address, phone,
           inventory_enabled, has_barcode_scanner,
           self_order_enabled,
-          gst_number, pan_number, email, website,
+          gst_number, pan_number, fssai_number, email, website,
           city, state, pincode, logo_url,
           bill_prefix, bill_footer_note,
           gst_enabled, default_sac_code,
@@ -278,6 +287,7 @@ function _formatBusiness(row) {
     self_order_enabled:  !!row.self_order_enabled,
     gst_number:          row.gst_number ?? null,
     pan_number:          row.pan_number ?? null,
+    fssai_number:        row.fssai_number ?? null,
     email:               row.email ?? null,
     website:             row.website ?? null,
     city:                row.city ?? null,
@@ -305,6 +315,7 @@ function _sqlTypeFor(key) {
     pincode:          sql.NVarChar(10),
     gst_number:       sql.NVarChar(15),
     pan_number:       sql.NVarChar(10),
+    fssai_number:     sql.NVarChar(20),
     logo_url:         sql.NVarChar(1000),
     bill_prefix:      sql.NVarChar(10),
     bill_footer_note: sql.NVarChar(500),

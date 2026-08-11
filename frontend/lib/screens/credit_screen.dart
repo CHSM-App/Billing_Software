@@ -6,6 +6,7 @@ import '../providers/credit_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/skeletons.dart';
 import 'credit_customer_bills_screen.dart';
 
 /// The Credit (udhaari) tab: a list of customers who owe money on credit bills.
@@ -56,7 +57,7 @@ class CreditScreen extends ConsumerWidget {
     final customersAsync = ref.watch(creditCustomersProvider);
 
     return customersAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const OrdersListSkeleton(),
       error: (e, _) => AppErrorWidget(
         error: e,
         onRetry: () => ref.invalidate(creditCustomersProvider),

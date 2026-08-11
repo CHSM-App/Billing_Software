@@ -254,6 +254,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         gstNumber: business['gst_number'] as String?,
         businessAddress: business['address'] as String?,
         defaultSacCode: business['default_sac_code'] as String?,
+        fssaiNumber: business['fssai_number'] as String?,
       );
       NotificationService.instance.init();
       await ref.read(sessionProvider.notifier).refresh();
@@ -266,8 +267,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       ref.invalidate(cartProvider);
       if (!mounted) return;
 
-      // License check after login — clear stale cache first so server is always authoritative
+      // Device-access gate FIRST, using the policy in the login response itself.
+      // This is authoritative and network-free, so it works even if the later
+      // /health or /license calls can't reach the server (flaky mobile network).
+      final deviceState = await LicenseService.instance.checkDevicePolicy(
+        allowMobile: business['allow_mobile'] as bool?,
+        allowDesktop: business['allow_desktop'] as bool?,
+      );
+      if (!mounted) return;
+      if (deviceState == LicenseState.blockedDevice) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => LicenseBlockedScreen(
+              reason: LicenseState.blockedDevice,
+              onUnblocked: () => Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const LoginScreen(),
+                ),
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+
+      // License check after login — clear stale cache first so server is always
+      // authoritative. clear() wipes the device-policy cache too, so re-cache it
+      // from the login response right after (the /license fetch will refresh it).
       await LicenseService.instance.clear();
+      await LicenseService.instance.cacheDevicePolicy(
+        allowMobile: business['allow_mobile'] as bool?,
+        allowDesktop: business['allow_desktop'] as bool?,
+      );
       final licenseStatus = await LicenseService.instance.check(isOnline: true);
       if (!mounted) return;
 
@@ -284,7 +317,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
       if (licenseStatus.state == LicenseState.blockedOffline ||
           licenseStatus.state == LicenseState.blockedSubscription ||
-          licenseStatus.state == LicenseState.blockedPending) {
+          licenseStatus.state == LicenseState.blockedPending ||
+          licenseStatus.state == LicenseState.blockedDevice) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(

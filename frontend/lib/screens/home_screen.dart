@@ -14,6 +14,7 @@ import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/skeletons.dart';
 import '../services/printer_service.dart';
 import '../services/receipt_labels.dart';
 import '../services/offline_service.dart';
@@ -1218,16 +1219,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final l10n = context.l10n;
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
-    // Only print GST invoice details (GSTIN + address) when GST is enabled.
-    // gstin stays null when off, so the receipt is byte-for-byte as before.
+    // Address and FSSAI print whenever available, regardless of GST. GSTIN
+    // remains gated on GST being enabled (gstin stays null when off, so a
+    // non-GST receipt is byte-for-byte as before).
+    final profile = await getGstProfile();
+    final addr = profile['business_address'] ?? '';
+    final fss = profile['fssai_number'] ?? '';
+    final String? address = addr.isNotEmpty ? addr : null;
+    final String? fssai = fss.isNotEmpty ? fss : null;
     String? gstin;
-    String? address;
     if (ref.read(gstEnabledProvider)) {
-      final gstProfile = await getGstProfile();
-      final g = gstProfile['gst_number'] ?? '';
-      final a = gstProfile['business_address'] ?? '';
+      final g = profile['gst_number'] ?? '';
       gstin = g.isNotEmpty ? g : null;
-      address = a.isNotEmpty ? a : null;
     }
     // Consume any previous credit bills that were settled with this bill —
     // each prints as its OWN receipt (never merged), one tap prints them all.
@@ -1240,6 +1243,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           businessName: businessName,
           businessAddress: address,
           businessGstin: gstin,
+          businessFssai: fssai,
           labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {
@@ -1871,7 +1875,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ];
 
       return itemsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const BillingSkeleton(),
         error: (e, _) => NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider)),
         data: (allItems) {
           if (allItems.isEmpty && !ref.read(connectivityProvider)) {

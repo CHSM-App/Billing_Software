@@ -21,6 +21,8 @@ router.get('/', requireAuth, async (req, res) => {
         expires_at,
         max_offline_days,
         grace_period_days,
+        allow_mobile,
+        allow_desktop,
         updated_at
       FROM subscriptions
       WHERE business_id = @business_id
@@ -56,6 +58,8 @@ router.get('/', requireAuth, async (req, res) => {
       expires_at: sub.expires_at,
       max_offline_days: sub.max_offline_days,
       grace_period_days: sub.grace_period_days,
+      allow_mobile: !!sub.allow_mobile,
+      allow_desktop: !!sub.allow_desktop,
       verified_at: new Date().toISOString()
     });
   } catch (err) {
@@ -81,7 +85,10 @@ router.post('/admin/activate', async (req, res) => {
     expires_at,
     max_offline_days = 30,
     grace_period_days = 5,
-    status = 'active'
+    status = 'active',
+    max_staff = 10,
+    allow_mobile = true,
+    allow_desktop = true
   } = req.body;
 
   if (!business_id || !expires_at) {
@@ -101,6 +108,9 @@ router.post('/admin/activate', async (req, res) => {
     request.input('expires_at', sql.DateTime2, new Date(expires_at));
     request.input('max_offline_days', sql.Int, max_offline_days);
     request.input('grace_period_days', sql.Int, grace_period_days);
+    request.input('max_staff', sql.Int, max_staff);
+    request.input('allow_mobile', sql.Bit, allow_mobile ? 1 : 0);
+    request.input('allow_desktop', sql.Bit, allow_desktop ? 1 : 0);
 
     // Upsert subscription — insert if not exists, update if exists
     await request.query(`
@@ -113,10 +123,15 @@ router.post('/admin/activate', async (req, res) => {
           expires_at        = @expires_at,
           max_offline_days  = @max_offline_days,
           grace_period_days = @grace_period_days,
+          max_staff         = @max_staff,
+          allow_mobile      = @allow_mobile,
+          allow_desktop     = @allow_desktop,
           updated_at        = GETUTCDATE()
       WHEN NOT MATCHED THEN
-        INSERT (business_id, status, expires_at, max_offline_days, grace_period_days)
-        VALUES (@business_id, @status, @expires_at, @max_offline_days, @grace_period_days);
+        INSERT (business_id, status, expires_at, max_offline_days, grace_period_days,
+                max_staff, allow_mobile, allow_desktop)
+        VALUES (@business_id, @status, @expires_at, @max_offline_days, @grace_period_days,
+                @max_staff, @allow_mobile, @allow_desktop);
     `);
 
     // Auto-verify the business when activating subscription

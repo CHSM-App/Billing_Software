@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/update/update_provider.dart';
+import '../../core/startup/startup_router.dart';
 import '../update/vittam_update_dialog.dart';
 import '../../l10n/l10n_ext.dart';
 import '../../theme/app_theme.dart';
+import '../../screens/main_shell.dart';
 
 class VittamSplashScreen extends ConsumerStatefulWidget {
   const VittamSplashScreen({super.key});
@@ -54,7 +56,22 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
   }
 
   Future<void> _run() async {
-    // Wait minimum 2 seconds then run the update gate.
+    // Kick off the real app bootstrap (offline cleanup, session, license) NOW,
+    // in parallel with the minimum splash time — so all the startup work
+    // finishes DURING this single splash instead of behind a second one.
+    final destinationFuture = resolveStartupDestination(
+      ref,
+      onLicenseUnblocked: (licenseStatus) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MainShell(licenseStatus: licenseStatus),
+          ),
+        );
+      },
+    );
+
+    // Hold the splash for at least 2 seconds for brand presence.
     await Future.delayed(_minSplashDuration);
     if (!mounted) return;
 
@@ -64,7 +81,14 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
     final proceed = await _remoteConfigGate();
     if (!proceed) return; // forced update — stay on the gate
 
-    if (mounted) Navigator.pushReplacementNamed(context, '/home');
+    // Wait for the bootstrap to finish (usually already done by now), then
+    // navigate straight to the final screen — no intermediate splash/loader.
+    final destination = await destinationFuture;
+    if (!mounted) return;
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => destination),
+    );
   }
 
   /// Reads the RC-driven update decision and shows [VittamUpdateDialog].

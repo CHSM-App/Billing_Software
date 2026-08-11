@@ -199,17 +199,21 @@ class PrinterService {
   //   - Printer IS ESC/POS capable but ESC @ (reset) causes blank output
   //   - Plain ASCII bytes + 0x0A (LF) line feeds work perfectly
   //   - No cut command needed — paper tears manually
-  //   - 32 chars fits safely on 58mm paper; 42 chars on 80mm
+  //   - The app supports 80mm printers only. An 80mm head @ 203dpi prints
+  //     576 dots wide; Font A is 12 dots/char → up to 48 characters per line.
+  //     _cols is set slightly below the max (46) to leave a small, even margin
+  //     on both edges; the four item columns MUST sum to _cols so rows stay
+  //     right-aligned to the content block.
   //
-  // Column layout (32 chars for 58mm safety):
-  //   Name(16) Qty(4) Price(6) Total(6) = 32
+  // Column layout (46 chars for 80mm):
+  //   Name(22) Qty(4) Price(10) Total(10) = 46
   // -------------------------------------------------------------------------
 
-  static const int _cols = 42;
-  static const int _nameCols = 20;
+  static const int _cols = 46;
+  static const int _nameCols = 22;
   static const int _qtyCols = 4;
-  static const int _priceCols = 9;
-  static const int _totalCols = 9;
+  static const int _priceCols = 10;
+  static const int _totalCols = 10;
 
   /// Build the receipt as a list of pre-formatted, column-aligned lines.
   /// Shared by both the ASCII text path and the raster path so the layout is
@@ -219,18 +223,23 @@ class PrinterService {
       String? businessPhone,
       String? businessAddress,
       String? businessGstin,
+      String? businessFssai,
       ReceiptLabels? labels}) {
     final grandTotal = bill.total - bill.discountAmount;
     // GSTIN is passed only when GST is enabled — its presence gates the
     // GSTIN line + the CGST/SGST split. Without it the receipt is as before.
     final gst = businessGstin != null && businessGstin.isNotEmpty;
+    final fssai = businessFssai != null && businessFssai.isNotEmpty;
     final lines = <String>[];
 
-    // Header
+    // Header — order: name, address, phone, GSTIN, FSSAI. Only the business
+    // name is always shown; every other line prints only when available.
     lines.add(
         _centre(businessName ?? labels?.defaultBusiness ?? 'BUSINESS', _cols));
     if (businessAddress != null && businessAddress.isNotEmpty) {
-      lines.add(_centre(businessAddress, _cols));
+      // Address may be multi-line and/or longer than the paper width — wrap and
+      // centre each resulting line (plain _centre would truncate + left-align).
+      lines.addAll(_centreMultiline(businessAddress, _cols));
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
       lines.add(
@@ -238,6 +247,9 @@ class PrinterService {
     }
     if (gst) {
       lines.add(_centre('${labels?.gstin ?? 'GSTIN:'} $businessGstin', _cols));
+    }
+    if (fssai) {
+      lines.add(_centre('${labels?.fssai ?? 'FSSAI:'} $businessFssai', _cols));
     }
     lines.add('-' * _cols);
 
@@ -322,17 +334,26 @@ class PrinterService {
       String? businessPhone,
       String? businessAddress,
       String? businessGstin,
+      String? businessFssai,
       ReceiptLabels? labels}) {
     final grandTotal = bill.total - bill.discountAmount;
     final gst = businessGstin != null && businessGstin.isNotEmpty;
+    final fssai = businessFssai != null && businessFssai.isNotEmpty;
     final rows = <ReceiptRow>[];
 
-    // Header
+    // Header — order: name, address, phone, GSTIN, FSSAI. Only the business
+    // name is always shown; every other line prints only when available.
     rows.add(ReceiptRow.center(
         businessName ?? labels?.defaultBusiness ?? 'BUSINESS',
         size: 34, bold: true));
     if (businessAddress != null && businessAddress.isNotEmpty) {
-      rows.add(ReceiptRow.center(businessAddress, size: 26));
+      // Split a multi-line/CRLF address into separate centred rows so each
+      // physical line is centred (a single row with an embedded newline would
+      // left-align the wrapped part). Raw (unpadded) lines — ReceiptRow.center
+      // handles the centring for the raster path.
+      for (final l in _wrapLines(businessAddress, _cols)) {
+        rows.add(ReceiptRow.center(l, size: 26));
+      }
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
       rows.add(ReceiptRow.center(
@@ -341,6 +362,10 @@ class PrinterService {
     if (gst) {
       rows.add(ReceiptRow.center(
           '${labels?.gstin ?? 'GSTIN:'} $businessGstin', size: 26));
+    }
+    if (fssai) {
+      rows.add(ReceiptRow.center(
+          '${labels?.fssai ?? 'FSSAI:'} $businessFssai', size: 26));
     }
     rows.add(ReceiptRow.rule());
 
@@ -476,6 +501,7 @@ class PrinterService {
       String? businessPhone,
       String? businessAddress,
       String? businessGstin,
+      String? businessFssai,
       ReceiptLabels? labels}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
@@ -485,6 +511,7 @@ class PrinterService {
         businessPhone: businessPhone,
         businessAddress: businessAddress,
         businessGstin: businessGstin,
+        businessFssai: businessFssai,
         labels: labels);
 
     if (_hasNonAscii(lines)) {
@@ -498,6 +525,7 @@ class PrinterService {
           businessPhone: businessPhone,
           businessAddress: businessAddress,
           businessGstin: businessGstin,
+          businessFssai: businessFssai,
           labels: labels);
       final raster = await RasterLab.rowsToReceiptRaster(rows);
       if (_isWindows) {
@@ -520,6 +548,7 @@ class PrinterService {
       String? businessPhone,
       String? businessAddress,
       String? businessGstin,
+      String? businessFssai,
       ReceiptLabels? labels}) async {
     for (var i = 0; i < bills.length; i++) {
       await printBill(bills[i],
@@ -527,6 +556,7 @@ class PrinterService {
           businessPhone: businessPhone,
           businessAddress: businessAddress,
           businessGstin: businessGstin,
+          businessFssai: businessFssai,
           labels: labels);
       // Let the printer finish and the SPP link settle before the next job.
       if (i < bills.length - 1) {
@@ -793,8 +823,40 @@ class PrinterService {
     return ' ' * pad + text;
   }
 
-  /// 4-column item row for 32-char receipt
-  /// Name(16) Qty(4) Price(6) Total(6)
+  /// Normalise CRLF/CR to LF, split into logical lines, and word-wrap each to
+  /// [width]. Returns the raw (unpadded) lines. Used for the business address,
+  /// which can be multi-line (e.g. "Street\r\nArea, City") and exceed one line.
+  static List<String> _wrapLines(String text, int width) {
+    final out = <String>[];
+    for (final rawLine
+        in text.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')) {
+      final line = rawLine.trim();
+      if (line.isEmpty) continue;
+      final words = line.split(RegExp(r'\s+'));
+      var current = '';
+      for (final w in words) {
+        if (current.isEmpty) {
+          current = w;
+        } else if ((current.length + 1 + w.length) <= width) {
+          current = '$current $w';
+        } else {
+          out.add(current);
+          current = w;
+        }
+      }
+      if (current.isNotEmpty) out.add(current);
+    }
+    return out;
+  }
+
+  /// Like [_wrapLines] but each line is space-padded so it centres on the
+  /// ASCII text path (which has no printer-side alignment). Plain [_centre]
+  /// would truncate a too-long address and lose the centring entirely.
+  static List<String> _centreMultiline(String text, int width) =>
+      _wrapLines(text, width).map((l) => _centre(l, width)).toList();
+
+  /// 4-column item row for the 46-char (80mm) receipt.
+  /// Name(22) Qty(4) Price(10) Total(10)
   static String _itemRow(String name, String qty, String price, String total) {
     final n = name.padRight(_nameCols).substring(0, _nameCols);
     final q = qty.padLeft(_qtyCols);
@@ -803,7 +865,7 @@ class PrinterService {
     return '$n$q$p$t';
   }
 
-  /// 2-column row: label left, value right (32-char)
+  /// 2-column row: label left, value right (46-char, 80mm)
   static String _twoCol(String label, String value) =>
       _twoColN(label, value, _cols);
 

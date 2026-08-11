@@ -1895,6 +1895,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get businessProfilePanInvalid => 'Invalid PAN format';
 
   @override
+  String get businessProfileFssai => 'FSSAI No. (optional)';
+
+  @override
+  String get businessProfileFssaiHint => '14-digit license number';
+
+  @override
+  String get businessProfileFssaiInvalid =>
+      'FSSAI number must be exactly 14 digits';
+
+  @override
   String get businessProfileDefaultSac => 'Default HSN/SAC (optional)';
 
   @override
@@ -2026,6 +2036,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get licenseSubtitleExpired =>
       'Your subscription has expired or been suspended.\nContact support to renew.';
+
+  @override
+  String get licenseTitleDevice => 'Device Not Allowed';
+
+  @override
+  String get licenseSubtitleDevice =>
+      'Your account isn\'t enabled for this type of device.\nContact support to use the app here.';
 
   @override
   String get licenseChecking => 'Checking…';

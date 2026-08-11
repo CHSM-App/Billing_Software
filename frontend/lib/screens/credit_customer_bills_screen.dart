@@ -168,15 +168,17 @@ class _CreditCustomerBillsScreenState
     }
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
-    // GSTIN + address only when GST is enabled (else null → receipt as before).
+    // Address + FSSAI print whenever available; GSTIN only when GST is enabled
+    // (else gstin stays null → non-GST receipt is byte-for-byte as before).
+    final profile = await getGstProfile();
+    final addr = profile['business_address'] ?? '';
+    final fss = profile['fssai_number'] ?? '';
+    final String? address = addr.isNotEmpty ? addr : null;
+    final String? fssai = fss.isNotEmpty ? fss : null;
     String? gstin;
-    String? address;
     if (ref.read(gstEnabledProvider)) {
-      final gstProfile = await getGstProfile();
-      final g = gstProfile['gst_number'] ?? '';
-      final a = gstProfile['business_address'] ?? '';
+      final g = profile['gst_number'] ?? '';
       gstin = g.isNotEmpty ? g : null;
-      address = a.isNotEmpty ? a : null;
     }
     try {
       // Print each bill on its own (never merged); the service settles the BT
@@ -187,6 +189,7 @@ class _CreditCustomerBillsScreenState
           businessName: businessName,
           businessAddress: address,
           businessGstin: gstin,
+          businessFssai: fssai,
           labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {

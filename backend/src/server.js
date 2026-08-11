@@ -182,6 +182,9 @@ app.use('/api/audit', require('./routes/audit'));
 app.use('/api/license', require('./routes/license'));
 app.use('/api/account', require('./routes/account'));
 app.use('/api/fcm', require('./routes/fcm'));
+// Internal admin dashboard — MUST be above the SPA catch-all so /admin/* isn't
+// swallowed by index.html. Gated by ADMIN_URL_SLUG (page) + admin JWT (API).
+app.use('/admin', require('./routes/admin'));
 
 // Unexpected middleware/route failures should stay JSON for API callers.
 app.use((err, req, res, next) => {

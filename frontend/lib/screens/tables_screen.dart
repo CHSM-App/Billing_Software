@@ -11,6 +11,7 @@ import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/skeletons.dart';
 import 'home_screen.dart';
 
 /// Side length (px) of a table tile on the floor plan. Used both to render the
@@ -479,7 +480,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
     final tablesAsync = ref.watch(tablesProvider);
 
     return tablesAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const TablesSkeleton(),
       error: (e, _) => AppErrorWidget(
         error: e,
         onRetry: () => ref.invalidate(tablesProvider),

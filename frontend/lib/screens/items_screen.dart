@@ -7,6 +7,7 @@ import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/skeletons.dart';
 import '../api.dart';
 import '../services/printer_service.dart';
 import 'menu_photos_screen.dart';
@@ -371,7 +372,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
       AsyncValue<List<Item>> itemsAsync, String userRole, bool inventoryEnabled) {
     final l10n = context.l10n;
     return itemsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const ItemsSkeleton(),
       error: (e, _) => AppErrorWidget(
         error: e,
         onRetry: () => ref.invalidate(itemsProvider),

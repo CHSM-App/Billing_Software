@@ -1901,6 +1901,16 @@ class AppLocalizationsMr extends AppLocalizations {
   String get businessProfilePanInvalid => 'पॅन क्रमांक चुकीचा आहे';
 
   @override
+  String get businessProfileFssai => 'FSSAI क्रमांक (ऐच्छिक)';
+
+  @override
+  String get businessProfileFssaiHint => '१४-अंकी परवाना क्रमांक';
+
+  @override
+  String get businessProfileFssaiInvalid =>
+      'FSSAI क्रमांक नेमका १४ अंकांचा असावा';
+
+  @override
   String get businessProfileDefaultSac => 'डिफॉल्ट HSN/SAC (ऐच्छिक)';
 
   @override
@@ -2033,6 +2043,13 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get licenseSubtitleExpired =>
       'तुमची सदस्यता संपली आहे किंवा बंद केली आहे.\nनूतनीकरणासाठी सपोर्टशी संपर्क साधा.';
+
+  @override
+  String get licenseTitleDevice => 'हे डिव्हाइस वापरता येणार नाही';
+
+  @override
+  String get licenseSubtitleDevice =>
+      'तुमचे खाते या प्रकारच्या डिव्हाइससाठी सुरू केलेले नाही.\nयेथे अ‍ॅप वापरण्यासाठी सपोर्टशी संपर्क साधा.';
 
   @override
   String get licenseChecking => 'तपासत आहे…';

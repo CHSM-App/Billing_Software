@@ -99,9 +99,11 @@ router.post('/register', registerLimiter, async (req, res) => {
         .input('expires_at', sql.DateTime2, trialExpiresAt)
         .query(`
           INSERT INTO subscriptions
-            (business_id, status, expires_at, max_offline_days, grace_period_days, is_trial)
+            (business_id, status, expires_at, max_offline_days, grace_period_days, is_trial,
+             max_staff, allow_mobile, allow_desktop)
           VALUES
-            (@business_id, 'active', @expires_at, 1, 0, 1)
+            (@business_id, 'active', @expires_at, 1, 0, 1,
+             10, 1, 1)
         `);
 
       // Trial users skip manual approval — mark the business verified so the
@@ -275,9 +277,11 @@ router.post('/login', loginLimiter, async (req, res) => {
                u.failed_attempts, u.locked_until,
                b.name AS business_name, b.business_type, b.is_verified,
                b.inventory_enabled, b.has_barcode_scanner, b.address,
-               b.gst_enabled, b.gst_number, b.default_sac_code
+               b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
+               s.allow_mobile, s.allow_desktop
         FROM users u
         JOIN businesses b ON u.business_id = b.id
+        LEFT JOIN subscriptions s ON s.business_id = u.business_id
         WHERE u.phone = @phone
       `);
 
@@ -365,6 +369,16 @@ router.post('/login', loginLimiter, async (req, res) => {
 
     audit.logUserLogin(row.business_id, row.id, row.name);
 
+    // Record login history with client IP + device (fire-and-forget, never throws)
+    audit.logLoginToTable({
+      business_id: row.business_id,
+      user_id:     row.id,
+      user_name:   row.name,
+      phone:       row.phone,
+      ip_address:  req.ip,
+      user_agent:  req.get('user-agent'),
+    });
+
     return res.json({
       success: true,
       access_token: accessToken,
@@ -385,6 +399,12 @@ router.post('/login', loginLimiter, async (req, res) => {
         gst_enabled: !!row.gst_enabled,
         gst_number: row.gst_number ?? null,
         default_sac_code: row.default_sac_code ?? null,
+        fssai_number: row.fssai_number ?? null,
+        // Device-access policy — surfaced at login so the client can enforce it
+        // immediately, without depending on a separate /license fetch that may
+        // fail on a flaky network. NULL (no subscription) defaults to allowed.
+        allow_mobile: row.allow_mobile == null ? true : !!row.allow_mobile,
+        allow_desktop: row.allow_desktop == null ? true : !!row.allow_desktop,
       },
     });
   } catch (err) {

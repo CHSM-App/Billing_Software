@@ -48,6 +48,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
   final _pincodeCtrl      = TextEditingController();
   final _gstCtrl          = TextEditingController();
   final _panCtrl          = TextEditingController();
+  final _fssaiCtrl        = TextEditingController();
   final _sacCtrl          = TextEditingController();
   final _billPrefixCtrl   = TextEditingController();
   final _footerNoteCtrl   = TextEditingController();
@@ -70,10 +71,19 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     _pincodeCtrl.dispose();
     _gstCtrl.dispose();
     _panCtrl.dispose();
+    _fssaiCtrl.dispose();
     _sacCtrl.dispose();
     _billPrefixCtrl.dispose();
     _footerNoteCtrl.dispose();
     super.dispose();
+  }
+
+  // True for food businesses (dine-in or takeaway restaurants) — gates the
+  // FSSAI field, which only these business types need.
+  bool get _isRestaurant {
+    final type = _profile?['business_type'];
+    return type == 'restaurant_with_tables' ||
+        type == 'restaurant_no_tables';
   }
 
   // ── Data ─────────────────────────────────────────────────────────────────
@@ -105,6 +115,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
     _pincodeCtrl.text     = p['pincode']          ?? '';
     _gstCtrl.text         = p['gst_number']       ?? '';
     _panCtrl.text         = p['pan_number']       ?? '';
+    _fssaiCtrl.text       = p['fssai_number']     ?? '';
     _sacCtrl.text         = p['default_sac_code'] ?? '';
     _billPrefixCtrl.text  = p['bill_prefix']      ?? 'INV';
     _footerNoteCtrl.text  = p['bill_footer_note'] ?? '';
@@ -134,6 +145,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
       addIfChanged('pincode',          _pincodeCtrl,     _profile?['pincode']);
       addIfChanged('gst_number',       _gstCtrl,         _profile?['gst_number']);
       addIfChanged('pan_number',       _panCtrl,         _profile?['pan_number']);
+      addIfChanged('fssai_number',     _fssaiCtrl,       _profile?['fssai_number']);
       addIfChanged('default_sac_code', _sacCtrl,         _profile?['default_sac_code']);
       addIfChanged('bill_prefix',      _billPrefixCtrl,  _profile?['bill_prefix']);
       addIfChanged('bill_footer_note', _footerNoteCtrl,  _profile?['bill_footer_note']);
@@ -162,6 +174,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
         gstNumber: updated['gst_number'] as String?,
         businessAddress: updated['address'] as String?,
         defaultSacCode: updated['default_sac_code'] as String?,
+        fssaiNumber: updated['fssai_number'] as String?,
       );
 
       if (mounted) {
@@ -429,6 +442,26 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                   return null;
                                 },
                               ),
+                              // FSSAI license number — food businesses only
+                              // (restaurants, dine-in or takeaway). Printed on
+                              // the bill/receipt only when the owner fills it in.
+                              if (_isRestaurant) ...[
+                                const SizedBox(height: AppSpacing.space12),
+                                _buildField(
+                                  controller: _fssaiCtrl,
+                                  label: l10n.businessProfileFssai,
+                                  hint: l10n.businessProfileFssaiHint,
+                                  keyboardType: TextInputType.number,
+                                  maxLength: 14,
+                                  validator: (v) {
+                                    if (v == null || v.trim().isEmpty) return null;
+                                    if (!RegExp(r'^\d{14}$').hasMatch(v.trim())) {
+                                      return l10n.businessProfileFssaiInvalid;
+                                    }
+                                    return null;
+                                  },
+                                ),
+                              ],
                               // Default HSN/SAC only matters when GST invoices
                               // are enabled — e.g. a restaurant setting 9963 once.
                               if (ref.watch(gstEnabledProvider)) ...[
