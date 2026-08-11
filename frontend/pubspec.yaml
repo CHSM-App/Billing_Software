@@ -43,6 +43,9 @@ dependencies:
   web_socket_channel: ^3.0.3
   audioplayers: ^6.1.0
   shimmer: ^3.0.0
+  # A5/A4 PDF invoice generation + OS print dialog (share/save/print).
+  pdf: ^3.11.1
+  printing: ^5.13.3
 
 dev_dependencies:
   flutter_test:

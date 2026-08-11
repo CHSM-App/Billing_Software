@@ -2146,8 +2146,27 @@ class AppLocalizationsEn extends AppLocalizations {
       'USB on Windows requires WinUSB driver installed for the printer';
 
   @override
+  String get printerSetupPaperSize => 'Paper Size';
+
+  @override
+  String get printerSetupPaperSize58 => '58mm (2 inch thermal)';
+
+  @override
+  String get printerSetupPaperSize80 => '80mm (3 inch thermal)';
+
+  @override
+  String get printerSetupPaperSizeA5 => 'A5 (PDF invoice)';
+
+  @override
+  String get printerSetupPaperSizeA4 => 'A4 (PDF invoice)';
+
+  @override
+  String get printerSetupPaperSizePdfHint =>
+      'Opens your device\'s print dialog to print or save a PDF';
+
+  @override
   String get printerSetupNoteThermal =>
-      'Only 80mm thermal printers are supported';
+      '58mm/80mm print to a thermal printer; A5/A4 make a PDF invoice';
 
   @override
   String get conflictQueuedForRetry => 'Bill queued for retry';

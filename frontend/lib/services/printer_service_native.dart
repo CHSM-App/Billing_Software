@@ -23,6 +23,24 @@ import 'barcode_image.dart';
 
 enum ConnectionType { ble, usb, classicBt }
 
+/// Monospace column widths for the ASCII receipt, sized to the paper width.
+/// The four item columns must sum to [cols] so rows fill the line and totals
+/// right-align.
+class _ColProfile {
+  final int cols;
+  final int nameCols;
+  final int qtyCols;
+  final int priceCols;
+  final int totalCols;
+  const _ColProfile({
+    required this.cols,
+    required this.nameCols,
+    required this.qtyCols,
+    required this.priceCols,
+    required this.totalCols,
+  });
+}
+
 class Printer {
   final String? name;
   final String? address; // MAC address
@@ -205,20 +223,26 @@ class PrinterService {
   //     on both edges; the four item columns MUST sum to _cols so rows stay
   //     right-aligned to the content block.
   //
-  // Column layout (46 chars for 80mm):
-  //   Name(22) Qty(4) Price(10) Total(10) = 46
+  // Column layout depends on paper width (see _ColProfile):
+  //   80mm → 46 chars: Name(22) Qty(4) Price(10) Total(10)
+  //   58mm → 32 chars: Name(14) Qty(4) Price(7)  Total(7)
+  // The 58mm price/total are 7 wide (not 6) so their padLeft keeps a leading
+  // space — otherwise "220.00" fills the field and columns visually collide.
   // -------------------------------------------------------------------------
 
-  static const int _cols = 46;
-  static const int _nameCols = 22;
-  static const int _qtyCols = 4;
-  static const int _priceCols = 10;
-  static const int _totalCols = 10;
+  // Default 80mm profile — used by callers that don't specify a size.
+  static const _ColProfile _cols80 =
+      _ColProfile(cols: 46, nameCols: 22, qtyCols: 4, priceCols: 10, totalCols: 10);
+  static const _ColProfile _cols58 =
+      _ColProfile(cols: 32, nameCols: 14, qtyCols: 4, priceCols: 7, totalCols: 7);
+
+  /// Resolve the column profile for a printable dot-width (384 → 58mm, else 80mm).
+  static _ColProfile _profileForDots(int dots) => dots <= 384 ? _cols58 : _cols80;
 
   /// Build the receipt as a list of pre-formatted, column-aligned lines.
   /// Shared by both the ASCII text path and the raster path so the layout is
   /// identical regardless of which is used.
-  List<String> _buildReceiptLines(Bill bill,
+  List<String> _buildReceiptLines(Bill bill, _ColProfile p,
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
@@ -235,23 +259,23 @@ class PrinterService {
     // Header — order: name, address, phone, GSTIN, FSSAI. Only the business
     // name is always shown; every other line prints only when available.
     lines.add(
-        _centre(businessName ?? labels?.defaultBusiness ?? 'BUSINESS', _cols));
+        _centre(businessName ?? labels?.defaultBusiness ?? 'BUSINESS', p.cols));
     if (businessAddress != null && businessAddress.isNotEmpty) {
       // Address may be multi-line and/or longer than the paper width — wrap and
       // centre each resulting line (plain _centre would truncate + left-align).
-      lines.addAll(_centreMultiline(businessAddress, _cols));
+      lines.addAll(_centreMultiline(businessAddress, p.cols));
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
       lines.add(
-          _centre('${labels?.phonePrefix ?? 'Ph:'} $businessPhone', _cols));
+          _centre('${labels?.phonePrefix ?? 'Ph:'} $businessPhone', p.cols));
     }
     if (gst) {
-      lines.add(_centre('${labels?.gstin ?? 'GSTIN:'} $businessGstin', _cols));
+      lines.add(_centre('${labels?.gstin ?? 'GSTIN:'} $businessGstin', p.cols));
     }
     if (fssai) {
-      lines.add(_centre('${labels?.fssai ?? 'FSSAI:'} $businessFssai', _cols));
+      lines.add(_centre('${labels?.fssai ?? 'FSSAI:'} $businessFssai', p.cols));
     }
-    lines.add('-' * _cols);
+    lines.add('-' * p.cols);
 
     // Bill info
     lines.add('${labels?.billNo ?? 'Bill#:'} ${bill.billNumber}');
@@ -267,32 +291,33 @@ class PrinterService {
     if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty) {
       lines.add('${labels?.customerPhone ?? 'Ph:'} ${bill.customerPhone}');
     }
-    lines.add('-' * _cols);
+    lines.add('-' * p.cols);
 
     // Items header
-    lines.add(_itemRow(labels?.colItem ?? 'Item', labels?.colQty ?? 'Qty',
+    lines.add(_itemRow(p, labels?.colItem ?? 'Item', labels?.colQty ?? 'Qty',
         labels?.colPrice ?? 'Price', labels?.colTotal ?? 'Total'));
-    lines.add('-' * _cols);
+    lines.add('-' * p.cols);
 
     // Items
     for (final item in bill.items) {
-      final name = item.itemName.length > _nameCols
-          ? item.itemName.substring(0, _nameCols)
+      final name = item.itemName.length > p.nameCols
+          ? item.itemName.substring(0, p.nameCols)
           : item.itemName;
       final qty = item.quantity % 1 == 0
           ? item.quantity.toInt().toString()
           : item.quantity.toStringAsFixed(1);
       lines.add(_itemRow(
+        p,
         name,
         qty,
         item.unitPrice.toStringAsFixed(2),
         item.lineTotal.toStringAsFixed(2),
       ));
     }
-    lines.add('-' * _cols);
+    lines.add('-' * p.cols);
 
     // Totals
-    lines.add(_twoCol(labels?.subtotal ?? 'Subtotal:',
+    lines.add(_twoCol(p, labels?.subtotal ?? 'Subtotal:',
         'Rs.${bill.subtotal.toStringAsFixed(2)}'));
 
     if (bill.taxAmount > 0) {
@@ -302,26 +327,26 @@ class PrinterService {
         // taxable value (subtotal) — e.g. 18% GST prints as CGST 9% / SGST 9%.
         final half = (bill.taxAmount / 2).toStringAsFixed(2);
         final halfRate = _halfGstRateLabel(bill);
-        lines.add(_twoCol('${labels?.cgst ?? 'CGST:'}$halfRate', 'Rs.$half'));
-        lines.add(_twoCol('${labels?.sgst ?? 'SGST:'}$halfRate', 'Rs.$half'));
+        lines.add(_twoCol(p, '${labels?.cgst ?? 'CGST:'}$halfRate', 'Rs.$half'));
+        lines.add(_twoCol(p, '${labels?.sgst ?? 'SGST:'}$halfRate', 'Rs.$half'));
       } else {
-        lines.add(_twoCol(
+        lines.add(_twoCol(p,
             labels?.tax ?? 'Tax:', 'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
       }
     }
 
     if (bill.discountAmount > 0) {
-      lines.add(_twoCol(labels?.discount ?? 'Discount:',
+      lines.add(_twoCol(p, labels?.discount ?? 'Discount:',
           '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
     }
 
-    lines.add(_twoCol(labels?.total ?? 'Grand Total:',
+    lines.add(_twoCol(p, labels?.total ?? 'Grand Total:',
         'Rs.${grandTotal.toStringAsFixed(2)}'));
 
     lines.add(
-        _twoCol(labels?.payment ?? 'Payment:', bill.paymentMode.toUpperCase()));
-    lines.add('-' * _cols);
-    lines.add(_centre(labels?.thankYou ?? 'Thank you, visit again!', _cols));
+        _twoCol(p, labels?.payment ?? 'Payment:', bill.paymentMode.toUpperCase()));
+    lines.add('-' * p.cols);
+    lines.add(_centre(labels?.thankYou ?? 'Thank you, visit again!', p.cols));
 
     return lines;
   }
@@ -329,7 +354,7 @@ class PrinterService {
   /// Build the receipt as STRUCTURED rows (columns + rules) for the raster
   /// path, so proportional Devanagari/Tamil glyphs align in a real table
   /// (Item / Qty / Price / Total) instead of overflowing space-padded columns.
-  List<ReceiptRow> _buildReceiptRows(Bill bill,
+  List<ReceiptRow> _buildReceiptRows(Bill bill, _ColProfile p,
       {String? businessName,
       String? businessPhone,
       String? businessAddress,
@@ -351,7 +376,7 @@ class PrinterService {
       // physical line is centred (a single row with an embedded newline would
       // left-align the wrapped part). Raw (unpadded) lines — ReceiptRow.center
       // handles the centring for the raster path.
-      for (final l in _wrapLines(businessAddress, _cols)) {
+      for (final l in _wrapLines(businessAddress, p.cols)) {
         rows.add(ReceiptRow.center(l, size: 26));
       }
     }
@@ -502,11 +527,16 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
-      ReceiptLabels? labels}) async {
+      ReceiptLabels? labels,
+      int paperDots = 576}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
 
-    final lines = _buildReceiptLines(bill,
+    // Column profile (ASCII path) and raster width both follow the paper width:
+    // 384 dots → 58mm, otherwise 80mm.
+    final profile = _profileForDots(paperDots);
+
+    final lines = _buildReceiptLines(bill, profile,
         businessName: businessName,
         businessPhone: businessPhone,
         businessAddress: businessAddress,
@@ -520,14 +550,14 @@ class PrinterService {
       // whole receipt as a raster image with TRUE column alignment so every
       // glyph prints correctly and the table stays aligned.
       // Uses the proven transport: single write, no inter-chunk delay.
-      final rows = _buildReceiptRows(bill,
+      final rows = _buildReceiptRows(bill, profile,
           businessName: businessName,
           businessPhone: businessPhone,
           businessAddress: businessAddress,
           businessGstin: businessGstin,
           businessFssai: businessFssai,
           labels: labels);
-      final raster = await RasterLab.rowsToReceiptRaster(rows);
+      final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
       if (_isWindows) {
         await _printWindows(printer, raster);
       } else {
@@ -549,7 +579,8 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
-      ReceiptLabels? labels}) async {
+      ReceiptLabels? labels,
+      int paperDots = 576}) async {
     for (var i = 0; i < bills.length; i++) {
       await printBill(bills[i],
           businessName: businessName,
@@ -557,7 +588,8 @@ class PrinterService {
           businessAddress: businessAddress,
           businessGstin: businessGstin,
           businessFssai: businessFssai,
-          labels: labels);
+          labels: labels,
+          paperDots: paperDots);
       // Let the printer finish and the SPP link settle before the next job.
       if (i < bills.length - 1) {
         await Future.delayed(const Duration(milliseconds: 1200));
@@ -592,15 +624,16 @@ class PrinterService {
     await _sendClassicBtTuned(printer, bytes, chunkSize, delayMs);
   }
 
-  Future<void> testPrint() async {
+  Future<void> testPrint({int paperDots = 576}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
 
+    final cols = _profileForDots(paperDots).cols;
     final lines = [
-      _centre('TEST PRINT', _cols),
-      '-' * _cols,
-      _centre('Printer is working!', _cols),
-      '-' * _cols,
+      _centre('TEST PRINT', cols),
+      '-' * cols,
+      _centre('Printer is working!', cols),
+      '-' * cols,
     ];
     final bytes = <int>[];
     for (final line in lines) {
@@ -855,19 +888,19 @@ class PrinterService {
   static List<String> _centreMultiline(String text, int width) =>
       _wrapLines(text, width).map((l) => _centre(l, width)).toList();
 
-  /// 4-column item row for the 46-char (80mm) receipt.
-  /// Name(22) Qty(4) Price(10) Total(10)
-  static String _itemRow(String name, String qty, String price, String total) {
-    final n = name.padRight(_nameCols).substring(0, _nameCols);
-    final q = qty.padLeft(_qtyCols);
-    final p = price.padLeft(_priceCols);
-    final t = total.padLeft(_totalCols);
-    return '$n$q$p$t';
+  /// 4-column item row sized to the profile: Name / Qty / Price / Total.
+  static String _itemRow(
+      _ColProfile prof, String name, String qty, String price, String total) {
+    final n = name.padRight(prof.nameCols).substring(0, prof.nameCols);
+    final q = qty.padLeft(prof.qtyCols);
+    final pr = price.padLeft(prof.priceCols);
+    final t = total.padLeft(prof.totalCols);
+    return '$n$q$pr$t';
   }
 
-  /// 2-column row: label left, value right (46-char, 80mm)
-  static String _twoCol(String label, String value) =>
-      _twoColN(label, value, _cols);
+  /// 2-column row: label left, value right, spanning the profile width.
+  static String _twoCol(_ColProfile prof, String label, String value) =>
+      _twoColN(label, value, prof.cols);
 
   /// 2-column row with explicit width
   static String _twoColN(String label, String value, int width) {

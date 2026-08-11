@@ -2153,7 +2153,27 @@ class AppLocalizationsMr extends AppLocalizations {
       'विंडोजवर यूएसबीसाठी प्रिंटरचा WinUSB ड्रायव्हर इन्स्टॉल असणे आवश्यक आहे';
 
   @override
-  String get printerSetupNoteThermal => 'फक्त ८० मिमी थर्मल प्रिंटर चालतात';
+  String get printerSetupPaperSize => 'कागद आकार';
+
+  @override
+  String get printerSetupPaperSize58 => '५८ मिमी (२ इंच थर्मल)';
+
+  @override
+  String get printerSetupPaperSize80 => '८० मिमी (३ इंच थर्मल)';
+
+  @override
+  String get printerSetupPaperSizeA5 => 'A5 (PDF बिल)';
+
+  @override
+  String get printerSetupPaperSizeA4 => 'A4 (PDF बिल)';
+
+  @override
+  String get printerSetupPaperSizePdfHint =>
+      'प्रिंट किंवा PDF सेव्ह करण्यासाठी डिव्हाइसचा प्रिंट डायलॉग उघडतो';
+
+  @override
+  String get printerSetupNoteThermal =>
+      '५८/८० मिमी थर्मल प्रिंटरवर छापतात; A5/A4 PDF बिल तयार करतात';
 
   @override
   String get conflictQueuedForRetry => 'बिल पुन्हा प्रयत्नासाठी रांगेत ठेवले';

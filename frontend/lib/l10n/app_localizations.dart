@@ -3932,10 +3932,46 @@ abstract class AppLocalizations {
   /// **'USB on Windows requires WinUSB driver installed for the printer'**
   String get printerSetupNoteUsb;
 
+  /// No description provided for @printerSetupPaperSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Paper Size'**
+  String get printerSetupPaperSize;
+
+  /// No description provided for @printerSetupPaperSize58.
+  ///
+  /// In en, this message translates to:
+  /// **'58mm (2 inch thermal)'**
+  String get printerSetupPaperSize58;
+
+  /// No description provided for @printerSetupPaperSize80.
+  ///
+  /// In en, this message translates to:
+  /// **'80mm (3 inch thermal)'**
+  String get printerSetupPaperSize80;
+
+  /// No description provided for @printerSetupPaperSizeA5.
+  ///
+  /// In en, this message translates to:
+  /// **'A5 (PDF invoice)'**
+  String get printerSetupPaperSizeA5;
+
+  /// No description provided for @printerSetupPaperSizeA4.
+  ///
+  /// In en, this message translates to:
+  /// **'A4 (PDF invoice)'**
+  String get printerSetupPaperSizeA4;
+
+  /// No description provided for @printerSetupPaperSizePdfHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Opens your device\'s print dialog to print or save a PDF'**
+  String get printerSetupPaperSizePdfHint;
+
   /// No description provided for @printerSetupNoteThermal.
   ///
   /// In en, this message translates to:
-  /// **'Only 80mm thermal printers are supported'**
+  /// **'58mm/80mm print to a thermal printer; A5/A4 make a PDF invoice'**
   String get printerSetupNoteThermal;
 
   /// No description provided for @conflictQueuedForRetry.

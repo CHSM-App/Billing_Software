@@ -16,6 +16,7 @@ import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
 import '../services/printer_service.dart';
+import '../services/receipt_output.dart';
 import '../services/receipt_labels.dart';
 import '../services/offline_service.dart';
 import '../services/sync_service.dart';
@@ -718,16 +719,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _generateBillAndPrint() async {
-    // Verify a printer is configured BEFORE generating the bill. Otherwise the
-    // bill would be finalized + the cart cleared, then the print would silently
-    // fail — the user would lose the cart with nothing printed. Fail early so
-    // they can connect a printer and retry without losing the order.
-    final printer = await PrinterService.instance.getActivePrinter();
-    if (printer == null) {
-      if (mounted) {
-        _showSnack(context.l10n.historyNoPrinterConfigured, isError: true);
+    // For thermal sizes, verify a printer is configured BEFORE generating the
+    // bill — otherwise it would finalize + clear the cart, then the print would
+    // silently fail and the order would be lost. PDF sizes (A5/A4) don't need a
+    // thermal printer (they open the OS print dialog), so skip the check there.
+    final pdfSelected = await ReceiptOutput.isPdfSelected();
+    if (!pdfSelected) {
+      final printer = await PrinterService.instance.getActivePrinter();
+      if (printer == null) {
+        if (mounted) {
+          _showSnack(context.l10n.historyNoPrinterConfigured, isError: true);
+        }
+        return;
       }
-      return;
     }
     await _generateBill(onBillReady: (bill) {
       _navigateAfterBill();
@@ -1227,23 +1231,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final fss = profile['fssai_number'] ?? '';
     final String? address = addr.isNotEmpty ? addr : null;
     final String? fssai = fss.isNotEmpty ? fss : null;
+    final sac = profile['default_sac_code'] ?? '';
+    final gstEnabled = ref.read(gstEnabledProvider);
     String? gstin;
-    if (ref.read(gstEnabledProvider)) {
+    if (gstEnabled) {
       final g = profile['gst_number'] ?? '';
       gstin = g.isNotEmpty ? g : null;
     }
     // Consume any previous credit bills that were settled with this bill —
     // each prints as its OWN receipt (never merged), one tap prints them all.
-    // printBills settles the BT link between jobs so a later receipt doesn't
-    // print garbage.
+    // ReceiptOutput routes to thermal (printBills) or an A5/A4 PDF per the
+    // chosen paper size; thermal settles the BT link between jobs.
     final prevBills = _justSettledPrevBills;
     _justSettledPrevBills = const [];
     try {
-      await PrinterService.instance.printBills([bill, ...prevBills],
+      await ReceiptOutput.emit([bill, ...prevBills],
           businessName: businessName,
           businessAddress: address,
           businessGstin: gstin,
           businessFssai: fssai,
+          defaultSacCode: sac.isNotEmpty ? sac : null,
+          gstEnabled: gstEnabled,
           labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {

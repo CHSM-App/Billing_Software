@@ -1,6 +1,25 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Print paper-size options and helpers. The stored value is one of these
+/// string constants; `mm58`/`mm80` print thermal ESC/POS, `a5`/`a4` generate a
+/// PDF invoice via the OS print dialog.
+class PaperSizes {
+  static const String mm58 = 'mm58';
+  static const String mm80 = 'mm80';
+  static const String a5   = 'a5';
+  static const String a4   = 'a4';
+
+  static const List<String> all = [mm58, mm80, a5, a4];
+
+  /// True for the ESC/POS thermal roll sizes (as opposed to the PDF page sizes).
+  static bool isThermal(String size) => size == mm58 || size == mm80;
+
+  /// Printable dot-width for a thermal size (58mm = 384, 80mm = 576 @ 203dpi).
+  /// Defaults to 80mm for any non-thermal value.
+  static int thermalDots(String size) => size == mm58 ? 384 : 576;
+}
+
 // ---------------------------------------------------------------------------
 // AuthStorage — single access point for all session persistence.
 //
@@ -50,6 +69,10 @@ class AuthStorage {
   // invoice prefix as online instead of a jarring 'LOCAL-'. Refreshed whenever
   // the business profile is fetched.
   static const _keyBillPrefix       = 'bill_prefix';
+  // Chosen print paper size: 'mm58' | 'mm80' | 'a5' | 'a4'. Defaults to 'mm80'
+  // (current behaviour). 'mm58'/'mm80' print thermal ESC/POS; 'a5'/'a4' generate
+  // a PDF invoice via the OS print dialog.
+  static const _keyPaperSize        = 'paper_size';
 
   // -------------------------------------------------------------------------
   // Write
@@ -149,6 +172,18 @@ class AuthStorage {
     final prefs = await SharedPreferences.getInstance();
     final p = prefs.getString(_keyBillPrefix)?.trim();
     return (p == null || p.isEmpty) ? 'INV' : p;
+  }
+
+  Future<void> savePaperSize(String size) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyPaperSize, size);
+  }
+
+  /// The chosen print paper size, defaulting to 80mm thermal.
+  Future<String> getPaperSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    final s = prefs.getString(_keyPaperSize);
+    return PaperSizes.all.contains(s) ? s! : PaperSizes.mm80;
   }
 
   Future<void> saveAccessToken(String accessToken) =>
@@ -258,6 +293,8 @@ Future<String?> getUserId()                    => AuthStorage.instance.getUserId
 Future<void>    clearSession()                 => AuthStorage.instance.clearSession();
 Future<void>    saveBillPrefix(String prefix)  => AuthStorage.instance.saveBillPrefix(prefix);
 Future<String>  getBillPrefix()                => AuthStorage.instance.getBillPrefix();
+Future<void>    savePaperSize(String size)     => AuthStorage.instance.savePaperSize(size);
+Future<String>  getPaperSize()                 => AuthStorage.instance.getPaperSize();
 Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInventoryEnabled(e);
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);

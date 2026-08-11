@@ -83,7 +83,8 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
-      dynamic labels}) async {
+      dynamic labels,
+      int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
 
@@ -93,11 +94,12 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
-      dynamic labels}) async {
+      dynamic labels,
+      int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
 
-  Future<void> testPrint() async {
+  Future<void> testPrint({int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
 

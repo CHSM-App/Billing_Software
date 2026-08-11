@@ -6,6 +6,7 @@ import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../services/printer_service.dart';
+import '../services/receipt_output.dart';
 import '../services/receipt_labels.dart';
 import '../storage.dart';
 import '../theme/app_theme.dart';
@@ -85,11 +86,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   void _showBillDetail(Bill bill) {
     final userRole = ref.read(userRoleProvider);
+    final businessName = ref.read(businessNameProvider);
     showDialog(
       context: context,
       builder: (_) => _BillDetailDialog(
         bill: bill,
         userRole: userRole,
+        businessName: businessName,
         onVoided: () => ref.invalidate(billsProvider),
       ),
     );
@@ -402,11 +405,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 class _BillDetailDialog extends StatelessWidget {
   final Bill bill;
   final String userRole;
+  final String businessName;
   final VoidCallback onVoided;
 
   const _BillDetailDialog({
     required this.bill,
     required this.userRole,
+    required this.businessName,
     required this.onVoided,
   });
 
@@ -554,17 +559,26 @@ class _BillDetailDialog extends StatelessWidget {
             final profile = await getGstProfile();
             final addr = profile['business_address'] ?? '';
             final fss = profile['fssai_number'] ?? '';
+            final sac = profile['default_sac_code'] ?? '';
             final String? address = addr.isNotEmpty ? addr : null;
             final String? fssai = fss.isNotEmpty ? fss : null;
+            // A bill that carries tax is a GST bill; gate GSTIN + the PDF's GST
+            // columns on that (same signal the receipt already used).
+            final billHasGst = bill.taxAmount > 0;
             String? gstin;
-            if (bill.taxAmount > 0) {
+            if (billHasGst) {
               final g = profile['gst_number'] ?? '';
               gstin = g.isNotEmpty ? g : null;
             }
             try {
-              await PrinterService.instance.printBill(bill,
-                  businessAddress: address, businessGstin: gstin,
-                  businessFssai: fssai, labels: labels);
+              await ReceiptOutput.emit([bill],
+                  businessName: businessName,
+                  businessAddress: address,
+                  businessGstin: gstin,
+                  businessFssai: fssai,
+                  defaultSacCode: sac.isNotEmpty ? sac : null,
+                  gstEnabled: billHasGst,
+                  labels: labels);
             } on PrinterException catch (e) {
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(

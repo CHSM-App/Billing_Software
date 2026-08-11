@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/printer_service.dart';
+import '../storage.dart';
 
 /// Watches the service's active-printer revision inside [ref]: registers a
 /// listener that rebuilds the provider whenever the printer is selected or
@@ -31,8 +32,27 @@ final canPrintProvider = FutureProvider<bool>((ref) {
   return PrinterService.instance.canPrint();
 });
 
-/// Convenience bool for widgets. Defaults to false while the async check is in
-/// flight, so the UI degrades to "Save" rather than promising a failing print.
+/// The chosen print paper size (e.g. 'mm80', 'a4'). Rebuilds when the printer
+/// settings change (the size is edited on the same setup screen, which bumps
+/// the printer revision).
+final paperSizeProvider = FutureProvider<String>((ref) {
+  _watchPrinterRevision(ref);
+  return getPaperSize();
+});
+
+/// True when the selected size is a PDF page size (A5/A4) rather than a thermal
+/// roll. PDF output doesn't require a paired thermal printer.
+final pdfPaperSelectedProvider = Provider<bool>((ref) {
+  final size = ref.watch(paperSizeProvider).valueOrNull;
+  return size != null && !PaperSizes.isThermal(size);
+});
+
+/// Convenience bool for widgets: the primary finalize action should offer
+/// "Print" when a thermal printer is ready OR a PDF size is selected (the PDF
+/// path opens the OS dialog and needs no thermal printer). Defaults to false
+/// while the async checks are in flight, so it degrades to "Save".
 final printReadyProvider = Provider<bool>((ref) {
-  return ref.watch(canPrintProvider).valueOrNull ?? false;
+  final thermalReady = ref.watch(canPrintProvider).valueOrNull ?? false;
+  final pdf = ref.watch(pdfPaperSelectedProvider);
+  return thermalReady || pdf;
 });

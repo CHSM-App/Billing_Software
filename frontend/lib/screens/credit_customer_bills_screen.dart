@@ -8,6 +8,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../providers/credit_provider.dart';
 import '../services/printer_service.dart';
+import '../services/receipt_output.dart';
 import '../services/receipt_labels.dart';
 import '../storage.dart';
 import '../theme/app_theme.dart';
@@ -161,10 +162,15 @@ class _CreditCustomerBillsScreenState
       _showSnack(l10n.creditSelectAtLeastOne, isError: true);
       return;
     }
-    final printer = await PrinterService.instance.getActivePrinter();
-    if (printer == null) {
-      if (mounted) _showSnack(l10n.historyNoPrinterConfigured, isError: true);
-      return;
+    // PDF sizes (A5/A4) open the OS print dialog and need no thermal printer;
+    // only require a paired printer for the thermal sizes.
+    final pdfSelected = await ReceiptOutput.isPdfSelected();
+    if (!pdfSelected) {
+      final printer = await PrinterService.instance.getActivePrinter();
+      if (printer == null) {
+        if (mounted) _showSnack(l10n.historyNoPrinterConfigured, isError: true);
+        return;
+      }
     }
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
@@ -173,23 +179,27 @@ class _CreditCustomerBillsScreenState
     final profile = await getGstProfile();
     final addr = profile['business_address'] ?? '';
     final fss = profile['fssai_number'] ?? '';
+    final sac = profile['default_sac_code'] ?? '';
+    final gstEnabled = ref.read(gstEnabledProvider);
     final String? address = addr.isNotEmpty ? addr : null;
     final String? fssai = fss.isNotEmpty ? fss : null;
     String? gstin;
-    if (ref.read(gstEnabledProvider)) {
+    if (gstEnabled) {
       final g = profile['gst_number'] ?? '';
       gstin = g.isNotEmpty ? g : null;
     }
     try {
-      // Print each bill on its own (never merged); the service settles the BT
-      // link between jobs so a later receipt doesn't print garbage.
+      // Each settled bill prints as its own receipt (never merged). For thermal
+      // the service settles the BT link between jobs; for PDF each bill is a page.
       final printables =
           bills.map((b) => _asSettled(b, settledMode)).toList();
-      await PrinterService.instance.printBills(printables,
+      await ReceiptOutput.emit(printables,
           businessName: businessName,
           businessAddress: address,
           businessGstin: gstin,
           businessFssai: fssai,
+          defaultSacCode: sac.isNotEmpty ? sac : null,
+          gstEnabled: gstEnabled,
           labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {

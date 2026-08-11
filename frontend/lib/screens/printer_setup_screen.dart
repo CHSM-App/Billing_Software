@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../l10n/l10n_ext.dart';
 import '../services/printer_service.dart';
+import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 
@@ -17,6 +18,7 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
   Printer? _activePrinter;
   bool _scanning = false;
   bool _testing = false;
+  String _paperSize = PaperSizes.mm80;
 
   @override
   void initState() {
@@ -26,7 +28,19 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
 
   Future<void> _loadActive() async {
     final p = await PrinterService.instance.getActivePrinter();
-    setState(() => _activePrinter = p);
+    final size = await getPaperSize();
+    setState(() {
+      _activePrinter = p;
+      _paperSize = size;
+    });
+  }
+
+  Future<void> _selectPaperSize(String size) async {
+    setState(() => _paperSize = size);
+    await savePaperSize(size);
+    // Bump the printer revision so paperSizeProvider (and the billing screen's
+    // Print/Save button) reflect the change immediately.
+    PrinterService.instance.activePrinterRevision.value++;
   }
 
   Future<void> _scan() async {
@@ -80,7 +94,8 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
     final l10n = context.l10n;
     setState(() => _testing = true);
     try {
-      await PrinterService.instance.testPrint();
+      await PrinterService.instance
+          .testPrint(paperDots: PaperSizes.thermalDots(_paperSize));
       _showSnack(l10n.printerSetupTestSent);
     } on PrinterException catch (e) {
       _showSnack(e.message, isError: true);
@@ -195,6 +210,25 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
 
           const SizedBox(height: AppSpacing.space24),
 
+          // Paper size section
+          _sectionHeader(l10n.printerSetupPaperSize),
+          const SizedBox(height: AppSpacing.space8),
+          AppCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                _paperSizeTile(PaperSizes.mm58, l10n.printerSetupPaperSize58, null),
+                _paperSizeTile(PaperSizes.mm80, l10n.printerSetupPaperSize80, null),
+                _paperSizeTile(
+                    PaperSizes.a5, l10n.printerSetupPaperSizeA5, l10n.printerSetupPaperSizePdfHint),
+                _paperSizeTile(
+                    PaperSizes.a4, l10n.printerSetupPaperSizeA4, l10n.printerSetupPaperSizePdfHint),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.space24),
+
           // Scan section
           _sectionHeader(l10n.printerSetupAvailablePrinters),
           const SizedBox(height: AppSpacing.space8),
@@ -300,6 +334,46 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _paperSizeTile(String value, String label, String? subtitle) {
+    final selected = _paperSize == value;
+    return InkWell(
+      onTap: () => _selectPaperSize(value),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.space12, vertical: AppSpacing.space12),
+        child: Row(
+          children: [
+            Icon(
+              selected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
+              color: selected ? AppColors.primary : AppColors.textDisabled,
+              size: 20,
+            ),
+            const SizedBox(width: AppSpacing.space12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  if (subtitle != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(subtitle,
+                          style: const TextStyle(
+                              fontSize: 12, color: AppColors.textSecondary)),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
