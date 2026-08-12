@@ -18,7 +18,13 @@ dependencies:
   shared_preferences: ^2.2.0
   flutter_secure_storage: ^9.2.2
   sqflite: ^2.3.0
-  sqflite_common_ffi: ^2.3.0
+  # Pinned to 2.3.7+1 (which depends on sqlite3 ^2.9.4). Newer sqflite_common_ffi
+  # pulls sqlite3 >=3.1.2, whose native-assets build hook DOWNLOADS a prebuilt
+  # libsqlite3 from GitHub at build time — that fails in CI behind a TLS-
+  # intercepting proxy (CERTIFICATE_VERIFY_FAILED). sqlite3 2.9.4 has no such
+  # hook (it bundles the library the old way), so the release build needs no
+  # network fetch. Keep the sqlite3 override below in sync with this.
+  sqflite_common_ffi: 2.3.7+1
   path_provider: ^2.1.0
   path: ^1.9.0
   intl: ^0.20.2
@@ -55,6 +61,13 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.3
+
+# Force the pre-download-hook sqlite3 (2.9.4). See the note on
+# sqflite_common_ffi above: sqlite3 >=3.1.2 downloads a prebuilt library from
+# GitHub at build time, which breaks CI release builds behind a proxy that does
+# TLS interception. 2.9.4 bundles the library without any network fetch.
+dependency_overrides:
+  sqlite3: 2.9.4
 
 flutter:
   uses-material-design: true
