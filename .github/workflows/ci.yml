@@ -37,7 +37,10 @@ permissions:
 env:
   BACKEND_DIR: backend
   BACKEND_BRANCH: backend
-  FLUTTER_VERSION: '3.32.0'
+  # 3.38.5 (Dart 3.9) — needed so `pdf`/`printing` resolve: pdf 3.12.0 requires
+  # vector_math ^2.2.0, which older Flutter's flutter_test pinned to 2.1.4.
+  # Matches the local dev SDK the app is built/tested against.
+  FLUTTER_VERSION: '3.38.5'
 
 jobs:
   # Job 1: Backend tests (Jest + Supertest)
