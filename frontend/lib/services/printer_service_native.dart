@@ -261,13 +261,13 @@ class PrinterService {
     // Header — order: name, address, phone, GSTIN, FSSAI. Only the business
     // name is always shown; every other line prints only when available.
     //
-    // The business name is emitted BIG (double-size + bold, centered) to match
-    // the raster receipt's larger name. It's tagged with [_bigLineMarker] so
-    // _linesToAsciiBytes wraps it in the ESC/POS size commands; it is NOT
-    // space-centred here (double-width chars would throw the padding off — the
-    // printer centres it via ESC a 1 instead).
-    lines.add(_bigLineMarker +
-        (businessName ?? labels?.defaultBusiness ?? 'BUSINESS'));
+    // The business name is printed BOLD (same normal size and centring as
+    // before). It's tagged with [_boldLineMarker] so _linesToAsciiBytes wraps it
+    // in the ESC/POS emphasis on/off commands. It's space-centred normally here
+    // (bold doesn't change the character cell width, so the padding still lines
+    // up).
+    lines.add(_boldLineMarker +
+        _centre(businessName ?? labels?.defaultBusiness ?? 'BUSINESS', p.cols));
     if (businessAddress != null && businessAddress.isNotEmpty) {
       // Address may be multi-line and/or longer than the paper width — wrap and
       // centre each resulting line (plain _centre would truncate + left-align).
@@ -525,39 +525,30 @@ class PrinterService {
     return rows;
   }
 
-  /// Sentinel prefix on a receipt line meaning "print this BIG": centered,
-  /// double-width/double-height and bold via ESC/POS commands. Used for the
-  /// business name so the ASCII receipt's name matches the larger raster name.
-  /// It's a control char (0x01) that never appears in real receipt text.
-  static const String _bigLineMarker = '\x01';
+  /// Sentinel prefix on a receipt line meaning "print this BOLD" via the ESC/POS
+  /// emphasis commands (no size or alignment change). Used for the business name
+  /// so it stands out on the plain-text receipt. It's a control char (0x01) that
+  /// never appears in real receipt text.
+  static const String _boldLineMarker = '\x01';
 
   /// Pack ASCII-only receipt [lines] into plain ESC/POS text bytes (fast path).
   List<int> _linesToAsciiBytes(List<String> lines) {
-    // ESC/POS: text-size (GS ! n), emphasis (ESC E n), alignment (ESC a n).
-    const gsSize = [0x1D, 0x21]; // GS ! — next byte is the size multiplier
-    const emphOn = [0x1B, 0x45, 0x01]; // ESC E 1  (bold on)
-    const emphOff = [0x1B, 0x45, 0x00]; // ESC E 0  (bold off)
-    const alignCenter = [0x1B, 0x61, 0x01]; // ESC a 1
-    const alignLeft = [0x1B, 0x61, 0x00]; // ESC a 0
+    // ESC/POS emphasis (bold) on/off.
+    const emphOn = [0x1B, 0x45, 0x01]; // ESC E 1
+    const emphOff = [0x1B, 0x45, 0x00]; // ESC E 0
 
     final bytes = <int>[];
     for (final line in lines) {
-      if (line.startsWith(_bigLineMarker)) {
-        // Big + bold + centered line (business name). Strip the marker, emit the
-        // ESC/POS size/emphasis/alignment around the raw text, then reset so the
-        // rest of the receipt prints at normal size, weight and alignment.
-        final text = line.substring(_bigLineMarker.length);
-        bytes.addAll(alignCenter);
+      if (line.startsWith(_boldLineMarker)) {
+        // Bold line (business name), already space-centred by the caller. Bold
+        // doesn't change the character cell width, so nothing else shifts — just
+        // wrap the text in emphasis on/off.
+        final text = line.substring(_boldLineMarker.length);
         bytes.addAll(emphOn);
-        bytes.addAll(gsSize);
-        bytes.add(0x11); // double width (bit 0) + double height (bit 4)
         for (final c in text.codeUnits) {
           bytes.add(c > 127 ? 63 : c);
         }
-        bytes.addAll(gsSize);
-        bytes.add(0x00); // reset to normal size
         bytes.addAll(emphOff);
-        bytes.addAll(alignLeft);
         bytes.add(0x0A); // LF
         continue;
       }
