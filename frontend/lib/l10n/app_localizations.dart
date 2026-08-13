@@ -788,6 +788,12 @@ abstract class AppLocalizations {
   /// **'Retail Shop'**
   String get businessTypeRetail;
 
+  /// No description provided for @businessTypeRestaurant.
+  ///
+  /// In en, this message translates to:
+  /// **'Restaurant'**
+  String get businessTypeRestaurant;
+
   /// No description provided for @businessTypeRestaurantTables.
   ///
   /// In en, this message translates to:

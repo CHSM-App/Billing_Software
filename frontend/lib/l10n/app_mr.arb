@@ -134,6 +134,7 @@
   "logoutConfirmBody": "तुम्हाला खात्यातून लॉगआउट करायचे आहे का?",
 
   "businessTypeRetail": "किरकोळ दुकान",
+  "businessTypeRestaurant": "रेस्टॉरंट",
   "businessTypeRestaurantTables": "रेस्टॉरंट (टेबलसह)",
   "businessTypeRestaurantTakeaway": "रेस्टॉरंट (पार्सल)",
 

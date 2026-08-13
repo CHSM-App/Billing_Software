@@ -86,8 +86,21 @@ router.get('/:slug', (req, res) => {
   if (!process.env.ADMIN_URL_SLUG || req.params.slug !== process.env.ADMIN_URL_SLUG) {
     return res.status(404).send('<h2>Not found</h2>');
   }
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  return res.sendFile(DASHBOARD_PATH);
+  // Read + send the bytes ourselves instead of res.sendFile: under iisnode,
+  // sendFile's internal `send` can 404 on a file that exists (path/stat quirks
+  // via the named-pipe FS) and swallow the real error — the request then falls
+  // through to the SPA catch-all, so the browser loads the app shell and its
+  // router prints "No routes matched /admin/…". fs.readFile is reliable and
+  // surfaces the true errno. (Same fix the /order page uses.)
+  return fs.readFile(DASHBOARD_PATH, (err, buf) => {
+    if (err) {
+      logger.error({ err, path: DASHBOARD_PATH }, 'Admin dashboard file read failed');
+      return res.status(500).send('Admin dashboard is temporarily unavailable.');
+    }
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    return res.send(buf);
+  });
 });
 
 // ---------------------------------------------------------------------------

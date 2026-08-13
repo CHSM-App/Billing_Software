@@ -404,6 +404,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get businessTypeRetail => 'Retail Shop';
 
   @override
+  String get businessTypeRestaurant => 'Restaurant';
+
+  @override
   String get businessTypeRestaurantTables => 'Restaurant (with tables)';
 
   @override

@@ -134,6 +134,7 @@
   "logoutConfirmBody": "Are you sure you want to logout from your account?",
 
   "businessTypeRetail": "Retail Shop",
+  "businessTypeRestaurant": "Restaurant",
   "businessTypeRestaurantTables": "Restaurant (with tables)",
   "businessTypeRestaurantTakeaway": "Restaurant (takeaway)",
 
