@@ -133,7 +133,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
     const result = await pool.request().query(`
       SELECT
         b.id, b.name, b.business_type, b.phone, b.address,
-        b.is_verified, b.whatsapp_mode, b.created_at,
+        b.is_verified, b.whatsapp_mode, b.created_at, b.last_active_at,
         u.name  AS owner_name,
         u.phone AS owner_phone,
         s.status            AS sub_status,
@@ -167,6 +167,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
       is_verified:       !!r.is_verified,
       whatsapp_mode:     r.whatsapp_mode || 'deeplink',
       created_at:        r.created_at,
+      last_active_at:    r.last_active_at ?? null,
       owner_name:        r.owner_name ?? null,
       owner_phone:       r.owner_phone ?? null,
       subscription: r.sub_status == null ? null : {

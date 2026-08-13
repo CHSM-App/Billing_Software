@@ -158,6 +158,7 @@
             <th>Business</th>
             <th>Owner</th>
             <th>Registered</th>
+            <th>Last Active</th>
             <th>Subscription</th>
             <th>Expires</th>
             <th>Staff</th>
@@ -192,6 +193,7 @@
     <div class="kv"><span class="k">Phone</span><span id="dPhone">—</span></div>
     <div class="kv"><span class="k">Type</span><span id="dType">—</span></div>
     <div class="kv"><span class="k">Registered</span><span id="dCreated">—</span></div>
+    <div class="kv"><span class="k">Last active</span><span id="dLastActive">—</span></div>
     <div class="kv"><span class="k">Bills</span><span id="dBills">—</span></div>
     <div class="kv"><span class="k">Items</span><span id="dItems">—</span></div>
     <div class="kv"><span class="k">Trial</span><span id="dTrial">—</span></div>
@@ -322,6 +324,23 @@
     if(isNaN(d)) return '—';
     return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
   }
+  // Relative "last active" label + colour: green if within a day, amber within
+  // a week, gray/red for stale or never. Returns a ready-to-insert chip string.
+  function fmtLastActive(s){
+    if(!s) return '<span class="chip gray">never</span>';
+    var d = new Date(s); if(isNaN(d)) return '<span class="chip gray">never</span>';
+    var mins = Math.floor((new Date() - d)/60000);
+    var label, cls;
+    if(mins < 2){ label='just now'; cls='green'; }
+    else if(mins < 60){ label=mins+'m ago'; cls='green'; }
+    else if(mins < 1440){ label=Math.floor(mins/60)+'h ago'; cls='green'; }
+    else {
+      var days = Math.floor(mins/1440);
+      label = days+'d ago';
+      cls = days<=7 ? 'amber' : 'red';
+    }
+    return '<span class="chip '+cls+'" title="'+esc(d.toLocaleString('en-IN'))+'">'+label+'</span>';
+  }
   function daysLeft(s){
     if(!s) return null;
     var d = new Date(s); if(isNaN(d)) return null;
@@ -367,6 +386,7 @@
         + '<td><div class="biz-name">'+esc(b.name)+'</div><div class="biz-sub">'+esc(b.phone)+' &middot; '+esc(b.business_type)+'</div></td>'
         + '<td>'+esc(b.owner_name||'—')+'<div class="biz-sub">'+esc(b.owner_phone||'')+'</div></td>'
         + '<td>'+fmtDate(b.created_at)+'</td>'
+        + '<td>'+fmtLastActive(b.last_active_at)+'</td>'
         + '<td>'+statusChip(sub)+'</td>'
         + '<td>'+expTxt+'</td>'
         + '<td>'+staff+'</td>'
@@ -408,6 +428,8 @@
     $('dPhone').textContent = b.owner_phone || '—';
     $('dType').textContent = b.business_type;
     $('dCreated').textContent = fmtDate(b.created_at);
+    $('dLastActive').innerHTML = fmtLastActive(b.last_active_at)
+      + (b.last_active_at ? ' <span class="muted">'+esc(new Date(b.last_active_at).toLocaleString('en-IN'))+'</span>' : '');
     $('dBills').textContent = b.bill_count!=null ? b.bill_count : 0;
     $('dItems').textContent = b.item_count!=null ? b.item_count : 0;
     $('dTrial').textContent = sub.is_trial ? 'Yes' : 'No';

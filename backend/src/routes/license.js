@@ -12,6 +12,16 @@ const router = Router();
 router.get('/', requireAuth, async (req, res) => {
   try {
     await poolConnect;
+
+    // Stamp last-active — this endpoint is hit on every app open / resume, so it
+    // doubles as a heartbeat for "when was this business last using the app?"
+    // (surfaced on the admin dashboard). Fire-and-forget: never delay or fail the
+    // license check on account of it.
+    pool.request()
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query(`UPDATE businesses SET last_active_at = GETUTCDATE() WHERE id = @business_id`)
+      .catch(() => {});
+
     const request = pool.request();
     request.input('business_id', sql.UniqueIdentifier, req.user.business_id);
 
