@@ -287,6 +287,34 @@ class RasterLab {
     return out.toBytes();
   }
 
+  /// Render the SAME structured [rows] as [rowsToReceiptRaster] but return a
+  /// crisp, anti-aliased PNG for on-screen preview instead of an ESC/POS payload.
+  ///
+  /// Unlike the print path we deliberately DO NOT run the 1-bit [_pack] threshold
+  /// here — that hard black/white quantization is what the physical printer head
+  /// needs, but on a phone screen it looks jagged/rough. The layout is identical
+  /// (same [_renderRows], which already supersamples 2×); only the final image
+  /// stays smooth. [scale] can render even larger for extra sharpness when the
+  /// user zooms in.
+  static Future<Uint8List> receiptPreviewPng(
+    List<ReceiptRow> rows, {
+    int width = dots80mm,
+    double fontSize = 24,
+    double scale = 1.0,
+    List<String> fonts = const [
+      'monospace',
+      'NotoSansDevanagari',
+      'NotoSansTamil',
+      'NotoSansGujarati',
+    ],
+  }) async {
+    final img = await _renderRows(rows,
+        width: (width * scale).round(), baseSize: fontSize * scale, fonts: fonts);
+    final png = await img.toByteData(format: ui.ImageByteFormat.png);
+    img.dispose();
+    return png!.buffer.asUint8List();
+  }
+
   /// Render pre-formatted, monospace-aligned receipt [lines] (already padded
   /// with spaces for column alignment) into ONE raster. Used by the real
   /// printBill when any line contains non-ASCII (e.g. Marathi) so the printer
@@ -387,13 +415,18 @@ class RasterLab {
     final contentW = renderW - padX * 2;
 
     ui.Paragraph mk(String text, double size, TextAlign align, bool bold,
-        double maxW) {
+        double maxW, {bool italic = false}) {
+      final fontStyle = italic ? FontStyle.italic : FontStyle.normal;
       final b = ui.ParagraphBuilder(ui.ParagraphStyle(
         textAlign: align,
         fontFamily: fonts.first,
         fontSize: size * ss,
         fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
-        maxLines: 2,
+        fontStyle: fontStyle,
+        // Allow long item names to wrap across several lines (instead of being
+        // ellipsized) while staying inside their column. Short cells (qty,
+        // price, total, headers) never reach this many lines anyway.
+        maxLines: 6,
         ellipsis: '…',
       ))
         ..pushStyle(ui.TextStyle(
@@ -402,6 +435,7 @@ class RasterLab {
           fontFamilyFallback: fonts.skip(1).toList(),
           fontSize: size * ss,
           fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
+          fontStyle: fontStyle,
           height: 1.15,
         ))
         ..addText(text);
@@ -417,7 +451,8 @@ class RasterLab {
         measured.add(_MRow.rule(hh));
         totalH += hh + gapY;
       } else if (r.isCenter) {
-        final p = mk(r.cells.first.text, r.size, TextAlign.center, r.bold, contentW);
+        final p = mk(r.cells.first.text, r.size, TextAlign.center, r.bold,
+            contentW, italic: r.italic);
         measured.add(_MRow.center(p, p.height));
         totalH += p.height + gapY;
       } else {
@@ -908,17 +943,20 @@ class ReceiptRow {
   final List<ReceiptCell> cells;
   final double size;
   final bool bold;
+  final bool italic;
   final bool isCenter;
   final bool isRule;
   const ReceiptRow._(this.cells,
       {this.size = 24,
       this.bold = false,
+      this.italic = false,
       this.isCenter = false,
       this.isRule = false});
 
-  factory ReceiptRow.center(String t, {double size = 24, bool bold = false}) =>
+  factory ReceiptRow.center(String t,
+          {double size = 24, bool bold = false, bool italic = false}) =>
       ReceiptRow._([ReceiptCell(t, align: TextAlign.center)],
-          size: size, bold: bold, isCenter: true);
+          size: size, bold: bold, italic: italic, isCenter: true);
 
   /// Bold rule = thicker line.
   factory ReceiptRow.rule({bool bold = false}) =>

@@ -650,6 +650,18 @@ abstract class AppLocalizations {
   /// **'Add tax rate & HSN/SAC to items and show CGST/SGST on bills'**
   String get settingsGstSubtitle;
 
+  /// No description provided for @settingsRoundOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice Round Off'**
+  String get settingsRoundOff;
+
+  /// No description provided for @settingsRoundOffSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Round the final payable to the nearest rupee and show the adjustment on the bill'**
+  String get settingsRoundOffSubtitle;
+
   /// No description provided for @settingsManageStaff.
   ///
   /// In en, this message translates to:
@@ -1424,6 +1436,12 @@ abstract class AppLocalizations {
   /// **'Discount:'**
   String get receiptDiscount;
 
+  /// No description provided for @receiptRoundOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Round Off:'**
+  String get receiptRoundOff;
+
   /// No description provided for @receiptTotal.
   ///
   /// In en, this message translates to:
@@ -1609,6 +1627,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Failed to generate bill. Check your connection.'**
   String get billingGenerateFailed;
+
+  /// No description provided for @billingServerErrorSavedOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Server unavailable — bill saved offline and will sync automatically.'**
+  String get billingServerErrorSavedOffline;
 
   /// No description provided for @billingSavedOffline.
   ///
@@ -1807,6 +1831,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'WhatsApp'**
   String get billingWhatsapp;
+
+  /// No description provided for @billingRoundOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Round Off'**
+  String get billingRoundOff;
+
+  /// No description provided for @billingPreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview bill'**
+  String get billingPreview;
+
+  /// No description provided for @billingPreviewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill Preview'**
+  String get billingPreviewTitle;
 
   /// No description provided for @billingPrinterNotConnected.
   ///

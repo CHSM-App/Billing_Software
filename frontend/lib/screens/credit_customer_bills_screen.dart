@@ -70,7 +70,7 @@ class _CreditCustomerBillsScreenState
 
   double get _selectedTotal => _bills
       .where((b) => _selected.contains(b.id))
-      .fold(0.0, (s, b) => s + (b.total - b.discountAmount));
+      .fold(0.0, (s, b) => s + b.grandTotal);
 
   void _toggle(String id) {
     setState(() {
@@ -222,6 +222,7 @@ class _CreditCustomerBillsScreenState
         taxAmount: bill.taxAmount,
         discountAmount: bill.discountAmount,
         total: bill.total,
+        roundOff: bill.roundOff,
         paymentMode: settledMode,
         status: 'finalized',
         paymentStatus: 'paid',
@@ -369,7 +370,7 @@ class _CreditCustomerBillsScreenState
                     ),
                   ),
                   Text(
-                    '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
+                    '₹${bill.grandTotal.toStringAsFixed(2)}',
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
@@ -462,7 +463,7 @@ class _SettlementSheetState extends State<_SettlementSheet> {
   final _dateFmt = DateFormat('dd MMM yyyy, hh:mm a');
 
   double get _total => widget.bills
-      .fold(0.0, (s, b) => s + (b.total - b.discountAmount));
+      .fold(0.0, (s, b) => s + b.grandTotal);
 
   Future<void> _run(_SettleAction action) async {
     setState(() => _busy = true);

@@ -3,7 +3,7 @@
 
 import 'dart:convert';
 import 'dart:ui' as ui show Image;
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart' show Uint8List, ValueNotifier;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
@@ -75,6 +75,17 @@ class PrinterService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefKey);
     activePrinterRevision.value++;
+  }
+
+  Future<Uint8List> buildReceiptPreviewPng(Bill bill,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      String? businessGstin,
+      String? businessFssai,
+      dynamic labels,
+      int paperDots = 576}) async {
+    throw PrinterException('Receipt preview is not supported in the browser.');
   }
 
   Future<void> printBill(Bill bill,

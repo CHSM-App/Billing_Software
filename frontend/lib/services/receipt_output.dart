@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
@@ -6,6 +8,15 @@ import '../storage.dart';
 import 'printer_service.dart';
 import 'receipt_labels.dart';
 import 'invoice_pdf.dart';
+
+/// A rendered preview of a bill, in whichever form matches the chosen paper
+/// size: a thermal receipt bitmap ([isPdf] == false) or an A5/A4 PDF invoice
+/// ([isPdf] == true). The UI shows the PNG as an image or the PDF in a viewer.
+class ReceiptPreview {
+  final Uint8List bytes;
+  final bool isPdf;
+  const ReceiptPreview({required this.bytes, required this.isPdf});
+}
 
 /// Single decision point for emitting a bill's receipt/invoice according to the
 /// user's chosen paper size:
@@ -71,5 +82,49 @@ class ReceiptOutput {
       onLayout: (_) async => bytes,
       name: 'Invoice-${bills.first.billNumber}',
     );
+  }
+
+  /// Render a single [bill] to a preview for the currently-selected paper size,
+  /// WITHOUT printing. Thermal sizes return a receipt PNG; A5/A4 return PDF
+  /// bytes. Mirrors [emit] so the preview matches what will actually be printed.
+  static Future<ReceiptPreview> buildPreview(
+    Bill bill, {
+    required String businessName,
+    String? businessAddress,
+    String? businessGstin,
+    String? businessFssai,
+    String? defaultSacCode,
+    required bool gstEnabled,
+    String? footerNote,
+    required ReceiptLabels labels,
+  }) async {
+    final size = await getPaperSize();
+
+    if (PaperSizes.isThermal(size)) {
+      final png = await PrinterService.instance.buildReceiptPreviewPng(
+        bill,
+        businessName: businessName,
+        businessAddress: businessAddress,
+        businessGstin: businessGstin,
+        businessFssai: businessFssai,
+        labels: labels,
+        paperDots: PaperSizes.thermalDots(size),
+      );
+      return ReceiptPreview(bytes: png, isPdf: false);
+    }
+
+    final pageFormat = size == PaperSizes.a5 ? PdfPageFormat.a5 : PdfPageFormat.a4;
+    final bytes = await InvoicePdf.buildMany(
+      bills: [bill],
+      pageFormat: pageFormat,
+      businessName: businessName,
+      address: businessAddress,
+      gstin: businessGstin,
+      fssai: businessFssai,
+      defaultSacCode: defaultSacCode,
+      gstEnabled: gstEnabled,
+      footerNote: footerNote,
+    );
+    return ReceiptPreview(bytes: bytes, isPdf: true);
   }
 }

@@ -260,6 +260,16 @@ class _SettingsContentState extends State<_SettingsContent>
                         title: l10n.settingsGst,
                         subtitle: l10n.settingsGstSubtitle,
                       ),
+                      // Invoice round-off — off by default. When on, the final
+                      // payable is rounded to the nearest rupee and the
+                      // adjustment shows as a separate "Round Off" line.
+                      const SizedBox(height: AppSpacing.space8),
+                      _BusinessFlagToggle(
+                        field: 'round_off_enabled',
+                        icon: Icons.calculate_outlined,
+                        title: l10n.settingsRoundOff,
+                        subtitle: l10n.settingsRoundOffSubtitle,
+                      ),
                       const SizedBox(height: AppSpacing.space24),
 
                       _sectionLabel(context, l10n.settingsSectionTeam),
@@ -823,6 +833,9 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
         await ref.read(sessionProvider.notifier).refresh();
       } else if (widget.field == 'gst_enabled') {
         await updateGstEnabled(value);
+        await ref.read(sessionProvider.notifier).refresh();
+      } else if (widget.field == 'round_off_enabled') {
+        await updateRoundOffEnabled(value);
         await ref.read(sessionProvider.notifier).refresh();
       }
     } on ApiException catch (e) {

@@ -323,6 +323,13 @@ class AppLocalizationsMr extends AppLocalizations {
       'वस्तूंना कर दर व HSN/SAC जोडा आणि बिलावर CGST/SGST दाखवा';
 
   @override
+  String get settingsRoundOff => 'बिल राउंड ऑफ';
+
+  @override
+  String get settingsRoundOffSubtitle =>
+      'अंतिम देय रक्कम जवळच्या रुपयात करा आणि बिलावर फरक दाखवा';
+
+  @override
   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
 
   @override
@@ -737,6 +744,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get receiptDiscount => 'सूट:';
 
   @override
+  String get receiptRoundOff => 'राउंड ऑफ:';
+
+  @override
   String get receiptTotal => 'एकूण:';
 
   @override
@@ -834,6 +844,10 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get billingGenerateFailed =>
       'बिल तयार करता आले नाही. तुमचे कनेक्शन तपासा.';
+
+  @override
+  String get billingServerErrorSavedOffline =>
+      'सर्व्हर उपलब्ध नाही — बिल ऑफलाइन जतन केले, आपोआप सिंक होईल.';
 
   @override
   String billingSavedOffline(String error) {
@@ -957,6 +971,15 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingWhatsapp => 'व्हॉट्सअ‍ॅप';
+
+  @override
+  String get billingRoundOff => 'राउंड ऑफ';
+
+  @override
+  String get billingPreview => 'बिल पूर्वावलोकन';
+
+  @override
+  String get billingPreviewTitle => 'बिल पूर्वावलोकन';
 
   @override
   String get billingPrinterNotConnected => 'प्रिंटर कनेक्ट नाही.';

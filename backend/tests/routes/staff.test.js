@@ -87,10 +87,12 @@ describe('GET /api/staff', () => {
 // ------------------------------------------------------------------
 describe('POST /api/staff', () => {
   test('creates staff and returns 201', async () => {
-    // Two queries run: the duplicate-phone check (must be empty), then the
-    // INSERT (returns the created row).
+    // Three queries run: the duplicate-phone check (must be empty), the
+    // staff-cap check (return a count under the cap so the add is allowed),
+    // then the INSERT (returns the created row).
     mockRequest.query
       .mockResolvedValueOnce({ recordset: [] })
+      .mockResolvedValueOnce({ recordset: [{ staff_count: 0, max_staff: 10 }] })
       .mockResolvedValueOnce({ recordset: [sampleStaff] });
     const res = await request(app)
       .post('/api/staff')

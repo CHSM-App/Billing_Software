@@ -248,6 +248,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         inventoryEnabled: business['inventory_enabled'] == true,
         hasBarcodeScanner: business['has_barcode_scanner'] == true,
         gstEnabled: business['gst_enabled'] == true,
+        roundOffEnabled: business['round_off_enabled'] == true,
       );
       // Cache GST invoice details so the thermal receipt can print GSTIN offline.
       await saveGstProfile(

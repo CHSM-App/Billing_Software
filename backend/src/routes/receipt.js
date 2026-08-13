@@ -19,7 +19,7 @@ router.get('/:token', async (req, res) => {
       .input('token', sql.NVarChar(16), token)
       .query(`
         SELECT b.bill_number, b.customer_name, b.customer_phone,
-               b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.created_at,
+               b.subtotal, b.tax_amount, b.discount_amount, b.total, b.round_off, b.payment_mode, b.created_at,
                b.payment_status, b.settled_payment_mode,
                t.table_number,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
@@ -298,9 +298,13 @@ router.get('/:token', async (req, res) => {
       <span>Discount</span>
       <span>&minus;&#8377;${fmt(bill.discount_amount)}</span>
     </div>` : ''}
+    ${Number(bill.round_off) !== 0 ? `<div class="t-row">
+      <span>Round Off</span>
+      <span>${Number(bill.round_off) < 0 ? '&minus;' : '+'}&#8377;${fmt(Math.abs(Number(bill.round_off)))}</span>
+    </div>` : ''}
     <div class="t-grand">
       <span>Grand Total</span>
-      <span>&#8377;${fmt(Number(bill.total) - Number(bill.discount_amount || 0))}</span>
+      <span>&#8377;${fmt(Number(bill.total) - Number(bill.discount_amount || 0) + Number(bill.round_off || 0))}</span>
     </div>
   </div>
 

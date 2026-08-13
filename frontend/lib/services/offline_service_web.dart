@@ -135,6 +135,9 @@ class OfflineService {
     return (localId: localId, clientBillId: clientBillId);
   }
 
+  /// Web is assumed online, so there are no offline bills to surface in history.
+  Future<List<Bill>> getAllBills(String businessId) async => const <Bill>[];
+
   Future<List<Map<String, dynamic>>> getPendingBills() async => _bills.values
       .where((b) =>
           (b['sync_status'] == SyncStatus.pending ||
@@ -226,6 +229,9 @@ class OfflineService {
       _drafts[localId]?['sync_status'] = SyncStatus.syncing;
 
   Future<void> markDraftSynced(String localId) async => _drafts.remove(localId);
+
+  /// Removes a draft consumed locally (finalized into an offline bill offline).
+  Future<void> deleteDraft(String localId) async => _drafts.remove(localId);
 
   Future<void> markDraftFailed(String localId, String error) async {
     final d = _drafts[localId];

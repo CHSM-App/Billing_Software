@@ -41,30 +41,41 @@ void setConnectivityNotifier(ConnectivityNotifier n) {
 // Logging HTTP client
 // ---------------------------------------------------------------------------
 
+/// Hard ceiling on EVERY request. Without this a server that accepts the
+/// connection but never responds (hung/overloaded backend, DB deadlock) makes
+/// the awaiting call hang forever — which showed up as the app "continuously
+/// loading" on a server error. On timeout, http throws TimeoutException, which
+/// isNetworkError() classifies as a network failure → _safeSend marks the app
+/// offline and throws NetworkException, so the UI falls back to offline instead
+/// of spinning.
+const Duration _requestTimeout = Duration(seconds: 15);
+
 Future<http.Response> _get(Uri uri, {Map<String, String>? headers}) async {
   _logRequest('GET', uri, headers);
-  final response = await http.get(uri, headers: headers);
+  final response = await http.get(uri, headers: headers).timeout(_requestTimeout);
   _logResponse('GET', uri, response);
   return response;
 }
 
 Future<http.Response> _post(Uri uri, {Map<String, String>? headers, Object? body}) async {
   _logRequest('POST', uri, headers, body: body);
-  final response = await http.post(uri, headers: headers, body: body);
+  final response =
+      await http.post(uri, headers: headers, body: body).timeout(_requestTimeout);
   _logResponse('POST', uri, response);
   return response;
 }
 
 Future<http.Response> _put(Uri uri, {Map<String, String>? headers, Object? body}) async {
   _logRequest('PUT', uri, headers, body: body);
-  final response = await http.put(uri, headers: headers, body: body);
+  final response =
+      await http.put(uri, headers: headers, body: body).timeout(_requestTimeout);
   _logResponse('PUT', uri, response);
   return response;
 }
 
 Future<http.Response> _delete(Uri uri, {Map<String, String>? headers}) async {
   _logRequest('DELETE', uri, headers);
-  final response = await http.delete(uri, headers: headers);
+  final response = await http.delete(uri, headers: headers).timeout(_requestTimeout);
   _logResponse('DELETE', uri, response);
   return response;
 }
@@ -77,7 +88,16 @@ Future<http.Response> _delete(Uri uri, {Map<String, String>? headers}) async {
 /// connectivity state to offline and rethrows a typed [NetworkException] so the
 /// UI can show a "No internet" message instead of "Something went wrong". Any
 /// other error (a real HTTP response, an ApiException) passes through untouched.
+///
+/// FAST-FAIL: once the app already knows it's offline, we throw immediately
+/// instead of attempting a request that would block for the full 15s timeout.
+/// Re-probing the server is the connectivity recovery poll's job (it uses the
+/// raw client, so it bypasses this guard); app requests shouldn't each stall for
+/// 15s while the server is down.
 Future<http.Response> _safeSend(Future<http.Response> Function() send) async {
+  if (_connectivityNotifier?.isOffline ?? false) {
+    throw const NetworkException();
+  }
   try {
     return await send();
   } catch (e) {
@@ -126,10 +146,17 @@ void _logRequest(String method, Uri uri, Map<String, String>? headers, {Object? 
 }
 
 void _logResponse(String method, Uri uri, http.Response response) {
-  // We reached the server and got an HTTP response — we are online. This clears
-  // a stale "offline" state after connectivity is restored, without waiting for
-  // a manual pull-to-refresh.
-  _connectivityNotifier?.markOnline();
+  // A 5xx means we reached the server but it's broken (e.g. its DB is down).
+  // That is NOT "online" in any useful sense — real requests will keep failing —
+  // so treat it like an outage: mark offline so the app keeps working offline
+  // and shows a "server error" state rather than a misleading "online". Any
+  // non-5xx response (2xx/4xx) proves the server is serving, so mark online and
+  // clear a stale "offline" state without waiting for a manual refresh.
+  if (response.statusCode >= 500) {
+    _connectivityNotifier?.markOffline();
+  } else {
+    _connectivityNotifier?.markOnline();
+  }
   final ok = response.statusCode >= 200 && response.statusCode < 300;
   final tag = ok ? '✓' : '✗';
   dev.log(
@@ -858,8 +885,25 @@ Future<Map<String, dynamic>> updateBusinessProfile(Map<String, dynamic> data) as
 // Health check
 // ---------------------------------------------------------------------------
 
-/// Returns true if the backend is reachable and DB is connected.
+/// Returns true if the backend is reachable and the DB is connected (a healthy
+/// 200). Used by the startup gate where we need the server able to serve data.
 Future<bool> checkHealth() async {
+  try {
+    final response = await _get(Uri.parse('$baseUrl/health'))
+        .timeout(const Duration(seconds: 5));
+    return response.statusCode == 200;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Returns true only if the server is actually HEALTHY (/health returns 200 —
+/// the DB is up and it can serve data). Used for connectivity RECOVERY: we go
+/// "online" only when requests will actually succeed, so a server that responds
+/// with a 5xx (up, but its database is down) keeps the app OFFLINE and the user
+/// keeps billing offline instead of hitting failures. A socket error/timeout
+/// (no internet, or server unreachable) also returns false.
+Future<bool> checkReachable() async {
   try {
     final response = await _get(Uri.parse('$baseUrl/health'))
         .timeout(const Duration(seconds: 5));

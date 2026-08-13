@@ -377,7 +377,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
+                '₹${bill.grandTotal.toStringAsFixed(2)}',
                 style: Theme.of(context)
                     .textTheme
                     .bodyLarge
@@ -526,15 +526,22 @@ class _BillDetailDialog extends StatelessWidget {
               ],
               _row(context, l10n.billingTotalAmount,
                   '₹${bill.total.toStringAsFixed(2)}',
-                  bold: bill.discountAmount == 0),
+                  bold: bill.discountAmount == 0 && bill.roundOff == 0),
               if (bill.discountAmount > 0) ...[
                 const SizedBox(height: 4),
                 _row(context, l10n.billingDiscount,
                     '− ₹${bill.discountAmount.toStringAsFixed(2)}',
                     valueColor: const Color(0xFF16A34A)),
+              ],
+              if (bill.roundOff != 0) ...[
+                const SizedBox(height: 4),
+                _row(context, l10n.billingRoundOff,
+                    '${bill.roundOff < 0 ? '− ' : '+ '}₹${bill.roundOff.abs().toStringAsFixed(2)}'),
+              ],
+              if (bill.discountAmount > 0 || bill.roundOff != 0) ...[
                 const Divider(height: AppSpacing.space12),
                 _row(context, l10n.billingNetPayable,
-                    '₹${(bill.total - bill.discountAmount).toStringAsFixed(2)}',
+                    '₹${bill.grandTotal.toStringAsFixed(2)}',
                     bold: true),
               ],
               const SizedBox(height: AppSpacing.space4),

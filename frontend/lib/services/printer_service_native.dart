@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:typed_data' show Uint8List;
 import 'dart:ui' show TextAlign;
 import 'dart:ui' as ui show Image;
 import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
@@ -249,7 +250,8 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       ReceiptLabels? labels}) {
-    final grandTotal = bill.total - bill.discountAmount;
+    // Grand total is the final payable: total - discount + round_off.
+    final grandTotal = bill.grandTotal;
     // GSTIN is passed only when GST is enabled — its presence gates the
     // GSTIN line + the CGST/SGST split. Without it the receipt is as before.
     final gst = businessGstin != null && businessGstin.isNotEmpty;
@@ -258,8 +260,14 @@ class PrinterService {
 
     // Header — order: name, address, phone, GSTIN, FSSAI. Only the business
     // name is always shown; every other line prints only when available.
-    lines.add(
-        _centre(businessName ?? labels?.defaultBusiness ?? 'BUSINESS', p.cols));
+    //
+    // The business name is emitted BIG (double-size + bold, centered) to match
+    // the raster receipt's larger name. It's tagged with [_bigLineMarker] so
+    // _linesToAsciiBytes wraps it in the ESC/POS size commands; it is NOT
+    // space-centred here (double-width chars would throw the padding off — the
+    // printer centres it via ESC a 1 instead).
+    lines.add(_bigLineMarker +
+        (businessName ?? labels?.defaultBusiness ?? 'BUSINESS'));
     if (businessAddress != null && businessAddress.isNotEmpty) {
       // Address may be multi-line and/or longer than the paper width — wrap and
       // centre each resulting line (plain _centre would truncate + left-align).
@@ -300,19 +308,28 @@ class PrinterService {
 
     // Items
     for (final item in bill.items) {
-      final name = item.itemName.length > p.nameCols
-          ? item.itemName.substring(0, p.nameCols)
-          : item.itemName;
       final qty = item.quantity % 1 == 0
           ? item.quantity.toInt().toString()
           : item.quantity.toStringAsFixed(1);
+      // Wrap the name within its column instead of truncating, so a long name
+      // prints in full across several lines while staying inside the name
+      // column (qty/price/total sit on the first line only).
+      final nameLines = _wrapNameToCol(item.itemName, p.nameCols);
+      final firstName = nameLines.isEmpty ? '' : nameLines.first;
+      // Total column shows the NET line price (unit price × qty, before tax) —
+      // consistent for retail and restaurant. Tax is summed once at the bottom.
+      final netLine = item.unitPrice * item.quantity;
       lines.add(_itemRow(
         p,
-        name,
+        firstName,
         qty,
         item.unitPrice.toStringAsFixed(2),
-        item.lineTotal.toStringAsFixed(2),
+        netLine.toStringAsFixed(2),
       ));
+      // Continuation lines: remaining name segments, name column only.
+      for (final cont in nameLines.skip(1)) {
+        lines.add(_itemRow(p, cont, '', '', ''));
+      }
     }
     lines.add('-' * p.cols);
 
@@ -339,6 +356,11 @@ class PrinterService {
       lines.add(_twoCol(p, labels?.discount ?? 'Discount:',
           '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
     }
+    if (bill.roundOff != 0) {
+      final sign = bill.roundOff < 0 ? '-' : '+';
+      lines.add(_twoCol(p, labels?.roundOff ?? 'Round Off:',
+          '${sign}Rs.${bill.roundOff.abs().toStringAsFixed(2)}'));
+    }
 
     lines.add(_twoCol(p, labels?.total ?? 'Grand Total:',
         'Rs.${grandTotal.toStringAsFixed(2)}'));
@@ -347,6 +369,9 @@ class PrinterService {
         _twoCol(p, labels?.payment ?? 'Payment:', bill.paymentMode.toUpperCase()));
     lines.add('-' * p.cols);
     lines.add(_centre(labels?.thankYou ?? 'Thank you, visit again!', p.cols));
+    // Brand line under the thank-you note. The plain-text path has no per-line
+    // font sizing, so it prints at normal size (the raster path renders it small).
+    lines.add(_centre(labels?.poweredBy ?? 'Powered by Vengurlatech', p.cols));
 
     return lines;
   }
@@ -361,7 +386,8 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       ReceiptLabels? labels}) {
-    final grandTotal = bill.total - bill.discountAmount;
+    // Grand total is the final payable: total - discount + round_off.
+    final grandTotal = bill.grandTotal;
     final gst = businessGstin != null && businessGstin.isNotEmpty;
     final fssai = businessFssai != null && businessFssai.isNotEmpty;
     final rows = <ReceiptRow>[];
@@ -443,11 +469,14 @@ class PrinterService {
       final qty = item.quantity % 1 == 0
           ? item.quantity.toInt().toString()
           : item.quantity.toStringAsFixed(1);
+      // Total column shows the NET line price (unit price × qty, before tax) —
+      // consistent for retail and restaurant. Tax is summed once at the bottom.
+      final netLine = item.unitPrice * item.quantity;
       rows.add(itemRow(
         item.itemName,
         qty,
         item.unitPrice.toStringAsFixed(2),
-        item.lineTotal.toStringAsFixed(2),
+        netLine.toStringAsFixed(2),
       ));
     }
     rows.add(ReceiptRow.rule());
@@ -476,6 +505,11 @@ class PrinterService {
       rows.add(total(labels?.discount ?? 'Discount:',
           '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
     }
+    if (bill.roundOff != 0) {
+      final sign = bill.roundOff < 0 ? '-' : '+';
+      rows.add(total(labels?.roundOff ?? 'Round Off:',
+          '${sign}Rs.${bill.roundOff.abs().toStringAsFixed(2)}'));
+    }
     rows.add(total(labels?.total ?? 'Grand Total:',
         'Rs.${grandTotal.toStringAsFixed(2)}',
         bold: true, size: 32));
@@ -484,14 +518,49 @@ class PrinterService {
     rows.add(ReceiptRow.rule());
     rows.add(ReceiptRow.center(
         labels?.thankYou ?? 'Thank you, visit again!', size: 26));
+    // Small italic brand line under the thank-you note.
+    rows.add(ReceiptRow.center(labels?.poweredBy ?? 'Powered by Vengurlatech',
+        size: 18, italic: true));
 
     return rows;
   }
 
+  /// Sentinel prefix on a receipt line meaning "print this BIG": centered,
+  /// double-width/double-height and bold via ESC/POS commands. Used for the
+  /// business name so the ASCII receipt's name matches the larger raster name.
+  /// It's a control char (0x01) that never appears in real receipt text.
+  static const String _bigLineMarker = '\x01';
+
   /// Pack ASCII-only receipt [lines] into plain ESC/POS text bytes (fast path).
   List<int> _linesToAsciiBytes(List<String> lines) {
+    // ESC/POS: text-size (GS ! n), emphasis (ESC E n), alignment (ESC a n).
+    const gsSize = [0x1D, 0x21]; // GS ! — next byte is the size multiplier
+    const emphOn = [0x1B, 0x45, 0x01]; // ESC E 1  (bold on)
+    const emphOff = [0x1B, 0x45, 0x00]; // ESC E 0  (bold off)
+    const alignCenter = [0x1B, 0x61, 0x01]; // ESC a 1
+    const alignLeft = [0x1B, 0x61, 0x00]; // ESC a 0
+
     final bytes = <int>[];
     for (final line in lines) {
+      if (line.startsWith(_bigLineMarker)) {
+        // Big + bold + centered line (business name). Strip the marker, emit the
+        // ESC/POS size/emphasis/alignment around the raw text, then reset so the
+        // rest of the receipt prints at normal size, weight and alignment.
+        final text = line.substring(_bigLineMarker.length);
+        bytes.addAll(alignCenter);
+        bytes.addAll(emphOn);
+        bytes.addAll(gsSize);
+        bytes.add(0x11); // double width (bit 0) + double height (bit 4)
+        for (final c in text.codeUnits) {
+          bytes.add(c > 127 ? 63 : c);
+        }
+        bytes.addAll(gsSize);
+        bytes.add(0x00); // reset to normal size
+        bytes.addAll(emphOff);
+        bytes.addAll(alignLeft);
+        bytes.add(0x0A); // LF
+        continue;
+      }
       for (final c in line.codeUnits) {
         bytes.add(c > 127 ? 63 : c); // replace any stray non-ASCII with '?'
       }
@@ -520,6 +589,29 @@ class PrinterService {
   // -------------------------------------------------------------------------
   // Printing dispatch
   // -------------------------------------------------------------------------
+
+  /// Build an on-screen PNG preview of [bill]'s thermal receipt — the exact
+  /// layout that would print, rendered through the same raster pipeline. Does
+  /// NOT touch the printer, so it works with no printer paired. [paperDots]
+  /// selects the width (384 → 58mm, else 80mm).
+  Future<Uint8List> buildReceiptPreviewPng(Bill bill,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      String? businessGstin,
+      String? businessFssai,
+      ReceiptLabels? labels,
+      int paperDots = 576}) async {
+    final profile = _profileForDots(paperDots);
+    final rows = _buildReceiptRows(bill, profile,
+        businessName: businessName,
+        businessPhone: businessPhone,
+        businessAddress: businessAddress,
+        businessGstin: businessGstin,
+        businessFssai: businessFssai,
+        labels: labels);
+    return RasterLab.receiptPreviewPng(rows, width: paperDots);
+  }
 
   Future<void> printBill(Bill bill,
       {String? businessName,
@@ -880,6 +972,44 @@ class PrinterService {
       if (current.isNotEmpty) out.add(current);
     }
     return out;
+  }
+
+  /// Word-wrap an item name to [width] columns, hard-breaking any single word
+  /// that is itself longer than [width] (e.g. a run-on name with no spaces).
+  /// Unlike [_wrapLines], this guarantees no returned segment exceeds [width],
+  /// so the whole name prints in full without being truncated by the column.
+  static List<String> _wrapNameToCol(String name, int width) {
+    if (width <= 0) return [name];
+    final out = <String>[];
+    var current = '';
+    for (final word in name.trim().split(RegExp(r'\s+'))) {
+      if (word.isEmpty) continue;
+      // A word longer than the column: flush the current line, then emit the
+      // word in width-sized chunks (the last chunk becomes the new current).
+      if (word.length > width) {
+        if (current.isNotEmpty) {
+          out.add(current);
+          current = '';
+        }
+        var rest = word;
+        while (rest.length > width) {
+          out.add(rest.substring(0, width));
+          rest = rest.substring(width);
+        }
+        current = rest;
+        continue;
+      }
+      if (current.isEmpty) {
+        current = word;
+      } else if (current.length + 1 + word.length <= width) {
+        current = '$current $word';
+      } else {
+        out.add(current);
+        current = word;
+      }
+    }
+    if (current.isNotEmpty) out.add(current);
+    return out.isEmpty ? [''] : out;
   }
 
   /// Like [_wrapLines] but each line is space-padded so it centres on the

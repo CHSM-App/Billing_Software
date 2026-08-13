@@ -55,6 +55,7 @@ dependencies:
   # 2.1.4). CI's Flutter version is bumped accordingly in .github/workflows.
   pdf: ^3.12.0
   printing: ^5.13.3
+  connectivity_plus: ^7.3.1
 
 dev_dependencies:
   flutter_test:

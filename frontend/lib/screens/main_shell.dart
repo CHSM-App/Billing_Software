@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/l10n_ext.dart';
+import '../api.dart' show setConnectivityNotifier;
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../services/sync_service.dart';
@@ -64,6 +65,14 @@ class _MainShellState extends ConsumerState<MainShell>
     // re-running bootstrap; start() is idempotent and clears the disposed latch
     // set by a prior logout, so realtime works on every session.
     RealtimeService.instance.start();
+
+    // Wire the connectivity notifier into api.dart for THIS session. The cold-
+    // start bootstrap wires it, but a fresh login (login screen → new shell) does
+    // not — without this, api.dart's markOffline/markOnline are no-ops, so the
+    // "No connection" badge never shows, the app can't tell it's offline (so
+    // billing tries online and fails), and it never detects reconnect. Re-wiring
+    // here guarantees it's connected on every session.
+    setConnectivityNotifier(ref.read(connectivityProvider.notifier));
 
     // Fresh login mounts a new shell. The open-drafts provider may still hold
     // stale/empty state from a previous session (it isn't autoDispose), so the
@@ -218,6 +227,11 @@ class _MainShellState extends ConsumerState<MainShell>
               // Queued offline drafts were just pushed; refresh Open Orders so
               // their local copies are replaced by the authoritative server ones.
               ref.invalidate(openDraftsProvider);
+              // History: the just-synced offline bills are now on the server and
+              // their local INV-<tag>-#### rows are gone, so re-fetch to show the
+              // authoritative copies.
+              ref.invalidate(billsProvider);
+              ref.invalidate(reportProvider);
             });
           }
         });

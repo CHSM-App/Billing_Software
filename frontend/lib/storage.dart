@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -58,6 +59,7 @@ class AuthStorage {
   static const _keyInventoryEnabled = 'inventory_enabled';
   static const _keyHasBarcodeScanner = 'has_barcode_scanner';
   static const _keyGstEnabled       = 'gst_enabled';
+  static const _keyRoundOffEnabled  = 'round_off_enabled';
   // Cached GST invoice details, refreshed whenever the business profile is
   // fetched — used so the thermal receipt can print GSTIN even offline.
   static const _keyGstNumber        = 'gst_number';
@@ -69,6 +71,15 @@ class AuthStorage {
   // invoice prefix as online instead of a jarring 'LOCAL-'. Refreshed whenever
   // the business profile is fetched.
   static const _keyBillPrefix       = 'bill_prefix';
+  // Offline bill numbering: 'INV-<deviceTag>-<seq>' e.g. INV-a7f4-0001.
+  //   • _keyDeviceTag — a 4-char random tag generated ONCE per install, so two
+  //     devices billing offline never produce the same number.
+  //   • _keyOfflineSeq — a monotonic 4-digit counter (wraps at 9999) that
+  //     persists across offline sessions and continues where it left off.
+  // The number is kept as-is on sync (it's printed and given to the customer),
+  // so it must be globally unique — the device tag guarantees that.
+  static const _keyDeviceTag        = 'offline_device_tag';
+  static const _keyOfflineSeq       = 'offline_bill_seq';
   // Chosen print paper size: 'mm58' | 'mm80' | 'a5' | 'a4'. Defaults to 'mm80'
   // (current behaviour). 'mm58'/'mm80' print thermal ESC/POS; 'a5'/'a4' generate
   // a PDF invoice via the OS print dialog.
@@ -90,6 +101,7 @@ class AuthStorage {
     bool inventoryEnabled = false,
     bool hasBarcodeScanner = false,
     bool gstEnabled = false,
+    bool roundOffEnabled = false,
   }) async {
     // Tokens go to secure storage
     await Future.wait([
@@ -109,6 +121,7 @@ class AuthStorage {
       prefs.setBool(_keyInventoryEnabled, inventoryEnabled),
       prefs.setBool(_keyHasBarcodeScanner, hasBarcodeScanner),
       prefs.setBool(_keyGstEnabled, gstEnabled),
+      prefs.setBool(_keyRoundOffEnabled, roundOffEnabled),
     ]);
   }
 
@@ -132,6 +145,11 @@ class AuthStorage {
   Future<void> updateGstEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyGstEnabled, enabled);
+  }
+
+  Future<void> updateRoundOffEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyRoundOffEnabled, enabled);
   }
 
   /// Cache the GST invoice details from the business profile so the thermal
@@ -172,6 +190,36 @@ class AuthStorage {
     final prefs = await SharedPreferences.getInstance();
     final p = prefs.getString(_keyBillPrefix)?.trim();
     return (p == null || p.isEmpty) ? 'INV' : p;
+  }
+
+  /// A stable 4-char UPPERCASE alphanumeric tag unique to THIS install,
+  /// generated once and reused. Embedded in offline bill numbers so two devices
+  /// billing offline never produce the same number. Existing installs that saved
+  /// a lowercase tag are upper-cased on read (no regeneration — that would break
+  /// the number's continuity).
+  Future<String> getDeviceTag() async {
+    final prefs = await SharedPreferences.getInstance();
+    final existing = prefs.getString(_keyDeviceTag);
+    if (existing != null && existing.isNotEmpty) return existing.toUpperCase();
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final rng = Random.secure();
+    final tag = List.generate(4, (_) => chars[rng.nextInt(chars.length)]).join();
+    await prefs.setString(_keyDeviceTag, tag);
+    return tag;
+  }
+
+  /// Builds the next OFFLINE bill number: `INV-<deviceTag>-<seq>`, e.g.
+  /// 'INV-a7f4-0001'. The 4-digit counter persists and continues across offline
+  /// sessions (wraps at 9999). This number is kept verbatim when the bill later
+  /// syncs — it's printed and handed to the customer, so it must not change; the
+  /// device tag keeps it globally unique.
+  Future<String> nextOfflineBillNumber() async {
+    final prefs = await SharedPreferences.getInstance();
+    final tag = await getDeviceTag();
+    final current = prefs.getInt(_keyOfflineSeq) ?? 0;
+    final next = current >= 9999 ? 1 : current + 1;
+    await prefs.setInt(_keyOfflineSeq, next);
+    return 'INV-$tag-${next.toString().padLeft(4, '0')}';
   }
 
   Future<void> savePaperSize(String size) async {
@@ -223,6 +271,7 @@ class AuthStorage {
       'inventory_enabled': prefs.getBool(_keyInventoryEnabled) ?? false,
       'has_barcode_scanner': prefs.getBool(_keyHasBarcodeScanner) ?? false,
       'gst_enabled'      : prefs.getBool(_keyGstEnabled) ?? false,
+      'round_off_enabled': prefs.getBool(_keyRoundOffEnabled) ?? false,
     };
   }
 
@@ -269,6 +318,7 @@ Future<void> saveSession({
   bool inventoryEnabled = false,
   bool hasBarcodeScanner = false,
   bool gstEnabled = false,
+  bool roundOffEnabled = false,
 }) => AuthStorage.instance.saveSession(
       accessToken: accessToken,
       refreshToken: refreshToken,
@@ -281,6 +331,7 @@ Future<void> saveSession({
       inventoryEnabled: inventoryEnabled,
       hasBarcodeScanner: hasBarcodeScanner,
       gstEnabled: gstEnabled,
+      roundOffEnabled: roundOffEnabled,
     );
 
 Future<void> updateBusinessName(String name)   => AuthStorage.instance.updateBusinessName(name);
@@ -293,11 +344,14 @@ Future<String?> getUserId()                    => AuthStorage.instance.getUserId
 Future<void>    clearSession()                 => AuthStorage.instance.clearSession();
 Future<void>    saveBillPrefix(String prefix)  => AuthStorage.instance.saveBillPrefix(prefix);
 Future<String>  getBillPrefix()                => AuthStorage.instance.getBillPrefix();
+Future<String>  nextOfflineBillNumber()        => AuthStorage.instance.nextOfflineBillNumber();
+Future<String>  getDeviceTag()                 => AuthStorage.instance.getDeviceTag();
 Future<void>    savePaperSize(String size)     => AuthStorage.instance.savePaperSize(size);
 Future<String>  getPaperSize()                 => AuthStorage.instance.getPaperSize();
 Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInventoryEnabled(e);
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);
+Future<void>    updateRoundOffEnabled(bool e)  => AuthStorage.instance.updateRoundOffEnabled(e);
 Future<void>    saveGstProfile({String? gstNumber, String? businessAddress, String? defaultSacCode, String? fssaiNumber}) =>
     AuthStorage.instance.saveGstProfile(gstNumber: gstNumber, businessAddress: businessAddress, defaultSacCode: defaultSacCode, fssaiNumber: fssaiNumber);
 Future<Map<String, String>> getGstProfile()    => AuthStorage.instance.getGstProfile();

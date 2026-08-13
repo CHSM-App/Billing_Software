@@ -44,11 +44,14 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
             COUNT(*) AS bill_count,
             ISNULL(SUM(total), 0) AS total_revenue,
             ISNULL(SUM(discount_amount), 0) AS total_discount,
-            ISNULL(SUM(CASE WHEN payment_mode = 'cash'   THEN total ELSE 0 END), 0) AS cash,
-            ISNULL(SUM(CASE WHEN payment_mode = 'upi'    THEN total ELSE 0 END), 0) AS upi,
-            ISNULL(SUM(CASE WHEN payment_mode = 'card'   THEN total ELSE 0 END), 0) AS card,
-            ISNULL(SUM(CASE WHEN payment_mode = 'credit' THEN total ELSE 0 END), 0) AS credit,
-            ISNULL(SUM(CASE WHEN payment_mode = 'other'  THEN total ELSE 0 END), 0) AS other
+            ISNULL(SUM(round_off), 0) AS total_round_off,
+            -- Payment-mode figures are the actual money collected: the payable
+            -- (total - discount) plus the round_off adjustment.
+            ISNULL(SUM(CASE WHEN payment_mode = 'cash'   THEN total - discount_amount + round_off ELSE 0 END), 0) AS cash,
+            ISNULL(SUM(CASE WHEN payment_mode = 'upi'    THEN total - discount_amount + round_off ELSE 0 END), 0) AS upi,
+            ISNULL(SUM(CASE WHEN payment_mode = 'card'   THEN total - discount_amount + round_off ELSE 0 END), 0) AS card,
+            ISNULL(SUM(CASE WHEN payment_mode = 'credit' THEN total - discount_amount + round_off ELSE 0 END), 0) AS credit,
+            ISNULL(SUM(CASE WHEN payment_mode = 'other'  THEN total - discount_amount + round_off ELSE 0 END), 0) AS other
           FROM bills
           WHERE business_id = @business_id
             AND status = 'finalized'
@@ -69,14 +72,17 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
     const bill      = billResult.recordset[0];
     const revenue   = parseFloat(bill.total_revenue);
     const discount  = parseFloat(bill.total_discount);
+    const roundOff  = parseFloat(bill.total_round_off);
     const expenses  = parseFloat(expenseResult.recordset[0].total_expenses);
-    const netRevenue = parseFloat((revenue - discount).toFixed(2));
+    // Net revenue = actual money collected = gross - discount + round_off.
+    const netRevenue = parseFloat((revenue - discount + roundOff).toFixed(2));
 
     return res.json({
       date: dateStr,
       bill_count:      bill.bill_count,
       total_revenue:   revenue,
       total_discount:  discount,
+      total_round_off: roundOff,
       total_expenses:  expenses,
       net_profit:      parseFloat((netRevenue - expenses).toFixed(2)),
       by_payment_mode: {
@@ -126,11 +132,13 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
           --   effective mode = settled_payment_mode once a credit bill is paid
           --                    (real cash/upi it was collected as), else
           --                    payment_mode (an unpaid credit stays 'credit').
-          --   net amount     = total - discount_amount (what total sales uses).
+          --   net amount     = total - discount_amount + round_off (the money
+          --                    actually collected, what total sales uses).
           SELECT
             COUNT(*) AS bill_count,
-            ISNULL(SUM(total - discount_amount), 0) AS total_revenue,
+            ISNULL(SUM(net), 0) AS total_revenue,
             ISNULL(SUM(discount_amount), 0) AS total_discount,
+            ISNULL(SUM(round_off), 0) AS total_round_off,
             ISNULL(SUM(tax_amount), 0) AS total_tax,
             ISNULL(SUM(CASE WHEN eff_mode = 'cash'   THEN net ELSE 0 END), 0) AS cash,
             ISNULL(SUM(CASE WHEN eff_mode = 'upi'    THEN net ELSE 0 END), 0) AS upi,
@@ -141,8 +149,9 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
             SELECT
               total,
               discount_amount,
+              round_off,
               tax_amount,
-              (total - discount_amount) AS net,
+              (total - discount_amount + round_off) AS net,
               CASE
                 WHEN payment_mode = 'credit' AND payment_status = 'paid'
                      AND settled_payment_mode IS NOT NULL
@@ -191,7 +200,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
               AND expense_date >= @from_date AND expense_date <= @to_date
           ) d
           LEFT JOIN (
-            SELECT CAST(created_at AS DATE) AS day, SUM(total) AS revenue
+            SELECT CAST(created_at AS DATE) AS day, SUM(total - discount_amount + round_off) AS revenue
             FROM bills
             WHERE business_id = @business_id AND status = 'finalized'
               AND created_at >= @from_dt AND created_at < @to_dt
@@ -223,7 +232,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         .input('from_dt',     sql.DateTime2,        fromDt)
         .input('to_dt',       sql.DateTime2,        toDt)
         .query(`
-          SELECT payment_mode, COUNT(*) AS count, SUM(total) AS total
+          SELECT payment_mode, COUNT(*) AS count, SUM(total - discount_amount + round_off) AS total
           FROM bills
           WHERE business_id = @business_id AND status = 'finalized'
             AND created_at >= @from_dt AND created_at < @to_dt
@@ -255,7 +264,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         .input('to_dt',       sql.DateTime2,        toDt)
         .query(`
           SELECT TOP 10
-                 b.bill_number, b.total, b.discount_amount, b.created_at,
+                 b.bill_number, b.total, b.discount_amount, b.round_off, b.created_at,
                  b.customer_name, t.table_number
           FROM bills b
           LEFT JOIN tables t ON t.id = b.table_id
@@ -266,7 +275,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
     ]);
 
     const bill      = billResult.recordset[0];
-    // total_revenue is already NET of discount (SUM(total - discount_amount)),
+    // total_revenue is the money collected: SUM(total - discount + round_off),
     // so the payment split below sums exactly to it.
     const netRevenue = parseFloat(bill.total_revenue);
     const revenue    = netRevenue;
@@ -279,6 +288,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
       bill_count:      bill.bill_count,
       total_revenue:   revenue,
       total_discount:  discount,
+      total_round_off: parseFloat(bill.total_round_off),
       total_tax:       parseFloat(bill.total_tax),
       total_expenses:  expenses,
       net_profit:      parseFloat((netRevenue - expenses).toFixed(2)),
@@ -313,6 +323,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         bill_number:     r.bill_number,
         total:           parseFloat(r.total),
         discount_amount: parseFloat(r.discount_amount || 0),
+        round_off:       parseFloat(r.round_off || 0),
         created_at:      r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
         customer_name:   r.customer_name,
         table_number:    r.table_number,
@@ -356,7 +367,7 @@ router.get('/weekly-sales', requireAuth, ownerOnly, async (req, res) => {
       .input('to_dt',       sql.DateTime2,        toDt)
       .query(`
         SELECT CAST(created_at AS DATE) AS day,
-               SUM(total - discount_amount) AS revenue
+               SUM(total - discount_amount + round_off) AS revenue
         FROM bills
         WHERE business_id = @business_id AND status = 'finalized'
           AND created_at >= @from_dt AND created_at < @to_dt

@@ -11,6 +11,7 @@ class SessionData {
   final bool inventoryEnabled;
   final bool hasBarcodeScanner;
   final bool gstEnabled;
+  final bool roundOffEnabled;
 
   const SessionData({
     required this.userId,
@@ -22,6 +23,7 @@ class SessionData {
     required this.inventoryEnabled,
     required this.hasBarcodeScanner,
     required this.gstEnabled,
+    required this.roundOffEnabled,
   });
 
   static SessionData empty() => const SessionData(
@@ -34,6 +36,7 @@ class SessionData {
         inventoryEnabled: false,
         hasBarcodeScanner: false,
         gstEnabled: false,
+        roundOffEnabled: false,
       );
 
   static SessionData fromMap(Map<String, dynamic> m) => SessionData(
@@ -46,6 +49,7 @@ class SessionData {
         inventoryEnabled: m['inventory_enabled'] == true,
         hasBarcodeScanner: m['has_barcode_scanner'] == true,
         gstEnabled: m['gst_enabled'] == true,
+        roundOffEnabled: m['round_off_enabled'] == true,
       );
 }
 
@@ -60,11 +64,16 @@ class SessionNotifier extends AsyncNotifier<SessionData> {
   }
 
   Future<void> refresh() async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
+    // Re-read the (local) session WITHOUT flipping to AsyncLoading first —
+    // otherwise every listener, including MainShell, briefly sees `loading` and
+    // the whole app flashes the splash screen (e.g. on Profile pull-to-refresh).
+    // getSession() reads SharedPreferences, so it's fast and effectively never
+    // fails; keep showing the current data throughout.
+    final next = await AsyncValue.guard(() async {
       final m = await getSession();
       return SessionData.fromMap(m);
     });
+    state = next;
   }
 
   Future<void> clear() async {
@@ -100,3 +109,8 @@ final inventoryEnabledProvider = Provider<bool>((ref) =>
 // are hidden and the app behaves exactly as before.
 final gstEnabledProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.gstEnabled ?? false);
+
+// Invoice round-off toggle. When false (the default), no round-off is applied
+// and the bill totals behave exactly as before.
+final roundOffEnabledProvider = Provider<bool>((ref) =>
+    ref.watch(sessionProvider).valueOrNull?.roundOffEnabled ?? false);

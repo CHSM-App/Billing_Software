@@ -43,6 +43,7 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
           b.city, b.state, b.pincode, b.logo_url,
           b.bill_prefix, b.bill_footer_note,
           b.gst_enabled, b.default_sac_code,
+          b.round_off_enabled,
           b.created_at,
           u.name  AS owner_name,
           u.phone AS owner_phone
@@ -93,6 +94,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     has_barcode_scanner,
     gst_enabled,
     default_sac_code,
+    round_off_enabled,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -166,6 +168,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     has_barcode_scanner,
     gst_enabled,
     default_sac_code,
+    round_off_enabled,
   };
 
   const fields = Object.entries(updatable).filter(([, v]) => v !== undefined);
@@ -184,7 +187,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           name, address, phone, email, website,
           city, state, pincode, gst_number, pan_number, fssai_number,
           logo_url, bill_prefix, bill_footer_note,
-          gst_enabled, default_sac_code
+          gst_enabled, default_sac_code, round_off_enabled
         FROM businesses WHERE id = @id
       `);
 
@@ -218,7 +221,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       // BIT columns take a normalised 0/1; text columns treat '' as NULL.
       const isBit = key === 'self_order_enabled' ||
           key === 'inventory_enabled' || key === 'has_barcode_scanner' ||
-          key === 'gst_enabled';
+          key === 'gst_enabled' || key === 'round_off_enabled';
       const normalised = isBit
         ? (value ? 1 : 0)
         : (value === '' ? null : value);
@@ -243,7 +246,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           gst_number, pan_number, fssai_number, email, website,
           city, state, pincode, logo_url,
           bill_prefix, bill_footer_note,
-          gst_enabled, default_sac_code,
+          gst_enabled, default_sac_code, round_off_enabled,
           created_at
         FROM businesses WHERE id = @id
       `);
@@ -298,6 +301,7 @@ function _formatBusiness(row) {
     bill_footer_note:    row.bill_footer_note ?? null,
     gst_enabled:         !!row.gst_enabled,
     default_sac_code:    row.default_sac_code ?? null,
+    round_off_enabled:   !!row.round_off_enabled,
     created_at:          row.created_at,
   };
 }
@@ -324,6 +328,7 @@ function _sqlTypeFor(key) {
     has_barcode_scanner: sql.Bit,
     gst_enabled:       sql.Bit,
     default_sac_code:  sql.NVarChar(10),
+    round_off_enabled: sql.Bit,
   };
   return map[key] ?? sql.NVarChar(500);
 }

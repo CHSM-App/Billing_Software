@@ -285,6 +285,10 @@ class Bill {
   final double taxAmount;
   final double discountAmount;
   final double total;
+  /// Signed invoice-level round-off adjustment (e.g. -0.22, +0.40). 0 when the
+  /// business has rounding disabled. NEVER folded into subtotal/tax/total — the
+  /// final payable is [grandTotal] = total - discount + roundOff.
+  final double roundOff;
   final String paymentMode;
   final String status;
   /// 'paid' | 'unpaid'. Unpaid means a credit (udhaari) bill awaiting
@@ -296,6 +300,9 @@ class Bill {
 
   /// True when this is a credit bill that hasn't been settled yet.
   bool get isUnpaidCredit => paymentStatus == 'unpaid';
+
+  /// The final amount the customer pays: total, less discount, plus round-off.
+  double get grandTotal => total - discountAmount + roundOff;
 
   Bill({
     required this.id,
@@ -309,6 +316,7 @@ class Bill {
     required this.taxAmount,
     this.discountAmount = 0.0,
     required this.total,
+    this.roundOff = 0.0,
     required this.paymentMode,
     required this.status,
     this.paymentStatus = 'paid',
@@ -333,6 +341,9 @@ class Bill {
             ? double.parse(j['discount_amount'].toString())
             : 0.0,
         total: double.parse(j['total'].toString()),
+        roundOff: j['round_off'] != null
+            ? double.parse(j['round_off'].toString())
+            : 0.0,
         paymentMode: j['payment_mode'],
         status: j['status'] ?? 'finalized',
         paymentStatus: j['payment_status'] ?? 'paid',

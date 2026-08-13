@@ -24,9 +24,14 @@ class ReceiptLabels {
   // isn't routed through the ARB files. Defaults to 'FSSAI:'.
   final String fssai;
   final String discount;
+  final String roundOff;
   final String total;
   final String payment;
   final String thankYou;
+  // Brand line printed in small text under the thank-you note. It's a product
+  // name, so — like FSSAI — it's the same across all languages and isn't routed
+  // through the ARB files.
+  final String poweredBy;
 
   const ReceiptLabels({
     required this.languageCode,
@@ -48,9 +53,11 @@ class ReceiptLabels {
     required this.gstin,
     this.fssai = 'FSSAI:',
     required this.discount,
+    this.roundOff = 'Round Off:',
     required this.total,
     required this.payment,
     required this.thankYou,
+    this.poweredBy = 'Powered by Vengurlatech',
   });
 
   factory ReceiptLabels.from(AppLocalizations l10n, String languageCode) =>
@@ -73,6 +80,7 @@ class ReceiptLabels {
         sgst: l10n.receiptSgst,
         gstin: l10n.receiptGstin,
         discount: l10n.receiptDiscount,
+        roundOff: l10n.receiptRoundOff,
         total: l10n.receiptTotal,
         payment: l10n.receiptPayment,
         thankYou: l10n.receiptThankYou,

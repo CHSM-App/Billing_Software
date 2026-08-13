@@ -55,6 +55,14 @@ class OpenDraftsNotifier extends AsyncNotifier<List<Bill>> {
     state = AsyncData([...current, draft]);
   }
 
+  /// Optimistically drop a draft from the visible list — used when an offline
+  /// draft is finalized into a bill while still offline, so it disappears from
+  /// Open Orders immediately instead of lingering as "still saving".
+  void removeLocalDraft(String draftId) {
+    final current = state.valueOrNull ?? const <Bill>[];
+    state = AsyncData(current.where((b) => b.id != draftId).toList());
+  }
+
   /// Reads queued offline drafts (table-less only) and rebuilds them as [Bill]s.
   Future<List<Bill>> _localDrafts() async {
     final rows = await OfflineService.instance.getAllDrafts();

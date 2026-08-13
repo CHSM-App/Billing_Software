@@ -322,6 +322,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Add tax rate & HSN/SAC to items and show CGST/SGST on bills';
 
   @override
+  String get settingsRoundOff => 'Invoice Round Off';
+
+  @override
+  String get settingsRoundOffSubtitle =>
+      'Round the final payable to the nearest rupee and show the adjustment on the bill';
+
+  @override
   String get settingsManageStaff => 'Manage Staff';
 
   @override
@@ -735,6 +742,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get receiptDiscount => 'Discount:';
 
   @override
+  String get receiptRoundOff => 'Round Off:';
+
+  @override
   String get receiptTotal => 'TOTAL:';
 
   @override
@@ -831,6 +841,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get billingGenerateFailed =>
       'Failed to generate bill. Check your connection.';
+
+  @override
+  String get billingServerErrorSavedOffline =>
+      'Server unavailable — bill saved offline and will sync automatically.';
 
   @override
   String billingSavedOffline(String error) {
@@ -954,6 +968,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingWhatsapp => 'WhatsApp';
+
+  @override
+  String get billingRoundOff => 'Round Off';
+
+  @override
+  String get billingPreview => 'Preview bill';
+
+  @override
+  String get billingPreviewTitle => 'Bill Preview';
 
   @override
   String get billingPrinterNotConnected => 'Printer not connected.';

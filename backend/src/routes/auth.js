@@ -278,6 +278,7 @@ router.post('/login', loginLimiter, async (req, res) => {
                b.name AS business_name, b.business_type, b.is_verified,
                b.inventory_enabled, b.has_barcode_scanner, b.address,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
+               b.round_off_enabled,
                s.allow_mobile, s.allow_desktop
         FROM users u
         JOIN businesses b ON u.business_id = b.id
@@ -400,6 +401,7 @@ router.post('/login', loginLimiter, async (req, res) => {
         gst_number: row.gst_number ?? null,
         default_sac_code: row.default_sac_code ?? null,
         fssai_number: row.fssai_number ?? null,
+        round_off_enabled: !!row.round_off_enabled,
         // Device-access policy — surfaced at login so the client can enforce it
         // immediately, without depending on a separate /license fetch that may
         // fail on a flaky network. NULL (no subscription) defaults to allowed.

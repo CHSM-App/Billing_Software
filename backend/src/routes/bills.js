@@ -8,6 +8,7 @@ const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUti
 const { sendBillLink, normalisePhone } = require('../whatsapp');
 const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
+const { computeRoundOff } = require('../money');
 
 // Base URL used in receipt links — no trailing slash
 const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
@@ -25,6 +26,26 @@ function generateReceiptToken() {
 }
 
 const router = express.Router();
+
+// Re-derive a bill's round_off from its (already persisted) total & discount so
+// the final payable stays reconciled after a totals-changing edit. When rounding
+// is disabled for the business it is forced to 0. ROUND(x, 0) in SQL Server is
+// round-half-up for the non-negative payable (total - discount), matching the
+// create path's computeRoundOff. subtotal/tax/discount/total are never touched.
+async function recomputeRoundOff(transaction, billId, roundOffEnabled) {
+  await transaction.request()
+    .input('id', sql.UniqueIdentifier, billId)
+    .input('enabled', sql.Bit, roundOffEnabled ? 1 : 0)
+    .query(`
+      UPDATE bills
+      SET round_off = CASE
+        WHEN @enabled = 1
+        THEN ROUND(total - discount_amount, 0) - (total - discount_amount)
+        ELSE 0
+      END
+      WHERE id = @id
+    `);
+}
 
 // Build a parameterized IN clause for an array of UUIDs.
 // Returns { clause: '@p0,@p1,...', bind: (request) => request }
@@ -273,7 +294,7 @@ async function fetchBill(billId, businessId) {
     .input('business_id', sql.UniqueIdentifier, businessId)
     .query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
-             b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.status,
+             b.subtotal, b.tax_amount, b.discount_amount, b.total, b.round_off, b.payment_mode, b.status,
              b.payment_status, b.settled_at, b.settled_payment_mode,
              b.created_by_user_id, b.created_at, b.receipt_token,
              t.table_number
@@ -300,7 +321,7 @@ async function fetchBill(billId, businessId) {
 
 // POST /api/bills
 router.post('/', requireAuth, async (req, res) => {
-  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id, discount_amount } = req.body;
+  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
@@ -336,6 +357,21 @@ router.post('/', requireAuth, async (req, res) => {
   if (client_bill_id !== undefined && (typeof client_bill_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(client_bill_id))) {
     return res.status(400).json({ error: 'client_bill_id must be a valid UUID' });
   }
+  // bill_number, when supplied (offline sync), preserves the number already
+  // printed on the customer's receipt. Constrain it to a safe invoice-number
+  // shape and length so it can't inject arbitrary data.
+  if (bill_number !== undefined && bill_number !== null &&
+      (typeof bill_number !== 'string' || !/^[A-Za-z0-9\-/]{1,50}$/.test(bill_number))) {
+    return res.status(400).json({ error: 'bill_number must be alphanumeric (with - or /), up to 50 chars' });
+  }
+  // round_off, when supplied (offline sync), preserves the exact adjustment
+  // already printed on the customer's receipt. Must be a small signed number
+  // (a single-rupee rounding is always within [-1, 1)).
+  if (round_off !== undefined && round_off !== null &&
+      (typeof round_off !== 'number' || !Number.isFinite(round_off) ||
+       round_off <= -1 || round_off >= 1)) {
+    return res.status(400).json({ error: 'round_off must be a number in (-1, 1)' });
+  }
 
   try {
     await poolConnect;
@@ -369,8 +405,9 @@ router.post('/', requireAuth, async (req, res) => {
       // consistent with the stock update that follows (no TOCTOU gap).
       const bizResult = await transaction.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-        .query('SELECT inventory_enabled FROM businesses WHERE id = @business_id');
+        .query('SELECT inventory_enabled, round_off_enabled FROM businesses WHERE id = @business_id');
       const inventoryEnabled = bizResult.recordset[0]?.inventory_enabled;
+      const roundOffEnabled = !!bizResult.recordset[0]?.round_off_enabled;
 
       const { clause: itemClause, bind: bindItems } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems(transaction.request())
@@ -439,6 +476,15 @@ router.post('/', requireAuth, async (req, res) => {
         total,
       ).toFixed(2));
 
+      // Invoice-level round-off. subtotal/tax/discount/total above are NEVER
+      // modified; round_off is a separate signed adjustment on the final payable
+      // (total - discount). Offline bills carry the exact round_off already
+      // printed on the customer's receipt — preserve it verbatim; online bills
+      // compute it server-side from the business's round_off_enabled setting.
+      const roundOff = (round_off !== undefined && round_off !== null)
+        ? parseFloat(Number(round_off).toFixed(2))
+        : computeRoundOff(total - discountAmount, roundOffEnabled);
+
       // Centralized stock pre-check: validate ALL items before any writes.
       // itemMap rows were fetched inside this transaction (locked), so
       // stock_quantity here reflects the committed state at transaction start.
@@ -468,7 +514,12 @@ router.post('/', requireAuth, async (req, res) => {
         }
       }
 
-      const billNumber = await generateBillNumber(transaction, req.user.business_id);
+      // Offline bills carry the number already printed on the customer's
+      // receipt (bill_number) — keep it verbatim. Only bills created directly on
+      // the server (no client number) get a fresh server sequence.
+      const billNumber = (bill_number && bill_number.trim())
+        ? bill_number.trim()
+        : await generateBillNumber(transaction, req.user.business_id);
       const receiptToken = generateReceiptToken();
 
       // Insert bill
@@ -482,6 +533,7 @@ router.post('/', requireAuth, async (req, res) => {
         .input('tax_amount',      sql.Decimal(10, 2),   taxAmount)
         .input('discount_amount', sql.Decimal(10, 2),   discountAmount)
         .input('total',           sql.Decimal(10, 2),   total)
+        .input('round_off',       sql.Decimal(10, 2),   roundOff)
         .input('payment_mode',    sql.NVarChar(20),     payment_mode)
         .input('payment_status',  sql.NVarChar(20),     paymentStatus)
         .input('status',          sql.NVarChar(20),     billStatus)
@@ -490,11 +542,11 @@ router.post('/', requireAuth, async (req, res) => {
         .input('receipt_token',   sql.NVarChar(16),     receiptToken)
         .query(`
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
-                             subtotal, tax_amount, discount_amount, total, payment_mode, payment_status, status,
+                             subtotal, tax_amount, discount_amount, total, round_off, payment_mode, payment_status, status,
                              created_by_user_id, client_bill_id, receipt_token)
           OUTPUT INSERTED.id
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
-                  @subtotal, @tax_amount, @discount_amount, @total, @payment_mode, @payment_status, @status,
+                  @subtotal, @tax_amount, @discount_amount, @total, @round_off, @payment_mode, @payment_status, @status,
                   @created_by_user_id, @client_bill_id, @receipt_token)
         `);
 
@@ -645,7 +697,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const billsResult = await request.query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
-             b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.status,
+             b.subtotal, b.tax_amount, b.discount_amount, b.total, b.round_off, b.payment_mode, b.status,
              b.created_by_user_id, b.created_at, b.receipt_token
       FROM bills b
       WHERE ${where}
@@ -692,7 +744,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
-               b.subtotal, b.tax_amount, b.discount_amount, b.total, b.payment_mode, b.status,
+               b.subtotal, b.tax_amount, b.discount_amount, b.total, b.round_off, b.payment_mode, b.status,
                b.created_by_user_id, b.created_at, b.receipt_token
         FROM bills b
         WHERE b.business_id = @business_id
@@ -834,7 +886,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         .input('id', sql.UniqueIdentifier, req.params.id)
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT b.id, b.status, bs.inventory_enabled
+          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled
           FROM bills b
           JOIN businesses bs ON bs.id = b.business_id
           WHERE b.id = @id AND b.business_id = @business_id
@@ -849,6 +901,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         return res.status(409).json({ error: 'Can only add items to a draft bill' });
       }
       const inventoryEnabled = billCheck.recordset[0].inventory_enabled;
+      const roundOffEnabled = !!billCheck.recordset[0].round_off_enabled;
 
       const { clause: itemClause2, bind: bindItems2 } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems2(transaction.request())
@@ -941,6 +994,11 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           WHERE id = @id
         `);
 
+      // Re-derive round_off from the fresh total/discount so the final payable
+      // stays reconciled after the edit. Off (0) when the business has rounding
+      // disabled. ROUND(x,0) is round-half-up for the non-negative payable.
+      await recomputeRoundOff(transaction, req.params.id, roundOffEnabled);
+
       // Atomic decrement — final concurrency guard.
       if (inventoryEnabled) {
         for (const li of lineItems) {
@@ -1030,7 +1088,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         .input('id', sql.UniqueIdentifier, req.params.id)
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT b.id, b.status, bs.inventory_enabled
+          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled
           FROM bills b
           JOIN businesses bs ON bs.id = b.business_id
           WHERE b.id = @id AND b.business_id = @business_id
@@ -1045,6 +1103,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         return res.status(409).json({ error: 'Can only update items on a draft bill' });
       }
       const inventoryEnabled = billCheck.recordset[0].inventory_enabled;
+      const roundOffEnabled = !!billCheck.recordset[0].round_off_enabled;
 
       const { clause: itemClause3, bind: bindItems3 } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems3(transaction.request())
@@ -1206,6 +1265,10 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
             total      = (SELECT SUM(line_total) FROM bill_items WHERE bill_id = @id)${extraSets.length ? ',\n            ' + extraSets.join(',\n            ') : ''}
           WHERE id = @id
         `);
+
+      // Re-derive round_off from the fresh total/discount so the final payable
+      // stays reconciled after the edit.
+      await recomputeRoundOff(transaction, req.params.id, roundOffEnabled);
 
       // Atomic decrement for new items — final concurrency guard.
       if (inventoryEnabled) {

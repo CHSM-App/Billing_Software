@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../api.dart' as api;
 import '../models/models.dart';
+import '../services/offline_service.dart';
+import '../storage.dart';
 
 // ---------------------------------------------------------------------------
 // Filter state
@@ -105,12 +107,60 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
   Future<List<Bill>> build() async {
     final filter = ref.watch(billFilterProvider);
     final fmt = DateFormat('yyyy-MM-dd');
-    final data = await api.getBills(
-      from: fmt.format(filter.from),
-      to: fmt.format(filter.to),
-      search: filter.search,
-    );
-    return data.map((j) => Bill.fromJson(j)).toList();
+
+    // Offline bills queued on this device (INV-<tag>-####), not yet synced. They must
+    // show in history immediately — both while offline and after reconnect,
+    // until the server copy replaces them (the row is deleted on successful
+    // sync). Filtered to the same date window + search as the server query.
+    final offline = await _offlineBillsInRange(filter);
+
+    try {
+      final data = await api.getBills(
+        from: fmt.format(filter.from),
+        to: fmt.format(filter.to),
+        search: filter.search,
+      );
+      final server = data.map((j) => Bill.fromJson(j)).toList();
+      // Unsynced offline bills first (most recent, still local), then server
+      // bills. De-dupe by id so a just-synced bill doesn't appear twice.
+      final serverIds = server.map((b) => b.id).toSet();
+      final merged = [
+        ...offline.where((b) => !serverIds.contains(b.id)),
+        ...server,
+      ];
+      return merged;
+    } catch (e) {
+      // Show the locally-queued offline bills (instead of an error screen) when
+      // we can't reach a working server — either a genuine network outage, or
+      // the server is up but broken (5xx, e.g. its DB is down). A 4xx (auth, bad
+      // request) still rethrows so it surfaces normally.
+      if (api.isNetworkError(e)) return offline;
+      if (e is api.ApiException && e.statusCode >= 500) return offline;
+      rethrow;
+    }
+  }
+
+  /// Finalized offline bills for this business within the filter's date range,
+  /// matching the search term (bill number / customer). Newest first.
+  Future<List<Bill>> _offlineBillsInRange(BillFilterState filter) async {
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty) return const [];
+    final all = await OfflineService.instance.getAllBills(businessId);
+    // Inclusive day range: [from 00:00, to+1day 00:00).
+    final start = DateTime(filter.from.year, filter.from.month, filter.from.day);
+    final end = DateTime(filter.to.year, filter.to.month, filter.to.day)
+        .add(const Duration(days: 1));
+    final q = filter.search?.trim().toLowerCase();
+    return all.where((b) {
+      if (b.createdAt.isBefore(start) || !b.createdAt.isBefore(end)) return false;
+      if (q != null && q.isNotEmpty) {
+        final hay = '${b.billNumber} ${b.customerName ?? ''} '
+                '${b.customerPhone ?? ''}'
+            .toLowerCase();
+        if (!hay.contains(q)) return false;
+      }
+      return true;
+    }).toList();
   }
 
   Future<void> reload() async {

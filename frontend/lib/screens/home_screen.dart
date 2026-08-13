@@ -9,6 +9,7 @@ import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../models/cart_entry.dart';
+import '../utils/money.dart';
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
@@ -23,6 +24,7 @@ import '../services/sync_service.dart';
 import '../services/notification_service.dart';
 import '../storage.dart';
 import '../main.dart' show rootMessengerKey;
+import 'bill_preview_screen.dart';
 import 'login_screen.dart';
 import 'printer_setup_screen.dart';
 
@@ -447,7 +449,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     try {
       final businessId = await getBusinessId() ?? '';
       final userId = await getUserId() ?? '';
-      final billPrefix = await getBillPrefix();
+      // Offline drafts share the finalized-bill scheme: 'INV-<deviceTag>-####'
+      // (device tag keeps it globally unique across devices; kept as-is on sync).
+      final draftNumber = await nextOfflineBillNumber();
 
       double subtotal = 0;
       double taxAmount = 0;
@@ -490,9 +494,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'created_at': DateTime.now().millisecondsSinceEpoch,
       });
       final localId = queued.localId;
-      final ts = localId.replaceAll(RegExp(r'\D'), '');
-      final draftNumber =
-          '$billPrefix-${ts.length > 6 ? ts.substring(ts.length - 6) : ts}';
 
       // Build an optimistic Bill so a table draft can be reopened offline from
       // the tables cache, and so the Open Orders queue can show it immediately.
@@ -698,24 +699,110 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _showSnack(context.l10n.billingAddAtLeastOneItem, isError: true);
       return;
     }
-    if (_blockedUnsyncedLocalDraft()) return;
     if (!_validateCustomerPhone()) return;
     if (!_validateCreditCustomer()) return;
+
+    // Finalizing an OFFLINE draft ('LOCAL-…'): the draft only exists in this
+    // device's queue, so there is no server bill to finalize against.
+    //   • Offline  → convert it to an offline finalized bill locally and delete
+    //     the draft row (otherwise the order stays stuck in Open Orders as
+    //     "still saving").
+    //   • Online   → block: it must sync to the server first, then be finalized
+    //     online against its real bill id.
+    // Only table-less (Open Orders) drafts are finalized offline here; an
+    // offline table draft keeps the existing path so its table state stays
+    // consistent (finalizing a table order offline is handled via the Tables
+    // flow, not this retail branch).
+    final localDraftId = widget.activeBillId;
+    final isLocalDraft =
+        (localDraftId?.startsWith('LOCAL-') ?? false) && widget.tableId == null;
+    if (isLocalDraft) {
+      final isOnline = ref.read(connectivityProvider);
+      if (isOnline) {
+        _showSnack(context.l10n.billingDraftPendingSync, isError: true);
+        return;
+      }
+      await _finalizeLocalDraftOffline(localDraftId!, cart,
+          onBillReady: onBillReady);
+      return;
+    }
+
     if (widget.activeBillId != null || widget.tableId != null) {
-      // Table billing — always online
+      // Table / synced-draft billing — always online
       await _generateBillOnline(cart, onBillReady: onBillReady);
       return;
     }
-    // Retail billing — online when connected, offline when not
+    // Retail billing — online when connected, offline when not.
+    //
+    // The connectivity flag is only a HINT: it starts optimistically "online"
+    // and flips to offline only after a request has already failed. So on the
+    // FIRST bill after the network drops it can still read "online". We therefore
+    // (1) go offline immediately when the flag already says offline, and
+    // (2) if an online attempt hits a NetworkException, transparently fall back
+    //     to offline billing instead of showing "check connection".
     final isOnline = ref.read(connectivityProvider);
-    if (isOnline) {
-      await _generateBillOnline(cart, onBillReady: onBillReady);
-    } else {
-      await _generateBillOffline(cart, onBillReady: onBillReady);
-      unawaited(SyncService.instance.syncAll().then((_) {
-        ref.invalidate(reportProvider);
-      }));
+    if (!isOnline) {
+      await _billOfflineAndSync(cart, onBillReady: onBillReady);
+      return;
     }
+    try {
+      await _generateBillOnline(cart, onBillReady: onBillReady);
+    } on NetworkException {
+      // Network dropped mid-request: the connectivity notifier is now offline.
+      // Re-bill offline so the sale is never lost. Retail online billing creates
+      // then finalizes a fresh bill, so a network failure means nothing was
+      // committed server-side — safe to redo locally.
+      await _billOfflineAndSync(cart, onBillReady: onBillReady);
+    } on ApiException catch (e) {
+      // Server responded but is broken (5xx — e.g. its database is down). The
+      // internet is fine, but the sale would be lost — so fall back to offline
+      // billing and let it sync when the server recovers, same as a network
+      // outage. (4xx errors — stock conflict, validation — are handled inside
+      // _generateBillOnline and never reach here.)
+      if (e.statusCode >= 500) {
+        if (mounted) {
+          _showSnack(context.l10n.billingServerErrorSavedOffline, isError: true);
+        }
+        await _billOfflineAndSync(cart, onBillReady: onBillReady);
+      } else {
+        rethrow;
+      }
+    }
+  }
+
+  /// Queue the bill offline and kick a background sync. Shared by the "already
+  /// offline" and "went offline mid-request" paths.
+  Future<void> _billOfflineAndSync(List<CartEntry> cart,
+      {void Function(Bill)? onBillReady}) async {
+    await _generateBillOffline(cart, onBillReady: onBillReady);
+    unawaited(SyncService.instance.syncAll().then((_) {
+      ref.invalidate(reportProvider);
+    }));
+  }
+
+  /// Finalize an offline draft ('LOCAL-…') while still offline: bill it locally
+  /// (which queues a finalized offline bill + triggers sync), then delete the
+  /// draft row so it stops appearing in Open Orders. Both the queued draft and
+  /// the queued bill carry the same items; dropping the draft avoids it syncing
+  /// as a duplicate later. If offline billing fails, the draft is left intact so
+  /// nothing is lost.
+  Future<void> _finalizeLocalDraftOffline(String draftId, List<CartEntry> cart,
+      {void Function(Bill)? onBillReady}) async {
+    var billed = false;
+    await _billOfflineAndSync(cart, onBillReady: (bill) {
+      billed = true;
+      // Preserve the plain-bill navigation: _generateBillOffline only calls
+      // _navigateAfterBill when no onBillReady is given, but we always pass one
+      // (to observe success), so replicate that navigation here.
+      if (onBillReady != null) {
+        onBillReady(bill);
+      } else {
+        _navigateAfterBill();
+      }
+    });
+    if (!billed) return; // offline billing errored — keep the draft
+    await OfflineService.instance.deleteDraft(draftId);
+    ref.read(openDraftsProvider.notifier).removeLocalDraft(draftId);
   }
 
   Future<void> _generateBillAndPrint() async {
@@ -986,7 +1073,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       } else {
         _navigateAfterBill();
       }
+    } on NetworkException {
+      // Let the caller fall back to offline billing — don't show an error here.
+      rethrow;
     } on ApiException catch (e) {
+      // 5xx = server broke (its DB is down, etc.). Let the caller fall back to
+      // offline billing so the sale isn't lost — don't show a generic error.
+      if (e.statusCode >= 500) rethrow;
       if (e.statusCode == 409 && e.items != null && e.items!.isNotEmpty) {
         _showInsufficientStockDialog(e.items!);
       } else {
@@ -1098,10 +1191,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     try {
       final businessId = await getBusinessId() ?? '';
       final userId = await getUserId() ?? '';
-      // Use the business's real invoice prefix for the offline receipt so the
-      // number doesn't visibly change (no "LOCAL-") when offline. The server
-      // assigns the authoritative sequence number on sync.
-      final billPrefix = await getBillPrefix();
+      // Offline bills get an 'INV-<deviceTag>-####' number: a per-device tag +
+      // 4-digit counter, globally unique across devices. This number is printed
+      // and given to the customer, so it is kept UNCHANGED when the bill syncs.
+      final offlineBillNumber = await nextOfflineBillNumber();
 
       double subtotal = 0;
       double taxAmount = 0;
@@ -1125,27 +1218,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
       final discountAmt = (double.tryParse(_discountAmtController.text) ?? 0.0)
           .clamp(0.0, total);
+      // Round-off is computed on-device and kept UNCHANGED when the bill syncs
+      // (it's already printed on the customer's receipt), same as bill_number.
+      final roundOff = computeRoundOff(
+          total - discountAmt, ref.read(roundOffEnabledProvider));
 
       final queued = await OfflineService.instance.queueOfflineBill({
         'business_id': businessId,
         'user_id': userId,
         'table_id': widget.tableId,
+        'bill_number': offlineBillNumber,
         'customer_name': _customerNameController.text.trim().nullIfEmpty,
         'customer_phone': _customerPhoneController.text.trim().nullIfEmpty,
         'subtotal': subtotal,
         'tax_amount': taxAmount,
         'discount_amount': discountAmt,
         'total': total,
+        'round_off': roundOff,
         'payment_mode': _paymentMode,
         'items_json': jsonEncode(lineItems),
         'created_at': DateTime.now().millisecondsSinceEpoch,
       });
       final localId = queued.localId;
-      // Display number keeps the real prefix; the last 6 digits of the queue
-      // timestamp keep it unique locally until the server assigns the final one.
-      final ts = localId.replaceAll(RegExp(r'\D'), '');
-      final offlineBillNumber =
-          '$billPrefix-${ts.length > 6 ? ts.substring(ts.length - 6) : ts}';
 
       final fakeBill = Bill(
         id: localId,
@@ -1157,7 +1251,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         customerPhone: _customerPhoneController.text.trim().nullIfEmpty,
         subtotal: subtotal,
         taxAmount: taxAmount,
+        discountAmount: discountAmt,
         total: total,
+        roundOff: roundOff,
         paymentMode: _paymentMode,
         status: 'finalized',
         createdByUserId: userId,
@@ -1218,6 +1314,107 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         createdAt: bill.createdAt,
         items: bill.items,
       );
+
+  /// Build an in-memory [Bill] from the current cart + customer fields for
+  /// preview/printing, WITHOUT queuing or saving it. Mirrors the totals and
+  /// line-item math used by the real (offline) billing path.
+  Bill _buildBillFromCart(List<CartEntry> cart) {
+    double subtotal = 0;
+    double taxAmount = 0;
+    final items = cart.map((e) {
+      final lineSub = e.effectivePrice * e.quantity;
+      final lineTax =
+          e.item.taxRate != null ? lineSub * (e.item.taxRate! / 100) : 0.0;
+      subtotal += lineSub;
+      taxAmount += lineTax;
+      return BillItem(
+        id: e.item.id,
+        billId: 'preview',
+        itemId: e.item.id,
+        variantId: e.variant?.id,
+        itemName: e.displayName,
+        quantity: e.quantity,
+        unitPrice: e.effectivePrice,
+        taxRate: e.item.taxRate,
+        lineTotal: double.parse((lineSub + lineTax).toStringAsFixed(2)),
+      );
+    }).toList();
+    final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+    final discountAmt =
+        (double.tryParse(_discountAmtController.text) ?? 0.0).clamp(0.0, total);
+    return Bill(
+      id: 'preview',
+      businessId: '',
+      // A placeholder number for the preview; the real bill gets its number when
+      // finalized (online) or from nextOfflineBillNumber() (offline).
+      billNumber: widget.activeBillId ?? 'PREVIEW',
+      tableId: widget.tableId,
+      tableNumber: widget.tableNumber,
+      customerName: _customerNameController.text.trim().nullIfEmpty,
+      customerPhone: _customerPhoneController.text.trim().nullIfEmpty,
+      subtotal: subtotal,
+      taxAmount: taxAmount,
+      discountAmount: discountAmt,
+      total: total,
+      roundOff: computeRoundOff(
+          total - discountAmt, ref.read(roundOffEnabledProvider)),
+      paymentMode: _paymentMode,
+      status: 'preview',
+      createdByUserId: '',
+      createdAt: DateTime.now(),
+      items: items,
+    );
+  }
+
+  /// Show a real, WYSIWYG preview of the current cart as it would be printed —
+  /// a thermal receipt bitmap (58/80mm) or an A5/A4 PDF, per the chosen paper
+  /// size. Read-only: nothing is saved.
+  Future<void> _previewBill() async {
+    final l10n = context.l10n;
+    final cart = ref.read(cartProvider);
+    if (cart.isEmpty) {
+      _showSnack(l10n.billingAddAtLeastOneItem, isError: true);
+      return;
+    }
+    final bill = _buildBillFromCart(cart);
+    final businessName = ref.read(businessNameProvider);
+    final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
+    final profile = await getGstProfile();
+    final addr = profile['business_address'] ?? '';
+    final fss = profile['fssai_number'] ?? '';
+    final sac = profile['default_sac_code'] ?? '';
+    final gstEnabled = ref.read(gstEnabledProvider);
+    String? gstin;
+    if (gstEnabled) {
+      final g = profile['gst_number'] ?? '';
+      gstin = g.isNotEmpty ? g : null;
+    }
+
+    ReceiptPreview preview;
+    try {
+      preview = await ReceiptOutput.buildPreview(
+        bill,
+        businessName: businessName,
+        businessAddress: addr.isNotEmpty ? addr : null,
+        businessGstin: gstin,
+        businessFssai: fss.isNotEmpty ? fss : null,
+        defaultSacCode: sac.isNotEmpty ? sac : null,
+        gstEnabled: gstEnabled,
+        labels: labels,
+      );
+    } catch (e) {
+      if (mounted) _showSnack(l10n.billingPrintFailed('$e'), isError: true);
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BillPreviewScreen(preview: preview),
+        fullscreenDialog: true,
+      ),
+    );
+  }
 
   Future<void> _autoPrint(Bill bill) async {
     final l10n = context.l10n;
@@ -2409,12 +2606,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   final discountAmt =
                       (double.tryParse(_discountAmtController.text) ?? 0.0)
                           .clamp(0.0, total);
+                  // Invoice round-off applies to THIS bill's payable
+                  // (total - discount), independent of any previous-due amount,
+                  // matching the backend. 0 when the business has it disabled.
+                  final roundOff = computeRoundOff(
+                      total - discountAmt, ref.watch(roundOffEnabledProvider));
                   // When "clear previous credit" is on, the old due is added to
                   // this bill's payable, so the customer pays one combined
                   // amount and those old bills are settled on finalize.
                   final prevDue =
                       _settlePrevCredit ? _prevCreditDue : 0.0;
-                  final netPayable = total - discountAmt + prevDue;
+                  final netPayable = total - discountAmt + roundOff + prevDue;
                   return Container(
                     decoration: BoxDecoration(
                       border: Border.all(color: AppColors.border),
@@ -2546,6 +2748,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ),
                           ),
                         ],
+                        // Round Off row — only when a non-zero adjustment.
+                        if (roundOff != 0) ...[
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space12, vertical: 10),
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    l10n.billingRoundOff,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                          color: AppColors.textSecondary,
+                                        ),
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '${roundOff < 0 ? '−' : '+'} ₹${roundOff.abs().toStringAsFixed(2)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         // Previous Due row — added to payable when the toggle
                         // above is on.
                         if (prevDue > 0) ...[
@@ -2588,10 +2822,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   Radius.circular(AppRadius.small - 1),
                               bottomRight:
                                   Radius.circular(AppRadius.small - 1),
-                              topLeft: discountAmt > 0
+                              topLeft: (discountAmt > 0 || roundOff != 0 || prevDue > 0)
                                   ? Radius.zero
                                   : Radius.circular(AppRadius.small - 1),
-                              topRight: discountAmt > 0
+                              topRight: (discountAmt > 0 || roundOff != 0 || prevDue > 0)
                                   ? Radius.zero
                                   : Radius.circular(AppRadius.small - 1),
                             ),
@@ -2644,19 +2878,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     // When this is the only action (a server with no finalize
                     // row), add the bottom safe-area inset here instead.
                     canFinalize ? 0 : AppSpacing.space16 + MediaQuery.of(context).padding.bottom),
-                child: SecondaryButton(
-                  text: _savingDraft ? l10n.commonSaving : l10n.billingSaveDraft,
-                  icon: Icons.save_outlined,
-                  onPressed: (cart.isEmpty || _savingDraft)
-                      ? null
-                      : () {
-                          // This button lives inside the cart bottom sheet.
-                          // Close the sheet first so _saveDraft's Navigator.pop
-                          // pops the billing screen (not the sheet) and the
-                          // Tables list is what the user returns to.
-                          if (inSheet) Navigator.pop(context);
-                          _saveDraft();
-                        },
+                child: Row(
+                  children: [
+                    // Preview the bill exactly as it will print (thermal receipt
+                    // or A5/A4 PDF), read-only — sits just left of Save Draft.
+                    _PreviewButton(
+                      tooltip: l10n.billingPreview,
+                      onPressed:
+                          (cart.isEmpty || _savingDraft) ? null : _previewBill,
+                    ),
+                    const SizedBox(width: AppSpacing.space8),
+                    Expanded(
+                      child: SecondaryButton(
+                        text: _savingDraft
+                            ? l10n.commonSaving
+                            : l10n.billingSaveDraft,
+                        icon: Icons.save_outlined,
+                        onPressed: (cart.isEmpty || _savingDraft)
+                            ? null
+                            : () {
+                                // This button lives inside the cart bottom sheet.
+                                // Close the sheet first so _saveDraft's
+                                // Navigator.pop pops the billing screen (not the
+                                // sheet) and the Tables list is what the user
+                                // returns to.
+                                if (inSheet) Navigator.pop(context);
+                                _saveDraft();
+                              },
+                      ),
+                    ),
+                  ],
                 ),
               ),
 
@@ -3284,6 +3535,40 @@ class _ExcelItemTable extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Compact square outlined button for previewing the bill, sized (52×52) to
+/// line up with the full-height [SecondaryButton] (Save Draft) beside it.
+/// Disabled (greyed) when [onPressed] is null (empty cart or a save in progress).
+class _PreviewButton extends StatelessWidget {
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  const _PreviewButton({required this.tooltip, this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    final color = enabled ? AppColors.primary : AppColors.textSecondary;
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        height: 52,
+        width: 52,
+        child: OutlinedButton(
+          onPressed: onPressed,
+          style: OutlinedButton.styleFrom(
+            padding: EdgeInsets.zero,
+            side: BorderSide(color: color),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.medium),
+            ),
+          ),
+          child: Icon(Icons.receipt_long_outlined, size: 22, color: color),
+        ),
+      ),
     );
   }
 }

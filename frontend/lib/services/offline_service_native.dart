@@ -90,7 +90,7 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 5,
+      version: 7,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
     );
@@ -126,11 +126,14 @@ class OfflineService {
         business_id     TEXT    NOT NULL,
         user_id         TEXT    NOT NULL,
         table_id        TEXT,
+        bill_number     TEXT,
         customer_name   TEXT,
         customer_phone  TEXT,
         subtotal        REAL    NOT NULL,
         tax_amount      REAL    NOT NULL,
+        discount_amount REAL    NOT NULL DEFAULT 0,
         total           REAL    NOT NULL,
+        round_off       REAL    NOT NULL DEFAULT 0,
         payment_mode    TEXT    NOT NULL,
         items_json      TEXT    NOT NULL,
         created_at      INTEGER NOT NULL,
@@ -233,6 +236,22 @@ class OfflineService {
     if (oldVersion < 5) {
       // v4 → v5: add the variant (size) cache so size barcodes scan offline.
       await _createVariantCacheTable(db);
+    }
+    if (oldVersion < 6) {
+      // v5 → v6: offline_bills gains bill_number (the INV-<tag>-#### shown on the
+      // receipt + in history) and discount_amount (was silently dropped before).
+      // ALTER ADD is safe & additive; existing rows default sensibly.
+      await db.execute('ALTER TABLE offline_bills ADD COLUMN bill_number TEXT');
+      await db.execute(
+        'ALTER TABLE offline_bills ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0',
+      );
+    }
+    if (oldVersion < 7) {
+      // v6 → v7: offline_bills gains round_off — the signed invoice-level
+      // adjustment printed on the receipt, preserved verbatim on sync.
+      await db.execute(
+        'ALTER TABLE offline_bills ADD COLUMN round_off REAL NOT NULL DEFAULT 0',
+      );
     }
   }
 
@@ -533,21 +552,24 @@ class OfflineService {
     final clientBillId = _generateUuidV4();
 
     await _database.insert('offline_bills', {
-      'local_id':       localId,
-      'client_bill_id': clientBillId,
-      'business_id':    data['business_id'],
-      'user_id':        data['user_id'],
-      'table_id':       data['table_id'],
-      'customer_name':  data['customer_name'],
-      'customer_phone': data['customer_phone'],
-      'subtotal':       data['subtotal'],
-      'tax_amount':     data['tax_amount'],
-      'total':          data['total'],
-      'payment_mode':   data['payment_mode'],
-      'items_json':     data['items_json'],
-      'created_at':     data['created_at'],
-      'sync_status':    SyncStatus.pending,
-      'retry_count':    0,
+      'local_id':        localId,
+      'client_bill_id':  clientBillId,
+      'business_id':     data['business_id'],
+      'user_id':         data['user_id'],
+      'table_id':        data['table_id'],
+      'bill_number':     data['bill_number'],
+      'customer_name':   data['customer_name'],
+      'customer_phone':  data['customer_phone'],
+      'subtotal':        data['subtotal'],
+      'tax_amount':      data['tax_amount'],
+      'discount_amount': data['discount_amount'] ?? 0,
+      'total':           data['total'],
+      'round_off':       data['round_off'] ?? 0,
+      'payment_mode':    data['payment_mode'],
+      'items_json':      data['items_json'],
+      'created_at':      data['created_at'],
+      'sync_status':     SyncStatus.pending,
+      'retry_count':     0,
     });
 
     return (localId: localId, clientBillId: clientBillId);
@@ -688,6 +710,60 @@ class OfflineService {
     return List<Map<String, dynamic>>.from(jsonDecode(itemsJson));
   }
 
+  /// All finalized offline bills for a business, newest first — for DISPLAY in
+  /// history (so an offline sale is visible before it syncs). Includes every
+  /// sync_status except ones already deleted on success; a synced bill is
+  /// removed from this table by [markBillSynced], so it naturally drops off once
+  /// the authoritative server copy exists.
+  Future<List<Bill>> getAllBills(String businessId) async {
+    final rows = await _database.query(
+      'offline_bills',
+      where: 'business_id = ?',
+      whereArgs: [businessId],
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(_rowToOfflineBill).toList();
+  }
+
+  /// Convert a queued offline_bills row into a [Bill] for display. The bill is
+  /// marked status 'unsynced' so the UI can badge it, and carries the local
+  /// `INV-<tag>-####` number stored at queue time.
+  Bill _rowToOfflineBill(Map<String, dynamic> row) {
+    final localId = row['local_id'] as String;
+    final items = decodeItems(row['items_json'] as String).map((li) {
+      final itemId = (li['item_id'] ?? '') as String;
+      return BillItem(
+        id: itemId.isEmpty ? localId : itemId,
+        billId: localId,
+        itemId: li['item_id'] as String?,
+        variantId: li['variant_id'] as String?,
+        itemName: (li['item_name'] ?? '') as String,
+        quantity: (li['quantity'] as num?)?.toDouble() ?? 0,
+        unitPrice: (li['unit_price'] as num?)?.toDouble() ?? 0,
+        taxRate: (li['tax_rate'] as num?)?.toDouble(),
+        lineTotal: (li['line_total'] as num?)?.toDouble() ?? 0,
+      );
+    }).toList();
+    return Bill(
+      id: localId,
+      businessId: row['business_id'] as String,
+      billNumber: (row['bill_number'] as String?) ?? localId,
+      customerName: row['customer_name'] as String?,
+      customerPhone: row['customer_phone'] as String?,
+      subtotal: (row['subtotal'] as num).toDouble(),
+      taxAmount: (row['tax_amount'] as num).toDouble(),
+      discountAmount: (row['discount_amount'] as num?)?.toDouble() ?? 0,
+      total: (row['total'] as num).toDouble(),
+      roundOff: (row['round_off'] as num?)?.toDouble() ?? 0,
+      paymentMode: row['payment_mode'] as String,
+      status: 'unsynced',
+      createdByUserId: row['user_id'] as String,
+      createdAt:
+          DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
+      items: items,
+    );
+  }
+
   // ── Offline draft queue ────────────────────────────────────────────────────
   //
   // A draft is an *open order* (status:'draft') saved while disconnected. It is
@@ -753,6 +829,15 @@ class OfflineService {
 
   /// Deletes the draft row after it has been created on the server.
   Future<void> markDraftSynced(String localId) async {
+    await _database.delete('offline_drafts',
+        where: 'local_id = ?', whereArgs: [localId]);
+  }
+
+  /// Removes a queued draft that has been consumed locally (finalized into an
+  /// offline bill while still offline). Unlike [markDraftSynced] this is not
+  /// tied to a server round-trip — the draft must simply stop existing so it
+  /// doesn't linger in Open Orders or later sync as a duplicate draft.
+  Future<void> deleteDraft(String localId) async {
     await _database.delete('offline_drafts',
         where: 'local_id = ?', whereArgs: [localId]);
   }

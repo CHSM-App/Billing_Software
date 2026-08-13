@@ -68,12 +68,18 @@ class InvoicePdf {
     final theme = pw.ThemeData.withFont(
       base: pw.Font.helvetica(),
       bold: pw.Font.helveticaBold(),
+      // Register the oblique faces so `fontStyle: italic` actually slants (the
+      // brand line in the footer); without these the pdf package silently
+      // renders italic text upright.
+      italic: pw.Font.helveticaOblique(),
+      boldItalic: pw.Font.helveticaBoldOblique(),
       fontFallback: [devanagari],
     );
 
     for (final bill in bills) {
       final showGst = gstEnabled && bill.taxAmount > 0;
-      final grandTotal = bill.total - bill.discountAmount;
+      // Final payable = total - discount + round_off.
+      final grandTotal = bill.grandTotal;
       final dateStr = DateFormat('dd-MM-yyyy').format(bill.createdAt.toLocal());
 
       // Use "Rs." rather than the ₹ glyph: the base PDF font (Helvetica) has no
@@ -85,35 +91,43 @@ class InvoicePdf {
           : (defaultSacCode ?? '');
 
       doc.addPage(
-        pw.Page(
+        pw.MultiPage(
           pageFormat: pageFormat,
           theme: theme,
-          margin: const pw.EdgeInsets.all(24),
-          build: (context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-              children: [
-                pw.Center(
-                  child: pw.Text('Tax Invoice',
-                      style: pw.TextStyle(
-                          fontSize: 16, fontWeight: pw.FontWeight.bold)),
-                ),
-                pw.SizedBox(height: 8),
-                _headerBox(businessName, address, gstin, fssai,
-                    bill.billNumber, dateStr),
-                _billToBox(bill),
-                _itemsTable(bill, showGst, codeOf, lineTaxOf, money),
-                pw.SizedBox(height: 10),
-                _summary(bill, grandTotal, money),
-                if (showGst) ...[
-                  pw.SizedBox(height: 10),
-                  _hsnTable(bill, codeOf, lineTaxOf, money),
-                ],
-                pw.SizedBox(height: 24),
-                _footer(businessName, footerNote),
-              ],
-            );
-          },
+          // Reserve a slim band at the very bottom for the brand line; the rest
+          // keeps the 24pt content margin. The band must fit the footer's own
+          // height (font + line) or the pdf package clips it and it stops
+          // aligning to the corner.
+          margin: pw.EdgeInsets.fromLTRB(24, 24, 24, 4 * PdfPageFormat.mm),
+          // "Powered by Vengurlatech" pinned to the bottom-right corner, italic.
+          footer: (context) => pw.Align(
+            alignment: pw.Alignment.bottomRight,
+            child: pw.Text('Powered by Vengurlatech',
+                style: pw.TextStyle(
+                    fontSize: 7,
+                    color: PdfColors.grey600,
+                    fontStyle: pw.FontStyle.italic)),
+          ),
+          build: (context) => [
+            pw.Center(
+              child: pw.Text('Tax Invoice',
+                  style: pw.TextStyle(
+                      fontSize: 16, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.SizedBox(height: 8),
+            _headerBox(businessName, address, gstin, fssai,
+                bill.billNumber, dateStr),
+            _billToBox(bill),
+            _itemsTable(bill, showGst, codeOf, lineTaxOf, money),
+            pw.SizedBox(height: 10),
+            _summary(bill, grandTotal, money),
+            if (showGst) ...[
+              pw.SizedBox(height: 10),
+              _hsnTable(bill, codeOf, lineTaxOf, money),
+            ],
+            pw.SizedBox(height: 24),
+            _footer(businessName, footerNote),
+          ],
         ),
       );
     }
@@ -351,6 +365,9 @@ class InvoicePdf {
                 _totRow('Sub Total', money(bill.subtotal)),
                 if (bill.discountAmount > 0)
                   _totRow('Discount', '- ${money(bill.discountAmount)}'),
+                if (bill.roundOff != 0)
+                  _totRow('Round Off',
+                      '${bill.roundOff < 0 ? '- ' : '+ '}${money(bill.roundOff.abs())}'),
                 pw.Container(height: 0.6, color: PdfColors.black),
                 _totRow('Grand Total', money(grandTotal), bold: true),
               ],

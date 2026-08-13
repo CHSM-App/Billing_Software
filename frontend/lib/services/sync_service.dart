@@ -173,6 +173,10 @@ class SyncService {
 
     return {
       'client_bill_id': row['client_bill_id'] as String,
+      // Preserve the offline bill number (INV-<tag>-####) the customer was
+      // handed at print time — the server stores it verbatim instead of
+      // assigning a new one.
+      if (row['bill_number'] != null) 'bill_number': row['bill_number'],
       'items': lineItems
           .map((li) => {
                 'item_id':  li['item_id'],
@@ -183,6 +187,13 @@ class SyncService {
       if (row['table_id']       != null) 'table_id':       row['table_id'],
       if (row['customer_name']  != null) 'customer_name':  row['customer_name'],
       if (row['customer_phone'] != null) 'customer_phone': row['customer_phone'],
+      // Preserve the discount and the invoice round-off exactly as printed on
+      // the customer's receipt; the server stores round_off verbatim (like
+      // bill_number) rather than recomputing it.
+      if (((row['discount_amount'] as num?)?.toDouble() ?? 0.0) > 0)
+        'discount_amount': (row['discount_amount'] as num).toDouble(),
+      if (((row['round_off'] as num?)?.toDouble() ?? 0.0) != 0.0)
+        'round_off': (row['round_off'] as num).toDouble(),
       'payment_mode': row['payment_mode'],
       'status': 'finalized',
     };
