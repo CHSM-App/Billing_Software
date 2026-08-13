@@ -146,7 +146,12 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
         s.allow_desktop     AS allow_desktop,
         (SELECT COUNT(*) FROM users su
            WHERE su.business_id = b.id
-             AND su.role IN (${MANAGED_ROLES_SQL})) AS staff_count
+             AND su.role IN (${MANAGED_ROLES_SQL})) AS staff_count,
+        (SELECT COUNT(*) FROM bills bl
+           WHERE bl.business_id = b.id
+             AND bl.status = 'finalized') AS bill_count,
+        (SELECT COUNT(*) FROM items it
+           WHERE it.business_id = b.id) AS item_count
       FROM businesses b
       LEFT JOIN users u ON u.business_id = b.id AND u.role = 'owner'
       LEFT JOIN subscriptions s ON s.business_id = b.id
@@ -175,6 +180,8 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
         allow_desktop:     !!r.allow_desktop,
       },
       staff_count:       r.staff_count,
+      bill_count:        r.bill_count,
+      item_count:        r.item_count,
     }));
 
     return res.json({ businesses });

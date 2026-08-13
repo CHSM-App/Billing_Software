@@ -157,9 +157,12 @@
           <tr>
             <th>Business</th>
             <th>Owner</th>
+            <th>Registered</th>
             <th>Subscription</th>
             <th>Expires</th>
             <th>Staff</th>
+            <th>Bills</th>
+            <th>Items</th>
             <th>Devices</th>
             <th>WhatsApp</th>
             <th>Verified</th>
@@ -189,6 +192,8 @@
     <div class="kv"><span class="k">Phone</span><span id="dPhone">—</span></div>
     <div class="kv"><span class="k">Type</span><span id="dType">—</span></div>
     <div class="kv"><span class="k">Registered</span><span id="dCreated">—</span></div>
+    <div class="kv"><span class="k">Bills</span><span id="dBills">—</span></div>
+    <div class="kv"><span class="k">Items</span><span id="dItems">—</span></div>
     <div class="kv"><span class="k">Trial</span><span id="dTrial">—</span></div>
 
     <div class="section-label">Subscription</div>
@@ -361,9 +366,12 @@
       return '<tr>'
         + '<td><div class="biz-name">'+esc(b.name)+'</div><div class="biz-sub">'+esc(b.phone)+' &middot; '+esc(b.business_type)+'</div></td>'
         + '<td>'+esc(b.owner_name||'—')+'<div class="biz-sub">'+esc(b.owner_phone||'')+'</div></td>'
+        + '<td>'+fmtDate(b.created_at)+'</td>'
         + '<td>'+statusChip(sub)+'</td>'
         + '<td>'+expTxt+'</td>'
         + '<td>'+staff+'</td>'
+        + '<td>'+(b.bill_count!=null?b.bill_count:0)+'</td>'
+        + '<td>'+(b.item_count!=null?b.item_count:0)+'</td>'
         + '<td>'+devChips(sub)+'</td>'
         + '<td>'+wa+'</td>'
         + '<td>'+ver+'</td>'
@@ -400,6 +408,8 @@
     $('dPhone').textContent = b.owner_phone || '—';
     $('dType').textContent = b.business_type;
     $('dCreated').textContent = fmtDate(b.created_at);
+    $('dBills').textContent = b.bill_count!=null ? b.bill_count : 0;
+    $('dItems').textContent = b.item_count!=null ? b.item_count : 0;
     $('dTrial').textContent = sub.is_trial ? 'Yes' : 'No';
 
     $('fStatus').value  = sub.status || 'active';
