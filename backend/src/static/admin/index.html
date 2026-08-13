@@ -49,7 +49,7 @@
   .stat{color:var(--muted);font-size:13px}
   .stat b{color:var(--text)}
 
-  main{padding:20px;max-width:1400px;margin:0 auto}
+  main{padding:20px;max-width:1600px;margin:0 auto}
   .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:var(--panel)}
   table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
   thead th{text-align:left;padding:11px 14px;color:var(--muted);font-size:11px;text-transform:uppercase;
@@ -196,9 +196,12 @@
     <div class="kv"><span class="k">Last active</span><span id="dLastActive">—</span></div>
     <div class="kv"><span class="k">Bills</span><span id="dBills">—</span></div>
     <div class="kv"><span class="k">Items</span><span id="dItems">—</span></div>
-    <div class="kv"><span class="k">Trial</span><span id="dTrial">—</span></div>
 
     <div class="section-label">Subscription</div>
+    <div class="toggle-row">
+      <span>Trial subscription</span>
+      <label class="switch"><input type="checkbox" id="fTrial"/><span class="slider"></span></label>
+    </div>
     <div class="field">
       <label>Status</label>
       <select id="fStatus">
@@ -432,8 +435,8 @@
       + (b.last_active_at ? ' <span class="muted">'+esc(new Date(b.last_active_at).toLocaleString('en-IN'))+'</span>' : '');
     $('dBills').textContent = b.bill_count!=null ? b.bill_count : 0;
     $('dItems').textContent = b.item_count!=null ? b.item_count : 0;
-    $('dTrial').textContent = sub.is_trial ? 'Yes' : 'No';
 
+    $('fTrial').checked = !!sub.is_trial;
     $('fStatus').value  = sub.status || 'active';
     $('fExpires').value = toDateInput(sub.expires_at);
     $('fOffline').value = sub.max_offline_days!=null ? sub.max_offline_days : 30;
@@ -466,6 +469,7 @@
       max_staff: parseInt($('fMaxStaff').value,10),
       allow_mobile: $('fMobile').checked,
       allow_desktop: $('fDesktop').checked,
+      is_trial: $('fTrial').checked,
       whatsapp_mode: $('fWhatsapp').value,
       is_verified: $('fVerified').checked
     };

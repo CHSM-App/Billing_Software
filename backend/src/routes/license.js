@@ -33,6 +33,7 @@ router.get('/', requireAuth, async (req, res) => {
         grace_period_days,
         allow_mobile,
         allow_desktop,
+        is_trial,
         updated_at
       FROM subscriptions
       WHERE business_id = @business_id
@@ -70,6 +71,7 @@ router.get('/', requireAuth, async (req, res) => {
       grace_period_days: sub.grace_period_days,
       allow_mobile: !!sub.allow_mobile,
       allow_desktop: !!sub.allow_desktop,
+      is_trial: !!sub.is_trial,
       verified_at: new Date().toISOString()
     });
   } catch (err) {
