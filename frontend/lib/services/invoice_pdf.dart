@@ -15,7 +15,10 @@ import '../utils/amount_words.dart';
 ///
 /// GST columns/table render ONLY when [gstEnabled] and the bill carries tax
 /// (`taxAmount > 0`); otherwise a plain invoice prints (matching the thermal
-/// receipt behaviour). Per-line GST is derived: `lineTotal − qty*unitPrice`.
+/// receipt behaviour). Per-line GST is derived as `lineTotal − qty*unitPrice`,
+/// then scaled by `discountedNet / subtotal` because bill_items store the
+/// pre-discount tax while the bill's tax_amount is charged on the discounted
+/// net. The Amount column is the NET line value, so it ties to the Sub Total.
 class InvoicePdf {
   // Cache the loaded Devanagari font so we don't re-read the asset per invoice.
   static pw.Font? _devanagari;
@@ -78,14 +81,27 @@ class InvoicePdf {
 
     for (final bill in bills) {
       final showGst = gstEnabled && bill.taxAmount > 0;
-      // Final payable = total - discount + round_off.
-      final grandTotal = bill.grandTotal;
+      // Final payable = total - discount + round_off, less any tax that must be
+      // ignored because GST is off. Without the correction an older bill whose
+      // stored tax_amount predates the toggle would print a grand total higher
+      // than the net payable the cashier was shown.
+      final grandTotal =
+          bill.grandTotal - (gstEnabled ? 0.0 : bill.taxAmount);
       final dateStr = DateFormat('dd-MM-yyyy').format(bill.createdAt.toLocal());
 
       // Use "Rs." rather than the ₹ glyph: the base PDF font (Helvetica) has no
       // Unicode ₹, and it matches the thermal receipt's currency style.
       String money(num v) => 'Rs.${v.toStringAsFixed(2)}';
-      double lineTaxOf(BillItem i) => i.lineTotal - (i.quantity * i.unitPrice);
+      // bill_items store the PRE-discount line tax (line_total = qty×price + tax,
+      // computed before the bill-level discount), while bill.taxAmount is the
+      // discounted figure. Tax is charged on the discounted net, so each line's
+      // tax is scaled by discountedNet/subtotal — without this the per-line GST
+      // column and its Total would exceed the CGST/SGST in the summary box.
+      final discountRatio = bill.subtotal > 0
+          ? (bill.subtotal - bill.discountAmount) / bill.subtotal
+          : 1.0;
+      double lineTaxOf(BillItem i) =>
+          (i.lineTotal - (i.quantity * i.unitPrice)) * discountRatio;
       String codeOf(BillItem i) => (i.hsnCode?.isNotEmpty ?? false)
           ? i.hsnCode!
           : (defaultSacCode ?? '');
@@ -120,7 +136,7 @@ class InvoicePdf {
             _billToBox(bill),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money),
             pw.SizedBox(height: 10),
-            _summary(bill, grandTotal, money),
+            _summary(bill, grandTotal, showGst, money),
             if (showGst) ...[
               pw.SizedBox(height: 10),
               _hsnTable(bill, codeOf, lineTaxOf, money),
@@ -296,14 +312,21 @@ class InvoicePdf {
             '${money(lineTaxOf(i))} (${_trimRate(rate)}%)',
             align: pw.Alignment.centerRight));
       }
-      cells.add(cell(money(i.lineTotal), align: pw.Alignment.centerRight));
+      // Amount is the NET line value (qty × unit price, before tax), matching
+      // the thermal receipt. Tax is shown once in its own column / the summary,
+      // so a tax-inclusive amount here would double-count it and the Total row
+      // would no longer equal the Sub Total in the summary box.
+      cells.add(cell(money(i.quantity * i.unitPrice),
+          align: pw.Alignment.centerRight));
       return pw.TableRow(children: cells);
     }
 
-    // Total row: sum of GST(₹) and Amount.
+    // Total row: sum of GST(₹) and the NET Amount — the latter ties back to the
+    // Sub Total in the summary box.
     final totalQty = bill.items.fold<double>(0, (s, i) => s + i.quantity);
     final totalGst = bill.items.fold<double>(0, (s, i) => s + lineTaxOf(i));
-    final totalAmt = bill.items.fold<double>(0, (s, i) => s + i.lineTotal);
+    final totalAmt =
+        bill.items.fold<double>(0, (s, i) => s + i.quantity * i.unitPrice);
 
     pw.TableRow totalRow() {
       final cells = <pw.Widget>[
@@ -331,7 +354,8 @@ class InvoicePdf {
   }
 
   // --- Summary: amount-in-words + totals ------------------------------------
-  static pw.Widget _summary(Bill bill, double grandTotal, String Function(num) money) {
+  static pw.Widget _summary(
+      Bill bill, double grandTotal, bool showGst, String Function(num) money) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -362,9 +386,17 @@ class InvoicePdf {
             decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.6)),
             child: pw.Column(
               children: [
+                // Order: Sub Total, Discount, then CGST/SGST (each half the tax),
+                // Round Off, Grand Total. Discount precedes tax because tax is on
+                // the discounted net. GST off → no tax rows at all, even if the
+                // bill still stores a tax_amount from when the toggle was on.
                 _totRow('Sub Total', money(bill.subtotal)),
                 if (bill.discountAmount > 0)
                   _totRow('Discount', '- ${money(bill.discountAmount)}'),
+                if (showGst) ...[
+                  _totRow('CGST', money(bill.taxAmount / 2)),
+                  _totRow('SGST', money(bill.taxAmount / 2)),
+                ],
                 if (bill.roundOff != 0)
                   _totRow('Round Off',
                       '${bill.roundOff < 0 ? '- ' : '+ '}${money(bill.roundOff.abs())}'),
@@ -398,11 +430,22 @@ class InvoicePdf {
       double Function(BillItem) lineTaxOf,
       String Function(num) money) {
     // Group by HSN code: taxable = Σ qty*unitPrice, tax = Σ lineTax, rate = taxRate.
+    //
+    // A bill-level discount reduces the taxable value and the tax charged on it.
+    // We spread it proportionally across HSN groups (by their share of the net
+    // subtotal) so this detailed breakdown reconciles to the bill's stored
+    // taxable/tax and grand total. `netSubtotal` is the pre-discount taxable
+    // base; `discountFactor` scales every group's taxable + tax down uniformly.
+    final netSubtotal = bill.items
+        .fold<double>(0, (s, i) => s + i.quantity * i.unitPrice);
+    final discountFactor = netSubtotal > 0
+        ? (netSubtotal - bill.discountAmount) / netSubtotal
+        : 1.0;
     final groups = <String, _HsnAgg>{};
     for (final i in bill.items) {
       final code = codeOf(i);
-      final taxable = i.quantity * i.unitPrice;
-      final tax = lineTaxOf(i);
+      final taxable = i.quantity * i.unitPrice * discountFactor;
+      final tax = lineTaxOf(i) * discountFactor;
       final g = groups.putIfAbsent(code, () => _HsnAgg(rate: i.taxRate ?? 0));
       g.taxable += taxable;
       g.tax += tax;

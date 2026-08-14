@@ -139,8 +139,19 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
 
   Future<void> updateItem(String id, Map<String, dynamic> data) async {
     final result = await api.updateItem(id, data);
-    final updated = Item.fromJson(result);
+    var updated = Item.fromJson(result);
     final current = state.valueOrNull ?? [];
+    // Defensive: if the response carries no `variants` key at all, Item.fromJson
+    // yields an empty list — which would make a sized item look like a plain one
+    // and bill at its base price. Keep the sizes we already had rather than
+    // silently dropping them. (The server attaches them; this guards a partial
+    // or older response.)
+    if (!result.containsKey('variants')) {
+      final existing = current.where((i) => i.id == id).firstOrNull;
+      if (existing != null && existing.hasVariants) {
+        updated = updated.copyWithVariants(existing.variants);
+      }
+    }
     state = AsyncData(
       current.map((i) => i.id == id ? updated : i).toList(),
     );

@@ -7,6 +7,10 @@ import 'package:pdf/pdf.dart';
 import 'package:Vittam/models/models.dart';
 import 'package:Vittam/services/invoice_pdf.dart';
 
+/// Net 20400 with a 4600 discount → discounted net 15800. Tax is charged on the
+/// discounted net, so 18% GST is 15800 × 0.18 = 2844 (NOT 3672, which would be
+/// 18% of the undiscounted subtotal). total = subtotal + discounted tax = 23244,
+/// and the payable is total − discount = 18644 = 15800 + 2844.
 Bill _sampleBill({required bool withTax}) => Bill(
       id: 'b1',
       businessId: 'biz1',
@@ -14,9 +18,9 @@ Bill _sampleBill({required bool withTax}) => Bill(
       customerName: 'Sagar Sandeep Dharaglkar',
       customerPhone: '8262878298',
       subtotal: 20400,
-      taxAmount: withTax ? 3672 : 0,
+      taxAmount: withTax ? 2844 : 0,
       discountAmount: 4600,
-      total: withTax ? 24072 : 20400,
+      total: withTax ? 23244 : 20400,
       paymentMode: 'cash',
       status: 'finalized',
       createdByUserId: 'u1',
@@ -101,6 +105,31 @@ void main() {
     final text = _renderedText(bytes);
     expect(text.contains('GOVIND'), true);
     expect(text.contains('Grand'), true);
+  });
+
+  test('discounted GST invoice reconciles: net amount, scaled tax, payable',
+      () async {
+    // bill_items carry the PRE-discount line tax (lineTotal 24072 = 20400 + 18%
+    // of the undiscounted net), but tax is charged on the DISCOUNTED net. The
+    // PDF must scale the per-line tax by discountedNet/subtotal and show the NET
+    // amount, so nothing on the page contradicts the summary box.
+    final bytes = await InvoicePdf.build(
+      bill: _sampleBill(withTax: true),
+      pageFormat: PdfPageFormat.a4,
+      businessName: 'GOVIND ELECTRONIC',
+      gstin: '27BFRPD0924F1ZL',
+      gstEnabled: true,
+    );
+    final text = _renderedText(bytes);
+    // Amount column is the NET line value, tying back to the Sub Total.
+    expect(text.contains('20400.00'), true, reason: 'net amount missing');
+    // Per-line GST scaled to the discounted net: 3672 × 15800/20400 = 2844.
+    expect(text.contains('2844.00'), true, reason: 'discounted tax missing');
+    // Grand Total = total − discount = 23244 − 4600 = 18644.
+    expect(text.contains('18644.00'), true, reason: 'payable missing');
+    // The undiscounted tax must NOT appear anywhere.
+    expect(text.contains('3672.00'), false,
+        reason: 'undiscounted tax leaked into the invoice');
   });
 
   test('non-GST invoice omits GST columns/table', () async {

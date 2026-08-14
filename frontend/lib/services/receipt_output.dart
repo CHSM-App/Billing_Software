@@ -58,6 +58,7 @@ class ReceiptOutput {
         businessAddress: businessAddress,
         businessGstin: businessGstin,
         businessFssai: businessFssai,
+        gstEnabled: gstEnabled,
         labels: labels,
         paperDots: PaperSizes.thermalDots(size),
       );
@@ -107,6 +108,7 @@ class ReceiptOutput {
         businessAddress: businessAddress,
         businessGstin: businessGstin,
         businessFssai: businessFssai,
+        gstEnabled: gstEnabled,
         labels: labels,
         paperDots: PaperSizes.thermalDots(size),
       );

@@ -257,10 +257,11 @@ describe('POST /api/items', () => {
 // ------------------------------------------------------------------
 describe('PUT /api/items/:id', () => {
   test('updates item and returns updated record', async () => {
-    // First call: ownership check; second call: update
+    // Calls: 1) ownership check, 2) update, 3) attachVariants
     mockRequest.query
       .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
-      .mockResolvedValueOnce({ recordset: [{ ...sampleItem, name: 'Basmati Rice' }], rowsAffected: [1] });
+      .mockResolvedValueOnce({ recordset: [{ ...sampleItem, name: 'Basmati Rice' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
 
     const res = await request(app)
       .put(`/api/items/${ITEM_ID}`)
@@ -268,6 +269,32 @@ describe('PUT /api/items/:id', () => {
       .send({ name: 'Basmati Rice' });
     expect(res.status).toBe(200);
     expect(res.body.name).toBe('Basmati Rice');
+    // Always present (empty for a plain item) so the client never has to guess.
+    expect(res.body.variants).toEqual([]);
+  });
+
+  test('returns the item variants so a sized item stays sized', async () => {
+    // Regression: this endpoint used to return the OUTPUT row with no `variants`
+    // key. The client's Item.fromJson defaults that to [], so an edited sized
+    // item dropped its sizes in the billing list and the next tap billed the
+    // base price (Chicken 65 at 230 instead of half 180 / Full 280) until a
+    // manual refresh restored it.
+    const variantRows = [
+      { id: 'v1', item_id: ITEM_ID, label: 'half', price: 180, barcode: null, sort_order: 0, is_active: true },
+      { id: 'v2', item_id: ITEM_ID, label: 'Full', price: 280, barcode: null, sort_order: 1, is_active: true },
+    ];
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ ...sampleItem, name: 'Chicken 65', price: 230 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: variantRows, rowsAffected: [2] });
+
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ price: 230 });
+    expect(res.status).toBe(200);
+    expect(res.body.variants).toHaveLength(2);
+    expect(res.body.variants.map((v) => v.label)).toEqual(['half', 'Full']);
   });
 
   test('returns 404 when item does not belong to business', async () => {

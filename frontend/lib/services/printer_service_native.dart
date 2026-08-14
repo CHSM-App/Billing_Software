@@ -249,12 +249,20 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
+      bool gstEnabled = true,
       ReceiptLabels? labels}) {
-    // Grand total is the final payable: total - discount + round_off.
-    final grandTotal = bill.grandTotal;
     // GSTIN is passed only when GST is enabled — its presence gates the
     // GSTIN line + the CGST/SGST split. Without it the receipt is as before.
     final gst = businessGstin != null && businessGstin.isNotEmpty;
+    // Master GST toggle. When off, tax is ignored ENTIRELY — no tax line prints
+    // and the tax is stripped from the payable, even for an older bill whose
+    // stored tax_amount is non-zero from when GST was on. This keeps the printed
+    // Grand Total equal to the Net Payable shown on the order card.
+    final showTax = gstEnabled && bill.taxAmount > 0;
+    // Grand total is the final payable: total - discount + round_off, less any
+    // tax that must be ignored because GST is off.
+    final grandTotal =
+        bill.grandTotal - (gstEnabled ? 0.0 : bill.taxAmount);
     final fssai = businessFssai != null && businessFssai.isNotEmpty;
     final lines = <String>[];
 
@@ -333,15 +341,23 @@ class PrinterService {
     }
     lines.add('-' * p.cols);
 
-    // Totals
+    // Totals — order: Sub Total, Discount, then tax (CGST/SGST when GST is on),
+    // Round Off, Grand Total. Discount is shown before tax because it reduces the
+    // taxable amount; tax is charged on the discounted net. When GST is off,
+    // bill.taxAmount is 0 (tax ignored entirely) so no tax line prints.
     lines.add(_twoCol(p, labels?.subtotal ?? 'Subtotal:',
         'Rs.${bill.subtotal.toStringAsFixed(2)}'));
 
-    if (bill.taxAmount > 0) {
+    if (bill.discountAmount > 0) {
+      lines.add(_twoCol(p, labels?.discount ?? 'Discount:',
+          '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
+    }
+
+    if (showTax) {
       if (gst) {
         // Intra-state split: CGST and SGST are each half the total tax.
         // The rate shown is the effective half-rate derived from the bill's
-        // taxable value (subtotal) — e.g. 18% GST prints as CGST 9% / SGST 9%.
+        // taxable value — e.g. 18% GST prints as CGST 9% / SGST 9%.
         final half = (bill.taxAmount / 2).toStringAsFixed(2);
         final halfRate = _halfGstRateLabel(bill);
         lines.add(_twoCol(p, '${labels?.cgst ?? 'CGST:'}$halfRate', 'Rs.$half'));
@@ -352,10 +368,6 @@ class PrinterService {
       }
     }
 
-    if (bill.discountAmount > 0) {
-      lines.add(_twoCol(p, labels?.discount ?? 'Discount:',
-          '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
-    }
     if (bill.roundOff != 0) {
       final sign = bill.roundOff < 0 ? '-' : '+';
       lines.add(_twoCol(p, labels?.roundOff ?? 'Round Off:',
@@ -385,10 +397,16 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
+      bool gstEnabled = true,
       ReceiptLabels? labels}) {
-    // Grand total is the final payable: total - discount + round_off.
-    final grandTotal = bill.grandTotal;
     final gst = businessGstin != null && businessGstin.isNotEmpty;
+    // GST off → tax ignored entirely: no tax line, and the stored tax is
+    // stripped from the payable (see _buildReceiptLines for the rationale).
+    final showTax = gstEnabled && bill.taxAmount > 0;
+    // Grand total is the final payable: total - discount + round_off, less any
+    // tax that must be ignored because GST is off.
+    final grandTotal =
+        bill.grandTotal - (gstEnabled ? 0.0 : bill.taxAmount);
     final fssai = businessFssai != null && businessFssai.isNotEmpty;
     final rows = <ReceiptRow>[];
 
@@ -488,9 +506,16 @@ class PrinterService {
           ReceiptCell(r, align: TextAlign.right, widthFraction: 0.45),
         ], size: size, bold: bold);
 
+    // Order: Sub Total, Discount, then tax (CGST/SGST when GST on), Round Off,
+    // Grand Total. Discount precedes tax because tax is charged on the discounted
+    // net. GST off → bill.taxAmount is 0, so no tax line prints.
     rows.add(total(labels?.subtotal ?? 'Subtotal:',
         'Rs.${bill.subtotal.toStringAsFixed(2)}'));
-    if (bill.taxAmount > 0) {
+    if (bill.discountAmount > 0) {
+      rows.add(total(labels?.discount ?? 'Discount:',
+          '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
+    }
+    if (showTax) {
       if (gst) {
         final half = (bill.taxAmount / 2).toStringAsFixed(2);
         final halfRate = _halfGstRateLabel(bill);
@@ -500,10 +525,6 @@ class PrinterService {
         rows.add(total(labels?.tax ?? 'Tax:',
             'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
       }
-    }
-    if (bill.discountAmount > 0) {
-      rows.add(total(labels?.discount ?? 'Discount:',
-          '-Rs.${bill.discountAmount.toStringAsFixed(2)}'));
     }
     if (bill.roundOff != 0) {
       final sign = bill.roundOff < 0 ? '-' : '+';
@@ -591,6 +612,7 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
+      bool gstEnabled = true,
       ReceiptLabels? labels,
       int paperDots = 576}) async {
     final profile = _profileForDots(paperDots);
@@ -600,6 +622,7 @@ class PrinterService {
         businessAddress: businessAddress,
         businessGstin: businessGstin,
         businessFssai: businessFssai,
+        gstEnabled: gstEnabled,
         labels: labels);
     return RasterLab.receiptPreviewPng(rows, width: paperDots);
   }
@@ -610,6 +633,7 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
+      bool gstEnabled = true,
       ReceiptLabels? labels,
       int paperDots = 576}) async {
     final printer = await getActivePrinter();
@@ -625,6 +649,7 @@ class PrinterService {
         businessAddress: businessAddress,
         businessGstin: businessGstin,
         businessFssai: businessFssai,
+        gstEnabled: gstEnabled,
         labels: labels);
 
     if (_hasNonAscii(lines)) {
@@ -639,6 +664,7 @@ class PrinterService {
           businessAddress: businessAddress,
           businessGstin: businessGstin,
           businessFssai: businessFssai,
+          gstEnabled: gstEnabled,
           labels: labels);
       final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
       if (_isWindows) {
@@ -662,6 +688,7 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
+      bool gstEnabled = true,
       ReceiptLabels? labels,
       int paperDots = 576}) async {
     for (var i = 0; i < bills.length; i++) {
@@ -671,6 +698,7 @@ class PrinterService {
           businessAddress: businessAddress,
           businessGstin: businessGstin,
           businessFssai: businessFssai,
+          gstEnabled: gstEnabled,
           labels: labels,
           paperDots: paperDots);
       // Let the printer finish and the SPP link settle before the next job.
@@ -1034,8 +1062,14 @@ class PrinterService {
   /// SGST are each half of it. Returns '' when the rate can't be determined so
   /// the label degrades gracefully to just "CGST:".
   String _halfGstRateLabel(Bill bill) {
-    if (bill.subtotal <= 0) return '';
-    final effectiveRate = bill.taxAmount / bill.subtotal * 100;
+    // The rate must be derived from the base the tax was ACTUALLY charged on:
+    // the discounted net (subtotal − discount), not the gross subtotal. Tax is
+    // charged after the discount, so dividing by the gross subtotal understates
+    // the rate — a 5% bill with a 20% discount would print "CGST 2%" instead of
+    // "CGST 2.5%". Mirrors _gstSplitRows() on the order card.
+    final taxableBase = bill.subtotal - bill.discountAmount;
+    if (taxableBase <= 0) return '';
+    final effectiveRate = bill.taxAmount / taxableBase * 100;
     final half = effectiveRate / 2;
     if (half <= 0) return '';
     // Whole numbers print clean (9%), fractional keep one decimal (2.5%).

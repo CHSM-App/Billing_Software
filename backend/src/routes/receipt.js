@@ -66,12 +66,31 @@ router.get('/:token', async (req, res) => {
     // before. CGST/SGST are a display split (each = tax_amount / 2); nothing is
     // recomputed from line items, so totals never drift.
     const gstEnabled = !!bill.gst_enabled && Number(bill.tax_amount) > 0;
+    // Final payable = total − discount + round_off, less any tax that must be
+    // ignored because the business has GST off. Without the correction a bill
+    // whose stored tax_amount predates the toggle would show a grand total
+    // higher than the net payable the customer actually paid.
+    const grandTotal =
+      Number(bill.total)
+      - Number(bill.discount_amount || 0)
+      + Number(bill.round_off || 0)
+      - (bill.gst_enabled ? 0 : Number(bill.tax_amount || 0));
     // Per-line HSN/SAC: the item's own code, else the business default SAC.
     const codeFor = (i) => i.hsn_code || bill.default_sac_code || '';
     const showHsnCol = gstEnabled && items.some((i) => codeFor(i));
 
     // Rate-wise GST summary rows: group taxable value + tax by tax_rate.
     // taxable = qty×unit_price; lineTax = line_total − taxable; cgst = sgst = lineTax/2.
+    //
+    // bill_items store the PRE-discount line tax (line_total = qty×price + tax,
+    // computed before the bill-level discount is applied), while bills.tax_amount
+    // holds the discounted figure. The discount reduces the taxable base, so both
+    // the taxable value and the tax here are scaled by discountedNet/subtotal —
+    // otherwise this summary would contradict the CGST/SGST totals below it.
+    const discountRatio =
+      Number(bill.subtotal) > 0
+        ? (Number(bill.subtotal) - Number(bill.discount_amount || 0)) / Number(bill.subtotal)
+        : 1;
     const gstByRate = {};
     if (gstEnabled) {
       for (const i of items) {
@@ -80,8 +99,8 @@ router.get('/:token', async (req, res) => {
         const taxable = Number(i.quantity) * Number(i.unit_price);
         const lineTax = Number(i.line_total) - taxable;
         const g = (gstByRate[rate] = gstByRate[rate] || { taxable: 0, tax: 0 });
-        g.taxable += taxable;
-        g.tax += lineTax;
+        g.taxable += taxable * discountRatio;
+        g.tax += lineTax * discountRatio;
       }
     }
     const gstSummaryRows = Object.keys(gstByRate)
@@ -283,17 +302,14 @@ router.get('/:token', async (req, res) => {
       <span>Subtotal</span>
       <span>&#8377;${fmt(bill.subtotal)}</span>
     </div>
-    ${Number(bill.tax_amount) > 0 ? (gstEnabled ? `<div class="t-row">
+    ${gstEnabled ? `<div class="t-row">
       <span>CGST</span>
       <span>&#8377;${fmt(Number(bill.tax_amount) / 2)}</span>
     </div>
     <div class="t-row">
       <span>SGST</span>
       <span>&#8377;${fmt(Number(bill.tax_amount) / 2)}</span>
-    </div>` : `<div class="t-row">
-      <span>Tax</span>
-      <span>&#8377;${fmt(bill.tax_amount)}</span>
-    </div>`) : ''}
+    </div>` : ''}
     ${Number(bill.discount_amount) > 0 ? `<div class="t-row">
       <span>Discount</span>
       <span>&minus;&#8377;${fmt(bill.discount_amount)}</span>
@@ -304,7 +320,7 @@ router.get('/:token', async (req, res) => {
     </div>` : ''}
     <div class="t-grand">
       <span>Grand Total</span>
-      <span>&#8377;${fmt(Number(bill.total) - Number(bill.discount_amount || 0) + Number(bill.round_off || 0))}</span>
+      <span>&#8377;${fmt(grandTotal)}</span>
     </div>
   </div>
 

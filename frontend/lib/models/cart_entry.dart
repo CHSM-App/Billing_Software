@@ -18,6 +18,13 @@ class CartEntry {
   String get displayName =>
       variant == null ? item.name : '${item.name} (${variant!.label})';
 
+  /// Net line amount — price × quantity, WITHOUT tax. This is what the order
+  /// card shows: prices are tax-exclusive, so the per-line figure is the pre-tax
+  /// value and tax is summarised separately in the totals below.
+  double get lineNet => effectivePrice * quantity;
+
+  /// Tax-inclusive line amount (net + this line's tax). Kept for callers that
+  /// need the grossed line value; the order card uses [lineNet] instead.
   double get lineTotal {
     final tax = item.taxRate != null ? (item.taxRate! / 100) : 0.0;
     return effectivePrice * quantity * (1 + tax);

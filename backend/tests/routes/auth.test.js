@@ -143,12 +143,15 @@ describe('POST /api/login', () => {
     expect(res.status).toBe(400);
   });
 
-  test('returns 401 for unknown phone', async () => {
+  test('returns 404 phone_not_found for an unknown phone', async () => {
+    // Distinct from a wrong PIN (401) so the login screen can offer to register
+    // this number instead of showing a generic "invalid credentials" error.
     mockRequest.query.mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
     const res = await request(app)
       .post('/api/login')
       .send({ phone: '0000000000', pin: '1234' });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('phone_not_found');
   });
 
   test('returns 403 for unverified account', async () => {

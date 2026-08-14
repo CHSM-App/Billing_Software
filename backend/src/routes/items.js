@@ -357,6 +357,13 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     `);
 
     const updated = result.recordset[0];
+    // Attach the item's sizes. Without this the response has NO `variants` key,
+    // so the client's Item.fromJson defaults it to [] and the updated item lands
+    // in the billing list looking like a plain item — tapping it then bills the
+    // base price instead of opening the size picker (Chicken 65: base 230 when
+    // the real sizes are half 180 / Full 280). Every other item-returning
+    // endpoint already does this; this one was the odd one out.
+    await attachVariants(req.user.business_id, [updated]);
     const actor = { user_id: req.user.user_id, user_name: req.user.name || null };
 
     if (price !== undefined && parseFloat(price) !== parseFloat(before.price)) {

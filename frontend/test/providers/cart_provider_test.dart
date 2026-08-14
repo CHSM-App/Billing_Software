@@ -1,5 +1,6 @@
 import 'package:Vittam/models/models.dart';
 import 'package:Vittam/providers/cart_provider.dart';
+import 'package:Vittam/providers/session_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -38,7 +39,12 @@ ItemVariant makeVariant({
       stockQuantity: stockQuantity,
     );
 
-ProviderContainer makeContainer() => ProviderContainer();
+/// [gstEnabled] mirrors the business's master GST toggle. It defaults to true so
+/// the tax/total tests exercise the normal taxed path; pass false to assert that
+/// tax is ignored entirely even when items still carry a tax_rate.
+ProviderContainer makeContainer({bool gstEnabled = true}) => ProviderContainer(
+      overrides: [gstEnabledProvider.overrideWithValue(gstEnabled)],
+    );
 
 void main() {
   // ─────────────────────────────────────────────────────────────
@@ -218,6 +224,16 @@ void main() {
       container.read(cartProvider.notifier).addItem(makeItem(price: 100.0, taxRate: 10.0));
       // tax = 100 * 1 * 0.10 = 10
       expect(container.read(cartTaxProvider), closeTo(10.0, 0.001));
+    });
+
+    test('ignores tax entirely when GST is disabled', () {
+      // The item still carries a leftover tax_rate from when GST was on, but the
+      // business toggle is off — tax must be 0 so the printed receipt's grand
+      // total matches the net payable shown on the order card.
+      final container = makeContainer(gstEnabled: false);
+      container.read(cartProvider.notifier).addItem(makeItem(price: 100.0, taxRate: 10.0));
+      expect(container.read(cartTaxProvider), 0.0);
+      expect(container.read(cartTotalProvider), closeTo(100.0, 0.001));
     });
   });
 

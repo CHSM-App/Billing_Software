@@ -160,6 +160,26 @@ class Item {
   /// Whether the cashier must pick a size before this item can be added.
   bool get hasVariants => variants.isNotEmpty;
 
+  /// Same item with a different set of sizes. Used to re-attach variants when a
+  /// partial API response omits them, so a sized item never degrades into a
+  /// plain one (which would bill at the base price).
+  Item copyWithVariants(List<ItemVariant> newVariants) => Item(
+        id: id,
+        businessId: businessId,
+        name: name,
+        barcode: barcode,
+        category: category,
+        price: price,
+        taxRate: taxRate,
+        hsnCode: hsnCode,
+        stockQuantity: stockQuantity,
+        lowStockThreshold: lowStockThreshold,
+        unit: unit,
+        variants: newVariants,
+        isActive: isActive,
+        imageUrl: imageUrl,
+      );
+
   bool get isLowStock =>
       stockQuantity != null &&
       lowStockThreshold != null &&

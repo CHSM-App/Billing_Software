@@ -221,14 +221,16 @@ describe('POST /api/bills', () => {
     // The route makes these calls in order inside the transaction:
     //   1. SELECT inventory_enabled FROM businesses
     //   2. SELECT items WHERE id IN (...)
-    //   3. SELECT item_recipes JOIN raw_materials  (loadRecipeMap — empty here)
-    //   4. SELECT COUNT(*) AS cnt FROM bills  (generateBillNumber)
-    //   5. INSERT INTO bills OUTPUT INSERTED.id
-    //   6. INSERT INTO bill_items  (one per item)
+    //   3. SELECT item_variants  (findMissingVariantError — none, so no error)
+    //   4. SELECT item_recipes JOIN raw_materials  (loadRecipeMap — empty here)
+    //   5. SELECT COUNT(*) AS cnt FROM bills  (generateBillNumber)
+    //   6. INSERT INTO bills OUTPUT INSERTED.id
+    //   7. INSERT INTO bill_items  (one per item)
     // (loadVariantMap is skipped — no variant_id on the line item.)
     const txQueryMock = jest.fn()
       .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
@@ -259,6 +261,37 @@ describe('POST /api/bills', () => {
     expect(res.status).toBe(201);
   });
 
+  test('rejects a variant item billed without a size', async () => {
+    // Regression: Chicken 65 has sizes (half 180 / Full 280) but a base price of
+    // 230. Scanning its ITEM-level barcode used to add it with no variant_id,
+    // billing the 230 placeholder — a price that isn't on the menu. The server
+    // must reject the line whatever the client does.
+    const txQueryMock = jest.fn()
+      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      // findMissingVariantError — this item HAS active sizes, so the line is bad.
+      .mockResolvedValueOnce({ recordset: [{ name: 'Chicken 65' }], rowsAffected: [1] })
+      .mockResolvedValue({ recordset: [], rowsAffected: [1] });
+
+    mockTransaction.request.mockImplementation(() => ({
+      inputs: {},
+      input: jest.fn().mockReturnThis(),
+      query: txQueryMock,
+    }));
+    mockRequest.query.mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({
+        items: [{ item_id: ITEM_ID, quantity: 1 }],
+        payment_mode: 'cash',
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Select a size for: Chicken 65/);
+    expect(mockTransaction.rollback).toHaveBeenCalled();
+  });
+
   test('snapshots hsn_code onto bill_items without changing totals', async () => {
     // A taxed item (5%) that carries an HSN code.
     const taxedItem = { ...sampleItem, tax_rate: 5, hsn_code: '9963' };
@@ -267,8 +300,11 @@ describe('POST /api/bills', () => {
     // assert the bill_items INSERT received hsn_code, and totals are unchanged.
     const capturedInputs = [];
     const txQueryMock = jest.fn()
-      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false }], rowsAffected: [1] })
+      // GST enabled so the taxed item's 5% is applied (tax is ignored when off).
+      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false, gst_enabled: true }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [taxedItem], rowsAffected: [1] })
+      // findMissingVariantError — no variant rows, so the line is allowed.
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
@@ -309,6 +345,99 @@ describe('POST /api/bills', () => {
     const lineInsert = capturedInputs.find((i) => 'hsn_code' in i);
     expect(lineInsert).toBeDefined();
     expect(lineInsert.hsn_code).toBe('9963');
+  });
+
+  test('ignores tax entirely when GST is disabled for the business', async () => {
+    // Same 5% item, but the business has gst_enabled = false → tax must be 0.
+    const taxedItem = { ...sampleItem, tax_rate: 5, hsn_code: '9963' };
+    const capturedInputs = [];
+    const txQueryMock = jest.fn()
+      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false, gst_enabled: false }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [taxedItem], rowsAffected: [1] })
+      // findMissingVariantError — no variant rows, so the line is allowed.
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
+      .mockResolvedValue({ recordset: [], rowsAffected: [1] });
+
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      capturedInputs.push(inputs);
+      return {
+        inputs,
+        input: jest.fn(function (name, _type, value) { inputs[name] = value; return this; }),
+        query: txQueryMock,
+      };
+    });
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 2 }], payment_mode: 'cash' });
+    expect(res.status).toBe(201);
+
+    // 2 × 50 = 100 taxable, but GST off → tax 0, total = subtotal.
+    const billInsert = capturedInputs.find((i) => 'subtotal' in i);
+    expect(billInsert.subtotal).toBe(100);
+    expect(billInsert.tax_amount).toBe(0);
+    expect(billInsert.total).toBe(100);
+    // The stored line's tax_rate is nulled out too (tax ignored entirely).
+    const lineInsert = capturedInputs.find((i) => 'hsn_code' in i);
+    expect(lineInsert.tax_rate).toBeNull();
+  });
+
+  test('applies discount to the net subtotal, then charges tax on the discounted net', async () => {
+    // 5% item, GST on. 2 × 50 = 100 net, discount 20 → discounted net 80,
+    // tax = 5 × 80/100 = 4. total = subtotal + discounted tax = 104 (discount is
+    // stored separately, NOT subtracted from total). Payable = total − discount
+    // = 104 − 20 = 84 = discounted net (80) + tax (4).
+    const taxedItem = { ...sampleItem, tax_rate: 5, hsn_code: '9963' };
+    const capturedInputs = [];
+    const txQueryMock = jest.fn()
+      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false, gst_enabled: true }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [taxedItem], rowsAffected: [1] })
+      // findMissingVariantError — no variant rows, so the line is allowed.
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
+      .mockResolvedValue({ recordset: [], rowsAffected: [1] });
+
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      capturedInputs.push(inputs);
+      return {
+        inputs,
+        input: jest.fn(function (name, _type, value) { inputs[name] = value; return this; }),
+        query: txQueryMock,
+      };
+    });
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({
+        items: [{ item_id: ITEM_ID, quantity: 2 }],
+        payment_mode: 'cash',
+        discount_amount: 20,
+      });
+    expect(res.status).toBe(201);
+
+    const billInsert = capturedInputs.find((i) => 'subtotal' in i);
+    expect(billInsert.subtotal).toBe(100);
+    expect(billInsert.discount_amount).toBe(20);
+    expect(billInsert.tax_amount).toBe(4);   // 5 × 80/100
+    expect(billInsert.total).toBe(104);      // subtotal 100 + discounted tax 4
+    // Payable is total − discount = 84 (discounted net 80 + tax 4).
   });
 
   test('returns 200 for duplicate client_bill_id (idempotent)', async () => {

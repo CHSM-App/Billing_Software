@@ -141,8 +141,11 @@ describe('GET /receipt/:token', () => {
     expect(res.text).toContain('&lt;script&gt;');
   });
 
-  test('GST off (default): no CGST/SGST or GST Summary, renders as before', async () => {
-    // A taxed bill but gst_enabled is falsy → single behaviour, no split.
+  test('GST off: tax ignored entirely — no tax rows, grand total excludes tax', async () => {
+    // A bill carrying a leftover tax_amount from when GST was on, but the
+    // business toggle is now off. Tax is ignored ENTIRELY: no Tax/CGST/SGST row
+    // and the grand total drops the tax, so the shared receipt link matches the
+    // net payable shown on the order card and the printed receipt.
     const taxedBill = { ...sampleBillRow, tax_amount: 5, total: 105 };
     mockRequest.query
       .mockResolvedValueOnce({ recordset: [taxedBill], rowsAffected: [1] })
@@ -150,9 +153,11 @@ describe('GET /receipt/:token', () => {
 
     const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
     expect(res.status).toBe(200);
-    expect(res.text).toContain('>Tax<');
+    expect(res.text).not.toContain('>Tax<');
     expect(res.text).not.toContain('>CGST<');
     expect(res.text).not.toContain('GST Summary');
+    // total 105 − tax 5 = 100 payable (no discount/round-off on this bill).
+    expect(res.text).toContain('&#8377;100.00');
   });
 
   test('GST on: shows CGST/SGST split and a GST Summary', async () => {

@@ -320,10 +320,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   void _onDiscountPctChanged() {
     if (_updatingDiscount) return;
-    final total = ref.read(cartTotalProvider);
+    // Discount is applied to the NET (pre-tax) subtotal — tax is then charged on
+    // the discounted net. So percentages are of the subtotal, not the gross total.
+    final net = ref.read(cartSubtotalProvider);
     final pct = double.tryParse(_discountPctController.text) ?? 0;
     _updatingDiscount = true;
-    final amt = total > 0 && pct > 0 ? (total * pct / 100) : 0.0;
+    final amt = net > 0 && pct > 0 ? (net * pct / 100) : 0.0;
     _discountAmtController.text = amt > 0 ? amt.toStringAsFixed(2) : '';
     _updatingDiscount = false;
     setState(() {});
@@ -331,10 +333,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   void _onDiscountAmtChanged() {
     if (_updatingDiscount) return;
-    final total = ref.read(cartTotalProvider);
+    // Percentage is of the NET subtotal (see _onDiscountPctChanged).
+    final net = ref.read(cartSubtotalProvider);
     final amt = double.tryParse(_discountAmtController.text) ?? 0;
     _updatingDiscount = true;
-    final pct = total > 0 && amt > 0 ? (amt / total * 100) : 0.0;
+    final pct = net > 0 && amt > 0 ? (amt / net * 100) : 0.0;
     _discountPctController.text = pct > 0 ? pct.toStringAsFixed(2) : '';
     _updatingDiscount = false;
     setState(() {});
@@ -348,9 +351,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final cached = await OfflineService.instance
           .getBarcodeMatch(barcode, businessId ?? '');
       if (cached != null) {
-        ref
-            .read(cartProvider.notifier)
-            .addItem(cached.item, variant: cached.variant);
+        _addScannedItem(cached.item, cached.variant);
         return;
       }
       final data = await getItemByBarcode(barcode);
@@ -363,13 +364,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           : item.variants
               .where((v) => v.id == matchedVariantId)
               .firstOrNull;
-      ref.read(cartProvider.notifier).addItem(item, variant: variant);
+      _addScannedItem(item, variant);
       // _animateCartBadge();
     } on ApiException catch (e) {
       _showSnack(e.message, isError: true);
     } catch (_) {
       _showSnack(l10n.billingItemNotFoundBarcode(barcode), isError: true);
     }
+  }
+
+  /// Add a scanned item to the cart, enforcing the SAME size rule as tapping an
+  /// item in the list: a variant item can never be billed at its base price.
+  ///
+  /// A scan resolves to a specific size only when a VARIANT barcode matched. An
+  /// item-level barcode on a variant item is ambiguous — the scan says "Chicken
+  /// 65", not which plate — so the size picker must open instead of silently
+  /// adding the base price. Without this a scan billed Chicken 65 at its 230
+  /// base price when the real sizes are half 180 / Full 280.
+  void _addScannedItem(Item item, ItemVariant? variant) {
+    if (variant == null && item.hasVariants) {
+      _showVariantPicker(item);
+      return;
+    }
+    ref.read(cartProvider.notifier).addItem(item, variant: variant);
   }
 
   List<Map<String, dynamic>> get _cartPayload {
@@ -455,10 +472,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
       double subtotal = 0;
       double taxAmount = 0;
+      // GST off → tax ignored entirely, even for items with a leftover tax_rate.
+      // Same rule as the finalize path, so reopening this draft to bill it can
+      // never resurrect tax the order card doesn't show.
+      final gstEnabled = ref.read(gstEnabledProvider);
       final lineItems = cart.map((e) {
         final lineSub = e.effectivePrice * e.quantity;
-        final lineTax =
-            e.item.taxRate != null ? lineSub * (e.item.taxRate! / 100) : 0.0;
+        final taxRate = gstEnabled ? e.item.taxRate : null;
+        final lineTax = taxRate != null ? lineSub * (taxRate / 100) : 0.0;
         subtotal += lineSub;
         taxAmount += lineTax;
         return {
@@ -467,13 +488,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           'item_name': e.displayName,
           'quantity': e.quantity,
           'unit_price': e.effectivePrice,
-          'tax_rate': e.item.taxRate,
+          'tax_rate': taxRate,
           'line_total': double.parse((lineSub + lineTax).toStringAsFixed(2)),
         };
       }).toList();
-      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+      // Discount applies to the NET subtotal; tax is charged on the discounted
+      // net. Clamp the discount to the subtotal and scale the tax accordingly so
+      // the stored figures match what the customer is shown and pays.
       final discountAmt =
-          (double.tryParse(_discountAmtController.text) ?? 0.0).clamp(0.0, total);
+          (double.tryParse(_discountAmtController.text) ?? 0.0)
+              .clamp(0.0, subtotal);
+      if (subtotal > 0) {
+        taxAmount = double.parse(
+            (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
+      }
+      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
       final customerName = _customerNameController.text.trim().nullIfEmpty;
       final customerPhone = _customerPhoneController.text.trim().nullIfEmpty;
       final tableId = widget.tableId;
@@ -1196,12 +1225,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // and given to the customer, so it is kept UNCHANGED when the bill syncs.
       final offlineBillNumber = await nextOfflineBillNumber();
 
+      // GST off → tax is ignored entirely, even if an item still carries a
+      // leftover tax_rate from when GST was on. Matches the cart providers, the
+      // online path and the backend, so the printed Grand Total equals the Net
+      // Payable shown on the order card.
+      final gstEnabled = ref.read(gstEnabledProvider);
+
       double subtotal = 0;
       double taxAmount = 0;
       final lineItems = cart.map((e) {
         final lineSub = e.effectivePrice * e.quantity;
-        final lineTax =
-            e.item.taxRate != null ? lineSub * (e.item.taxRate! / 100) : 0.0;
+        final taxRate = gstEnabled ? e.item.taxRate : null;
+        final lineTax = taxRate != null ? lineSub * (taxRate / 100) : 0.0;
         subtotal += lineSub;
         taxAmount += lineTax;
         return {
@@ -1210,14 +1245,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           'item_name': e.displayName,
           'quantity': e.quantity,
           'unit_price': e.effectivePrice,
-          'tax_rate': e.item.taxRate,
+          'tax_rate': taxRate,
           'line_total':
               double.parse((lineSub + lineTax).toStringAsFixed(2)),
         };
       }).toList();
-      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+      // Discount applies to the NET subtotal; tax is charged on the discounted
+      // net. Clamp to subtotal and scale the tax so stored/printed/synced figures
+      // all agree (bill-level: tax × discountedNet / net).
       final discountAmt = (double.tryParse(_discountAmtController.text) ?? 0.0)
-          .clamp(0.0, total);
+          .clamp(0.0, subtotal);
+      if (subtotal > 0) {
+        taxAmount = double.parse(
+            (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
+      }
+      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
       // Round-off is computed on-device and kept UNCHANGED when the bill syncs
       // (it's already printed on the customer's receipt), same as bill_number.
       final roundOff = computeRoundOff(
@@ -1339,9 +1381,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         lineTotal: double.parse((lineSub + lineTax).toStringAsFixed(2)),
       );
     }).toList();
-    final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+    // Discount on NET subtotal; tax charged on the discounted net (bill-level:
+    // tax × discountedNet / net) so the preview/receipt matches the real bill.
     final discountAmt =
-        (double.tryParse(_discountAmtController.text) ?? 0.0).clamp(0.0, total);
+        (double.tryParse(_discountAmtController.text) ?? 0.0)
+            .clamp(0.0, subtotal);
+    if (subtotal > 0) {
+      taxAmount = double.parse(
+          (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
+    }
+    final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
     return Bill(
       id: 'preview',
       businessId: '',
@@ -2221,7 +2270,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final cart = ref.watch(cartProvider);
       final subtotal = ref.watch(cartSubtotalProvider);
       final tax = ref.watch(cartTaxProvider);
-      final total = ref.watch(cartTotalProvider);
       // When GST is enabled, the tax is shown split as CGST + SGST (each half)
       // in the totals summary below, mirroring the printed receipt.
       final gstEnabled = ref.watch(gstEnabledProvider);
@@ -2597,9 +2645,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                     AppSpacing.space12, AppSpacing.space16, 0),
                 child: Builder(builder: (ctx) {
+                  // Discount is applied to the NET (pre-tax) subtotal, then tax is
+                  // charged on the discounted net. So the discount clamps to the
+                  // subtotal, and the tax shown here is scaled down in proportion
+                  // to the discount (bill-level: originalTax × discountedNet/net).
                   final discountAmt =
                       (double.tryParse(_discountAmtController.text) ?? 0.0)
-                          .clamp(0.0, total);
+                          .clamp(0.0, subtotal);
+                  final discountedNet = subtotal - discountAmt;
+                  final effectiveTax =
+                      subtotal > 0 ? tax * discountedNet / subtotal : 0.0;
+                  // "Total" here means subtotal + the (discounted) tax; the
+                  // discount is broken out on its own row below, so payable is
+                  // total − discount (+ round-off / prev due), which equals
+                  // discountedNet + effectiveTax. The identity holds because the
+                  // tax already reflects the discount.
+                  final total = subtotal + effectiveTax;
                   // Invoice round-off applies to THIS bill's payable
                   // (total - discount), independent of any previous-due amount,
                   // matching the backend. 0 when the business has it disabled.
@@ -2618,15 +2679,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ),
                     child: Column(
                       children: [
-                        // Total Amount row
+                        // Sub Total row — pure item amount (no tax, no discount).
                         Padding(
                           padding: const EdgeInsets.symmetric(
                               horizontal: AppSpacing.space12, vertical: 10),
                           child: Row(
                             children: [
-                              Flexible(
+                              Expanded(
                                 child: Text(
-                                  l10n.billingTotalAmount,
+                                  l10n.billingSubtotal,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
@@ -2634,83 +2695,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       ),
                                 ),
                               ),
-                              const Spacer(),
-                              // The compact "+ GST" hint is only shown when GST
-                              // is NOT enabled; with GST on, the split is broken
-                              // out in its own CGST/SGST rows below.
-                              if (tax > 0 && !gstEnabled)
-                                Flexible(
-                                  child: Text(
-                                    l10n.billingSubtotalPlusGst(
-                                        subtotal.toStringAsFixed(2),
-                                        tax.toStringAsFixed(2)),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                                          color: AppColors.textSecondary,
-                                          fontSize: 11,
-                                        ),
-                                  ),
-                                ),
-                              if (tax > 0 && !gstEnabled) const SizedBox(width: 6),
+                              const SizedBox(width: AppSpacing.space8),
                               Text(
-                                '₹${total.toStringAsFixed(2)}',
+                                '₹${subtotal.toStringAsFixed(2)}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.right,
                                 style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                                       fontWeight: FontWeight.w600,
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures()
+                                      ],
                                     ),
                               ),
                             ],
                           ),
                         ),
-                        // CGST / SGST split — shown when GST is enabled and the
-                        // cart carries tax. Each is half the tax; the rate is
-                        // derived from the taxable subtotal (e.g. 18% → 9%+9%).
-                        // Kept in one compact block (single divider, tight rows)
-                        // so it never pushes the footer actions off-screen.
-                        if (gstEnabled && tax > 0) ...[
-                          const Divider(height: 1),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: AppSpacing.space12, vertical: 6),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                for (final line
-                                    in _gstSplitRows(l10n, subtotal, tax))
-                                  Padding(
-                                    padding:
-                                        const EdgeInsets.symmetric(vertical: 2),
-                                    child: Row(
-                                      children: [
-                                        Text(
-                                          line.$1,
-                                          style: Theme.of(ctx)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.copyWith(
-                                                color: AppColors.textSecondary,
-                                              ),
-                                        ),
-                                        const Spacer(),
-                                        Text(
-                                          '₹${line.$2}',
-                                          style: Theme.of(ctx)
-                                              .textTheme
-                                              .bodySmall
-                                              ?.copyWith(
-                                                color: AppColors.textSecondary,
-                                              ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                        // Discount row — only when applied
+                        // Discount row — only when applied. Shown right after the
+                        // sub total (it reduces the taxable amount below).
                         if (discountAmt > 0) ...[
                           const Divider(height: 1),
                           Padding(
@@ -2718,7 +2720,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 horizontal: AppSpacing.space12, vertical: 10),
                             child: Row(
                               children: [
-                                Flexible(
+                                Expanded(
                                   child: Text(
                                     l10n.billingDiscountApplied,
                                     maxLines: 1,
@@ -2728,16 +2730,79 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         ),
                                   ),
                                 ),
-                                const Spacer(),
+                                const SizedBox(width: AppSpacing.space8),
                                 Text(
                                   '− ₹${discountAmt.toStringAsFixed(2)}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.right,
                                   style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                                         fontWeight: FontWeight.w600,
                                         color: const Color(0xFF16A34A),
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures()
+                                        ],
                                       ),
                                 ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        // CGST / SGST split — shown ONLY when GST is enabled and
+                        // the (discounted) cart carries tax. Each is half the tax;
+                        // the rate is derived from the discounted taxable base
+                        // (e.g. 18% → 9% + 9%). When GST is off, tax is ignored
+                        // entirely, so this block never renders. Placed after the
+                        // discount because tax is charged on the discounted net.
+                        if (gstEnabled && effectiveTax > 0) ...[
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space12, vertical: 6),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (final line
+                                    in _gstSplitRows(l10n, discountedNet, effectiveTax))
+                                  Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 2),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            line.$1,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(ctx)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color:
+                                                      AppColors.textSecondary,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(
+                                            width: AppSpacing.space8),
+                                        Text(
+                                          '₹${line.$2}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.right,
+                                          style: Theme.of(ctx)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: AppColors.textSecondary,
+                                                fontFeatures: const [
+                                                  FontFeature.tabularFigures()
+                                                ],
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                               ],
                             ),
                           ),
@@ -2750,7 +2815,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 horizontal: AppSpacing.space12, vertical: 10),
                             child: Row(
                               children: [
-                                Flexible(
+                                Expanded(
                                   child: Text(
                                     l10n.billingRoundOff,
                                     maxLines: 1,
@@ -2760,14 +2825,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         ),
                                   ),
                                 ),
-                                const Spacer(),
+                                const SizedBox(width: AppSpacing.space8),
                                 Text(
                                   '${roundOff < 0 ? '−' : '+'} ₹${roundOff.abs().toStringAsFixed(2)}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.right,
                                   style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                                         fontWeight: FontWeight.w600,
                                         color: AppColors.textSecondary,
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures()
+                                        ],
                                       ),
                                 ),
                               ],
@@ -2783,7 +2852,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 horizontal: AppSpacing.space12, vertical: 10),
                             child: Row(
                               children: [
-                                Flexible(
+                                Expanded(
                                   child: Text(
                                     l10n.billingPreviousDue,
                                     maxLines: 1,
@@ -2793,14 +2862,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                         ),
                                   ),
                                 ),
-                                const Spacer(),
+                                const SizedBox(width: AppSpacing.space8),
                                 Text(
                                   '+ ₹${prevDue.toStringAsFixed(2)}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.right,
                                   style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
                                         fontWeight: FontWeight.w600,
                                         color: AppColors.warning,
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures()
+                                        ],
                                       ),
                                 ),
                               ],
@@ -2828,7 +2901,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               horizontal: AppSpacing.space12, vertical: 11),
                           child: Row(
                             children: [
-                              Flexible(
+                              Expanded(
                                 child: Text(
                                   l10n.billingNetPayable,
                                   maxLines: 1,
@@ -2840,17 +2913,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ),
                                 ),
                               ),
-                              const Spacer(),
+                              const SizedBox(width: AppSpacing.space8),
                               Text(
                                 '₹${netPayable.toStringAsFixed(2)}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.right,
                                 style: Theme.of(ctx)
                                     .textTheme
                                     .titleMedium
                                     ?.copyWith(
                                   fontWeight: FontWeight.w800,
                                   color: AppColors.primary,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures()
+                                  ],
                                 ),
                               ),
                             ],
@@ -3086,7 +3163,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
                 Text(
-                  '₹${entry.lineTotal.toStringAsFixed(2)}',
+                  // Net (pre-tax) line amount — tax is shown in the totals below.
+                  '₹${entry.lineNet.toStringAsFixed(2)}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w600,

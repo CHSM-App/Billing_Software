@@ -91,6 +91,35 @@ async function loadVariantMap(transaction, businessId, items) {
   return map;
 }
 
+// Reject any line that bills a variant item WITHOUT choosing a size.
+//
+// A variant item's base `items.price` is a placeholder — the real prices live on
+// its sizes (Chicken 65: base 230, but half 180 / Full 280). A line with no
+// variant_id would silently bill that placeholder, charging the customer a price
+// that isn't on the menu. The clients open a size picker, but a scanned
+// item-level barcode used to skip it, so this is enforced server-side where
+// every path (online, offline sync, QR ordering) must pass.
+//
+// Returns an error string when a line is invalid, or null when all lines are OK.
+async function findMissingVariantError(transaction, businessId, items) {
+  const noVariantIds = [
+    ...new Set(items.filter((i) => !i.variant_id).map((i) => i.item_id).filter(Boolean)),
+  ];
+  if (noVariantIds.length === 0) return null;
+  const { clause, bind } = inParams(noVariantIds);
+  const result = await bind(transaction.request())
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .query(`
+      SELECT DISTINCT i.name
+      FROM item_variants v
+      JOIN items i ON i.id = v.item_id
+      WHERE v.item_id IN (${clause}) AND i.business_id = @business_id AND v.is_active = 1
+    `);
+  if (result.recordset.length === 0) return null;
+  const names = result.recordset.map((r) => r.name).join(', ');
+  return `Select a size for: ${names}`;
+}
+
 // Load recipe rows for a set of line items, keyed by item_id. Each entry is a
 // list of { raw_material_id, quantity, stock_quantity, low_stock_threshold, name }.
 // Rows are read inside the transaction so raw-material stock is consistent with
@@ -405,9 +434,13 @@ router.post('/', requireAuth, async (req, res) => {
       // consistent with the stock update that follows (no TOCTOU gap).
       const bizResult = await transaction.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-        .query('SELECT inventory_enabled, round_off_enabled FROM businesses WHERE id = @business_id');
+        .query('SELECT inventory_enabled, round_off_enabled, gst_enabled FROM businesses WHERE id = @business_id');
       const inventoryEnabled = bizResult.recordset[0]?.inventory_enabled;
       const roundOffEnabled = !!bizResult.recordset[0]?.round_off_enabled;
+      // When GST is disabled for the business, tax is ignored entirely — even if
+      // an item still carries a leftover tax_rate from when GST was on. Every
+      // line's tax becomes 0 and no tax_amount accrues.
+      const gstEnabled = !!bizResult.recordset[0]?.gst_enabled;
 
       const { clause: itemClause, bind: bindItems } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems(transaction.request())
@@ -437,6 +470,14 @@ router.post('/', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Variant not found: ${badVariant.variant_id}` });
       }
 
+      // A variant item must be billed with a size — never at its base price.
+      const missingVariant = await findMissingVariantError(
+        transaction, req.user.business_id, items);
+      if (missingVariant) {
+        await transaction.rollback();
+        return res.status(400).json({ error: missingVariant });
+      }
+
       // Recipe rows (raw materials) for any items that consume them.
       const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
 
@@ -452,7 +493,8 @@ router.post('/', requireAuth, async (req, res) => {
           ? parseFloat(variant.price)
           : parseFloat(dbItem.price);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
-        const taxRate = dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
+        // GST off → tax ignored entirely (rate treated as null, line tax 0).
+        const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         const lineTotal = qty * unitPrice + lineTax;
         subtotal += qty * unitPrice;
@@ -470,11 +512,20 @@ router.post('/', requireAuth, async (req, res) => {
       });
       subtotal = parseFloat(subtotal.toFixed(2));
       taxAmount = parseFloat(taxAmount.toFixed(2));
-      const total = parseFloat((subtotal + taxAmount).toFixed(2));
+      // Discount applies to the NET (pre-tax) subtotal; tax is then charged on
+      // the discounted net. So clamp the discount to the subtotal and scale the
+      // tax in proportion (bill-level: tax × discountedNet / subtotal). total is
+      // subtotal + the discounted tax, so payable (total − discount) equals
+      // discountedNet + discountedTax — the identity round-off/payable rely on.
       const discountAmount = parseFloat(Math.min(
         Math.max(parseFloat(discount_amount) || 0, 0),
-        total,
+        subtotal,
       ).toFixed(2));
+      if (subtotal > 0 && discountAmount > 0) {
+        taxAmount = parseFloat(
+          (taxAmount * (subtotal - discountAmount) / subtotal).toFixed(2));
+      }
+      const total = parseFloat((subtotal + taxAmount).toFixed(2));
 
       // Invoice-level round-off. subtotal/tax/discount/total above are NEVER
       // modified; round_off is a separate signed adjustment on the final payable
@@ -886,7 +937,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         .input('id', sql.UniqueIdentifier, req.params.id)
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled
+          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled, bs.gst_enabled
           FROM bills b
           JOIN businesses bs ON bs.id = b.business_id
           WHERE b.id = @id AND b.business_id = @business_id
@@ -902,6 +953,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       }
       const inventoryEnabled = billCheck.recordset[0].inventory_enabled;
       const roundOffEnabled = !!billCheck.recordset[0].round_off_enabled;
+      // GST off → tax ignored entirely, even for items with a leftover tax_rate.
+      const gstEnabled = !!billCheck.recordset[0].gst_enabled;
 
       const { clause: itemClause2, bind: bindItems2 } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems2(transaction.request())
@@ -929,6 +982,14 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Variant not found: ${badVariant2.variant_id}` });
       }
 
+      // A variant item must be billed with a size — never at its base price.
+      const missingVariant2 = await findMissingVariantError(
+        transaction, req.user.business_id, items);
+      if (missingVariant2) {
+        await transaction.rollback();
+        return res.status(400).json({ error: missingVariant2 });
+      }
+
       const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
 
       const lineItems = items.map((i) => {
@@ -939,7 +1000,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           ? parseFloat(variant.price)
           : parseFloat(dbItem.price);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
-        const taxRate = dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
+        // GST off → tax ignored entirely (rate treated as null, line tax 0).
+        const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
           item_id: dbItem.id,
@@ -983,15 +1045,31 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           `);
       }
 
-      // Recalculate totals from all bill_items
+      // Recalculate totals from all bill_items. Discount applies to the NET
+      // subtotal and tax is charged on the discounted net, so tax_amount is the
+      // raw line tax scaled by discountedNet/subtotal (clamped so a discount can
+      // never exceed the subtotal). total = subtotal + discounted tax, keeping
+      // payable = total − discount reconciled. Uses the already-persisted
+      // discount_amount (this path edits items, not the discount).
       await transaction.request()
         .input('id', sql.UniqueIdentifier, req.params.id)
         .query(`
-          UPDATE bills SET
-            subtotal   = (SELECT SUM(quantity * unit_price) FROM bill_items WHERE bill_id = @id),
-            tax_amount = (SELECT SUM(line_total - quantity * unit_price) FROM bill_items WHERE bill_id = @id),
-            total      = (SELECT SUM(line_total) FROM bill_items WHERE bill_id = @id)
-          WHERE id = @id
+          UPDATE b SET
+            subtotal   = agg.sub,
+            tax_amount = ROUND(agg.raw_tax * (agg.sub - agg.disc) / NULLIF(agg.sub, 0), 2),
+            total      = agg.sub + ROUND(agg.raw_tax * (agg.sub - agg.disc) / NULLIF(agg.sub, 0), 2)
+          FROM bills b
+          CROSS APPLY (
+            SELECT
+              CAST(SUM(bi.quantity * bi.unit_price) AS DECIMAL(18,4)) AS sub,
+              CAST(SUM(bi.line_total - bi.quantity * bi.unit_price) AS DECIMAL(18,4)) AS raw_tax,
+              CASE WHEN b.discount_amount >
+                        CAST(SUM(bi.quantity * bi.unit_price) AS DECIMAL(18,4))
+                   THEN CAST(SUM(bi.quantity * bi.unit_price) AS DECIMAL(18,4))
+                   ELSE b.discount_amount END AS disc
+            FROM bill_items bi WHERE bi.bill_id = @id
+          ) agg
+          WHERE b.id = @id
         `);
 
       // Re-derive round_off from the fresh total/discount so the final payable
@@ -1088,7 +1166,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         .input('id', sql.UniqueIdentifier, req.params.id)
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled
+          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled, bs.gst_enabled
           FROM bills b
           JOIN businesses bs ON bs.id = b.business_id
           WHERE b.id = @id AND b.business_id = @business_id
@@ -1104,6 +1182,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       }
       const inventoryEnabled = billCheck.recordset[0].inventory_enabled;
       const roundOffEnabled = !!billCheck.recordset[0].round_off_enabled;
+      // GST off → tax ignored entirely, even for items with a leftover tax_rate.
+      const gstEnabled = !!billCheck.recordset[0].gst_enabled;
 
       const { clause: itemClause3, bind: bindItems3 } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems3(transaction.request())
@@ -1131,6 +1211,14 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         return res.status(400).json({ error: `Variant not found: ${badVariant3.variant_id}` });
       }
 
+      // A variant item must be billed with a size — never at its base price.
+      const missingVariant3 = await findMissingVariantError(
+        transaction, req.user.business_id, items);
+      if (missingVariant3) {
+        await transaction.rollback();
+        return res.status(400).json({ error: missingVariant3 });
+      }
+
       const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
 
       const lineItems = items.map((i) => {
@@ -1141,7 +1229,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           ? parseFloat(variant.price)
           : parseFloat(dbItem.price);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
-        const taxRate = dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
+        // GST off → tax ignored entirely (rate treated as null, line tax 0).
+        const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
           item_id: dbItem.id,
@@ -1238,6 +1327,10 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       }
 
       // Recalculate totals, and update customer/discount fields when supplied.
+      // Discount applies to the NET subtotal; tax is charged on the discounted
+      // net (bill-level: rawTax × discountedNet/subtotal). The effective discount
+      // for the tax scaling is the one being set now (clamped to the net), or the
+      // already-persisted one when the discount isn't part of this edit.
       const totalsReq = transaction.request()
         .input('id', sql.UniqueIdentifier, req.params.id);
       const extraSets = [];
@@ -1250,20 +1343,31 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         extraSets.push('customer_phone = @customer_phone');
       }
       if (setDiscount) {
-        // Clamp to a non-negative value; can't exceed the new total (computed
-        // from bill_items in this same statement).
         const discountAmount = Math.max(parseFloat(discount_amount) || 0, 0);
         totalsReq.input('discount_amount', sql.Decimal(10, 2), discountAmount);
+        // Clamp the incoming discount to the NET subtotal (not gross line total).
         extraSets.push(
-          'discount_amount = (SELECT CASE WHEN @discount_amount > SUM(line_total) THEN SUM(line_total) ELSE @discount_amount END FROM bill_items WHERE bill_id = @id)',
+          'discount_amount = (SELECT CASE WHEN @discount_amount > SUM(quantity * unit_price) THEN SUM(quantity * unit_price) ELSE @discount_amount END FROM bill_items WHERE bill_id = @id)',
         );
       }
+      // `disc` for the tax scaling: the new clamped discount when setting it,
+      // otherwise the bill's current discount_amount. Both are clamped to net.
+      const discExpr = setDiscount
+        ? 'CASE WHEN @discount_amount > agg.sub THEN agg.sub ELSE @discount_amount END'
+        : 'CASE WHEN b.discount_amount > agg.sub THEN agg.sub ELSE b.discount_amount END';
       await totalsReq.query(`
-          UPDATE bills SET
-            subtotal   = (SELECT SUM(quantity * unit_price) FROM bill_items WHERE bill_id = @id),
-            tax_amount = (SELECT SUM(line_total - quantity * unit_price) FROM bill_items WHERE bill_id = @id),
-            total      = (SELECT SUM(line_total) FROM bill_items WHERE bill_id = @id)${extraSets.length ? ',\n            ' + extraSets.join(',\n            ') : ''}
-          WHERE id = @id
+          UPDATE b SET
+            subtotal   = agg.sub,
+            tax_amount = ROUND(agg.raw_tax * (agg.sub - (${discExpr})) / NULLIF(agg.sub, 0), 2),
+            total      = agg.sub + ROUND(agg.raw_tax * (agg.sub - (${discExpr})) / NULLIF(agg.sub, 0), 2)${extraSets.length ? ',\n            ' + extraSets.join(',\n            ') : ''}
+          FROM bills b
+          CROSS APPLY (
+            SELECT
+              CAST(SUM(bi.quantity * bi.unit_price) AS DECIMAL(18,4)) AS sub,
+              CAST(SUM(bi.line_total - bi.quantity * bi.unit_price) AS DECIMAL(18,4)) AS raw_tax
+            FROM bill_items bi WHERE bi.bill_id = @id
+          ) agg
+          WHERE b.id = @id
         `);
 
       // Re-derive round_off from the fresh total/discount so the final payable

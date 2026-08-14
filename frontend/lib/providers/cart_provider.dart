@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../models/cart_entry.dart';
+import 'session_provider.dart';
 
 class CartNotifier extends Notifier<List<CartEntry>> {
   @override
@@ -102,6 +103,8 @@ final cartSubtotalProvider = Provider<double>((ref) {
 });
 
 final cartTaxProvider = Provider<double>((ref) {
+  // GST off → tax is ignored entirely, even if items carry a leftover tax_rate.
+  if (!ref.watch(gstEnabledProvider)) return 0.0;
   return ref.watch(cartProvider).fold(0.0, (s, e) {
     if (e.item.taxRate == null) return s;
     return s + e.effectivePrice * e.quantity * (e.item.taxRate! / 100);
