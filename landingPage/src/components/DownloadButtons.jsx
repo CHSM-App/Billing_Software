@@ -1,14 +1,11 @@
 import React from 'react'
-import { Monitor, Globe } from 'lucide-react'
+import { Monitor } from 'lucide-react'
 
 /**
  * Drop your installer files into the `public/downloads/` folder:
  *   public/downloads/Vittam-Setup.exe   → Windows installer
- *
- * The web app link can be an external URL — update WEB_URL below.
  */
 const WIN_URL = '/downloads/Vittam-windows.zip'
-const WEB_URL = 'https://app.Vittam.in'   // ← update to your web app URL
 const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.vengurlatech.Vittam'
 
 export function DownloadButtons({ size = 'md', row = false }) {
@@ -52,20 +49,6 @@ export function DownloadButtons({ size = 'md', row = false }) {
         <span className="flex flex-col text-left leading-tight">
           <span className="text-[10px] opacity-50 font-normal -mb-0.5">Get it on</span>
           <span>Google Play</span>
-        </span>
-      </a>
-
-      {/* Web App */}
-      <a
-        href={WEB_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`${base} ${pad} btn-ghost-teal`}
-      >
-        <Globe size={size === 'lg' ? 20 : 18} className="flex-shrink-0" />
-        <span className="flex flex-col text-left leading-tight">
-          <span className="text-[10px] opacity-50 font-normal -mb-0.5">Open in browser</span>
-          <span>Web App</span>
         </span>
       </a>
     </div>

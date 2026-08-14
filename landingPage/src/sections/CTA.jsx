@@ -62,27 +62,10 @@ export default function CTA() {
               <span>Google Play</span>
             </span>
           </a>
-
-          {/* Web */}
-          <a
-            href="https://app.Vittam.in"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-outline-white inline-flex items-center gap-3 px-6 py-4 rounded-2xl text-sm font-semibold"
-          >
-            <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-            </svg>
-            <span className="flex flex-col text-left leading-tight">
-              <span className="text-[10px] font-normal opacity-50 -mb-0.5">Open in browser</span>
-              <span>Web App</span>
-            </span>
-          </a>
         </div>
 
         <p className="text-white/25 text-xs mt-8">
-          Available on Windows, Android (Google Play), and Web · No credit card required
+          Available on Windows and Android (Google Play) · No credit card required
         </p>
       </div>
     </section>

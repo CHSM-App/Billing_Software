@@ -163,10 +163,13 @@ jobs:
           commit_message: "sync: backend + landing page from ${{ github.ref_name }} @ ${{ github.sha }}"
 
   # Job 4: Build Flutter APK + AAB on tag push (v*)
+  # Runs AFTER the backend/landing-page sync so the release sequence is
+  # Windows → backend sync → APK/IPA (see sync-backend-tag).
   build-apk:
     name: Build Flutter APK + AAB
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: sync-backend-tag
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -301,9 +304,17 @@ jobs:
       - name: Zip Windows build
         shell: pwsh
         run: |
+          # Versioned zip for the GitHub Release asset.
           Compress-Archive `
             -Path "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows" `
             -DestinationPath "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows.zip"
+          # Stable-named copy for the landing page download button
+          # (landingPage/public/downloads/Vittam-windows.zip). Same inner folder
+          # structure as the versioned zip, just a fixed filename so the site's
+          # /downloads/Vittam-windows.zip link never has to change per release.
+          Copy-Item `
+            "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows.zip" `
+            "frontend/build/windows/dist/Vittam-windows.zip"
 
       - name: Upload Windows build as artifact
         uses: actions/upload-artifact@v4
@@ -312,10 +323,83 @@ jobs:
           path: frontend/build/windows/dist/billing-*.zip
           retention-days: 30
 
+      # Stable-named zip, handed to the sync-backend-tag job so it can drop it
+      # into the landing page's public/downloads/ before building the site.
+      - name: Upload Vittam-windows.zip for landing page
+        uses: actions/upload-artifact@v4
+        with:
+          name: vittam-windows-download
+          path: frontend/build/windows/dist/Vittam-windows.zip
+          retention-days: 1
+
       - name: Add Windows build to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: frontend/build/windows/dist/billing-*.zip
+          files: frontend/build/windows/dist/billing-${{ github.ref_name }}-windows.zip
+
+  # Job 5b: On tag push, rebuild the landing page bundling the FRESH Windows
+  # build as the download, then sync the backend folder to the backend branch.
+  #
+  # Order (enforced via `needs`): build-windows must finish first so this job can
+  # download the just-built Vittam-windows.zip and drop it into
+  # landingPage/public/downloads/ (replacing the committed copy) BEFORE the Vite
+  # build copies public/ into backend/public/. build-apk / build-ios then wait on
+  # THIS job so the whole release goes out in the requested sequence.
+  #
+  # This is the tag-only twin of `sync-backend` (which still runs on branch
+  # pushes for fast backend deploys). The two never run together: this one is
+  # gated on tags, that one on non-tags.
+  sync-backend-tag:
+    name: Bundle Windows build + sync backend branch (tag)
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: build-windows
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: landingPage/package-lock.json
+
+      - name: Download fresh Windows build (Vittam-windows.zip)
+        uses: actions/download-artifact@v4
+        with:
+          name: vittam-windows-download
+          path: landingPage/public/downloads
+
+      - name: Verify the download replaced the committed zip
+        run: ls -la landingPage/public/downloads/Vittam-windows.zip
+
+      - name: Install landing page dependencies
+        working-directory: landingPage
+        run: npm ci
+
+      - name: Build landing page (outputs to backend/public/)
+        working-directory: landingPage
+        run: npm run build
+        env:
+          # API calls from the landing page go to the same domain — no prefix needed
+          VITE_API_URL: ''
+
+      - name: Install backend production dependencies
+        working-directory: backend
+        run: npm ci --omit=dev
+
+      - name: Remove backend/public/ exclusion so it gets deployed
+        run: sed -i '/^backend\/public\//d' .gitignore
+
+      - name: Push backend folder to backend branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: ${{ env.BACKEND_BRANCH }}
+          publish_dir: ./${{ env.BACKEND_DIR }}
+          force_orphan: true
+          commit_message: "sync: backend + landing page (with ${{ github.ref_name }} Windows build) @ ${{ github.sha }}"
 
   # Job 6: Build unsigned Flutter iOS IPA on tag push (v*)
   # This creates an unsigned IPA artifact. App Store/TestFlight distribution
@@ -324,6 +408,7 @@ jobs:
     name: Build Flutter iOS
     runs-on: macos-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: sync-backend-tag
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

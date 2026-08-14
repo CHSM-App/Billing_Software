@@ -2166,11 +2166,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // Cart panel
   // ---------------------------------------------------------------------------
 
-  /// Empty-cart placeholder. When [flexible] (wide layout) it expands to fill
-  /// the space the cart list would occupy so the footer actions stay pinned to
-  /// the bottom and never overflow. In the bottom sheet it stays intrinsic.
-  Widget _emptyCartPlaceholder(AppLocalizations l10n, {required bool flexible}) {
-    final content = Padding(
+  /// Empty-cart placeholder — a compact icon + message. Kept intrinsic (not
+  /// Expanded) so the footer actions follow directly beneath it rather than
+  /// being pushed to the bottom of a tall panel.
+  Widget _emptyCartPlaceholder(AppLocalizations l10n) {
+    return Padding(
       padding: const EdgeInsets.symmetric(
           vertical: AppSpacing.space32, horizontal: AppSpacing.space16),
       child: Column(
@@ -2193,14 +2193,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
               textAlign: TextAlign.center),
         ],
-      ),
-    );
-    if (!flexible) return content;
-    // Center the placeholder within the flexible space; a scroll view guards
-    // against overflow if the panel is ever shorter than the placeholder.
-    return Expanded(
-      child: SingleChildScrollView(
-        child: Center(child: content),
       ),
     );
   }
@@ -2302,11 +2294,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
             // Scrollable cart items — takes all available space
             if (cart.isEmpty)
-              // In the wide layout the empty placeholder must FLEX so it absorbs
-              // the leftover vertical space; a fixed-height placeholder here is
-              // what pushed the footer actions off-screen (bottom overflow).
-              // In the bottom sheet the column is min-sized, so keep it fixed.
-              _emptyCartPlaceholder(l10n, flexible: !inSheet)
+              // Empty cart: keep the placeholder INTRINSIC (a compact icon +
+              // message) so the footer actions (payment / customer / discount /
+              // save) sit right beneath it instead of being pushed to the bottom
+              // of a tall panel. The footer is a loose Flexible + scroll view
+              // (see _wrapFooter), so it takes only the height it needs and can
+              // never overflow — no flexing placeholder required to prevent that.
+              _emptyCartPlaceholder(l10n)
             else if (inSheet)
               // In bottom sheet: not constrained, just list
               Column(
