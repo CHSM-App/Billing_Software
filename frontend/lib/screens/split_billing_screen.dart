@@ -11,14 +11,17 @@ import 'home_screen.dart';
 /// panel has its own completely independent cart state.
 List<Override> _cartOverrides() => [
       cartProvider.overrideWith(CartNotifier.new),
+      // effectivePrice, not item.price: a sized line is charged at its own
+      // size's price, and a sized item's own price is null. Reading item.price
+      // directly both ignored the size and would now be a null-arithmetic error.
       cartSubtotalProvider.overrideWith(
         (ref) => ref.watch(cartProvider).fold(
-            0.0, (s, e) => s + e.item.price * e.quantity),
+            0.0, (s, e) => s + e.effectivePrice * e.quantity),
       ),
       cartTaxProvider.overrideWith(
         (ref) => ref.watch(cartProvider).fold(0.0, (s, e) {
           if (e.item.taxRate == null) return s;
-          return s + e.item.price * e.quantity * (e.item.taxRate! / 100);
+          return s + e.effectivePrice * e.quantity * (e.item.taxRate! / 100);
         }),
       ),
       cartTotalProvider.overrideWith(

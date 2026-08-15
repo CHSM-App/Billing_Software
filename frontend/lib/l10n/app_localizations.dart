@@ -650,6 +650,30 @@ abstract class AppLocalizations {
   /// **'Add tax rate & HSN/SAC to items and show CGST/SGST on bills'**
   String get settingsGstSubtitle;
 
+  /// No description provided for @settingsGstNeedsGstin.
+  ///
+  /// In en, this message translates to:
+  /// **'Add your GSTIN in Business Profile to turn this on'**
+  String get settingsGstNeedsGstin;
+
+  /// No description provided for @settingsGstNeedsGstinTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'GSTIN required'**
+  String get settingsGstNeedsGstinTitle;
+
+  /// No description provided for @settingsGstNeedsGstinMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'A tax invoice must show your GSTIN. Add it in Business Profile, then turn on GST.'**
+  String get settingsGstNeedsGstinMessage;
+
+  /// No description provided for @settingsGstAddGstin.
+  ///
+  /// In en, this message translates to:
+  /// **'Add GSTIN'**
+  String get settingsGstAddGstin;
+
   /// No description provided for @settingsRoundOff.
   ///
   /// In en, this message translates to:
@@ -1226,6 +1250,30 @@ abstract class AppLocalizations {
   /// **'Business Type'**
   String get registerSectionBusinessType;
 
+  /// No description provided for @registerSectionTaxDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Tax Details (Optional)'**
+  String get registerSectionTaxDetails;
+
+  /// No description provided for @registerGstOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'GSTIN (optional)'**
+  String get registerGstOptional;
+
+  /// No description provided for @registerPanOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'PAN (optional)'**
+  String get registerPanOptional;
+
+  /// No description provided for @registerFssaiOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'FSSAI Number (optional)'**
+  String get registerFssaiOptional;
+
   /// No description provided for @registerSectionOwnerDetails.
   ///
   /// In en, this message translates to:
@@ -1658,6 +1706,12 @@ abstract class AppLocalizations {
   /// **'Bill printed successfully'**
   String get billingPrintSuccess;
 
+  /// No description provided for @billingBillSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill {number} saved'**
+  String billingBillSaved(String number);
+
   /// No description provided for @billingPrintFailed.
   ///
   /// In en, this message translates to:
@@ -1741,6 +1795,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cart ({count})'**
   String billingCartWithCount(int count);
+
+  /// No description provided for @billingOrderItemCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item} other{{count} items}}'**
+  String billingOrderItemCount(int count);
 
   /// No description provided for @billingNoItemsFound.
   ///
@@ -2215,6 +2275,90 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Plate'**
   String get itemsUnitPlate;
+
+  /// No description provided for @itemsHasVariants.
+  ///
+  /// In en, this message translates to:
+  /// **'This item has variants'**
+  String get itemsHasVariants;
+
+  /// No description provided for @itemsHasVariantsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sizes or options with their own price and stock'**
+  String get itemsHasVariantsSubtitle;
+
+  /// No description provided for @itemsVariantRowTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Variant {number}'**
+  String itemsVariantRowTitle(int number);
+
+  /// No description provided for @itemsVariantNameShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get itemsVariantNameShort;
+
+  /// No description provided for @itemsVariantNameHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Half, XL, 500ml'**
+  String get itemsVariantNameHint;
+
+  /// No description provided for @itemsAddAnotherVariant.
+  ///
+  /// In en, this message translates to:
+  /// **'Add another variant'**
+  String get itemsAddAnotherVariant;
+
+  /// No description provided for @itemsVariantsNoneEntered.
+  ///
+  /// In en, this message translates to:
+  /// **'Add at least one variant, or untick the box'**
+  String get itemsVariantsNoneEntered;
+
+  /// No description provided for @itemsVariantDuplicateLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Two variants are both named \"{label}\"'**
+  String itemsVariantDuplicateLabel(String label);
+
+  /// No description provided for @itemsVariantDuplicateBarcode.
+  ///
+  /// In en, this message translates to:
+  /// **'Barcode \"{barcode}\" is used by more than one variant'**
+  String itemsVariantDuplicateBarcode(String barcode);
+
+  /// No description provided for @itemsVariantBarcodeSameAsItem.
+  ///
+  /// In en, this message translates to:
+  /// **'A variant barcode cannot match the item barcode'**
+  String get itemsVariantBarcodeSameAsItem;
+
+  /// No description provided for @itemsVariantsStockIgnoredHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Stock is tracked per variant. The item stock above is not used.'**
+  String get itemsVariantsStockIgnoredHint;
+
+  /// No description provided for @itemsVariantsPartialFail.
+  ///
+  /// In en, this message translates to:
+  /// **'Item saved, but {failed} of {total} variants failed. Fix them and save again — added variants are not duplicated.'**
+  String itemsVariantsPartialFail(int failed, int total);
+
+  /// No description provided for @itemsFieldLowStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Low stock alert'**
+  String get itemsFieldLowStock;
+
+  /// No description provided for @itemsFieldLowStockHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Warn when stock falls to this'**
+  String get itemsFieldLowStockHint;
 
   /// No description provided for @itemsManageSizes.
   ///

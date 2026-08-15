@@ -996,6 +996,40 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return false;
   }
 
+  /// Called the moment a bill is durably saved (server-confirmed, or written to
+  /// the offline queue) — BEFORE any printing.
+  ///
+  /// Confirms the save with a global snackbar and refreshes everything the sale
+  /// affects. Two reasons this is separate from printing:
+  ///   • Saving and printing are different outcomes. A bill saved but not
+  ///     printed (A4/A5 where the user dismisses the OS dialog, or a thermal
+  ///     failure) previously showed NO confirmation at all, so the cashier
+  ///     couldn't tell whether the sale was recorded.
+  ///   • The billing screen is usually popped by [_navigateAfterBill] before a
+  ///     PDF dialog closes, so a screen-local snackbar would never be seen.
+  ///     [_showGlobalSnack] survives the pop.
+  void _onBillSaved(Bill bill) {
+    // Stock, history and (for a table order) the table's state all changed.
+    _refreshAfterBill(bill);
+    final label = bill.billNumber.isEmpty ? '' : bill.billNumber;
+    _showGlobalSnack(context.l10n.billingBillSaved(label));
+  }
+
+  /// Refresh every view a finalized sale invalidates, so the app reflects the
+  /// new state without a manual pull-to-refresh. Safe to call offline: each
+  /// provider falls back to its local cache.
+  void _refreshAfterBill(Bill bill) {
+    // History gains the new bill.
+    ref.read(billsProvider.notifier).refreshSilently();
+    // Selling decrements stock — refresh the catalogue so quantities and
+    // low-stock badges are current.
+    ref.read(itemsProvider.notifier).refreshInBackground();
+    // A credit (udhaari) sale changes what the customer owes.
+    if (bill.paymentMode == 'credit' || _settlePrevCredit) {
+      ref.read(creditCustomersProvider.notifier).refreshSilently();
+    }
+  }
+
   void _navigateAfterBill() {
     if (!mounted) return;
     if (widget.onBillDone != null) {
@@ -1097,6 +1131,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // A finalized order is no longer a draft, so it leaves the kitchen queue —
       // ping so the Kitchen screen drops it immediately.
       NotificationService.instance.pingKitchen();
+      // Confirm the save and refresh stock/history/credit BEFORE printing, so
+      // the cashier sees it even when the print is dismissed or fails.
+      _onBillSaved(bill);
       if (onBillReady != null) {
         onBillReady(bill);
       } else {
@@ -1321,7 +1358,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _discountPctController.clear();
       _discountAmtController.clear();
       setState(() => _paymentMode = 'cash');
+      // Deduct the sold quantities from the LOCAL item cache. The server does
+      // this on sync, but until then the cached stock is the only figure the
+      // app has — without this an offline sale leaves stock unchanged, so the
+      // catalogue and low-stock badges stay wrong for the whole outage.
+      await OfflineService.instance.applyStockDelta(businessId, lineItems);
       if (!mounted) return;
+      // Same save confirmation + refresh as the online path.
+      _onBillSaved(fakeBill);
       if (onBillReady != null) {
         onBillReady(fakeBill);
       } else {
@@ -2322,6 +2366,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleLarge),
                   ),
+                  // Item count beside the title — distinct LINES, not summed
+                  // quantity, so a 1.5 kg line still reads as one item (matches
+                  // the cart badge). Hidden on an empty cart: the placeholder
+                  // below already says there's nothing in it.
+                  if (cart.isNotEmpty) ...[
+                    const SizedBox(width: AppSpacing.space8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryLight,
+                        borderRadius: BorderRadius.circular(AppRadius.large),
+                      ),
+                      child: Text(
+                        l10n.billingOrderItemCount(cart.length),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.primaryDark,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                  ],
                   const Spacer(),
                   // Clearing a cart / releasing a table is a cashier/owner
                   // action — hidden for servers, who only build orders.
@@ -2343,12 +2411,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             // Scrollable cart items — takes all available space
             if (cart.isEmpty)
               // Empty cart: keep the placeholder INTRINSIC (a compact icon +
-              // message) so the footer actions (payment / customer / discount /
-              // save) sit right beneath it instead of being pushed to the bottom
-              // of a tall panel. The footer is a loose Flexible + scroll view
-              // (see _wrapFooter), so it takes only the height it needs and can
-              // never overflow — no flexing placeholder required to prevent that.
-              _emptyCartPlaceholder(l10n)
+              // message). In the wide layout it takes the leftover space via
+              // Expanded so the pinned footer sits at the BOTTOM of the panel,
+              // in the same place it occupies once items are added — the
+              // controls must not jump as the first item goes in. The sheet is
+              // min-sized and scrolls as a whole, so no Expanded there.
+              (inSheet
+                  ? _emptyCartPlaceholder(l10n)
+                  : Expanded(child: _emptyCartPlaceholder(l10n)))
             else if (inSheet)
               // In bottom sheet: not constrained, just list
               Column(
@@ -2356,22 +2426,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 children: cart.map((e) => _buildCartRow(e)).toList(),
               )
             else
-              // In wide layout: scrollable list that takes remaining space
+              // In wide layout: scrollable list that takes remaining space.
+              // This is the ONLY scrollable region of the panel.
               Expanded(
                 child: ListView(
                   children: cart.map((e) => _buildCartRow(e)).toList(),
                 ),
               ),
 
-            // Footer (payment, customer, discount, totals, actions). In the wide
-            // layout it's wrapped in a scrollable Flexible so it can never
-            // overflow the panel — on a short window, or when extra rows appear
-            // (CGST/SGST, discount, previous due), the footer scrolls instead of
-            // clipping. In the bottom sheet the column is already min-sized and
-            // the sheet scrolls, so the footer renders inline (a Flexible in an
-            // unbounded column would be a layout error there).
+            // Footer (payment, customer, discount, totals, actions) — pinned to
+            // the bottom and never scrolls; see [_wrapFooter].
             _wrapFooter(
-              inSheet,
               [
             const Divider(height: 1),
 
@@ -3133,16 +3198,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// discount / previous-due rows scroll instead of clipping). In the bottom
   /// sheet the surrounding column is min-sized and the sheet scrolls itself, so
   /// the children render inline (a Flexible in an unbounded column would throw).
-  Widget _wrapFooter(bool inSheet, List<Widget> children) {
-    final column = Column(
+  /// The cart footer — payment mode, customer fields, discounts, totals and the
+  /// action buttons.
+  ///
+  /// It is PINNED to the bottom and never scrolls: only the items list above it
+  /// scrolls. Previously the footer was a loose [Flexible] wrapped in a
+  /// [SingleChildScrollView], so it competed with the item list for vertical
+  /// space — a long order pushed Payment Mode and the Save/WhatsApp buttons into
+  /// their own scroll region, and the cashier had to scroll the panel to reach
+  /// them. Keeping it fixed means the controls are always in the same place.
+  ///
+  /// In the bottom sheet the whole sheet scrolls, so the footer renders inline —
+  /// which is the same min-sized column, hence no per-layout branch here.
+  Widget _wrapFooter(List<Widget> children) {
+    return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: children,
-    );
-    if (inSheet) return column;
-    return Flexible(
-      fit: FlexFit.loose,
-      child: SingleChildScrollView(child: column),
     );
   }
 
@@ -3696,7 +3768,21 @@ class _ExcelItemRow extends StatefulWidget {
   bool get isVariantRow => variant != null;
   bool get treatAsVariantItem => variant == null && item.hasVariants;
   String get rowName => variant != null ? variant!.label : item.name;
-  double get rowPrice => variant?.price ?? item.price;
+  /// Null for a variant PARENT row: the item owns no price and its sizes differ,
+  /// so no single figure is correct — [rowPriceLabel] shows their range instead.
+  double? get rowPrice => variant?.price ?? item.price;
+
+  /// What the price column renders. A size row and a plain item show their own
+  /// price. A variant parent shows NOTHING: it owns no price and its sizes
+  /// differ, so any single figure would be wrong — the price appears once the
+  /// cashier picks a size.
+  String get rowPriceLabel {
+    if (treatAsVariantItem) return '';
+    final p = rowPrice;
+    if (p == null) return '';
+    final suffix = item.isMeasured && !isVariantRow ? '/${item.unit}' : '';
+    return '₹${p.toStringAsFixed(2)}$suffix';
+  }
 
   @override
   State<_ExcelItemRow> createState() => _ExcelItemRowState();
@@ -3904,9 +3990,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                     SizedBox(
                       width: 72,
                       child: Text(
-                        (widget.item.isMeasured && !widget.isVariantRow)
-                            ? '₹${widget.rowPrice.toStringAsFixed(2)}/${widget.item.unit}'
-                            : '₹${widget.rowPrice.toStringAsFixed(2)}',
+                        widget.rowPriceLabel,
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           fontSize: 12,

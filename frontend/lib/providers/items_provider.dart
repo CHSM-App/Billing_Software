@@ -130,14 +130,18 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     }
   }
 
-  Future<void> addItem(Map<String, dynamic> data) async {
+  /// Creates the item and returns it, so the caller can use the new id — the
+  /// inline "add variants while creating" flow needs it to POST each variant
+  /// against the item that was just created.
+  Future<Item> addItem(Map<String, dynamic> data) async {
     final result = await api.createItem(data);
     final newItem = Item.fromJson(result);
     final current = state.valueOrNull ?? [];
     state = AsyncData([...current, newItem]);
+    return newItem;
   }
 
-  Future<void> updateItem(String id, Map<String, dynamic> data) async {
+  Future<Item> updateItem(String id, Map<String, dynamic> data) async {
     final result = await api.updateItem(id, data);
     var updated = Item.fromJson(result);
     final current = state.valueOrNull ?? [];
@@ -155,6 +159,7 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     state = AsyncData(
       current.map((i) => i.id == id ? updated : i).toList(),
     );
+    return updated;
   }
 
   Future<void> removeItem(String id) async {
@@ -168,23 +173,11 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
   /// Also refreshes the offline cache in the background.
   void setItemVariants(String itemId, List<ItemVariant> variants) {
     final current = state.valueOrNull ?? [];
-    final updated = current.map((i) {
-      if (i.id != itemId) return i;
-      return Item(
-        id: i.id,
-        businessId: i.businessId,
-        name: i.name,
-        barcode: i.barcode,
-        category: i.category,
-        price: i.price,
-        taxRate: i.taxRate,
-        stockQuantity: i.stockQuantity,
-        lowStockThreshold: i.lowStockThreshold,
-        unit: i.unit,
-        variants: variants,
-        isActive: i.isActive,
-      );
-    }).toList();
+    // copyWithVariants copies EVERY field. The previous hand-rolled Item(...)
+    // silently omitted hsnCode and imageUrl, so patching an item's sizes wiped
+    // its HSN code (and photo) from local state until the next server refetch.
+    final updated =
+        current.map((i) => i.id == itemId ? i.copyWithVariants(variants) : i).toList();
     state = AsyncData(updated);
 
     // Keep the offline cache consistent — fire and forget.

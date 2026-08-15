@@ -83,6 +83,37 @@ describe('POST /api/register', () => {
     expect(res.body.success).toBe(true);
   });
 
+  test('accepts optional GSTIN/PAN/FSSAI and enables GST when a GSTIN is given', async () => {
+    // Queries: 1) GSTIN duplicate check (none), 2) insert business, 3) insert user.
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ id: BUSINESS_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
+
+    const res = await request(app).post('/api/register').send({
+      ...validBody,
+      gst_number: '27ABCDE1234F1Z5',
+      pan_number: 'ABCDE1234F',
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test('returns 400 for a malformed GSTIN at registration', async () => {
+    const res = await request(app)
+      .post('/api/register')
+      .send({ ...validBody, gst_number: 'NOTAGSTIN' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid GSTIN/i);
+  });
+
+  test('returns 400 for a malformed FSSAI at registration', async () => {
+    const res = await request(app)
+      .post('/api/register')
+      .send({ ...validBody, fssai_number: '123' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/FSSAI/i);
+  });
+
   test('returns 400 when required fields are missing', async () => {
     const res = await request(app).post('/api/register').send({ business_name: 'X' });
     expect(res.status).toBe(400);

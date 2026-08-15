@@ -797,6 +797,11 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
   bool? _enabled;
   bool _saving = false;
 
+  /// True when this is the GST toggle and the business has no GSTIN yet. A tax
+  /// invoice must carry a GSTIN, so the switch stays locked until one is saved
+  /// in Business Profile.
+  bool _needsGstin = false;
+
   @override
   void initState() {
     super.initState();
@@ -807,7 +812,11 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
     try {
       final profile = await getBusinessProfile();
       if (mounted) {
-        setState(() => _enabled = profile[widget.field] == true);
+        setState(() {
+          _enabled = profile[widget.field] == true;
+          _needsGstin = widget.field == 'gst_enabled' &&
+              ((profile['gst_number'] as String?)?.trim().isEmpty ?? true);
+        });
       }
     } catch (_) {
       if (mounted) setState(() => _enabled = false);
@@ -860,7 +869,17 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
       ),
       child: SwitchListTile(
         value: _enabled ?? false,
-        onChanged: (_enabled == null || _saving) ? null : _toggle,
+        // GST without a GSTIN is blocked: turning it on is disabled, but turning
+        // it OFF stays allowed so a business that somehow has it on can escape.
+        onChanged: (_enabled == null || _saving)
+            ? null
+            : (v) {
+                if (v && _needsGstin) {
+                  _promptForGstin();
+                  return;
+                }
+                _toggle(v);
+              },
         secondary: Container(
           width: 36,
           height: 36,
@@ -871,9 +890,46 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
           child: Icon(widget.icon, color: AppColors.primary, size: 20),
         ),
         title: Text(widget.title),
-        subtitle: Text(widget.subtitle),
+        subtitle: Text(
+          _needsGstin && !(_enabled ?? false)
+              ? context.l10n.settingsGstNeedsGstin
+              : widget.subtitle,
+          style: _needsGstin && !(_enabled ?? false)
+              ? const TextStyle(color: AppColors.warning)
+              : null,
+        ),
       ),
     );
+  }
+
+  /// Explain why GST can't be enabled yet and offer to open Business Profile,
+  /// where the GSTIN is entered. Re-checks on return so the switch unlocks
+  /// straight away once a GSTIN is saved.
+  Future<void> _promptForGstin() async {
+    final l10n = context.l10n;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.settingsGstNeedsGstinTitle),
+        content: Text(l10n.settingsGstNeedsGstinMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.commonCancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.settingsGstAddGstin),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BusinessProfileScreen()),
+    );
+    if (mounted) await _load();
   }
 }
 

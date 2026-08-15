@@ -323,6 +323,20 @@ class AppLocalizationsMr extends AppLocalizations {
       'वस्तूंना कर दर व HSN/SAC जोडा आणि बिलावर CGST/SGST दाखवा';
 
   @override
+  String get settingsGstNeedsGstin =>
+      'हे सुरू करण्यासाठी व्यवसाय प्रोफाइलमध्ये GSTIN जोडा';
+
+  @override
+  String get settingsGstNeedsGstinTitle => 'GSTIN आवश्यक';
+
+  @override
+  String get settingsGstNeedsGstinMessage =>
+      'कर बिलावर तुमचा GSTIN दिसणे आवश्यक आहे. तो व्यवसाय प्रोफाइलमध्ये जोडा, नंतर GST सुरू करा.';
+
+  @override
+  String get settingsGstAddGstin => 'GSTIN जोडा';
+
+  @override
   String get settingsRoundOff => 'बिल राउंड ऑफ';
 
   @override
@@ -637,6 +651,18 @@ class AppLocalizationsMr extends AppLocalizations {
   String get registerSectionBusinessType => 'व्यवसायाचा प्रकार';
 
   @override
+  String get registerSectionTaxDetails => 'कर तपशील (ऐच्छिक)';
+
+  @override
+  String get registerGstOptional => 'जीएसटीआयएन (ऐच्छिक)';
+
+  @override
+  String get registerPanOptional => 'पॅन (ऐच्छिक)';
+
+  @override
+  String get registerFssaiOptional => 'एफएसएसएआय क्रमांक (ऐच्छिक)';
+
+  @override
   String get registerSectionOwnerDetails => 'मालकाची माहिती';
 
   @override
@@ -866,6 +892,11 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingPrintSuccess => 'बिल यशस्वीरित्या प्रिंट झाले';
 
   @override
+  String billingBillSaved(String number) {
+    return 'बिल $number जतन झाले';
+  }
+
+  @override
   String billingPrintFailed(String error) {
     return 'प्रिंट अयशस्वी: $error';
   }
@@ -919,6 +950,17 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String billingCartWithCount(int count) {
     return 'कार्ट ($count)';
+  }
+
+  @override
+  String billingOrderItemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count वस्तू',
+      one: '1 वस्तू',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1170,6 +1212,60 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsUnitPlate => 'प्लेट';
+
+  @override
+  String get itemsHasVariants => 'या वस्तूचे प्रकार आहेत';
+
+  @override
+  String get itemsHasVariantsSubtitle =>
+      'स्वतःची किंमत व स्टॉक असलेले आकार किंवा पर्याय';
+
+  @override
+  String itemsVariantRowTitle(int number) {
+    return 'प्रकार $number';
+  }
+
+  @override
+  String get itemsVariantNameShort => 'नाव';
+
+  @override
+  String get itemsVariantNameHint => 'उदा. हाफ, XL, 500ml';
+
+  @override
+  String get itemsAddAnotherVariant => 'आणखी एक प्रकार जोडा';
+
+  @override
+  String get itemsVariantsNoneEntered =>
+      'किमान एक प्रकार जोडा, किंवा चेकबॉक्स काढा';
+
+  @override
+  String itemsVariantDuplicateLabel(String label) {
+    return 'दोन प्रकारांचे नाव \"$label\" आहे';
+  }
+
+  @override
+  String itemsVariantDuplicateBarcode(String barcode) {
+    return 'बारकोड \"$barcode\" एकापेक्षा जास्त प्रकारांसाठी वापरला आहे';
+  }
+
+  @override
+  String get itemsVariantBarcodeSameAsItem =>
+      'प्रकाराचा बारकोड वस्तूच्या बारकोडसारखा असू शकत नाही';
+
+  @override
+  String get itemsVariantsStockIgnoredHint =>
+      'स्टॉक प्रत्येक प्रकारानुसार ठेवला जातो. वरील वस्तूचा स्टॉक वापरला जाणार नाही.';
+
+  @override
+  String itemsVariantsPartialFail(int failed, int total) {
+    return 'वस्तू जतन झाली, पण $total पैकी $failed प्रकार अयशस्वी. दुरुस्त करून पुन्हा जतन करा — आधी जोडलेले प्रकार पुन्हा जोडले जाणार नाहीत.';
+  }
+
+  @override
+  String get itemsFieldLowStock => 'कमी स्टॉक इशारा';
+
+  @override
+  String get itemsFieldLowStockHint => 'स्टॉक इथपर्यंत आल्यावर इशारा द्या';
 
   @override
   String get itemsManageSizes => 'प्रकार जोडा';

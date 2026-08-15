@@ -60,7 +60,9 @@ CREATE TABLE items (
     name            NVARCHAR(200)    NOT NULL,
     barcode         NVARCHAR(100)    NULL,
     category        NVARCHAR(100)    NULL,
-    price           DECIMAL(10,2)    NOT NULL,
+    -- NULL only for an item sold through its variants (each size carries its
+    -- own price). Required for a plain item — enforced in routes/items.js.
+    price           DECIMAL(10,2)    NULL,
     tax_rate        DECIMAL(5,2)     NULL,
     hsn_code        NVARCHAR(10)     NULL,   -- optional per-item HSN/SAC (GST)
     stock_quantity  DECIMAL(10,2)    NULL,

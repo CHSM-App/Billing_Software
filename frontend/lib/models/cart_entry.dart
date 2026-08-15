@@ -12,7 +12,12 @@ class CartEntry {
   String get key => variant == null ? item.id : '${item.id}:${variant!.id}';
 
   /// Price actually charged: the variant's price when set, else the item's.
-  double get effectivePrice => variant?.price ?? item.price;
+  ///
+  /// Both can be null — a sized item has no price of its own, and a size may
+  /// inherit it. Falling back to 0 keeps the cart arithmetic finite instead of
+  /// producing NaN totals; the server rejects such a line outright, and the UI
+  /// requires a size before a variant item can be added at all.
+  double get effectivePrice => variant?.price ?? item.price ?? 0.0;
 
   /// Display name including the size, e.g. "T-Shirt (XL)".
   String get displayName =>

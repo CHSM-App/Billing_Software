@@ -63,6 +63,32 @@ class OfflineService {
   Future<List<Item>> getCachedItems(String businessId) async =>
       List.of(_itemCache[businessId] ?? []);
 
+  /// No-op on web: offline billing isn't supported in the browser, so there is
+  /// no locally-queued sale whose stock would need deducting. Present to keep
+  /// the interface identical to the native implementation.
+  Future<void> applyStockDelta(
+      String businessId, List<Map<String, dynamic>> lineItems) async {}
+
+  // Server bill/draft cache — in-memory only on web, so it survives navigation
+  // within a session but not a page reload. The browser build is expected to be
+  // online; these exist to keep the interface identical to native.
+  final Map<String, List<Map<String, dynamic>>> _serverBillCache = {};
+
+  Future<void> cacheServerBills(String businessId, String kind,
+      List<Map<String, dynamic>> payloads) async {
+    _serverBillCache['$businessId:$kind'] = List.of(payloads);
+  }
+
+  Future<List<Map<String, dynamic>>> getCachedServerBills(
+          String businessId, String kind) async =>
+      List.of(_serverBillCache['$businessId:$kind'] ?? const []);
+
+  Future<void> removeCachedServerBill(String id) async {
+    for (final list in _serverBillCache.values) {
+      list.removeWhere((p) => p['id'] == id);
+    }
+  }
+
   Future<CacheStatus> getCacheStatus(String businessId) async {
     final t = _itemCacheTime[businessId];
     if (t == null) return CacheStatus.empty;

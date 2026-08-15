@@ -40,6 +40,13 @@ function ownerOnly(req, res, next) {
 
 // Attach active variants to a list of item rows (mutates rows in place).
 // Each item gets a `variants` array (empty when none). One round-trip.
+// SQL Server raises 2627 (unique constraint) / 2601 (unique index) when a
+// barcode collides. Without this the error falls into a generic catch and the
+// client sees "Failed to create…", which tells the user nothing actionable.
+function isDuplicateKeyError(err) {
+  return err && (err.number === 2627 || err.number === 2601);
+}
+
 async function attachVariants(businessId, itemRows) {
   if (itemRows.length === 0) return itemRows;
   const ids = itemRows.map((r) => r.id);
@@ -245,13 +252,31 @@ router.get('/:id', requireAuth, async (req, res) => {
 
 // POST /api/items
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
-  const { name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit } = req.body;
+  const {
+    name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit,
+    low_stock_threshold,
+    // Set by the client when the item is being created with sizes. The variants
+    // themselves are POSTed separately straight after, so at INSERT time this is
+    // the only signal that the missing price is intentional.
+    has_variants,
+  } = req.body;
 
-  if (!name || price === undefined || price === null) {
-    return res.status(400).json({ error: 'name and price are required' });
+  const sizedItem = has_variants === true;
+
+  if (!name) {
+    return res.status(400).json({ error: 'name is required' });
   }
-  if (isNaN(parseFloat(price)) || parseFloat(price) < 0) {
+  // A variant item has no price of its own — each size carries one. A plain item
+  // must have a price, or billing it would have nothing to charge.
+  if (!sizedItem && (price === undefined || price === null)) {
+    return res.status(400).json({ error: 'price is required unless the item has variants' });
+  }
+  if (price != null && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
     return res.status(400).json({ error: 'price must be a non-negative number' });
+  }
+  if (low_stock_threshold != null &&
+      (isNaN(parseFloat(low_stock_threshold)) || parseFloat(low_stock_threshold) < 0)) {
+    return res.status(400).json({ error: 'low_stock_threshold must be a non-negative number' });
   }
 
   try {
@@ -259,18 +284,29 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
     const result = await pool.request()
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .input('name', sql.NVarChar(200), name)
-      .input('barcode', sql.NVarChar(100), barcode || null)
+      // A sized item owns none of these — its variants carry the price, barcode
+      // and stock. Force them null so a leftover value can never be billed or
+      // scanned in place of a size.
+      .input('barcode', sql.NVarChar(100), sizedItem ? null : (barcode || null))
       .input('category', sql.NVarChar(100), category || null)
-      .input('price', sql.Decimal(10, 2), parseFloat(price))
+      .input('price', sql.Decimal(10, 2),
+        sizedItem || price == null ? null : parseFloat(price))
       .input('tax_rate', sql.Decimal(5, 2), tax_rate != null ? parseFloat(tax_rate) : null)
       .input('hsn_code', sql.NVarChar(10), hsn_code || null)
-      .input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null)
+      .input('stock_quantity', sql.Decimal(10, 2),
+        sizedItem || stock_quantity == null ? null : parseFloat(stock_quantity))
       .input('unit', sql.NVarChar(20), unit || 'piece')
+      // Low-stock alert level. Previously hardcoded to 50, so it was impossible
+      // to set from the app — a shop selling 5 kg of rice alerted at the same
+      // level as one selling 500 packets. 50 stays the default when omitted so
+      // existing callers are unaffected.
+      .input('low_stock_threshold', sql.Decimal(10, 2),
+        low_stock_threshold != null ? parseFloat(low_stock_threshold) : 50)
       .query(`
         INSERT INTO items (business_id, name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit, low_stock_threshold)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
                INSERTED.price, INSERTED.tax_rate, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @hsn_code, @stock_quantity, @unit, 50)
+        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @hsn_code, @stock_quantity, @unit, @low_stock_threshold)
       `);
 
     const created = result.recordset[0];
@@ -280,8 +316,18 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       created,
     );
 
+    // Attach variants (always [] for a brand-new item) so the response shape
+    // matches every other item-returning endpoint. Without a `variants` key the
+    // client's Item.fromJson defaults it to [], which is the same shape that
+    // made a sized item look plain and bill at its base price — see the note on
+    // PUT /:id below.
+    await attachVariants(req.user.business_id, [created]);
+
     return res.status(201).json(created);
   } catch (err) {
+    if (isDuplicateKeyError(err)) {
+      return res.status(409).json({ error: 'That barcode is already used by another item' });
+    }
     logger.error({ err }, 'Create item error');
     return res.status(500).json({ error: 'Failed to create item' });
   }
@@ -289,27 +335,54 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
 // PUT /api/items/:id
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
-  const { name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit } = req.body;
+  const {
+    name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit,
+    low_stock_threshold,
+  } = req.body;
 
-  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined) {
+  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
-  if (price !== undefined && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
+  if (price != null && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
     return res.status(400).json({ error: 'price must be a non-negative number' });
+  }
+  if (low_stock_threshold != null &&
+      (isNaN(parseFloat(low_stock_threshold)) || parseFloat(low_stock_threshold) < 0)) {
+    return res.status(400).json({ error: 'low_stock_threshold must be a non-negative number' });
   }
 
   try {
     await poolConnect;
 
+    // Whether the item actually has sizes is read from the DB, never taken on
+    // trust from the request — an edit that cleared the price would otherwise
+    // just have to claim the item was sized.
     const check = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query('SELECT id, name, price, stock_quantity FROM items WHERE id = @id AND business_id = @business_id');
+      .query(`
+        SELECT i.id, i.name, i.price, i.stock_quantity,
+               (SELECT COUNT(*) FROM item_variants v
+                 WHERE v.item_id = i.id AND v.is_active = 1) AS variant_count
+        FROM items i
+        WHERE i.id = @id AND i.business_id = @business_id
+      `);
 
     if (check.recordset.length === 0) {
       return res.status(404).json({ error: 'Item not found' });
     }
     const before = check.recordset[0];
+    const sizedItem = before.variant_count > 0;
+
+    // Clearing the price is only meaningful for an item whose sizes carry their
+    // own. On a plain item it would leave nothing to bill — and because billing
+    // falls back to the item price when a size has none, a null here would
+    // otherwise surface as NaN on the invoice.
+    if (price !== undefined && price == null && !sizedItem) {
+      return res.status(400).json({
+        error: 'price can only be cleared on an item that has variants',
+      });
+    }
 
     const sets = [];
     const request = pool.request()
@@ -330,7 +403,8 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     }
     if (price !== undefined) {
       sets.push('price = @price');
-      request.input('price', sql.Decimal(10, 2), parseFloat(price));
+      request.input('price', sql.Decimal(10, 2),
+        price != null ? parseFloat(price) : null);
     }
     if (tax_rate !== undefined) {
       sets.push('tax_rate = @tax_rate');
@@ -347,6 +421,11 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     if (unit !== undefined) {
       sets.push('unit = @unit');
       request.input('unit', sql.NVarChar(20), unit || 'piece');
+    }
+    if (low_stock_threshold !== undefined) {
+      sets.push('low_stock_threshold = @low_stock_threshold');
+      request.input('low_stock_threshold', sql.Decimal(10, 2),
+        low_stock_threshold != null ? parseFloat(low_stock_threshold) : null);
     }
     const result = await request.query(`
       UPDATE items
@@ -375,6 +454,9 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
 
     return res.json(updated);
   } catch (err) {
+    if (isDuplicateKeyError(err)) {
+      return res.status(409).json({ error: 'That barcode is already used by another item' });
+    }
     logger.error({ err }, 'Update item error');
     return res.status(500).json({ error: 'Failed to update item' });
   }
@@ -541,6 +623,11 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
 
     return res.status(201).json(result.recordset[0]);
   } catch (err) {
+    if (isDuplicateKeyError(err)) {
+      return res.status(409).json({
+        error: 'That barcode is already used by another size of this item',
+      });
+    }
     logger.error({ err }, 'Create variant error');
     return res.status(500).json({ error: 'Failed to create variant' });
   }
@@ -603,6 +690,11 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
     }
     return res.json(result.recordset[0]);
   } catch (err) {
+    if (isDuplicateKeyError(err)) {
+      return res.status(409).json({
+        error: 'That barcode is already used by another size of this item',
+      });
+    }
     logger.error({ err }, 'Update variant error');
     return res.status(500).json({ error: 'Failed to update variant' });
   }

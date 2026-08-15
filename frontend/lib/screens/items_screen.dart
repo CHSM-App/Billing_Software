@@ -37,6 +37,28 @@ String itemUnitLabel(BuildContext context, String unit) {
   }
 }
 
+/// Price shown for an item in a list.
+///
+/// A sized item has no price of its own — its sizes do — so show the range they
+/// span ("₹180 – ₹280") rather than a meaningless figure. Falls back to a dash
+/// when nothing is priced yet.
+String itemPriceLabel(Item item) {
+  if (item.hasVariants) {
+    final prices = item.variants
+        .map((v) => v.price ?? item.price)
+        .whereType<double>()
+        .toList()
+      ..sort();
+    if (prices.isEmpty) return '—';
+    if (prices.first == prices.last) {
+      return '₹${prices.first.toStringAsFixed(2)}';
+    }
+    return '₹${prices.first.toStringAsFixed(2)} – ₹${prices.last.toStringAsFixed(2)}';
+  }
+  final p = item.price;
+  return p == null ? '—' : '₹${p.toStringAsFixed(2)}';
+}
+
 class ItemsScreen extends ConsumerStatefulWidget {
   const ItemsScreen({super.key});
 
@@ -169,14 +191,15 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         inventoryEnabled: inventoryEnabled,
         gstEnabled: gstEnabled,
         categories: categories,
-        onSaved: (data) async {
-          if (item == null) {
-            await ref.read(itemsProvider.notifier).addItem(data);
-          } else {
-            await ref.read(itemsProvider.notifier).updateItem(item.id, data);
-          }
+        onSaved: (data, variants) async {
+          final saved = item == null
+              ? await ref.read(itemsProvider.notifier).addItem(data)
+              : await ref.read(itemsProvider.notifier).updateItem(item.id, data);
           await ref.read(categoriesProvider.notifier).reload();
+          return saved;
         },
+        onVariantsCreated: (itemId, variants) =>
+            ref.read(itemsProvider.notifier).setItemVariants(itemId, variants),
         onManageSizes:
             item != null ? () => _showVariantManager(item) : null,
         onManageRecipe: showRecipe
@@ -243,6 +266,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     final l10n = context.l10n;
 
     final businessType = ref.watch(businessTypeProvider);
+    // Menu photos are customer-facing DISH images shown on the QR menu, so they
+    // only apply to food businesses. A retail shop has no menu to photograph.
+    final isRestaurant = businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
     final withRawMaterials =
         _showRawMaterials(businessType, inventoryEnabled, userRole);
     _ensureTabController(withRawMaterials);
@@ -258,8 +285,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
               title: Text(l10n.itemsTitle),
               automaticallyImplyLeading: false,
               // Owners manage customer-facing dish photos here. Photos live in a
-              // dedicated screen and never appear during billing.
-              actions: userRole == 'owner'
+              // dedicated screen and never appear during billing. Restaurants
+              // only — a retail shop has no QR menu for the photos to appear on.
+              actions: userRole == 'owner' && isRestaurant
                   ? [
                       IconButton(
                         icon: const Icon(Icons.photo_library_outlined),
@@ -623,9 +651,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                     ],
                   ),
                 ),
-                // Price
+                // Price — a range for a sized item, whose own price is null.
                 Text(
-                  '₹${item.price.toStringAsFixed(2)}',
+                  itemPriceLabel(item),
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -761,7 +789,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
             // Item details row
             Row(
               children: [
-                Text('₹${item.price.toStringAsFixed(2)}',
+                Text(itemPriceLabel(item),
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: AppColors.primary,
                           fontWeight: FontWeight.w600,
@@ -881,6 +909,37 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
 }
 
 // ---------------------------------------------------------------------------
+// One in-progress variant row in the Add Item form.
+//
+// Owns its own controllers rather than living in a map keyed by index, so
+// deleting a middle row doesn't shuffle everyone else's text.
+// ---------------------------------------------------------------------------
+class _VariantDraft {
+  final label = TextEditingController();
+  final price = TextEditingController();
+  final barcode = TextEditingController();
+  final stock = TextEditingController();
+  final lowStock = TextEditingController();
+
+  /// A row the user added and then left completely untouched. Dropped silently
+  /// on save — a trailing blank row is a change of mind, not an error.
+  bool get isBlank =>
+      label.text.trim().isEmpty &&
+      price.text.trim().isEmpty &&
+      barcode.text.trim().isEmpty &&
+      stock.text.trim().isEmpty &&
+      lowStock.text.trim().isEmpty;
+
+  void dispose() {
+    label.dispose();
+    price.dispose();
+    barcode.dispose();
+    stock.dispose();
+    lowStock.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Add / Edit item dialog — stays StatefulWidget (no need for Riverpod here)
 // ---------------------------------------------------------------------------
 class _ItemFormDialog extends StatefulWidget {
@@ -888,7 +947,16 @@ class _ItemFormDialog extends StatefulWidget {
   final bool inventoryEnabled;
   final bool gstEnabled;
   final List<String> categories;
-  final Future<void> Function(Map<String, dynamic> data) onSaved;
+
+  /// Saves the item and returns it, so the variants can be created against the
+  /// new id. [variants] is empty unless the "has variants" box was ticked.
+  final Future<Item> Function(
+      Map<String, dynamic> data, List<Map<String, dynamic>> variants) onSaved;
+  /// Called once the inline variants have been created, so the caller can patch
+  /// the item in local state. Without this the freshly-created item keeps
+  /// `variants: []` and would bill at its base price.
+  final void Function(String itemId, List<ItemVariant> variants)?
+      onVariantsCreated;
   final VoidCallback? onManageSizes;
   final VoidCallback? onManageRecipe;
 
@@ -898,6 +966,7 @@ class _ItemFormDialog extends StatefulWidget {
       this.gstEnabled = false,
       this.categories = const [],
       required this.onSaved,
+      this.onVariantsCreated,
       this.onManageSizes,
       this.onManageRecipe});
 
@@ -915,8 +984,26 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _hsnCtrl = TextEditingController();
   final _barcodeCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
+  final _lowStockCtrl = TextEditingController();
   String _unit = 'piece';
   bool _saving = false;
+
+  /// Whether the user ticked "this item has variants" while CREATING. Editing an
+  /// existing item still routes to the dedicated size manager, which already
+  /// handles update/delete of persisted sizes safely.
+  bool _hasVariants = false;
+  final List<_VariantDraft> _variantDrafts = [];
+
+  /// The item created by a previous save attempt that then failed part-way
+  /// through its variants. Held so a retry adds only the MISSING variants
+  /// instead of creating a second item.
+  Item? _savedItem;
+
+  /// Indexes (into the non-blank draft list) whose variant was already created.
+  final Set<int> _createdDraftIndexes = {};
+
+  /// Shown as a banner when the item saved but some variants did not.
+  String? _partialFailure;
 
   static const _units = [
     'piece',
@@ -941,6 +1028,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _hsnCtrl.text = item.hsnCode ?? '';
       _barcodeCtrl.text = item.barcode ?? '';
       _stockCtrl.text = item.stockQuantity?.toString() ?? '';
+      _lowStockCtrl.text = item.lowStockThreshold?.toString() ?? '';
       _unit = _units.contains(item.unit) ? item.unit : 'piece';
     }
   }
@@ -977,6 +1065,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _hsnCtrl.dispose();
     _barcodeCtrl.dispose();
     _stockCtrl.dispose();
+    _lowStockCtrl.dispose();
+    for (final d in _variantDrafts) {
+      d.dispose();
+    }
     super.dispose();
   }
 
@@ -1048,49 +1140,377 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     );
   }
 
+  /// Barcodes are compared the way the server's lookup normalises them (see the
+  /// REPLACE chain in routes/items.js) — otherwise "12-34" and "1234" look
+  /// distinct here but collide at scan time.
+  static String _normaliseBarcode(String s) =>
+      s.replaceAll(RegExp(r'[\s\-.]'), '');
+
+  /// Cross-row checks that a per-field validator can't express. Returns an error
+  /// message, or null when the drafts are fine.
+  ///
+  /// Worth doing carefully: a duplicate barcode reaches the server as a unique
+  /// index violation, and duplicate LABELS aren't constrained at all — two sizes
+  /// called "M" would both be created and be indistinguishable when billing.
+  String? _validateVariants(AppLocalizations l10n, String? itemBarcode) {
+    final drafts = _variantDrafts.where((d) => !d.isBlank).toList();
+    if (drafts.isEmpty) return l10n.itemsVariantsNoneEntered;
+
+    final seenLabels = <String>{};
+    final seenBarcodes = <String>{};
+    final normalisedItemBarcode =
+        itemBarcode == null ? null : _normaliseBarcode(itemBarcode);
+
+    for (final d in drafts) {
+      final label = d.label.text.trim();
+      if (!seenLabels.add(label.toLowerCase())) {
+        return l10n.itemsVariantDuplicateLabel(label);
+      }
+      final barcode = d.barcode.text.trim();
+      if (barcode.isEmpty) continue;
+      final normalised = _normaliseBarcode(barcode);
+      if (!seenBarcodes.add(normalised)) {
+        return l10n.itemsVariantDuplicateBarcode(barcode);
+      }
+      if (normalisedItemBarcode != null && normalised == normalisedItemBarcode) {
+        return l10n.itemsVariantBarcodeSameAsItem;
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _draftPayload(_VariantDraft d, int sortOrder) => {
+        'label': d.label.text.trim(),
+        if (d.price.text.trim().isNotEmpty)
+          'price': double.parse(d.price.text.trim()),
+        if (d.barcode.text.trim().isNotEmpty) 'barcode': d.barcode.text.trim(),
+        if (widget.inventoryEnabled && d.stock.text.trim().isNotEmpty)
+          'stock_quantity': double.parse(d.stock.text.trim()),
+        if (widget.inventoryEnabled && d.lowStock.text.trim().isNotEmpty)
+          'low_stock_threshold': double.parse(d.lowStock.text.trim()),
+        'sort_order': sortOrder,
+      };
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _saving = true);
 
     // Auto-generate a 12-digit barcode for new items that have no barcode.
-    // Use current timestamp so it's unique and scannable immediately.
-    final barcodeInput = _barcodeCtrl.text.trim();
-    final autoBarcode = (widget.item == null && barcodeInput.isEmpty)
-        ? DateTime.now().millisecondsSinceEpoch.toString().substring(1, 13)
-        : null;
+    // Use current timestamp so it's unique and scannable immediately. A sized
+    // item gets none — its sizes are what get scanned.
+    final barcodeInput = _hasVariants ? '' : _barcodeCtrl.text.trim();
+    final autoBarcode =
+        (widget.item == null && !_hasVariants && barcodeInput.isEmpty)
+            ? DateTime.now().millisecondsSinceEpoch.toString().substring(1, 13)
+            : null;
+    final effectiveBarcode = barcodeInput.isNotEmpty ? barcodeInput : autoBarcode;
 
-    // Items with sizes track stock per size — force item-level stock to null so
-    // it is never considered.
-    final hasVariants = widget.item?.hasVariants ?? false;
+    if (_hasVariants) {
+      final err = _validateVariants(context.l10n, effectiveBarcode);
+      if (err != null) {
+        _showError(err);
+        return;
+      }
+    }
+
+    setState(() {
+      _saving = true;
+      _partialFailure = null;
+    });
+
+    // Items with sizes track stock per size — the server nulls the parent's
+    // stock as soon as a size exists, so don't send a figure that will be
+    // discarded.
+    final sizedItem = _hasVariants || (widget.item?.hasVariants ?? false);
 
     final data = {
       'name': _nameCtrl.text.trim(),
       if (_categoryCtrl.text.trim().isNotEmpty) 'category': _categoryCtrl.text.trim(),
-      'price': double.parse(_priceCtrl.text.trim()),
+      // A sized item has no price of its own — the sizes carry it. The server
+      // only accepts a null price when has_variants says so.
+      if (_hasVariants) 'has_variants': true,
+      'price': _hasVariants ? null : double.parse(_priceCtrl.text.trim()),
       if (_taxCtrl.text.trim().isNotEmpty)
         'tax_rate': double.parse(_taxCtrl.text.trim()),
       if (widget.gstEnabled)
         'hsn_code': _hsnCtrl.text.trim().isNotEmpty ? _hsnCtrl.text.trim() : null,
-      'barcode': barcodeInput.isNotEmpty ? barcodeInput : autoBarcode,
+      'barcode': effectiveBarcode,
       'unit': _unit,
-      if (widget.inventoryEnabled && hasVariants)
+      if (widget.inventoryEnabled && sizedItem)
         'stock_quantity': null
       else if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
         'stock_quantity': double.parse(_stockCtrl.text.trim()),
+      if (widget.inventoryEnabled && !sizedItem && _lowStockCtrl.text.trim().isNotEmpty)
+        'low_stock_threshold': double.parse(_lowStockCtrl.text.trim()),
     };
 
+    final drafts = _variantDrafts.where((d) => !d.isBlank).toList();
+
     try {
-      await widget.onSaved(data);
+      // On a retry after a partial failure the item already exists — creating it
+      // again would leave a duplicate behind.
+      final saved = _savedItem ?? await widget.onSaved(data, const []);
+      _savedItem = saved;
+
+      if (_hasVariants && drafts.isNotEmpty) {
+        final created = <ItemVariant>[];
+        final failed = <String>[];
+        for (var i = 0; i < drafts.length; i++) {
+          if (_createdDraftIndexes.contains(i)) continue;
+          try {
+            final res = await createVariant(saved.id, _draftPayload(drafts[i], i));
+            created.add(ItemVariant.fromJson(res));
+            _createdDraftIndexes.add(i);
+          } catch (_) {
+            failed.add(drafts[i].label.text.trim());
+          }
+        }
+        // Patch local state even on partial success: without this the item sits
+        // in the list with variants: [], so tapping it while billing would
+        // charge the base price instead of opening the size picker.
+        if (created.isNotEmpty) {
+          widget.onVariantsCreated?.call(saved.id, created);
+        }
+        if (failed.isNotEmpty) {
+          if (!mounted) return;
+          setState(() => _partialFailure = context.l10n
+              .itemsVariantsPartialFail(failed.length, drafts.length));
+          return;
+        }
+      }
+
       if (!mounted) return;
       Navigator.pop(context);
     } on ApiException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(sanitizeUiErrorMessage(e)),
-        backgroundColor: AppColors.error,
-      ));
+      _showError(sanitizeUiErrorMessage(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  void _toggleHasVariants(bool value) {
+    setState(() {
+      _hasVariants = value;
+      // Start with one row so ticking the box shows something to fill in
+      // straight away. Drafts are kept on untick so an accidental toggle
+      // doesn't wipe typed data.
+      if (_hasVariants && _variantDrafts.isEmpty) {
+        _variantDrafts.add(_VariantDraft());
+      }
+    });
+  }
+
+  void _removeVariantRow(int index) {
+    setState(() {
+      _variantDrafts.removeAt(index).dispose();
+      // An empty section with only an "add" button reads as broken — untick
+      // instead once the last row is gone.
+      if (_variantDrafts.isEmpty) _hasVariants = false;
+    });
+  }
+
+  /// The "this item has variants" toggle plus, once ticked, one card per size.
+  Widget _buildVariantsSection(AppLocalizations l10n) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppRadius.small),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CheckboxListTile(
+            value: _hasVariants,
+            onChanged: _saving ? null : (v) => _toggleHasVariants(v ?? false),
+            title: Text(l10n.itemsHasVariants),
+            subtitle: Text(
+              l10n.itemsHasVariantsSubtitle,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: AppColors.textSecondary),
+            ),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            activeColor: AppColors.primary,
+          ),
+          if (_hasVariants) ...[
+            // The item's own stock box stays visible (it still applies to a
+            // plain item), so be explicit that it is ignored once sizes exist.
+            if (widget.inventoryEnabled)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.space8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline,
+                        size: 14, color: AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        l10n.itemsVariantsStockIgnoredHint,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            for (var i = 0; i < _variantDrafts.length; i++)
+              _buildVariantCard(l10n, i),
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.space8),
+              child: OutlinedButton.icon(
+                onPressed: _saving
+                    ? null
+                    : () => setState(() => _variantDrafts.add(_VariantDraft())),
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(l10n.itemsAddAnotherVariant,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(40),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// One size: name + price, then barcode + stock, then the low-stock alert.
+  /// Two fields per row — the dialog is 400px wide and each AppTextField
+  /// carries 16px of padding either side, so more than two per row is unusable.
+  Widget _buildVariantCard(AppLocalizations l10n, int index) {
+    final d = _variantDrafts[index];
+    final numeric = const TextInputType.numberWithOptions(decimal: true);
+
+    String? nonNegative(String? v) {
+      if (v == null || v.trim().isEmpty) return null;
+      final n = double.tryParse(v.trim());
+      if (n == null || n < 0) return l10n.commonEnterValidNumber;
+      return null;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.space8),
+      padding: const EdgeInsets.all(AppSpacing.space8),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(AppRadius.small),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Text(
+                l10n.itemsVariantRowTitle(index + 1),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary,
+                    ),
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: _saving ? null : () => _removeVariantRow(index),
+                icon: const Icon(Icons.delete_outline,
+                    size: 18, color: AppColors.error),
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: AppTextField(
+                  label: l10n.itemsVariantNameShort,
+                  hint: l10n.itemsVariantNameHint,
+                  controller: d.label,
+                  capitalizeWords: true,
+                  maxLength: 50,
+                  validator: (v) => d.isBlank
+                      ? null
+                      : (v == null || v.trim().isEmpty
+                          ? l10n.commonRequired
+                          : null),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.space8),
+              Expanded(
+                child: AppTextField(
+                  // Required now: with no item-level price to fall back on, a
+                  // size with no price would have nothing to charge.
+                  label: l10n.itemsFieldPrice,
+                  controller: d.price,
+                  keyboardType: numeric,
+                  validator: (v) {
+                    if (d.isBlank) return null;
+                    if (v == null || v.trim().isEmpty) {
+                      return l10n.commonRequired;
+                    }
+                    return nonNegative(v);
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.space8),
+          Row(
+            children: [
+              Expanded(
+                child: AppTextField(
+                  label: l10n.itemsSizeBarcodeOptional,
+                  controller: d.barcode,
+                  keyboardType: TextInputType.number,
+                  maxLength: 100,
+                ),
+              ),
+              if (widget.inventoryEnabled) ...[
+                const SizedBox(width: AppSpacing.space8),
+                Expanded(
+                  child: AppTextField(
+                    label: l10n.itemsSizeStock,
+                    controller: d.stock,
+                    keyboardType: numeric,
+                    validator: nonNegative,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (widget.inventoryEnabled) ...[
+            const SizedBox(height: AppSpacing.space8),
+            Row(
+              children: [
+                Expanded(
+                  child: AppTextField(
+                    label: l10n.itemsFieldLowStock,
+                    controller: d.lowStock,
+                    keyboardType: numeric,
+                    validator: nonNegative,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.space8),
+                const Expanded(child: SizedBox()),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: AppColors.error,
+    ));
   }
 
   @override
@@ -1102,10 +1522,38 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         width: 400,
         child: Form(
           key: _formKey,
-          child: SingleChildScrollView(
+          // Several variant cards on top of the item fields easily exceed a
+          // small phone's height — cap it so the content scrolls instead of the
+          // dialog being squeezed and the Save button becoming unreachable.
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.7,
+            ),
+            child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (_partialFailure != null) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    margin: const EdgeInsets.only(bottom: AppSpacing.space12),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                      border: Border.all(
+                          color: AppColors.error.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(
+                      _partialFailure!,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.error),
+                    ),
+                  ),
+                ],
                 AppTextField(
                   label: l10n.itemsFieldName,
                   controller: _nameCtrl,
@@ -1115,20 +1563,30 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 _buildCategoryField(context, l10n),
-                const SizedBox(height: AppSpacing.space12),
-                AppTextField(
-                  label: l10n.itemsFieldPrice,
-                  controller: _priceCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return l10n.commonRequired;
-                    if (double.tryParse(v) == null) {
-                      return l10n.commonEnterValidNumber;
-                    }
-                    return null;
-                  },
-                ),
+                // The variants toggle sits here, before price/barcode/stock,
+                // because it decides whether those fields apply at all: a sized
+                // item owns none of them — each size carries its own.
+                if (widget.item == null) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  _buildVariantsSection(l10n),
+                ],
+                // Price belongs to the item only when it has no sizes.
+                if (!_hasVariants) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  AppTextField(
+                    label: l10n.itemsFieldPrice,
+                    controller: _priceCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return l10n.commonRequired;
+                      if (double.tryParse(v) == null) {
+                        return l10n.commonEnterValidNumber;
+                      }
+                      return null;
+                    },
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.space12),
                 DropdownButtonFormField<String>(
                   value: _unit,
@@ -1173,16 +1631,21 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     hint: l10n.itemsFieldHsnHint,
                   ),
                 ],
-                const SizedBox(height: AppSpacing.space12),
-                AppTextField(
-                  label: l10n.itemsFieldBarcode,
-                  controller: _barcodeCtrl,
-                  keyboardType: TextInputType.number,
-                ),
+                // A sized item is never scanned directly — each size has its own
+                // barcode, so the item-level one would be ambiguous.
+                if (!_hasVariants) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  AppTextField(
+                    label: l10n.itemsFieldBarcode,
+                    controller: _barcodeCtrl,
+                    keyboardType: TextInputType.number,
+                  ),
+                ],
                 // Item-level stock is only meaningful when the item has NO
                 // sizes. With sizes, stock is tracked per size, so hide it and
                 // show a hint pointing to the size manager.
                 if (widget.inventoryEnabled &&
+                    !_hasVariants &&
                     !(widget.item?.hasVariants ?? false)) ...[
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
@@ -1190,6 +1653,22 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     controller: _stockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  const SizedBox(height: AppSpacing.space12),
+                  // Low-stock alert level. Until now this was hardcoded to 50
+                  // server-side and could not be set at all from the app.
+                  AppTextField(
+                    label: l10n.itemsFieldLowStock,
+                    hint: l10n.itemsFieldLowStockHint,
+                    controller: _lowStockCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return null;
+                      final n = double.tryParse(v.trim());
+                      if (n == null) return l10n.commonEnterValidNumber;
+                      return n < 0 ? l10n.commonEnterValidNumber : null;
+                    },
                   ),
                 ] else if (widget.inventoryEnabled &&
                     (widget.item?.hasVariants ?? false)) ...[
@@ -1219,7 +1698,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     ),
                   ),
                 ],
-                if (widget.onManageSizes != null) ...[
+                if (widget.onManageSizes != null && !_hasVariants) ...[
                   const SizedBox(height: AppSpacing.space12),
                   OutlinedButton.icon(
                     onPressed: () {
@@ -1259,6 +1738,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   ),
                 ],
               ],
+            ),
             ),
           ),
         ),
@@ -1315,8 +1795,10 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   // Effective target — a size (variant) if one was passed, else the whole item.
   String? get _existingBarcode => widget.variant?.barcode ?? widget.item.barcode;
   String get _targetId => widget.variant?.id ?? widget.item.id;
+  // 0 when neither is priced — a barcode label for a sized item is printed per
+  // size, so the parent's own (null) price is never the one shown.
   double get _targetPrice =>
-      widget.variant?.price ?? widget.item.price;
+      widget.variant?.price ?? widget.item.price ?? 0.0;
   String? get _subtitle => widget.variant?.label;
 
   @override
@@ -1707,9 +2189,11 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                 )
               else
                 ..._variants.map((v) {
+                  // A size inherits the item's price only when the item has one;
+                  // a sized item's own price is null.
                   final price = v.price ?? widget.item.price;
                   final sub = [
-                    '₹${price.toStringAsFixed(2)}',
+                    price == null ? '—' : '₹${price.toStringAsFixed(2)}',
                     if (widget.inventoryEnabled && v.stockQuantity != null)
                       l10n.itemsStockLabel(formatQty(v.stockQuantity!)),
                   ].join('  ·  ');
@@ -1897,6 +2381,20 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
     }
   }
 
+  /// Dialog width: roomy on desktop/tablet, compact on phones. Uses the same
+  /// 720 breakpoint as the items list. Always capped to the available width
+  /// (less the dialog's own margins) so a small window can't overflow.
+  static double _dialogWidth(BuildContext context) {
+    final screen = MediaQuery.of(context).size.width;
+    final target = screen >= 720 ? 520.0 : 360.0;
+    return target.clamp(0.0, screen - 80).toDouble();
+  }
+
+  /// Quantity field width — wide enough for the full "Add quantity" label when
+  /// the dialog is wide, otherwise the original compact size.
+  static double _qtyFieldWidth(BuildContext context) =>
+      MediaQuery.of(context).size.width >= 720 ? 170.0 : 110.0;
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -1916,7 +2414,11 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
         ],
       ),
       content: SizedBox(
-        width: 360,
+        // Wider on a large window (desktop) so the quantity field can show its
+        // full "Add quantity" label instead of truncating to "Add qu…". Falls
+        // back to the compact width on phones, capped to the screen so a small
+        // window never overflows.
+        width: _dialogWidth(context),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1959,7 +2461,10 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                       ),
                       const SizedBox(width: 12),
                       SizedBox(
-                        width: 110,
+                        // 110 was too narrow for the "Add quantity" label, which
+                        // truncated to "Add qu…". Widen it wherever the dialog
+                        // itself is wide enough to afford it.
+                        width: _qtyFieldWidth(context),
                         child: AppTextField(
                           label: l10n.itemsAddQuantity,
                           controller: _ctrls[v.id]!,

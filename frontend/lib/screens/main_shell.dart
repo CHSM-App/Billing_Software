@@ -21,7 +21,6 @@ import 'settings_screen.dart';
 import 'license_screen.dart';
 import 'login_screen.dart';
 import '../providers/open_drafts_provider.dart';
-import '../providers/credit_provider.dart';
 
 class MainShell extends ConsumerStatefulWidget {
   final int initialIndex;

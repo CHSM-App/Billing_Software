@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../theme/app_theme.dart';
+import '../utils/text_formatters.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/language_selector.dart';
 import 'otp_screen.dart';
@@ -24,8 +25,24 @@ class _RegisterScreenState extends State<RegisterScreen>
   final _ownerPhoneController = TextEditingController();
   final _pinController = TextEditingController();
   final _confirmPinController = TextEditingController();
+  final _gstController = TextEditingController();
+  final _panController = TextEditingController();
+  final _fssaiController = TextEditingController();
+
 
   String _businessType = 'retail';
+
+  /// True when a food business is selected — gates the FSSAI field, which only
+  /// restaurants need.
+  bool get _isRestaurant => _businessType == 'restaurant';
+
+  /// The value the API expects. The picker uses a plain 'restaurant' label, but
+  /// the server only accepts 'retail' | 'restaurant_with_tables' |
+  /// 'restaurant_no_tables' — sending the raw 'restaurant' was rejected as an
+  /// invalid business_type. Table management can be turned on later in Settings,
+  /// so a new restaurant starts in the no-tables mode.
+  String get _apiBusinessType =>
+      _businessType == 'restaurant' ? 'restaurant_no_tables' : _businessType;
   bool _inventoryEnabled = false;
   bool _isLoading = false;
   String? _errorMessage;
@@ -55,6 +72,9 @@ class _RegisterScreenState extends State<RegisterScreen>
     _ownerPhoneController.dispose();
     _pinController.dispose();
     _confirmPinController.dispose();
+    _gstController.dispose();
+    _panController.dispose();
+    _fssaiController.dispose();
     super.dispose();
   }
 
@@ -106,7 +126,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     try {
       await register(
         businessName: _businessNameController.text.trim(),
-        businessType: _businessType,
+        businessType: _apiBusinessType,
         address: _addressController.text.trim().isEmpty
             ? null
             : _addressController.text.trim(),
@@ -116,6 +136,11 @@ class _RegisterScreenState extends State<RegisterScreen>
         ownerName: _ownerNameController.text.trim(),
         ownerPhone: _ownerPhoneController.text.trim(),
         pin: _pinController.text.trim(),
+        gstNumber: _gstController.text.trim(),
+        panNumber: _panController.text.trim(),
+        // FSSAI only applies to food businesses; never send it for retail even
+        // if the field held a stale value before the type was switched.
+        fssaiNumber: _isRestaurant ? _fssaiController.text.trim() : null,
       );
 
       if (!mounted) return;
@@ -268,6 +293,73 @@ class _RegisterScreenState extends State<RegisterScreen>
                         ),
                         // Barcode scanning is enabled by default for every
                         // business, so no toggle is shown here.
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.space16),
+                    // Tax details — every field is optional and can be filled in
+                    // later from Business Profile. Entering a GSTIN here turns GST
+                    // on right away, so the first bill prints as a tax invoice.
+                    _buildSectionCard(
+                      icon: Icons.receipt_long_outlined,
+                      title: l10n.registerSectionTaxDetails,
+                      color: const Color(0xFF7C3AED),
+                      children: [
+                        AppTextField(
+                          label: l10n.registerGstOptional,
+                          controller: _gstController,
+                          hint: l10n.businessProfileGstHint,
+                          maxLength: 15,
+                          inputFormatters: [UpperCaseTextFormatter()],
+                          prefixIcon: const Icon(Icons.receipt_outlined,
+                              size: 18, color: AppColors.textSecondary),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return null;
+                            if (!RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$')
+                                .hasMatch(v.trim())) {
+                              return l10n.businessProfileGstInvalid;
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: AppSpacing.space16),
+                        AppTextField(
+                          label: l10n.registerPanOptional,
+                          controller: _panController,
+                          hint: l10n.businessProfilePanHint,
+                          maxLength: 10,
+                          inputFormatters: [UpperCaseTextFormatter()],
+                          prefixIcon: const Icon(Icons.badge_outlined,
+                              size: 18, color: AppColors.textSecondary),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return null;
+                            if (!RegExp(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$')
+                                .hasMatch(v.trim())) {
+                              return l10n.businessProfilePanInvalid;
+                            }
+                            return null;
+                          },
+                        ),
+                        // FSSAI is a food-licence number — only shown once a
+                        // restaurant is selected above.
+                        if (_isRestaurant) ...[
+                          const SizedBox(height: AppSpacing.space16),
+                          AppTextField(
+                            label: l10n.registerFssaiOptional,
+                            controller: _fssaiController,
+                            hint: l10n.businessProfileFssaiHint,
+                            keyboardType: TextInputType.number,
+                            maxLength: 14,
+                            prefixIcon: const Icon(Icons.verified_outlined,
+                                size: 18, color: AppColors.textSecondary),
+                            validator: (v) {
+                              if (v == null || v.trim().isEmpty) return null;
+                              if (!RegExp(r'^\d{14}$').hasMatch(v.trim())) {
+                                return l10n.businessProfileFssaiInvalid;
+                              }
+                              return null;
+                            },
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: AppSpacing.space16),

@@ -424,6 +424,9 @@ Future<Map<String, dynamic>> register({
   required String ownerName,
   required String ownerPhone,
   required String pin,
+  String? gstNumber,
+  String? panNumber,
+  String? fssaiNumber,
 }) async {
   final response = await _post(
     Uri.parse('$baseUrl/register'),
@@ -438,6 +441,12 @@ Future<Map<String, dynamic>> register({
       'owner_name': ownerName,
       'owner_phone': ownerPhone,
       'pin': pin,
+      // Optional tax identifiers — omitted entirely when left blank so the
+      // server treats them as absent rather than empty strings.
+      if (gstNumber != null && gstNumber.isNotEmpty) 'gst_number': gstNumber,
+      if (panNumber != null && panNumber.isNotEmpty) 'pan_number': panNumber,
+      if (fssaiNumber != null && fssaiNumber.isNotEmpty)
+        'fssai_number': fssaiNumber,
     }),
   );
   return _parse(response);

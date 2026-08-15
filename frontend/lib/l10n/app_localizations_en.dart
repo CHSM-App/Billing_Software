@@ -322,6 +322,20 @@ class AppLocalizationsEn extends AppLocalizations {
       'Add tax rate & HSN/SAC to items and show CGST/SGST on bills';
 
   @override
+  String get settingsGstNeedsGstin =>
+      'Add your GSTIN in Business Profile to turn this on';
+
+  @override
+  String get settingsGstNeedsGstinTitle => 'GSTIN required';
+
+  @override
+  String get settingsGstNeedsGstinMessage =>
+      'A tax invoice must show your GSTIN. Add it in Business Profile, then turn on GST.';
+
+  @override
+  String get settingsGstAddGstin => 'Add GSTIN';
+
+  @override
   String get settingsRoundOff => 'Invoice Round Off';
 
   @override
@@ -634,6 +648,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get registerSectionBusinessType => 'Business Type';
 
   @override
+  String get registerSectionTaxDetails => 'Tax Details (Optional)';
+
+  @override
+  String get registerGstOptional => 'GSTIN (optional)';
+
+  @override
+  String get registerPanOptional => 'PAN (optional)';
+
+  @override
+  String get registerFssaiOptional => 'FSSAI Number (optional)';
+
+  @override
   String get registerSectionOwnerDetails => 'Owner Details';
 
   @override
@@ -863,6 +889,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingPrintSuccess => 'Bill printed successfully';
 
   @override
+  String billingBillSaved(String number) {
+    return 'Bill $number saved';
+  }
+
+  @override
   String billingPrintFailed(String error) {
     return 'Print failed: $error';
   }
@@ -916,6 +947,17 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String billingCartWithCount(int count) {
     return 'Cart ($count)';
+  }
+
+  @override
+  String billingOrderItemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items',
+      one: '1 item',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1166,6 +1208,60 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsUnitPlate => 'Plate';
+
+  @override
+  String get itemsHasVariants => 'This item has variants';
+
+  @override
+  String get itemsHasVariantsSubtitle =>
+      'Sizes or options with their own price and stock';
+
+  @override
+  String itemsVariantRowTitle(int number) {
+    return 'Variant $number';
+  }
+
+  @override
+  String get itemsVariantNameShort => 'Name';
+
+  @override
+  String get itemsVariantNameHint => 'e.g. Half, XL, 500ml';
+
+  @override
+  String get itemsAddAnotherVariant => 'Add another variant';
+
+  @override
+  String get itemsVariantsNoneEntered =>
+      'Add at least one variant, or untick the box';
+
+  @override
+  String itemsVariantDuplicateLabel(String label) {
+    return 'Two variants are both named \"$label\"';
+  }
+
+  @override
+  String itemsVariantDuplicateBarcode(String barcode) {
+    return 'Barcode \"$barcode\" is used by more than one variant';
+  }
+
+  @override
+  String get itemsVariantBarcodeSameAsItem =>
+      'A variant barcode cannot match the item barcode';
+
+  @override
+  String get itemsVariantsStockIgnoredHint =>
+      'Stock is tracked per variant. The item stock above is not used.';
+
+  @override
+  String itemsVariantsPartialFail(int failed, int total) {
+    return 'Item saved, but $failed of $total variants failed. Fix them and save again — added variants are not duplicated.';
+  }
+
+  @override
+  String get itemsFieldLowStock => 'Low stock alert';
+
+  @override
+  String get itemsFieldLowStockHint => 'Warn when stock falls to this';
 
   @override
   String get itemsManageSizes => 'Add variants';

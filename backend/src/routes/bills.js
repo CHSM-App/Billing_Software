@@ -120,6 +120,29 @@ async function findMissingVariantError(transaction, businessId, items) {
   return `Select a size for: ${names}`;
 }
 
+// Resolve the price to charge for one line: the variant's own price when it has
+// one, otherwise the parent item's.
+//
+// items.price is nullable for an item sold only through its sizes, so both can
+// legitimately be null — and `parseFloat(null)` is NaN, which would propagate
+// silently through subtotal/tax/total and store a corrupt bill. Returning null
+// here lets the caller reject the line instead.
+function resolveUnitPrice(dbItem, variant) {
+  if (variant && variant.price != null) return parseFloat(variant.price);
+  if (dbItem.price != null) return parseFloat(dbItem.price);
+  return null;
+}
+
+// Thrown when a line has no price on either the variant or its parent item —
+// data that should be unreachable (a sized item's variants all carry prices),
+// but billing NaN would be far worse than a clear 400.
+class PricelessLineError extends Error {
+  constructor(itemName) {
+    super(`No price set for: ${itemName}`);
+    this.itemName = itemName;
+  }
+}
+
 // Load recipe rows for a set of line items, keyed by item_id. Each entry is a
 // list of { raw_material_id, quantity, stock_quantity, low_stock_threshold, name }.
 // Rows are read inside the transaction so raw-material stock is consistent with
@@ -489,9 +512,8 @@ router.post('/', requireAuth, async (req, res) => {
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
         // Variant price overrides item price when set; otherwise fall back.
-        const unitPrice = variant && variant.price != null
-          ? parseFloat(variant.price)
-          : parseFloat(dbItem.price);
+        const unitPrice = resolveUnitPrice(dbItem, variant);
+        if (unitPrice == null) throw new PricelessLineError(dbItem.name);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         // GST off → tax ignored entirely (rate treated as null, line tax 0).
         const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
@@ -698,6 +720,9 @@ router.post('/', requireAuth, async (req, res) => {
       throw err;
     }
   } catch (err) {
+    if (err instanceof PricelessLineError) {
+      return res.status(400).json({ error: err.message });
+    }
     logger.error({ err }, 'Create bill error');
     return res.status(500).json({ error: 'Failed to create bill' });
   }
@@ -996,9 +1021,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         const dbItem = itemMap[i.item_id];
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
-        const unitPrice = variant && variant.price != null
-          ? parseFloat(variant.price)
-          : parseFloat(dbItem.price);
+        const unitPrice = resolveUnitPrice(dbItem, variant);
+        if (unitPrice == null) throw new PricelessLineError(dbItem.name);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         // GST off → tax ignored entirely (rate treated as null, line tax 0).
         const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
@@ -1132,6 +1156,9 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
     return res.json(bill);
   } catch (err) {
+    if (err instanceof PricelessLineError) {
+      return res.status(400).json({ error: err.message });
+    }
     logger.error({ err }, 'Add items error');
     return res.status(500).json({ error: 'Failed to add items' });
   }
@@ -1225,9 +1252,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         const dbItem = itemMap[i.item_id];
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
-        const unitPrice = variant && variant.price != null
-          ? parseFloat(variant.price)
-          : parseFloat(dbItem.price);
+        const unitPrice = resolveUnitPrice(dbItem, variant);
+        if (unitPrice == null) throw new PricelessLineError(dbItem.name);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         // GST off → tax ignored entirely (rate treated as null, line tax 0).
         const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
@@ -1419,6 +1445,9 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
 
     return res.json(bill);
   } catch (err) {
+    if (err instanceof PricelessLineError) {
+      return res.status(400).json({ error: err.message });
+    }
     logger.error({ err }, 'Update items error');
     return res.status(500).json({ error: 'Failed to update items' });
   }

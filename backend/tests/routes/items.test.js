@@ -219,6 +219,108 @@ describe('POST /api/items', () => {
     expect(mockRequest.inputs.hsn_code).toBeNull();
   });
 
+  test('always returns a variants key so a new item is never variant-less', async () => {
+    // Every other item-returning endpoint attaches variants. POST used to be the
+    // odd one out, and a missing `variants` key is exactly what made a sized item
+    // look plain on the billing screen and charge its base price.
+    mockRequest.recordset = [sampleItem];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50 });
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveProperty('variants');
+    expect(Array.isArray(res.body.variants)).toBe(true);
+  });
+
+  test('honours a supplied low_stock_threshold', async () => {
+    // Regression: this was hardcoded to 50 in the INSERT, so a shop selling 5 kg
+    // of rice alerted at the same level as one selling 500 packets.
+    mockRequest.recordset = [{ ...sampleItem, low_stock_threshold: 5 }];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50, low_stock_threshold: 5 });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.low_stock_threshold).toBe(5);
+  });
+
+  test('defaults low_stock_threshold to 50 when omitted', async () => {
+    mockRequest.recordset = [sampleItem];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50 });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.low_stock_threshold).toBe(50);
+  });
+
+  test('rejects a negative low_stock_threshold', async () => {
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50, low_stock_threshold: -1 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/low_stock_threshold/i);
+  });
+
+  test('returns 409 (not 500) when the barcode is already taken', async () => {
+    // SQL Server raises 2627/2601 on the unique barcode index. It used to fall
+    // into the generic catch and surface as an unhelpful "Failed to create item".
+    const dup = Object.assign(new Error('Violation of UNIQUE KEY constraint'), { number: 2627 });
+    mockRequest.query.mockRejectedValueOnce(dup);
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50, barcode: '123456789012' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/barcode/i);
+  });
+
+  test('allows a null price when the item has variants', async () => {
+    // A sized item owns no price — each size carries one. has_variants is the
+    // only signal at INSERT time, since the variants are POSTed straight after.
+    mockRequest.recordset = [{ ...sampleItem, price: null }];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Chicken 65', has_variants: true });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.price).toBeNull();
+    // Barcode and stock belong to the sizes too — never to the parent.
+    expect(mockRequest.inputs.barcode).toBeNull();
+    expect(mockRequest.inputs.stock_quantity).toBeNull();
+  });
+
+  test('rejects a missing price on a plain item', async () => {
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/price is required/i);
+  });
+
+  test('nulls a sized item\'s barcode and stock even when they are sent', async () => {
+    mockRequest.recordset = [{ ...sampleItem, price: null }];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({
+        name: 'Chicken 65',
+        has_variants: true,
+        price: 230,
+        barcode: '123456789012',
+        stock_quantity: 10,
+      });
+    expect(res.status).toBe(201);
+    // The 230 base price is exactly what used to get billed when no size was
+    // picked — a price that isn't on the menu.
+    expect(mockRequest.inputs.price).toBeNull();
+    expect(mockRequest.inputs.barcode).toBeNull();
+    expect(mockRequest.inputs.stock_quantity).toBeNull();
+  });
+
   test('returns 403 for non-owner role', async () => {
     const res = await request(app)
       .post('/api/items')
@@ -307,6 +409,42 @@ describe('PUT /api/items/:id', () => {
     expect(res.status).toBe(404);
   });
 
+  test('refuses to clear the price of an item that has no variants', async () => {
+    // Billing falls back to the item price when a size has none, so a null here
+    // on a plain item would surface as NaN on the invoice.
+    mockRequest.query.mockResolvedValueOnce({
+      recordset: [{ ...sampleItem, variant_count: 0 }],
+      rowsAffected: [1],
+    });
+
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ price: null });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/variants/i);
+  });
+
+  test('allows clearing the price of an item that has variants', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({
+        recordset: [{ ...sampleItem, variant_count: 2 }],
+        rowsAffected: [1],
+      })
+      .mockResolvedValueOnce({
+        recordset: [{ ...sampleItem, price: null }],
+        rowsAffected: [1],
+      })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ price: null });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.price).toBeNull();
+  });
+
   test('returns 400 when no fields are provided', async () => {
     const res = await request(app)
       .put(`/api/items/${ITEM_ID}`)
@@ -356,5 +494,29 @@ describe('DELETE /api/items/:id', () => {
       .delete(`/api/items/${ITEM_ID}`)
       .set(authHeader({ role: 'staff' }));
     expect(res.status).toBe(403);
+  });
+});
+
+// ------------------------------------------------------------------
+// POST /api/items/:id/variants — duplicate barcode
+// ------------------------------------------------------------------
+describe('POST /api/items/:id/variants', () => {
+  test('returns 409 (not 500) when the barcode is already used by another size', async () => {
+    // The inline "add variants while creating an item" flow surfaces this error
+    // straight to the cashier, so it has to be actionable — a bare 500 saying
+    // "Failed to create variant" tells them nothing about what to fix.
+    const dup = Object.assign(new Error('Violation of UNIQUE KEY constraint'), { number: 2601 });
+    mockRequest.query
+      // loadOwnedItem — the parent item exists and belongs to this business.
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      // The variant INSERT trips the unique barcode index.
+      .mockRejectedValueOnce(dup);
+
+    const res = await request(app)
+      .post(`/api/items/${ITEM_ID}/variants`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ label: 'Full', price: 280, barcode: '123456789012' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/barcode/i);
   });
 });

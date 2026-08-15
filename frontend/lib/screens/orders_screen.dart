@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
-import '../providers/credit_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/shell_app_bar.dart';
 import 'tables_screen.dart';

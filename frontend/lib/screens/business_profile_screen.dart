@@ -187,7 +187,11 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
         );
       }
     } catch (e) {
-      if (mounted) _showError(e.toString());
+      // Use the server's own message ("Invalid GSTIN format (e.g. 27ABCDE1234F1Z5)",
+      // "This GSTIN is already registered…"). ApiException.toString() returns only
+      // the generic fallback, which turned every validation failure into an
+      // unhelpful "Something went wrong".
+      if (mounted) _showError(sanitizeUiErrorMessage(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -215,31 +219,6 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
-        actions: [
-          if (!_loading)
-            _saving
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  )
-                : TextButton(
-                    onPressed: _save,
-                    child: Text(
-                      l10n.commonSave,
-                      style: AppFont.style(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

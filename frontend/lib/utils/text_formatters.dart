@@ -31,3 +31,20 @@ class CapitalizeWordsFormatter extends TextInputFormatter {
     return newValue.copyWith(text: buffer.toString());
   }
 }
+
+/// Forces input to upper case as the user types. Used for GSTIN and PAN, whose
+/// formats are defined in capitals — without this a lower-case entry fails
+/// validation even though the value is otherwise correct.
+class UpperCaseTextFormatter extends TextInputFormatter {
+  const UpperCaseTextFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final upper = newValue.text.toUpperCase();
+    if (upper == newValue.text) return newValue;
+    return newValue.copyWith(text: upper);
+  }
+}

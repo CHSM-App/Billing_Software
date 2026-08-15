@@ -103,7 +103,11 @@ class Item {
   final String name;
   final String? barcode;
   final String? category;
-  final double price;
+
+  /// The item's own price, or null when it is sold only through its variants —
+  /// each size then carries its own price. Use [CartEntry.effectivePrice] rather
+  /// than reading this directly when billing.
+  final double? price;
   final double? taxRate;
   final String? hsnCode;
   final double? stockQuantity;
@@ -123,7 +127,7 @@ class Item {
     required this.name,
     this.barcode,
     this.category,
-    required this.price,
+    this.price,
     this.taxRate,
     this.hsnCode,
     this.stockQuantity,
@@ -140,7 +144,7 @@ class Item {
         name: j['name'],
         barcode: j['barcode'],
         category: j['category'],
-        price: double.parse(j['price'].toString()),
+        price: j['price'] != null ? double.parse(j['price'].toString()) : null,
         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
         hsnCode: j['hsn_code'] as String?,
         stockQuantity: j['stock_quantity'] != null ? double.parse(j['stock_quantity'].toString()) : null,

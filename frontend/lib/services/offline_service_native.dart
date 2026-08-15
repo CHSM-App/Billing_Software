@@ -90,7 +90,7 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
     );
@@ -146,6 +146,7 @@ class OfflineService {
       'CREATE INDEX IF NOT EXISTS idx_offline_bills_status ON offline_bills (sync_status)',
     );
     await _createDraftsTable(db);
+    await _createServerBillCacheTable(db);
   }
 
   /// Offline draft queue — mirrors [offline_bills] but for `status:'draft'`
@@ -253,6 +254,37 @@ class OfflineService {
         'ALTER TABLE offline_bills ADD COLUMN round_off REAL NOT NULL DEFAULT 0',
       );
     }
+    if (oldVersion < 8) {
+      // v7 → v8: cache SERVER bills/drafts so they survive going offline.
+      await _createServerBillCacheTable(db);
+    }
+  }
+
+  /// Cache of bills and drafts fetched FROM the server.
+  ///
+  /// Distinct from [offline_bills] / [offline_drafts], which hold sales created
+  /// on this device and awaiting sync. This table is a read-through mirror: a
+  /// bill drafted or finalized while ONLINE lives only on the server, so it used
+  /// to disappear the moment the network dropped. Every successful fetch
+  /// refreshes this cache, and the offline path reads from it.
+  ///
+  /// [kind] is 'bill' or 'draft'. [payload_json] is the raw server JSON so it
+  /// rehydrates through the normal Bill.fromJson path with no lossy mapping.
+  Future<void> _createServerBillCacheTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cached_server_bills (
+        id           TEXT    NOT NULL PRIMARY KEY,
+        business_id  TEXT    NOT NULL,
+        kind         TEXT    NOT NULL,
+        created_at   INTEGER NOT NULL,
+        payload_json TEXT    NOT NULL,
+        cached_at    INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cached_server_bills_kind '
+      'ON cached_server_bills (business_id, kind, created_at)',
+    );
   }
 
   Database get _database {
@@ -297,6 +329,104 @@ class OfflineService {
             'sort_order': v.sortOrder,
             'is_active': v.isActive ? 1 : 0,
           });
+        }
+      }
+    });
+  }
+
+  // ── Server bill/draft cache ───────────────────────────────────────────────
+
+  /// Mirror a batch of server bills or drafts into the local cache.
+  ///
+  /// Called after every successful fetch so the same records remain readable
+  /// once the network drops. Upserts by id — a draft that later comes back
+  /// finalized simply replaces its earlier row.
+  ///
+  /// [kind] is 'bill' or 'draft'. [payloads] are the raw server JSON maps.
+  Future<void> cacheServerBills(
+      String businessId, String kind, List<Map<String, dynamic>> payloads) async {
+    if (payloads.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _database.transaction((txn) async {
+      for (final p in payloads) {
+        final id = p['id'] as String?;
+        if (id == null) continue;
+        final createdRaw = p['created_at'];
+        final created = createdRaw is String
+            ? (DateTime.tryParse(createdRaw)?.millisecondsSinceEpoch ?? now)
+            : now;
+        await txn.insert(
+          'cached_server_bills',
+          {
+            'id': id,
+            'business_id': businessId,
+            'kind': kind,
+            'created_at': created,
+            'payload_json': jsonEncode(p),
+            'cached_at': now,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
+  /// Cached server bills/drafts of [kind], newest first. Returns the raw JSON
+  /// maps so callers rehydrate them with the same Bill.fromJson used online.
+  Future<List<Map<String, dynamic>>> getCachedServerBills(
+      String businessId, String kind) async {
+    final rows = await _database.query(
+      'cached_server_bills',
+      where: 'business_id = ? AND kind = ?',
+      whereArgs: [businessId, kind],
+      orderBy: 'created_at DESC',
+    );
+    return rows
+        .map((r) =>
+            jsonDecode(r['payload_json'] as String) as Map<String, dynamic>)
+        .toList();
+  }
+
+  /// Drop a cached server record — used when a draft is finalized or a bill is
+  /// voided, so the stale copy can't reappear while offline.
+  Future<void> removeCachedServerBill(String id) async {
+    await _database.delete('cached_server_bills', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Deduct sold quantities from the cached stock after an OFFLINE sale.
+  ///
+  /// The server owns stock and applies the same deduction when the bill syncs,
+  /// but until then this local cache is the only stock figure the app has. Each
+  /// line's quantity is subtracted from its variant when the line has one
+  /// (sizes carry their own stock), otherwise from the parent item.
+  ///
+  /// Only rows whose stock is actually tracked (non-NULL) are touched, so an
+  /// untracked item stays untracked. Stock is floored at 0 — a negative figure
+  /// would render as nonsense in the catalogue, and the server's own count wins
+  /// on the next refresh anyway.
+  ///
+  /// [lineItems] uses the same shape queued into offline_bills: each entry has
+  /// `item_id`, optional `variant_id`, and `quantity`.
+  Future<void> applyStockDelta(
+      String businessId, List<Map<String, dynamic>> lineItems) async {
+    if (lineItems.isEmpty) return;
+    await _database.transaction((txn) async {
+      for (final li in lineItems) {
+        final qty = (li['quantity'] as num?)?.toDouble() ?? 0;
+        if (qty <= 0) continue;
+        final variantId = li['variant_id'] as String?;
+        if (variantId != null) {
+          await txn.rawUpdate(
+            'UPDATE cached_variants SET stock_quantity = MAX(0, stock_quantity - ?) '
+            'WHERE id = ? AND business_id = ? AND stock_quantity IS NOT NULL',
+            [qty, variantId, businessId],
+          );
+        } else {
+          await txn.rawUpdate(
+            'UPDATE cached_items SET stock_quantity = MAX(0, stock_quantity - ?) '
+            'WHERE id = ? AND business_id = ? AND stock_quantity IS NOT NULL',
+            [qty, li['item_id'], businessId],
+          );
         }
       }
     });

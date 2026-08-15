@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart' as api;
 import '../models/models.dart';
 import '../services/offline_service.dart';
+import '../storage.dart';
 
 /// Table-less draft bills — the "Open Orders" queue. A server saves these from
 /// the billing page; a cashier/owner opens one to finalize it. The Open Orders
@@ -20,11 +21,38 @@ class OpenDraftsNotifier extends AsyncNotifier<List<Bill>> {
     try {
       final data = await api.getDraftBills();
       final server = data.map((j) => Bill.fromJson(j)).toList();
+      // Mirror server drafts locally so an order drafted while ONLINE is still
+      // visible after the network drops — previously it lived only on the
+      // server and vanished the moment connectivity was lost.
+      await _cacheServerDrafts(data);
       return _merge(server, local);
     } catch (_) {
-      if (local.isNotEmpty) return local;
+      // Fall back to the last-known server drafts, merged with local ones.
+      final cached = await _cachedServerDrafts();
+      final merged = _merge(cached, local);
+      if (merged.isNotEmpty) return merged;
       rethrow;
     }
+  }
+
+  /// Persist raw server draft JSON for offline reads.
+  Future<void> _cacheServerDrafts(List<dynamic> data) async {
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty) return;
+    await OfflineService.instance.cacheServerBills(
+      businessId,
+      'draft',
+      data.cast<Map<String, dynamic>>(),
+    );
+  }
+
+  /// Server drafts as of the last successful fetch.
+  Future<List<Bill>> _cachedServerDrafts() async {
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty) return const [];
+    final rows =
+        await OfflineService.instance.getCachedServerBills(businessId, 'draft');
+    return rows.map((j) => Bill.fromJson(j)).toList();
   }
 
   Future<void> reload() async {
@@ -39,11 +67,15 @@ class OpenDraftsNotifier extends AsyncNotifier<List<Bill>> {
     try {
       final data = await api.getDraftBills();
       final server = data.map((j) => Bill.fromJson(j)).toList();
+      await _cacheServerDrafts(data);
       state = AsyncData(_merge(server, local));
     } catch (_) {
       // Keep the current list (with local drafts) on failure; a later refresh
-      // corrects it. If we have nothing yet, at least show local drafts.
-      if (!state.hasValue) state = AsyncData(local);
+      // corrects it. If we have nothing yet, fall back to the cached server
+      // drafts so an offline reload still shows open orders.
+      if (!state.hasValue) {
+        state = AsyncData(_merge(await _cachedServerDrafts(), local));
+      }
     }
   }
 

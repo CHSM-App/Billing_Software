@@ -212,6 +212,31 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       }
     }
 
+    // GST can only be switched ON when the business has a GSTIN — a tax invoice
+    // must carry one, so enabling it without would print a non-compliant bill.
+    // The effective GSTIN is the one being set in THIS request when present,
+    // otherwise whatever is already stored (so toggling GST on with an existing
+    // GSTIN still works, and clearing the GSTIN in the same request is caught).
+    if (gst_enabled === true) {
+      const effectiveGstin = gst_number !== undefined
+        ? (gst_number || '')
+        : (old.gst_number || '');
+      if (!effectiveGstin) {
+        return res.status(400).json({
+          error: 'Add your GSTIN before turning on GST',
+        });
+      }
+    }
+
+    // Clearing the GSTIN must also turn GST off, otherwise the business would be
+    // left issuing tax invoices with no GSTIN to print on them. Force the flag
+    // off in the same UPDATE unless the caller already set it explicitly.
+    const clearingGstin =
+      gst_number !== undefined && !gst_number && !!old.gst_number;
+    if (clearingGstin && gst_enabled === undefined && old.gst_enabled) {
+      fields.push(['gst_enabled', false]);
+    }
+
     // Build parameterised UPDATE
     const req2 = pool.request();
     req2.input('id', sql.UniqueIdentifier, req.user.business_id);

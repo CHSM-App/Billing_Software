@@ -14,6 +14,12 @@ const router = express.Router();
 
 const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables', 'restaurant_no_tables'];
 
+// Tax identifier formats — kept identical to routes/businesses.js so a value
+// accepted at sign-up is never rejected later in Business Profile.
+const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const PAN_RE   = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+const FSSAI_RE = /^[0-9]{14}$/;
+
 // How many consecutive PIN failures before locking the account
 const MAX_FAILED_ATTEMPTS = 10;
 // How long to lock the account after MAX_FAILED_ATTEMPTS (milliseconds)
@@ -31,6 +37,11 @@ router.post('/register', registerLimiter, async (req, res) => {
     owner_name,
     owner_phone,
     pin,
+    // Optional tax identifiers captured at sign-up so the first bill can already
+    // print a compliant header. All three are editable later in Business Profile.
+    gst_number,
+    pan_number,
+    fssai_number,
   } = req.body;
 
   // Basic validation
@@ -46,6 +57,18 @@ router.post('/register', registerLimiter, async (req, res) => {
   if (!/^\d{10}$/.test(phone) || !/^\d{10}$/.test(owner_phone)) {
     return res.status(400).json({ error: 'Phone must be a 10-digit number' });
   }
+  // Optional tax identifiers — same formats the Business Profile screen enforces.
+  if (gst_number) {
+    if (!GSTIN_RE.test(gst_number)) {
+      return res.status(400).json({ error: 'Invalid GSTIN format (e.g. 27ABCDE1234F1Z5)' });
+    }
+  }
+  if (pan_number && !PAN_RE.test(pan_number)) {
+    return res.status(400).json({ error: 'Invalid PAN format (e.g. ABCDE1234F)' });
+  }
+  if (fssai_number && !FSSAI_RE.test(fssai_number)) {
+    return res.status(400).json({ error: 'Invalid FSSAI number — must be exactly 14 digits' });
+  }
 
   const toTitleCase = (str) => str.replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -60,7 +83,22 @@ router.post('/register', registerLimiter, async (req, res) => {
     await transaction.begin();
 
     try {
-      // Insert business
+      // A GSTIN identifies exactly one business — reject a duplicate up front
+      // rather than letting it through and confusing two businesses' invoices.
+      if (gst_number) {
+        const dup = await transaction.request()
+          .input('gst', sql.NVarChar(15), gst_number)
+          .query('SELECT 1 FROM businesses WHERE gst_number = @gst');
+        if (dup.recordset.length > 0) {
+          await transaction.rollback();
+          return res.status(409).json({
+            error: 'This GSTIN is already registered with another business',
+          });
+        }
+      }
+
+      // Insert business. Supplying a GSTIN at sign-up turns GST on immediately,
+      // so the very first bill prints as a tax invoice.
       const businessResult = await transaction.request()
         .input('name', sql.NVarChar(200), businessNameSaved)
         .input('business_type', sql.NVarChar(50), business_type)
@@ -70,10 +108,16 @@ router.post('/register', registerLimiter, async (req, res) => {
         // Barcode scanning is enabled by default; only disabled if a client
         // explicitly sends has_barcode_scanner: false.
         .input('has_barcode_scanner', sql.Bit, has_barcode_scanner === false ? 0 : 1)
+        .input('gst_number', sql.NVarChar(15), gst_number || null)
+        .input('gst_enabled', sql.Bit, gst_number ? 1 : 0)
+        .input('pan_number', sql.NVarChar(10), pan_number || null)
+        .input('fssai_number', sql.NVarChar(20), fssai_number || null)
         .query(`
-          INSERT INTO businesses (name, business_type, address, phone, inventory_enabled, has_barcode_scanner)
+          INSERT INTO businesses (name, business_type, address, phone, inventory_enabled, has_barcode_scanner,
+                                  gst_number, gst_enabled, pan_number, fssai_number)
           OUTPUT INSERTED.id
-          VALUES (@name, @business_type, @address, @phone, @inventory_enabled, @has_barcode_scanner)
+          VALUES (@name, @business_type, @address, @phone, @inventory_enabled, @has_barcode_scanner,
+                  @gst_number, @gst_enabled, @pan_number, @fssai_number)
         `);
 
       const businessId = businessResult.recordset[0].id;
