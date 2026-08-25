@@ -5,14 +5,17 @@ import Logo from './Logo'
 const LINKS = {
   Product: [
     { label: 'Features',    href: '/#features' },
+    { label: 'How It Works', href: '/#how-it-works' },
     { label: 'Download',    href: '/#download' },
     { label: 'Google Play', href: 'https://play.google.com/store/apps/details?id=com.vengurlatech.Vittam' },
   ],
   Support: [
     { label: 'Help Center', href: '/help' },
+    { label: 'FAQ',         href: '/#faq' },
   ],
   Legal: [
     { label: 'Privacy Policy', href: '/privacy' },
+    { label: 'Delete Account', href: '/delete-account' },
   ],
 }
 
