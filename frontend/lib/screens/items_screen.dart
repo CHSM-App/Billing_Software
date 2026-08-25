@@ -180,8 +180,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     final isRestaurant = businessType == 'restaurant_with_tables' ||
         businessType == 'restaurant_no_tables';
     // Recipes only apply to restaurant dishes with inventory, and need a saved
-    // item to attach to.
-    final showRecipe = isRestaurant && inventoryEnabled && item != null;
+    // item to attach to. A SIZED item has no recipe of its own — each size
+    // carries one — so its item-level button is hidden; otherwise an owner
+    // could fill in a recipe no bill would ever reach.
+    final showRecipe = isRestaurant &&
+        inventoryEnabled &&
+        item != null &&
+        !item.hasVariants;
     // Existing categories for this business, to offer as dropdown suggestions.
     final categories = ref.read(categoriesProvider).valueOrNull ?? const [];
     showDialog(
@@ -215,11 +220,16 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
 
   void _showVariantManager(Item item) {
     final inventoryEnabled = ref.read(inventoryEnabledProvider);
+    final businessType = ref.read(businessTypeProvider);
+    final isRestaurant = businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
     showDialog(
       context: context,
       builder: (_) => _VariantManagerDialog(
         item: item,
         inventoryEnabled: inventoryEnabled,
+        // A sized item's recipes live here, one per size.
+        showRecipe: isRestaurant && inventoryEnabled,
         onChanged: (variants) {
           // Patch this item's variants locally — instant, no network refetch.
           ref.read(itemsProvider.notifier).setItemVariants(item.id, variants);
@@ -1005,6 +1015,15 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// Shown as a banner when the item saved but some variants did not.
   String? _partialFailure;
 
+  /// True whenever this item's prices live on its sizes — either the box was
+  /// just ticked (create), or the item already has sizes (edit). Everything the
+  /// sizes own (price, barcode, stock) is hidden and omitted on save.
+  ///
+  /// [_hasVariants] alone is create-only, so editing an existing sized item used
+  /// to fall through to the plain-item branch and demand a price the item does
+  /// not have.
+  bool get _sizedItem => _hasVariants || (widget.item?.hasVariants ?? false);
+
   static const _units = [
     'piece',
     'kg',
@@ -1023,7 +1042,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     if (item != null) {
       _nameCtrl.text = item.name;
       _categoryCtrl.text = item.category ?? '';
-      _priceCtrl.text = item.price.toString();
+      // ?? '' — a sized item has no price of its own, and `null.toString()`
+      // would put the literal text "null" in the field.
+      _priceCtrl.text = item.price?.toString() ?? '';
       _taxCtrl.text = item.taxRate?.toString() ?? '';
       _hsnCtrl.text = item.hsnCode ?? '';
       _barcodeCtrl.text = item.barcode ?? '';
@@ -1197,9 +1218,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     // Auto-generate a 12-digit barcode for new items that have no barcode.
     // Use current timestamp so it's unique and scannable immediately. A sized
     // item gets none — its sizes are what get scanned.
-    final barcodeInput = _hasVariants ? '' : _barcodeCtrl.text.trim();
+    final barcodeInput = _sizedItem ? '' : _barcodeCtrl.text.trim();
     final autoBarcode =
-        (widget.item == null && !_hasVariants && barcodeInput.isEmpty)
+        (widget.item == null && !_sizedItem && barcodeInput.isEmpty)
             ? DateTime.now().millisecondsSinceEpoch.toString().substring(1, 13)
             : null;
     final effectiveBarcode = barcodeInput.isNotEmpty ? barcodeInput : autoBarcode;
@@ -1220,7 +1241,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     // Items with sizes track stock per size — the server nulls the parent's
     // stock as soon as a size exists, so don't send a figure that will be
     // discarded.
-    final sizedItem = _hasVariants || (widget.item?.hasVariants ?? false);
+    final sizedItem = _sizedItem;
 
     final data = {
       'name': _nameCtrl.text.trim(),
@@ -1228,12 +1249,15 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       // A sized item has no price of its own — the sizes carry it. The server
       // only accepts a null price when has_variants says so.
       if (_hasVariants) 'has_variants': true,
-      'price': _hasVariants ? null : double.parse(_priceCtrl.text.trim()),
+      'price': sizedItem ? null : double.parse(_priceCtrl.text.trim()),
       if (_taxCtrl.text.trim().isNotEmpty)
         'tax_rate': double.parse(_taxCtrl.text.trim()),
       if (widget.gstEnabled)
         'hsn_code': _hsnCtrl.text.trim().isNotEmpty ? _hsnCtrl.text.trim() : null,
-      'barcode': effectiveBarcode,
+      // Omitted entirely for a sized item: the field isn't shown, so sending
+      // null would silently clear a barcode the user never saw. (On create the
+      // server nulls it anyway when has_variants is set.)
+      if (!sizedItem) 'barcode': effectiveBarcode,
       'unit': _unit,
       if (widget.inventoryEnabled && sizedItem)
         'stock_quantity': null
@@ -1530,6 +1554,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
               maxHeight: MediaQuery.of(context).size.height * 0.7,
             ),
             child: SingleChildScrollView(
+            // The first field's floating label sits a few pixels ABOVE the field
+            // box, so with the content starting at y=0 it was clipped by the
+            // dialog. A small top pad gives it room.
+            padding: const EdgeInsets.only(top: 8),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1571,7 +1599,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   _buildVariantsSection(l10n),
                 ],
                 // Price belongs to the item only when it has no sizes.
-                if (!_hasVariants) ...[
+                if (!_sizedItem) ...[
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
                     label: l10n.itemsFieldPrice,
@@ -1633,7 +1661,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 ],
                 // A sized item is never scanned directly — each size has its own
                 // barcode, so the item-level one would be ambiguous.
-                if (!_hasVariants) ...[
+                if (!_sizedItem) ...[
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
                     label: l10n.itemsFieldBarcode,
@@ -1644,9 +1672,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 // Item-level stock is only meaningful when the item has NO
                 // sizes. With sizes, stock is tracked per size, so hide it and
                 // show a hint pointing to the size manager.
-                if (widget.inventoryEnabled &&
-                    !_hasVariants &&
-                    !(widget.item?.hasVariants ?? false)) ...[
+                if (widget.inventoryEnabled && !_sizedItem) ...[
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
                     label: l10n.itemsFieldStock,
@@ -1989,11 +2015,15 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
 class _VariantManagerDialog extends StatefulWidget {
   final Item item;
   final bool inventoryEnabled;
+
+  /// Whether each size gets a recipe button — restaurant + inventory only.
+  final bool showRecipe;
   final void Function(List<ItemVariant> variants) onChanged;
 
   const _VariantManagerDialog({
     required this.item,
     required this.inventoryEnabled,
+    this.showRecipe = false,
     required this.onChanged,
   });
 
@@ -2053,6 +2083,63 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Open the recipe editor for one size.
+  ///
+  /// If the parent item still carries an item-level recipe from before it had
+  /// sizes, offer to copy it down. That recipe is now unreachable — every line
+  /// on a sized item names a size, and a sized line never falls back to the
+  /// item's rows — so without this the dish would silently stop consuming raw
+  /// materials.
+  Future<void> _editRecipe(ItemVariant v) async {
+    final l10n = context.l10n;
+    List<Map<String, dynamic>>? seed;
+
+    try {
+      final existing = await getItemRecipe(widget.item.id);
+      if (existing.isNotEmpty && mounted) {
+        final copy = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text(l10n.itemsRecipeCopyTitle),
+            content: Text(l10n.itemsRecipeCopyBody(widget.item.name)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(l10n.itemsRecipeStartEmpty),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(l10n.itemsRecipeCopyConfirm),
+              ),
+            ],
+          ),
+        );
+        if (copy == true) {
+          seed = existing
+              .map((j) => {
+                    'raw_material_id': j['raw_material_id'],
+                    'quantity': j['quantity'],
+                  })
+              .toList();
+        }
+      }
+    } catch (_) {
+      // The prompt is a convenience — a failed lookup just means no seed.
+    }
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (_) => RecipeEditorDialog(
+        itemId: widget.item.id,
+        itemName: widget.item.name,
+        variantId: v.id,
+        variantLabel: v.label,
+        initialRows: seed,
+      ),
+    );
   }
 
   Future<void> _delete(ItemVariant v) async {
@@ -2172,12 +2259,34 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
       title: Text(l10n.itemsSizesTitle(widget.item.name),
           maxLines: 1, overflow: TextOverflow.ellipsis),
       content: SizedBox(
-        width: 400,
+        // 440 when a recipe icon joins edit/print/delete — four 18px buttons
+        // plus the size label and price/stock subtitle crowd 400.
+        width: widget.showRecipe ? 440 : 400,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // A size with no recipe consumes nothing — say so, since the
+              // symptom otherwise is stock quietly not moving.
+              if (widget.showRecipe && _variants.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.space8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline,
+                          size: 14, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(l10n.itemsVariantRecipeHint,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: AppColors.textSecondary)),
+                      ),
+                    ],
+                  ),
+                ),
               if (_variants.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
@@ -2233,6 +2342,16 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                           ),
                           onPressed: _busy ? null : () => _printVariantBarcode(v),
                         ),
+                        if (widget.showRecipe)
+                          IconButton(
+                            tooltip: l10n.itemsVariantRecipeTooltip(v.label),
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(6),
+                            icon: const Icon(Icons.receipt_long_outlined,
+                                size: 18, color: AppColors.textSecondary),
+                            onPressed: _busy ? null : () => _editRecipe(v),
+                          ),
                         IconButton(
                           visualDensity: VisualDensity.compact,
                           constraints: const BoxConstraints(),

@@ -5,8 +5,19 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const audit = require('../audit');
+const {
+  MAX_DECIMAL_12_4,
+  validateNumber,
+  validateInteger,
+  validateText,
+  validateEnum,
+} = require('../validate');
 
 const router = express.Router();
+
+// Units an item may be sold in. Must stay in sync with `_units` in the Flutter
+// item form — the value drives unit conversion, not just display.
+const VALID_UNITS = ['piece', 'kg', 'g', 'litre', 'ml', 'metre', 'dozen', 'plate'];
 
 // Item photos are compressed on the device and uploaded as JPEG. They live on
 // disk under backend/uploads/items and are served by an explicit static mount
@@ -46,6 +57,7 @@ function ownerOnly(req, res, next) {
 function isDuplicateKeyError(err) {
   return err && (err.number === 2627 || err.number === 2601);
 }
+
 
 async function attachVariants(businessId, itemRows) {
   if (itemRows.length === 0) return itemRows;
@@ -263,21 +275,25 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
   const sizedItem = has_variants === true;
 
-  if (!name) {
-    return res.status(400).json({ error: 'name is required' });
-  }
   // A variant item has no price of its own — each size carries one. A plain item
   // must have a price, or billing it would have nothing to charge.
   if (!sizedItem && (price === undefined || price === null)) {
     return res.status(400).json({ error: 'price is required unless the item has variants' });
   }
-  if (price != null && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
-    return res.status(400).json({ error: 'price must be a non-negative number' });
-  }
-  if (low_stock_threshold != null &&
-      (isNaN(parseFloat(low_stock_threshold)) || parseFloat(low_stock_threshold) < 0)) {
-    return res.status(400).json({ error: 'low_stock_threshold must be a non-negative number' });
-  }
+  const invalid = validateText(name, 'Name', 200, { required: true })
+    || validateNumber(price, 'Price')
+    || validateNumber(stock_quantity, 'Stock')
+    || validateNumber(low_stock_threshold, 'Low stock alert')
+    // tax_rate is DECIMAL(5,2) — a percentage, so cap it at 100 rather than the
+    // column max. 999% tax would fit the column and still be nonsense.
+    || validateNumber(tax_rate, 'Tax rate', { max: 100 })
+    || validateText(barcode, 'Barcode', 100)
+    || validateText(hsn_code, 'HSN/SAC code', 10)
+    || validateText(category, 'Category', 100)
+    // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
+    // recipe quantity is stored, so an unknown value would silently skip it.
+    || validateEnum(unit, 'Unit', VALID_UNITS);
+  if (invalid) return res.status(400).json({ error: invalid });
 
   try {
     await poolConnect;
@@ -343,13 +359,20 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
-  if (price != null && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
-    return res.status(400).json({ error: 'price must be a non-negative number' });
-  }
-  if (low_stock_threshold != null &&
-      (isNaN(parseFloat(low_stock_threshold)) || parseFloat(low_stock_threshold) < 0)) {
-    return res.status(400).json({ error: 'low_stock_threshold must be a non-negative number' });
-  }
+  const invalid = (name !== undefined
+        ? validateText(name, 'Name', 200, { required: true })
+        : null)
+    || validateNumber(price, 'Price')
+    || validateNumber(stock_quantity, 'Stock')
+    || validateNumber(low_stock_threshold, 'Low stock alert')
+    || validateNumber(tax_rate, 'Tax rate', { max: 100 })
+    || validateText(barcode, 'Barcode', 100)
+    || validateText(hsn_code, 'HSN/SAC code', 10)
+    || validateText(category, 'Category', 100)
+    // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
+    // recipe quantity is stored, so an unknown value would silently skip it.
+    || validateEnum(unit, 'Unit', VALID_UNITS);
+  if (invalid) return res.status(400).json({ error: invalid });
 
   try {
     await poolConnect;
@@ -588,12 +611,13 @@ const VARIANT_OUTPUT =
 router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
   const { label, price, barcode, stock_quantity, low_stock_threshold, sort_order } = req.body;
 
-  if (!label || !String(label).trim()) {
-    return res.status(400).json({ error: 'label is required' });
-  }
-  if (price !== undefined && price !== null && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
-    return res.status(400).json({ error: 'price must be a non-negative number' });
-  }
+  const invalid = validateText(label, 'Size name', 50, { required: true })
+    || validateNumber(price, 'Price')
+    || validateNumber(stock_quantity, 'Stock')
+    || validateNumber(low_stock_threshold, 'Low stock alert')
+    || validateInteger(sort_order, 'sort_order')
+    || validateText(barcode, 'Barcode', 100);
+  if (invalid) return res.status(400).json({ error: invalid });
 
   try {
     await poolConnect;
@@ -641,6 +665,17 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
       stock_quantity === undefined && low_stock_threshold === undefined && sort_order === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
+  // The same rules as create — this route had none, so an edit could set a
+  // negative price or blank out a size's name where a create could not.
+  const invalid = (label !== undefined
+        ? validateText(label, 'Size name', 50, { required: true })
+        : null)
+    || validateNumber(price, 'Price')
+    || validateNumber(stock_quantity, 'Stock')
+    || validateNumber(low_stock_threshold, 'Low stock alert')
+    || validateInteger(sort_order, 'sort_order')
+    || validateText(barcode, 'Barcode', 100);
+  if (invalid) return res.status(400).json({ error: invalid });
 
   try {
     await poolConnect;
@@ -728,89 +763,187 @@ router.delete('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, re
 // the billing page; only the parent item is billed.
 // ---------------------------------------------------------------------------
 
-// GET /api/items/:id/recipe — list the recipe rows (with raw-material details).
+// An item WITHOUT sizes keeps its recipe on the item (variant_id NULL); an item
+// WITH sizes carries one per size. The two shapes share these helpers so the
+// item-level and variant-level routes can never drift apart.
+//
+// Every variant predicate needs the explicit IS NULL arm — `= @variant_id`
+// alone never matches NULL, so an item-level read/write would silently touch
+// nothing (or, for the DELETE, everything).
+
+async function fetchRecipe(itemId, variantId, businessId) {
+  const result = await pool.request()
+    .input('item_id', sql.UniqueIdentifier, itemId)
+    .input('variant_id', sql.UniqueIdentifier, variantId || null)
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .query(`
+      SELECT ir.id, ir.item_id, ir.variant_id, ir.raw_material_id, ir.quantity,
+             rm.name AS raw_material_name, rm.unit AS raw_material_unit,
+             rm.stock_quantity, rm.low_stock_threshold
+      FROM item_recipes ir
+      JOIN items i ON i.id = ir.item_id
+      JOIN raw_materials rm ON rm.id = ir.raw_material_id
+      WHERE ir.item_id = @item_id AND i.business_id = @business_id AND rm.is_active = 1
+        AND ((@variant_id IS NULL AND ir.variant_id IS NULL)
+             OR ir.variant_id = @variant_id)
+      ORDER BY rm.name ASC
+    `);
+  return result.recordset;
+}
+
+/// Validates [rows] and replaces one recipe wholesale. Returns null on success,
+/// or `{ status, error }` to send back.
+async function replaceRecipe(itemId, variantId, rows, businessId) {
+  if (!Array.isArray(rows)) {
+    return { status: 400, error: 'rows array is required' };
+  }
+  const seen = new Set();
+  for (const r of rows) {
+    if (!r.raw_material_id) {
+      return { status: 400, error: 'each row needs a raw_material_id' };
+    }
+    // Must be > 0 (a zero-quantity ingredient is just a missing row) and within
+    // DECIMAL(12,4) — past that SQL Server raises an arithmetic overflow that
+    // would surface as an opaque 500.
+    const badQty = validateNumber(r.quantity, 'Quantity',
+      { max: MAX_DECIMAL_12_4, allowZero: false });
+    if (r.quantity == null || badQty) {
+      return { status: 400, error: badQty || 'each row needs a quantity > 0' };
+    }
+    // Without this a duplicate reaches UQ_item_recipes_item_variant_raw and
+    // surfaces as an opaque 500 instead of a fixable message.
+    if (seen.has(r.raw_material_id)) {
+      return { status: 400, error: 'Each raw material may appear only once in a recipe' };
+    }
+    seen.add(r.raw_material_id);
+  }
+
+  // Validate all referenced raw materials belong to this business.
+  if (rows.length > 0) {
+    const request = pool.request().input('business_id', sql.UniqueIdentifier, businessId);
+    const ids = [...seen];
+    const params = ids.map((id, i) => { request.input(`r${i}`, sql.UniqueIdentifier, id); return `@r${i}`; });
+    const check = await request.query(`
+      SELECT id FROM raw_materials
+      WHERE business_id = @business_id AND is_active = 1 AND id IN (${params.join(', ')})
+    `);
+    if (check.recordset.length !== ids.length) {
+      return { status: 400, error: 'One or more raw materials were not found' };
+    }
+  }
+
+  const transaction = pool.transaction();
+  await transaction.begin();
+  try {
+    // Scoped by variant: an unscoped delete would wipe every OTHER size's
+    // recipe whenever one size was saved.
+    await transaction.request()
+      .input('item_id', sql.UniqueIdentifier, itemId)
+      .input('variant_id', sql.UniqueIdentifier, variantId || null)
+      .query(`
+        DELETE FROM item_recipes
+        WHERE item_id = @item_id
+          AND ((@variant_id IS NULL AND variant_id IS NULL)
+               OR variant_id = @variant_id)
+      `);
+
+    for (const r of rows) {
+      await transaction.request()
+        .input('item_id', sql.UniqueIdentifier, itemId)
+        .input('variant_id', sql.UniqueIdentifier, variantId || null)
+        .input('raw_material_id', sql.UniqueIdentifier, r.raw_material_id)
+        .input('quantity', sql.Decimal(12, 4), parseFloat(r.quantity))
+        .query(`
+          INSERT INTO item_recipes (item_id, variant_id, raw_material_id, quantity)
+          VALUES (@item_id, @variant_id, @raw_material_id, @quantity)
+        `);
+    }
+    await transaction.commit();
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+  return null;
+}
+
+// Confirms the size exists and belongs to this item. Reads don't require the
+// size to still be active (an owner may inspect a removed size's recipe);
+// writes pass requireActive so a deactivated size can't be edited.
+async function loadOwnedVariant(itemId, variantId, { requireActive } = {}) {
+  const result = await pool.request()
+    .input('id', sql.UniqueIdentifier, variantId)
+    .input('item_id', sql.UniqueIdentifier, itemId)
+    .query(`
+      SELECT id FROM item_variants
+      WHERE id = @id AND item_id = @item_id
+        ${requireActive ? 'AND is_active = 1' : ''}
+    `);
+  return result.recordset[0] || null;
+}
+
+// GET /api/items/:id/recipe — the recipe of an item that has no sizes.
 router.get('/:id/recipe', requireAuth, async (req, res) => {
   try {
     await poolConnect;
-    const result = await pool.request()
-      .input('item_id', sql.UniqueIdentifier, req.params.id)
-      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .query(`
-        SELECT ir.id, ir.item_id, ir.raw_material_id, ir.quantity,
-               rm.name AS raw_material_name, rm.unit AS raw_material_unit,
-               rm.stock_quantity, rm.low_stock_threshold
-        FROM item_recipes ir
-        JOIN items i ON i.id = ir.item_id
-        JOIN raw_materials rm ON rm.id = ir.raw_material_id
-        WHERE ir.item_id = @item_id AND i.business_id = @business_id AND rm.is_active = 1
-        ORDER BY rm.name ASC
-      `);
-    return res.json(result.recordset);
+    return res.json(await fetchRecipe(req.params.id, null, req.user.business_id));
   } catch (err) {
     logger.error({ err }, 'Get recipe error');
     return res.status(500).json({ error: 'Failed to fetch recipe' });
   }
 });
 
-// PUT /api/items/:id/recipe — replace the item's whole recipe.
+// PUT /api/items/:id/recipe — replace that item-level recipe.
 // Body: { rows: [{ raw_material_id, quantity }, ...] }
 router.put('/:id/recipe', requireAuth, ownerOnly, async (req, res) => {
-  const { rows } = req.body;
-  if (!Array.isArray(rows)) {
-    return res.status(400).json({ error: 'rows array is required' });
-  }
-  for (const r of rows) {
-    if (!r.raw_material_id || r.quantity == null || isNaN(parseFloat(r.quantity)) || parseFloat(r.quantity) <= 0) {
-      return res.status(400).json({ error: 'each row needs a raw_material_id and a quantity > 0' });
-    }
-  }
-
   try {
     await poolConnect;
     if (!(await loadOwnedItem(req.params.id, req.user.business_id))) {
       return res.status(404).json({ error: 'Item not found' });
     }
-
-    // Validate all referenced raw materials belong to this business.
-    if (rows.length > 0) {
-      const request = pool.request().input('business_id', sql.UniqueIdentifier, req.user.business_id);
-      const ids = [...new Set(rows.map((r) => r.raw_material_id))];
-      const params = ids.map((id, i) => { request.input(`r${i}`, sql.UniqueIdentifier, id); return `@r${i}`; });
-      const check = await request.query(`
-        SELECT id FROM raw_materials
-        WHERE business_id = @business_id AND is_active = 1 AND id IN (${params.join(', ')})
-      `);
-      if (check.recordset.length !== ids.length) {
-        return res.status(400).json({ error: 'One or more raw materials were not found' });
-      }
-    }
-
-    const transaction = pool.transaction();
-    await transaction.begin();
-    try {
-      await transaction.request()
-        .input('item_id', sql.UniqueIdentifier, req.params.id)
-        .query('DELETE FROM item_recipes WHERE item_id = @item_id');
-
-      for (const r of rows) {
-        await transaction.request()
-          .input('item_id', sql.UniqueIdentifier, req.params.id)
-          .input('raw_material_id', sql.UniqueIdentifier, r.raw_material_id)
-          .input('quantity', sql.Decimal(12, 4), parseFloat(r.quantity))
-          .query(`
-            INSERT INTO item_recipes (item_id, raw_material_id, quantity)
-            VALUES (@item_id, @raw_material_id, @quantity)
-          `);
-      }
-      await transaction.commit();
-    } catch (err) {
-      await transaction.rollback();
-      throw err;
-    }
-
+    const fail = await replaceRecipe(
+      req.params.id, null, req.body.rows, req.user.business_id);
+    if (fail) return res.status(fail.status).json({ error: fail.error });
     return res.json({ success: true });
   } catch (err) {
     logger.error({ err }, 'Update recipe error');
+    return res.status(500).json({ error: 'Failed to update recipe' });
+  }
+});
+
+// GET /api/items/:id/variants/:variantId/recipe — one size's recipe.
+router.get('/:id/variants/:variantId/recipe', requireAuth, async (req, res) => {
+  try {
+    await poolConnect;
+    if (!(await loadOwnedItem(req.params.id, req.user.business_id))) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    if (!(await loadOwnedVariant(req.params.id, req.params.variantId))) {
+      return res.status(404).json({ error: 'Variant not found' });
+    }
+    return res.json(
+      await fetchRecipe(req.params.id, req.params.variantId, req.user.business_id));
+  } catch (err) {
+    logger.error({ err }, 'Get variant recipe error');
+    return res.status(500).json({ error: 'Failed to fetch recipe' });
+  }
+});
+
+// PUT /api/items/:id/variants/:variantId/recipe — replace one size's recipe.
+router.put('/:id/variants/:variantId/recipe', requireAuth, ownerOnly, async (req, res) => {
+  try {
+    await poolConnect;
+    if (!(await loadOwnedItem(req.params.id, req.user.business_id))) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    if (!(await loadOwnedVariant(req.params.id, req.params.variantId, { requireActive: true }))) {
+      return res.status(404).json({ error: 'Variant not found' });
+    }
+    const fail = await replaceRecipe(
+      req.params.id, req.params.variantId, req.body.rows, req.user.business_id);
+    if (fail) return res.status(fail.status).json({ error: fail.error });
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Update variant recipe error');
     return res.status(500).json({ error: 'Failed to update recipe' });
   }
 });

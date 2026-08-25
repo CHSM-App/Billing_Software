@@ -238,11 +238,15 @@ class RecipeRow {
   final String rawMaterialUnit;
   final double quantity;
 
+  /// The size this row belongs to, or null for an item that has no sizes.
+  final String? variantId;
+
   RecipeRow({
     required this.rawMaterialId,
     required this.rawMaterialName,
     required this.rawMaterialUnit,
     required this.quantity,
+    this.variantId,
   });
 
   factory RecipeRow.fromJson(Map<String, dynamic> j) => RecipeRow(
@@ -250,6 +254,7 @@ class RecipeRow {
         rawMaterialName: (j['raw_material_name'] as String?) ?? '',
         rawMaterialUnit: (j['raw_material_unit'] as String?) ?? 'piece',
         quantity: double.parse(j['quantity'].toString()),
+        variantId: j['variant_id'] as String?,
       );
 }
 

@@ -2466,6 +2466,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsManageRecipe => 'Manage recipe (raw materials)';
 
   @override
+  String itemsVariantRecipeTooltip(String label) {
+    return 'Recipe for $label';
+  }
+
+  @override
+  String get itemsVariantRecipeHint =>
+      'Each size has its own recipe. A size without one consumes no raw materials.';
+
+  @override
+  String get itemsRecipeCopyTitle => 'Copy recipe to this size?';
+
+  @override
+  String itemsRecipeCopyBody(String name) {
+    return '$name already has a recipe. Copy it to this size as a starting point? Once an item has sizes, only each size\'s own recipe is used.';
+  }
+
+  @override
+  String get itemsRecipeCopyConfirm => 'Copy';
+
+  @override
+  String get itemsRecipeStartEmpty => 'Start empty';
+
+  @override
   String itemsRecipeTitle(String name) {
     return 'Recipe · $name';
   }

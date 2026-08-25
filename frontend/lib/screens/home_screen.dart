@@ -2263,29 +2263,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Expanded) so the footer actions follow directly beneath it rather than
   /// being pushed to the bottom of a tall panel.
   Widget _emptyCartPlaceholder(AppLocalizations l10n) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.space32, horizontal: AppSpacing.space16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(AppRadius.large),
+    // Centred and scrollable: in the wide layout this sits in an Expanded whose
+    // height is whatever the pinned footer leaves over. On a short window that
+    // can be less than the icon + text need, which overflowed the column — so
+    // let it scroll rather than paint past its bounds.
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            vertical: AppSpacing.space24, horizontal: AppSpacing.space16),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.surfaceVariant,
+                borderRadius: BorderRadius.circular(AppRadius.large),
+              ),
+              child: const Icon(Icons.shopping_cart_outlined,
+                  size: 28, color: AppColors.textDisabled),
             ),
-            child: const Icon(Icons.shopping_cart_outlined,
-                size: 28, color: AppColors.textDisabled),
-          ),
-          const SizedBox(height: AppSpacing.space12),
-          Text(l10n.billingNoItemsAddedYet,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-              textAlign: TextAlign.center),
-        ],
+            const SizedBox(height: AppSpacing.space12),
+            Text(l10n.billingNoItemsAddedYet,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                textAlign: TextAlign.center),
+          ],
+        ),
       ),
     );
   }
@@ -2410,15 +2417,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
             // Scrollable cart items — takes all available space
             if (cart.isEmpty)
-              // Empty cart: keep the placeholder INTRINSIC (a compact icon +
-              // message). In the wide layout it takes the leftover space via
-              // Expanded so the pinned footer sits at the BOTTOM of the panel,
-              // in the same place it occupies once items are added — the
-              // controls must not jump as the first item goes in. The sheet is
-              // min-sized and scrolls as a whole, so no Expanded there.
+              // Empty cart: a compact icon + message. In the wide layout it
+              // takes the leftover space via Expanded so the pinned footer sits
+              // at the BOTTOM of the panel, in the same place it occupies once
+              // items are added — the controls must not jump as the first item
+              // goes in.
+              //
+              // Center is load-bearing, not decoration: Expanded forces a tight
+              // height on its child, and the placeholder's own height is fixed,
+              // so on a short window it painted past the bounds (the yellow
+              // "BOTTOM OVERFLOWED" stripe). Center relaxes that to a loose
+              // constraint and the scroll view inside absorbs the rest.
+              //
+              // The sheet is min-sized and scrolls as a whole, so no Expanded.
               (inSheet
                   ? _emptyCartPlaceholder(l10n)
-                  : Expanded(child: _emptyCartPlaceholder(l10n)))
+                  : Expanded(
+                      child: Center(child: _emptyCartPlaceholder(l10n))))
             else if (inSheet)
               // In bottom sheet: not constrained, just list
               Column(

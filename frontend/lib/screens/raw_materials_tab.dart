@@ -696,8 +696,23 @@ class RecipeEditorDialog extends ConsumerStatefulWidget {
   final String itemId;
   final String itemName;
 
-  const RecipeEditorDialog(
-      {super.key, required this.itemId, required this.itemName});
+  /// When set, this edits that SIZE's recipe rather than the item's. An item
+  /// with sizes has no recipe of its own — each size carries one.
+  final String? variantId;
+  final String? variantLabel;
+
+  /// Pre-fills the editor with these rows instead of loading from the server.
+  /// Used to seed a new size from the item's existing recipe.
+  final List<Map<String, dynamic>>? initialRows;
+
+  const RecipeEditorDialog({
+    super.key,
+    required this.itemId,
+    required this.itemName,
+    this.variantId,
+    this.variantLabel,
+    this.initialRows,
+  });
 
   @override
   ConsumerState<RecipeEditorDialog> createState() => _RecipeEditorDialogState();
@@ -726,13 +741,24 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
     try {
       // Ensure the raw-materials list is available.
       final materials = await ref.read(rawMaterialsProvider.future);
-      final recipeRaw = await getItemRecipe(widget.itemId);
-      final recipe = recipeRaw
-          .map((j) => RecipeRow.fromJson(j as Map<String, dynamic>))
-          .toList();
-      // Stored quantity is in the material's stock unit; show it in the entry
-      // unit (kg -> g, L -> ml) so a plate reads as "250" not "0.25".
-      final byId = {for (final r in recipe) r.rawMaterialId: r.quantity};
+      // Seeded rows (copying an item's recipe onto a new size) skip the fetch —
+      // the size has nothing stored yet.
+      final Map<String, double> byId;
+      if (widget.initialRows != null) {
+        byId = {
+          for (final r in widget.initialRows!)
+            r['raw_material_id'] as String: (r['quantity'] as num).toDouble(),
+        };
+      } else {
+        final recipeRaw =
+            await getItemRecipe(widget.itemId, variantId: widget.variantId);
+        final recipe = recipeRaw
+            .map((j) => RecipeRow.fromJson(j as Map<String, dynamic>))
+            .toList();
+        // Stored quantity is in the material's stock unit; show it in the entry
+        // unit (kg -> g, L -> ml) so a plate reads as "250" not "0.25".
+        byId = {for (final r in recipe) r.rawMaterialId: r.quantity};
+      }
       for (final m in materials) {
         String text = '';
         if (byId.containsKey(m.id)) {
@@ -780,7 +806,7 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
     }
     setState(() => _saving = true);
     try {
-      await setItemRecipe(widget.itemId, rows);
+      await setItemRecipe(widget.itemId, rows, variantId: widget.variantId);
       if (mounted) Navigator.pop(context);
     } on ApiException catch (e) {
       if (mounted) {
@@ -1131,7 +1157,12 @@ class _RecipeEditorDialogState extends ConsumerState<RecipeEditorDialog> {
     return AlertDialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      title: Text(l10n.itemsRecipeTitle(widget.itemName),
+      // "Recipe · Chicken 65 (Full)" for a size — reuses the existing key's
+      // placeholder rather than needing a second one.
+      title: Text(
+          l10n.itemsRecipeTitle(widget.variantLabel == null
+              ? widget.itemName
+              : '${widget.itemName} (${widget.variantLabel})'),
           maxLines: 1, overflow: TextOverflow.ellipsis),
       content: SizedBox(
         width: 560,

@@ -261,7 +261,7 @@ describe('POST /api/items', () => {
       .set(authHeader({ role: 'owner' }))
       .send({ name: 'Rice', price: 50, low_stock_threshold: -1 });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/low_stock_threshold/i);
+    expect(res.body.error).toMatch(/low stock/i);
   });
 
   test('returns 409 (not 500) when the barcode is already taken', async () => {

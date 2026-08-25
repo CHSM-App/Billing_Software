@@ -2,8 +2,13 @@ const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
+const { validateNumber, validateText, validateEnum } = require('../validate');
 
 const router = express.Router();
+
+// Units a raw material can be stocked in. The value drives the recipe entry
+// conversion (kg -> g, litre -> ml), so an unknown one would skip it silently.
+const VALID_RM_UNITS = ['piece', 'kg', 'g', 'litre', 'ml'];
 
 function ownerOnly(req, res, next) {
   if (req.user.role !== 'owner') {
@@ -39,9 +44,11 @@ router.get('/', requireAuth, async (req, res) => {
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
   const { name, unit, stock_quantity, low_stock_threshold } = req.body;
 
-  if (!name || !String(name).trim()) {
-    return res.status(400).json({ error: 'name is required' });
-  }
+  const invalid = validateText(name, 'Name', 200, { required: true })
+    || validateEnum(unit, 'Unit', VALID_RM_UNITS)
+    || validateNumber(stock_quantity, 'Stock')
+    || validateNumber(low_stock_threshold, 'Low stock alert');
+  if (invalid) return res.status(400).json({ error: invalid });
 
   try {
     await poolConnect;
@@ -70,6 +77,15 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   if (name === undefined && unit === undefined && stock_quantity === undefined && low_stock_threshold === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
+  // Same rules as create — this route had none, so an edit could set a negative
+  // stock or an unknown unit where a create could not.
+  const invalid = (name !== undefined
+        ? validateText(name, 'Name', 200, { required: true })
+        : null)
+    || validateEnum(unit, 'Unit', VALID_RM_UNITS)
+    || validateNumber(stock_quantity, 'Stock')
+    || validateNumber(low_stock_threshold, 'Low stock alert');
+  if (invalid) return res.status(400).json({ error: invalid });
 
   try {
     await poolConnect;

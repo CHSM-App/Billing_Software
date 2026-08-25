@@ -143,18 +143,30 @@ class PricelessLineError extends Error {
   }
 }
 
-// Load recipe rows for a set of line items, keyed by item_id. Each entry is a
-// list of { raw_material_id, quantity, stock_quantity, low_stock_threshold, name }.
+// Key a recipe lookup by the line it belongs to.
+//
+// An item WITHOUT sizes keeps its recipe on the item itself (variant_id NULL);
+// an item WITH sizes carries one per size. A line therefore matches exactly one
+// set of rows and there is no merging: a sized line NEVER falls back to the
+// item-level rows, mirroring the price rule (a sized item's own price is
+// meaningless — see migration 031).
+const recipeKey = (itemId, variantId) => `${itemId}|${variantId || ''}`;
+
+// Load recipe rows for a set of line items, keyed by (item_id, variant_id). Each
+// entry is a list of { raw_material_id, quantity, stock_quantity, low_stock_threshold, name }.
 // Rows are read inside the transaction so raw-material stock is consistent with
 // the deductions that follow.
 async function loadRecipeMap(transaction, businessId, items) {
   const itemIds = [...new Set(items.map((i) => i.item_id).filter(Boolean))];
   if (itemIds.length === 0) return {};
   const { clause, bind } = inParams(itemIds);
+  // Fetching by item pulls every size's rows for that item — a few extra rows,
+  // but it keeps the predicate simple and avoids a composite IN whose NULL
+  // matching is easy to get wrong.
   const result = await bind(transaction.request())
     .input('business_id', sql.UniqueIdentifier, businessId)
     .query(`
-      SELECT ir.item_id, ir.raw_material_id, ir.quantity,
+      SELECT ir.item_id, ir.variant_id, ir.raw_material_id, ir.quantity,
              rm.name, rm.stock_quantity, rm.low_stock_threshold
       FROM item_recipes ir
       JOIN raw_materials rm ON rm.id = ir.raw_material_id
@@ -164,7 +176,8 @@ async function loadRecipeMap(transaction, businessId, items) {
     `);
   const map = {};
   for (const row of result.recordset) {
-    (map[row.item_id] = map[row.item_id] || []).push(row);
+    const k = recipeKey(row.item_id, row.variant_id);
+    (map[k] = map[k] || []).push(row);
   }
   return map;
 }
@@ -226,8 +239,9 @@ function checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap) {
       requested[key] = (requested[key] || 0) + parseFloat(li.quantity);
     }
 
-    // Recipe raw materials consumed by this line's item.
-    const rows = recipeMap[li.item_id] || [];
+    // Recipe raw materials consumed by this line's item — or, when the line
+    // names a size, by that size specifically.
+    const rows = recipeMap[recipeKey(li.item_id, li.variant_id)] || [];
     for (const r of rows) {
       const key = `rm:${r.raw_material_id}`;
       setAvail(key, r.stock_quantity, r.name);
@@ -245,18 +259,23 @@ function checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap) {
   return out;
 }
 
-// Deduct every raw-material line in an item's recipe. `recipeMap` is keyed by
-// item_id -> [{ raw_material_id, quantity, stock_quantity }]. Returns true when
-// all raw materials had enough stock (or were untracked), false on any shortfall.
+// Deduct every raw-material line in this line's recipe. `recipeMap` is keyed by
+// recipeKey(item_id, variant_id) -> [{ raw_material_id, quantity, stock_quantity }].
+// Returns true when all raw materials had enough stock (or were untracked),
+// false on any shortfall.
 async function decrementRecipe(transaction, li, recipeMap) {
-  const rows = recipeMap[li.item_id];
+  const rows = recipeMap[recipeKey(li.item_id, li.variant_id)];
   if (!rows || rows.length === 0) return true;
   for (const r of rows) {
     if (r.stock_quantity == null) continue; // untracked raw material
     const used = parseFloat(r.quantity) * parseFloat(li.quantity);
     const upd = await transaction.request()
       .input('id', sql.UniqueIdentifier, r.raw_material_id)
-      .input('qty', sql.Decimal(10, 2), used)
+      // Decimal(12,4), matching item_recipes.quantity (widened by migration 020
+      // for exactly this reason). At (10,2) a 0.005 kg pinch truncated to 0.00
+      // and deducted nothing — and restoreLineStock must round identically or
+      // every void would leak stock.
+      .input('qty', sql.Decimal(12, 4), used)
       .query(`
         UPDATE raw_materials
         SET stock_quantity = stock_quantity - @qty
@@ -284,17 +303,29 @@ async function restoreLineStock(transaction, businessId, li) {
       .query('UPDATE items SET stock_quantity = stock_quantity + @qty WHERE id = @item_id AND business_id = @business_id AND stock_quantity IS NOT NULL');
   }
 
-  // Restore recipe raw materials, if this item consumes any.
+  // Restore recipe raw materials, if this line consumes any.
+  //
+  // The variant predicate is essential. This is a set-based UPDATE that
+  // re-derives quantities straight from the table rather than from the
+  // preloaded map, so without it a void would restore the item-level rows AND
+  // every size's rows at once — silently crediting stock several times over.
+  // `= @variant_id` alone would never match NULL, hence the explicit IS NULL arm.
   if (li.item_id) {
     await transaction.request()
       .input('item_id', sql.UniqueIdentifier, li.item_id)
-      .input('qty', sql.Decimal(10, 2), li.quantity)
+      .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
+      // Must match decrementRecipe's binding exactly, or a void returns a
+      // different amount than the sale removed.
+      .input('qty', sql.Decimal(12, 4), li.quantity)
       .query(`
         UPDATE rm
         SET rm.stock_quantity = rm.stock_quantity + (ir.quantity * @qty)
         FROM raw_materials rm
         JOIN item_recipes ir ON ir.raw_material_id = rm.id
-        WHERE ir.item_id = @item_id AND rm.stock_quantity IS NOT NULL
+        WHERE ir.item_id = @item_id
+          AND ((@variant_id IS NULL AND ir.variant_id IS NULL)
+               OR ir.variant_id = @variant_id)
+          AND rm.stock_quantity IS NOT NULL
       `);
   }
 }

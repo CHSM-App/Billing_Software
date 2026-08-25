@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.3:5000/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
           
@@ -621,15 +621,25 @@ Future<void> deleteRawMaterial(String id) async {
 }
 
 /// The recipe (raw-material consumption) for a sellable item.
-Future<List<dynamic>> getItemRecipe(String itemId) async {
-  return _parse(await _authGet(Uri.parse('$baseUrl/items/$itemId/recipe')));
+///
+/// Pass [variantId] to read one size's recipe instead. An item WITHOUT sizes
+/// keeps its recipe on the item; an item WITH sizes carries one per size, and a
+/// sized line never falls back to the item's.
+Future<List<dynamic>> getItemRecipe(String itemId, {String? variantId}) async {
+  final path = variantId == null
+      ? '$baseUrl/items/$itemId/recipe'
+      : '$baseUrl/items/$itemId/variants/$variantId/recipe';
+  return _parse(await _authGet(Uri.parse(path)));
 }
 
-/// Replaces an item's whole recipe. [rows] is a list of
-/// `{ raw_material_id, quantity }`.
-Future<void> setItemRecipe(String itemId, List<Map<String, dynamic>> rows) async {
-  _parse(await _authPut(Uri.parse('$baseUrl/items/$itemId/recipe'),
-      body: jsonEncode({'rows': rows})));
+/// Replaces one whole recipe — the item's, or [variantId]'s when given. [rows]
+/// is a list of `{ raw_material_id, quantity }`.
+Future<void> setItemRecipe(String itemId, List<Map<String, dynamic>> rows,
+    {String? variantId}) async {
+  final path = variantId == null
+      ? '$baseUrl/items/$itemId/recipe'
+      : '$baseUrl/items/$itemId/variants/$variantId/recipe';
+  _parse(await _authPut(Uri.parse(path), body: jsonEncode({'rows': rows})));
 }
 
 // ---------------------------------------------------------------------------

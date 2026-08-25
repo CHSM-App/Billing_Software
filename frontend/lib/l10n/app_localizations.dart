@@ -4406,6 +4406,42 @@ abstract class AppLocalizations {
   /// **'Manage recipe (raw materials)'**
   String get itemsManageRecipe;
 
+  /// No description provided for @itemsVariantRecipeTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Recipe for {label}'**
+  String itemsVariantRecipeTooltip(String label);
+
+  /// No description provided for @itemsVariantRecipeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Each size has its own recipe. A size without one consumes no raw materials.'**
+  String get itemsVariantRecipeHint;
+
+  /// No description provided for @itemsRecipeCopyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy recipe to this size?'**
+  String get itemsRecipeCopyTitle;
+
+  /// No description provided for @itemsRecipeCopyBody.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} already has a recipe. Copy it to this size as a starting point? Once an item has sizes, only each size\'s own recipe is used.'**
+  String itemsRecipeCopyBody(String name);
+
+  /// No description provided for @itemsRecipeCopyConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get itemsRecipeCopyConfirm;
+
+  /// No description provided for @itemsRecipeStartEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Start empty'**
+  String get itemsRecipeStartEmpty;
+
   /// No description provided for @itemsRecipeTitle.
   ///
   /// In en, this message translates to:

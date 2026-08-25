@@ -2473,6 +2473,29 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsManageRecipe => 'पाककृती व्यवस्थापित करा (कच्चा माल)';
 
   @override
+  String itemsVariantRecipeTooltip(String label) {
+    return '$label साठी पाककृती';
+  }
+
+  @override
+  String get itemsVariantRecipeHint =>
+      'प्रत्येक आकाराची स्वतःची पाककृती असते. पाककृती नसलेला आकार कच्चा माल वापरत नाही.';
+
+  @override
+  String get itemsRecipeCopyTitle => 'पाककृती या आकारासाठी कॉपी करायची?';
+
+  @override
+  String itemsRecipeCopyBody(String name) {
+    return '$name ला आधीच पाककृती आहे. ती या आकारासाठी सुरुवात म्हणून कॉपी करायची? वस्तूला आकार असल्यावर फक्त प्रत्येक आकाराची स्वतःची पाककृती वापरली जाते.';
+  }
+
+  @override
+  String get itemsRecipeCopyConfirm => 'कॉपी करा';
+
+  @override
+  String get itemsRecipeStartEmpty => 'रिकामे सुरू करा';
+
+  @override
   String itemsRecipeTitle(String name) {
     return 'पाककृती · $name';
   }

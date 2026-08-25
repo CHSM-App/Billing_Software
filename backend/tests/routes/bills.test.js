@@ -665,3 +665,131 @@ describe('PUT /api/bills/:id/update-items', () => {
     expect(res.status).toBe(400);
   });
 });
+
+// ------------------------------------------------------------------
+// Recipe deduction — per-size raw-material consumption
+//
+// An item WITHOUT sizes keeps its recipe on the item (variant_id NULL); an item
+// WITH sizes carries one per size. A sized line never falls back to the
+// item-level rows, so a half plate cannot consume a full plate's ingredients.
+// ------------------------------------------------------------------
+describe('POST /api/bills — recipe deduction', () => {
+  const VARIANT_ID = '11111111-1111-1111-1111-111111111111';
+  const RM_ID = '22222222-2222-2222-2222-222222222222';
+
+  /// Wires the transaction so loadRecipeMap returns [recipeRows], and records
+  /// every raw_materials UPDATE so a test can assert the deducted amount.
+  function billWithRecipe(recipeRows, { variantRows = [] } = {}) {
+    const deductions = [];
+    let call = 0;
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      return {
+        inputs,
+        input: jest.fn(function (name, _type, value) {
+          inputs[name] = value;
+          return this;
+        }),
+        query: jest.fn((sqlText) => {
+          call++;
+          if (/UPDATE raw_materials/.test(sqlText)) {
+            deductions.push({ id: inputs.id, qty: inputs.qty });
+            return Promise.resolve({ recordset: [], rowsAffected: [1] });
+          }
+          if (/FROM item_recipes/.test(sqlText)) {
+            return Promise.resolve({ recordset: recipeRows, rowsAffected: [recipeRows.length] });
+          }
+          if (/FROM item_variants/.test(sqlText)) {
+            return Promise.resolve({ recordset: variantRows, rowsAffected: [variantRows.length] });
+          }
+          if (/FROM businesses/.test(sqlText)) {
+            return Promise.resolve({
+              recordset: [{ inventory_enabled: true, gst_enabled: false }],
+              rowsAffected: [1],
+            });
+          }
+          if (/FROM items/.test(sqlText)) {
+            return Promise.resolve({ recordset: [sampleItem], rowsAffected: [1] });
+          }
+          if (/COUNT\(\*\) AS cnt/.test(sqlText)) {
+            return Promise.resolve({ recordset: [{ cnt: 0 }], rowsAffected: [1] });
+          }
+          if (/INSERT INTO bills/.test(sqlText)) {
+            return Promise.resolve({ recordset: [{ id: BILL_ID }], rowsAffected: [1] });
+          }
+          if (/UPDATE (items|item_variants)/.test(sqlText)) {
+            return Promise.resolve({ recordset: [], rowsAffected: [1] });
+          }
+          return Promise.resolve({ recordset: [], rowsAffected: [1] });
+        }),
+      };
+    });
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    return deductions;
+  }
+
+  test('an item with no sizes still deducts its item-level recipe', async () => {
+    // BACK-COMPAT: this is the guarantee for dishes that already have recipes.
+    const deductions = billWithRecipe([
+      { item_id: ITEM_ID, variant_id: null, raw_material_id: RM_ID,
+        quantity: 1.5, name: 'Rice', stock_quantity: 100, low_stock_threshold: null },
+    ]);
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 2 }], payment_mode: 'cash' });
+    expect(res.status).toBe(201);
+    // 2 × 1.5 = 3
+    expect(deductions).toEqual([{ id: RM_ID, qty: 3 }]);
+  });
+
+  test('a sized line uses its own size\'s recipe, not the item-level one', async () => {
+    // Both rows exist for the same material. Billing 2 × the size must deduct
+    // 2 × 0.5 = 1 — never the item-level 2 × 1.5, and never their sum.
+    const deductions = billWithRecipe(
+      [
+        { item_id: ITEM_ID, variant_id: null, raw_material_id: RM_ID,
+          quantity: 1.5, name: 'Rice', stock_quantity: 100, low_stock_threshold: null },
+        { item_id: ITEM_ID, variant_id: VARIANT_ID, raw_material_id: RM_ID,
+          quantity: 0.5, name: 'Rice', stock_quantity: 100, low_stock_threshold: null },
+      ],
+      { variantRows: [{ id: VARIANT_ID, item_id: ITEM_ID, label: 'Half', price: 90, stock_quantity: 50 }] },
+    );
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({
+        items: [{ item_id: ITEM_ID, variant_id: VARIANT_ID, quantity: 2 }],
+        payment_mode: 'cash',
+      });
+    expect(res.status).toBe(201);
+    expect(deductions).toEqual([{ id: RM_ID, qty: 1 }]);
+  });
+
+  test('a sized line with no recipe of its own deducts nothing', async () => {
+    // Strict: no fallback to the item-level rows. If this ever starts falling
+    // back, a half plate silently consumes a full plate's ingredients.
+    const deductions = billWithRecipe(
+      [
+        { item_id: ITEM_ID, variant_id: null, raw_material_id: RM_ID,
+          quantity: 1.5, name: 'Rice', stock_quantity: 100, low_stock_threshold: null },
+      ],
+      { variantRows: [{ id: VARIANT_ID, item_id: ITEM_ID, label: 'Half', price: 90, stock_quantity: 50 }] },
+    );
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({
+        items: [{ item_id: ITEM_ID, variant_id: VARIANT_ID, quantity: 2 }],
+        payment_mode: 'cash',
+      });
+    expect(res.status).toBe(201);
+    expect(deductions).toEqual([]);
+  });
+});

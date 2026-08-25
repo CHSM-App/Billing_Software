@@ -1,0 +1,1091 @@
+<title>Vittam Server Spec</title>
+<style>
+  :root {
+    --ground:      #F6F7F7;
+    --surface:     #FFFFFF;
+    --surface-alt: #EDEFEF;
+    --ink:         #14191B;
+    --ink-soft:    #4E5A5C;
+    --ink-faint:   #7C8A8C;
+    --rule:        #D3D9D8;
+    --rule-strong: #A9B4B3;
+    --accent:      #0E6660;
+    --accent-soft: #DCEBE9;
+    --warn:        #8A5300;
+    --warn-soft:   #F7E9D2;
+    --alarm:       #A81F26;
+    --alarm-soft:  #F8DEDE;
+    --plate:       #FBFBF9;
+
+    --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+    --sans: ui-sans-serif, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #101414;
+      --surface:     #171D1D;
+      --surface-alt: #1E2626;
+      --ink:         #E7ECEB;
+      --ink-soft:    #A7B4B3;
+      --ink-faint:   #7A8887;
+      --rule:        #2B3534;
+      --rule-strong: #46534F;
+      --accent:      #4FBFB2;
+      --accent-soft: #16302E;
+      --warn:        #D9A24E;
+      --warn-soft:   #2E2415;
+      --alarm:       #E8767C;
+      --alarm-soft:  #331A1C;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #101414;
+    --surface:     #171D1D;
+    --surface-alt: #1E2626;
+    --ink:         #E7ECEB;
+    --ink-soft:    #A7B4B3;
+    --ink-faint:   #7A8887;
+    --rule:        #2B3534;
+    --rule-strong: #46534F;
+    --accent:      #4FBFB2;
+    --accent-soft: #16302E;
+    --warn:        #D9A24E;
+    --warn-soft:   #2E2415;
+    --alarm:       #E8767C;
+    --alarm-soft:  #331A1C;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 24px 96px;
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 0 56px;
+    align-items: start;
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    grid-column: 1 / -1;
+    border-bottom: 2px solid var(--ink);
+    padding: 56px 0 20px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px 40px;
+  }
+  .masthead h1 {
+    font-size: clamp(30px, 4.6vw, 46px);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+    margin: 6px 0 0;
+    text-wrap: balance;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+  .masthead .stamp {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.9;
+    color: var(--ink-soft);
+    text-align: right;
+    white-space: nowrap;
+  }
+  .masthead .stamp b { color: var(--ink); font-weight: 600; }
+
+  .lede {
+    grid-column: 1 / -1;
+    max-width: 68ch;
+    color: var(--ink-soft);
+    font-size: 17px;
+    margin: 22px 0 0;
+  }
+
+  /* ---------- provenance key ---------- */
+  .key {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 24px 0 8px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .chip {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 2px;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .chip.verified { background: var(--accent-soft); color: var(--accent); }
+  .chip.input    { background: var(--warn-soft);   color: var(--warn); }
+  .chip.risk     { background: var(--alarm-soft);  color: var(--alarm); }
+
+  /* ---------- index rail ---------- */
+  nav.rail {
+    position: sticky;
+    top: 28px;
+    padding-top: 44px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  nav.rail ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+  nav.rail a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    border-left: 2px solid transparent;
+    padding-left: 8px;
+    margin-left: -10px;
+  }
+  nav.rail a:hover, nav.rail a:focus-visible {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    outline: none;
+  }
+  nav.rail .n { color: var(--ink-faint); }
+
+  /* ---------- sections ---------- */
+  main { padding-top: 44px; min-width: 0; }
+
+  section { padding-bottom: 52px; }
+  section + section { border-top: 1px solid var(--rule); padding-top: 44px; }
+
+  .head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .head .n {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h2 {
+    font-size: clamp(21px, 2.5vw, 27px);
+    letter-spacing: -0.018em;
+    font-weight: 650;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    margin: 34px 0 12px;
+  }
+  p { margin: 0 0 14px; max-width: 72ch; }
+  section > p:first-of-type { margin-top: 10px; }
+  ul { margin: 0 0 14px; padding-left: 20px; max-width: 72ch; }
+  li { margin-bottom: 7px; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.875em;
+    background: var(--surface-alt);
+    padding: 1px 5px;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+  strong { font-weight: 650; }
+  a { color: var(--accent); }
+
+  /* ---------- tables ---------- */
+  .scroll { overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 480px; }
+  th, td {
+    text-align: left;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    background: var(--surface-alt);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.m, th.m { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+
+  /* ---------- callouts ---------- */
+  .note {
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--ink-faint);
+    background: var(--surface);
+    padding: 14px 18px;
+    margin: 0 0 18px;
+    font-size: 14.5px;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  .note .label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 5px;
+    color: var(--ink-faint);
+  }
+  .note.ask   { border-left-color: var(--warn);  }
+  .note.ask   .label { color: var(--warn); }
+  .note.stop  { border-left-color: var(--alarm); background: var(--alarm-soft); }
+  .note.stop  .label { color: var(--alarm); }
+  .note.stop  code { background: rgba(127,127,127,0.18); }
+
+  pre.cmd {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    background: var(--surface-alt);
+    border: 1px solid var(--rule);
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 0 0 18px;
+    color: var(--ink);
+  }
+
+  /* ---------- diagrams: pure CSS, no runtime ---------- */
+  .dgm {
+    border: 1px solid var(--rule-strong);
+    background: var(--surface-alt);
+    padding: 20px;
+    margin: 0 0 10px;
+    display: grid;
+    gap: 0;
+  }
+
+  .tier {
+    border: 1px solid var(--rule-strong);
+    background: var(--ground);
+    padding: 11px 12px 12px;
+  }
+  .tier-label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    margin-bottom: 9px;
+  }
+  .tier.emphasis { border-color: var(--accent); border-width: 2px; }
+  .tier.emphasis .tier-label { color: var(--accent); }
+
+  .nodes { display: flex; flex-wrap: wrap; gap: 10px; }
+  .node {
+    flex: 1 1 170px;
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--rule-strong);
+    padding: 9px 11px;
+  }
+  .node b { display: block; font-size: 13.5px; font-weight: 650; line-height: 1.35; }
+  .node span {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.6;
+    color: var(--ink-faint);
+    margin-top: 3px;
+    word-break: break-word;
+  }
+  .node.key { border-left-color: var(--accent); }
+  .node.ext { border-left-color: var(--warn); }
+
+  .flow {
+    display: grid;
+    justify-items: center;
+    gap: 3px;
+    padding: 7px 0;
+  }
+  .flow .line { width: 1px; height: 12px; background: var(--rule-strong); }
+  .flow .edge {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 3px 9px;
+    text-align: center;
+  }
+  .flow .arrow { font-size: 11px; color: var(--rule-strong); line-height: 1; }
+
+  .chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .chain .step {
+    flex: 1 1 130px;
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--rule-strong);
+    padding: 9px 11px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .chain .step em {
+    display: block;
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 4px;
+  }
+  .chain .step.key  { border-top-color: var(--accent); }
+  .chain .step.warn { border-top-color: var(--warn); }
+  .chain .sep {
+    align-self: center;
+    font-family: var(--mono);
+    color: var(--rule-strong);
+    font-size: 14px;
+    flex: 0 0 auto;
+  }
+
+  .caption {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.05em;
+    margin: 0 0 24px;
+  }
+
+  footer {
+    grid-column: 1 / -1;
+    border-top: 2px solid var(--ink);
+    padding-top: 18px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    line-height: 1.9;
+  }
+
+  @media (max-width: 880px) {
+    .shell { grid-template-columns: minmax(0, 1fr); }
+    nav.rail { position: static; padding-top: 32px; border-bottom: 1px solid var(--rule); padding-bottom: 24px; }
+    nav.rail ol { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    main { padding-top: 32px; }
+    .masthead .stamp { text-align: left; }
+  }
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">Infrastructure handover &middot; for server sizing</p>
+      <h1>Vittam Server Spec</h1>
+    </div>
+    <div class="stamp">
+      APP <b>Vittam</b> &nbsp;v1.1.10+22<br>
+      DOMAIN <b>vittam.vengurlatech.com</b><br>
+      COMPILED <b>2026-08-21</b>
+    </div>
+  </header>
+
+  <p class="lede">
+    Everything in this document that could be read out of the repository has been read out of the
+    repository. Everything that lives only on the running host or in the hosting panel is marked and
+    left blank &mdash; with the exact command to fill it in. Hand this to the server vendor as-is.
+  </p>
+
+  <div class="key">
+    <span class="chip verified">Verified from code</span>
+    <span class="chip input">Needs a measurement</span>
+    <span class="chip risk">Blocker / risk</span>
+  </div>
+
+  <nav class="rail" aria-label="Contents">
+    <ol>
+      <li><a href="#s1"><span class="n">01</span><span>Architecture</span></a></li>
+      <li><a href="#s2"><span class="n">02</span><span>Deployment</span></a></li>
+      <li><a href="#s3"><span class="n">03</span><span>Database</span></a></li>
+      <li><a href="#s4"><span class="n">04</span><span>Network</span></a></li>
+      <li><a href="#s5"><span class="n">05</span><span>Sizing</span></a></li>
+      <li><a href="#s6"><span class="n">06</span><span>Peak load</span></a></li>
+      <li><a href="#s7"><span class="n">07</span><span>DR / backup</span></a></li>
+      <li><a href="#s8"><span class="n">08</span><span>Dependencies</span></a></li>
+      <li><a href="#s9"><span class="n">09</span><span>SSL</span></a></li>
+      <li><a href="#s10"><span class="n">10</span><span>Cutover</span></a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <!-- 01 -->
+    <section id="s1">
+      <div class="head"><span class="n">01</span><h2>Current architecture</h2><span class="chip verified">Verified from code</span></div>
+      <p>
+        One Node.js process does everything: it serves the REST API, the marketing site, the public
+        receipt pages, the internal admin dashboard, and the WebSocket channel. There is no
+        load balancer, no cache tier, no queue, and no second instance. The database is the only
+        component that already lives on separate hardware.
+      </p>
+
+      <div class="dgm">
+        <div class="tier">
+          <span class="tier-label">Clients</span>
+          <div class="nodes">
+            <div class="node"><b>Flutter app</b><span>Android · Windows desktop · iOS</span></div>
+            <div class="node"><b>Browser</b><span>landing page · public receipt links</span></div>
+          </div>
+        </div>
+
+        <div class="flow">
+          <span class="line"></span>
+          <span class="edge">HTTPS 443 → /api · / · /receipt&nbsp;&nbsp;|&nbsp;&nbsp;WSS 443 → /ws</span>
+          <span class="arrow">▼</span>
+        </div>
+
+        <div class="tier emphasis">
+          <span class="tier-label">Application host — one Windows Server VM</span>
+          <div class="nodes">
+            <div class="node key"><b>IIS + iisnode</b><span>TLS termination · reverse proxy</span></div>
+            <div class="node key"><b>Node 20 · Express 5</b><span>ONE process · API + WS + SPA + admin</span></div>
+            <div class="node"><b>Local disk</b><span>uploads/ · logs/ · public/</span></div>
+          </div>
+        </div>
+
+        <div class="flow">
+          <span class="arrow">▼</span>
+          <span class="edge">outbound only — nothing below is hosted by you</span>
+          <span class="line"></span>
+        </div>
+
+        <div class="tier">
+          <span class="tier-label">External services</span>
+          <div class="nodes">
+            <div class="node ext"><b>MS SQL Server</b><span>remote host · TDS port 5691</span></div>
+            <div class="node ext"><b>Firebase</b><span>FCM push · Remote Config · 443</span></div>
+            <div class="node ext"><b>SMSala</b><span>api2.smsala.com · OTP + bill links · 443</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Fig. 1 &mdash; runtime topology. Everything above the external tier runs on one machine.</p>
+
+      <h3>What the single process is responsible for</h3>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Surface</th><th>Path</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>REST API</td><td class="m">/api/*</td><td>19 route modules: auth, bills, items, tables, kitchen, reports, expenses, staff, credit, licence, raw materials, recurring expenses, FCM, audit, account, businesses, public orders, receipts, admin</td></tr>
+          <tr><td>Real-time</td><td class="m">/ws</td><td>WebSocket, JWT-authenticated on connect, one open socket per logged-in device, broadcast grouped by <code>business_id</code>. Drives kitchen/tables/drafts refresh.</td></tr>
+          <tr><td>Marketing site</td><td class="m">/</td><td>React + Vite SPA, built by CI into <code>backend/public/</code> (~20&nbsp;MB incl. the Windows app download)</td></tr>
+          <tr><td>Customer receipts</td><td class="m">/receipt/*</td><td>Public, unauthenticated. Links already sent to real customers over WhatsApp.</td></tr>
+          <tr><td>Item photos</td><td class="m">/uploads/*</td><td>Static from <code>backend/uploads/</code>, <strong>outside</strong> the deploy directory on purpose &mdash; CI force-pushes over <code>public/</code></td></tr>
+          <tr><td>Admin dashboard</td><td class="m">/admin/&lt;slug&gt;</td><td>Internal, gated by a secret URL slug plus a separate admin JWT</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>Application-layer constraints already coded in</h3>
+      <ul>
+        <li><strong>Stateful in one place:</strong> WebSocket connections are held in an in-process <code>Map</code>. Two app instances behind a naive load balancer would each only reach half the devices. Horizontal scaling needs sticky sessions or a shared pub/sub &mdash; not currently built.</li>
+        <li><strong>Rate limit:</strong> 200 requests per IP per 15 minutes, with <code>trust proxy = 1</code>. Any new proxy/CDN in front must forward <code>X-Forwarded-For</code> or every user gets bucketed together.</li>
+        <li><strong>DB pool:</strong> max 20 connections in production, 15&nbsp;s connect timeout, 30&nbsp;s query timeout.</li>
+        <li><strong>Sessions:</strong> JWT access tokens (8&nbsp;h &mdash; the comment in <code>.env</code> still says 15 min; the code says 8h) + refresh tokens (30&nbsp;days, stored in the DB). No server-side session store, so a host restart does not log anyone out.</li>
+      </ul>
+    </section>
+
+    <!-- 02 -->
+    <section id="s2">
+      <div class="head"><span class="n">02</span><h2>Application deployment</h2><span class="chip verified">Verified from code</span></div>
+      <p>
+        Deployment is pull-based and Git-driven. GitHub Actions builds a fully self-contained backend
+        folder &mdash; production <code>node_modules</code> and the compiled landing page included &mdash; and
+        force-pushes it as an orphan commit to a branch called <code>backend</code>. The server takes its code
+        from that branch. <strong>The build server never needs npm, Node, or a toolchain.</strong>
+      </p>
+
+      <div class="dgm">
+        <div class="tier">
+          <span class="tier-label">Every push — backend + site deploy</span>
+          <div class="chain">
+            <div class="step"><em>trigger</em>git push (any branch)</div>
+            <span class="sep">→</span>
+            <div class="step"><em>GitHub Actions</em>Jest + Supertest, flutter test</div>
+            <span class="sep">→</span>
+            <div class="step"><em>build</em>vite build → backend/public/</div>
+            <span class="sep">→</span>
+            <div class="step"><em>bundle</em>npm ci --omit=dev</div>
+            <span class="sep">→</span>
+            <div class="step key"><em>publish</em>force-push orphan → branch <code>backend</code></div>
+            <span class="sep">→</span>
+            <div class="step key"><em>server</em>pulls branch into IIS site root</div>
+          </div>
+        </div>
+
+        <div class="flow">
+          <span class="line"></span>
+          <span class="edge">separate pipeline — tag push only</span>
+          <span class="arrow">▼</span>
+        </div>
+
+        <div class="tier">
+          <span class="tier-label">On tag v* — client releases</span>
+          <div class="chain">
+            <div class="step"><em>trigger</em>git tag v*</div>
+            <span class="sep">→</span>
+            <div class="step"><em>build</em>Windows .zip (VS 2022)</div>
+            <span class="sep">→</span>
+            <div class="step"><em>re-sync</em>backend branch with fresh download</div>
+            <span class="sep">→</span>
+            <div class="step"><em>build</em>Android APK + AAB</div>
+            <span class="sep">→</span>
+            <div class="step"><em>ship</em>GitHub Release</div>
+            <span class="sep">→</span>
+            <div class="step warn"><em>manual only</em>Play Store upload</div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Fig. 2 &mdash; CI/CD. Play Store upload is always manually triggered, never automatic.</p>
+
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Component</th><th>Built by</th><th>Lands on</th><th>Cadence</th></tr></thead>
+        <tbody>
+          <tr><td>Backend API</td><td class="m">GitHub Actions</td><td>App server, from branch <code>backend</code></td><td>Every push to any branch</td></tr>
+          <tr><td>Landing page</td><td class="m">Vite</td><td>Same server, <code>backend/public/</code></td><td>Same push</td></tr>
+          <tr><td>Android APK / AAB</td><td class="m">GitHub Actions</td><td>GitHub Release &rarr; Play Store</td><td>On <code>v*</code> tag; Play upload manual</td></tr>
+          <tr><td>Windows desktop</td><td class="m">GitHub Actions (VS 2022)</td><td>GitHub Release + site download</td><td>On <code>v*</code> tag</td></tr>
+          <tr><td>DB schema</td><td class="m">—</td><td>SQL Server</td><td><strong>Manual</strong>: <code>npm run migrate:up</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="note ask">
+        <span class="label">Confirm on the current host</span>
+        <p>The repository shows what CI produces but not how the server consumes it. Confirm whether the
+        <code>backend</code> branch is pulled by a Plesk Git hook, a scheduled task, or by hand &mdash; and whether
+        anything restarts the Node process afterwards. <code>web.config</code> sets
+        <code>watchedFiles="src\*.js"</code>, so iisnode recycles itself on a source change; a
+        dependency-only change may not trigger it.</p>
+      </div>
+
+      <h3>Runtime host configuration (from <code>web.config</code>)</h3>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Setting</th><th class="m">Value</th><th>Implication for the new server</th></tr></thead>
+        <tbody>
+          <tr><td>Host model</td><td class="m">IIS + iisnode</td><td>Windows Server today. The app code itself is OS-agnostic &mdash; see §10.</td></tr>
+          <tr><td>Node processes per app</td><td class="m">1</td><td>Single-threaded. Extra vCPUs help IIS and TLS, not app throughput.</td></tr>
+          <tr><td>Max concurrent requests / process</td><td class="m">1024</td><td>Named-pipe queue depth between IIS and Node</td></tr>
+          <tr><td>Named pipe pool</td><td class="m">512</td><td>&mdash;</td></tr>
+          <tr><td>Node binary path</td><td class="m">C:\Program Files\nodejs\node.exe</td><td>Hard-coded. Must exist at that exact path, or edit <code>web.config</code>.</td></tr>
+          <tr><td>Temp directory</td><td class="m">C:\Inetpub\vhosts\vengurlatech.com\tmp</td><td>Hard-coded Plesk path. Must be updated on any move.</td></tr>
+          <tr><td>iisnode log cap</td><td class="m">20 files &times; 10&nbsp;MB = 100&nbsp;MB</td><td>Plus the app's own pino logs &mdash; see §5</td></tr>
+          <tr><td>Listen</td><td class="m">0.0.0.0 : PORT (5000 in dev)</td><td>Behind IIS the port comes from the named pipe, not TCP</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <!-- 03 -->
+    <section id="s3">
+      <div class="head"><span class="n">03</span><h2>Database inventory</h2><span class="chip verified">Verified from code</span></div>
+      <p>
+        One database, Microsoft SQL Server, currently on a <strong>third-party shared host</strong>
+        (<code>winsome.grabweb.in</code>, non-standard port <code>5691</code>) rather than on the app server.
+        18 tables, 33 forward migrations applied in order, each with a matching rollback script.
+      </p>
+
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Property</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>Engine</td><td class="m">Microsoft SQL Server (driver: <code>mssql</code> / Tedious)</td></tr>
+          <tr><td>Databases</td><td class="m">1</td></tr>
+          <tr><td>Tables</td><td class="m">18</td></tr>
+          <tr><td>Migrations</td><td class="m">33 up + 33 down &mdash; latest <code>032_variant_recipes</code></td></tr>
+          <tr><td>Connection</td><td class="m">Remote, TDS over TCP, port 5691, TLS on</td></tr>
+          <tr><td>Pool</td><td class="m">max 20 (prod) / 5 (dev), idle timeout 30&nbsp;s</td></tr>
+          <tr><td>Multi-tenancy</td><td class="m">Single DB, row-scoped by <code>business_id</code></td></tr>
+          <tr><td>Current size</td><td class="m"><span class="chip input">Needs a measurement</span></td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>Tables by function</h3>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Group</th><th>Tables</th><th>Growth</th></tr></thead>
+        <tbody>
+          <tr><td>Tenancy &amp; identity</td><td class="m">businesses, users, refresh_tokens, login_logs</td><td>Slow. <code>refresh_tokens</code> and <code>login_logs</code> grow per login &mdash; check they are pruned.</td></tr>
+          <tr><td>Catalogue</td><td class="m">items, item_variants, raw_materials, item_recipes</td><td>Slow, bounded by catalogue size</td></tr>
+          <tr><td>Transactions</td><td class="m">bills, bill_items, tables</td><td><strong>Primary growth driver.</strong> Scales with tenants &times; bills/day &times; lines/bill.</td></tr>
+          <tr><td>Money out</td><td class="m">expenses, recurring_expenses</td><td>Moderate</td></tr>
+          <tr><td>Licensing</td><td class="m">subscriptions, account_deletion_requests</td><td>Slow</td></tr>
+          <tr><td>Messaging</td><td class="m">fcm_tokens, whatsapp_otp_log</td><td>Moderate. <code>whatsapp_otp_log</code> grows per OTP &mdash; a retention policy is worth setting.</td></tr>
+          <tr><td>Compliance</td><td class="m">audit_logs</td><td><strong>Unbounded by design.</strong> Size this deliberately or add archiving.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="note ask">
+        <span class="label">Run this against the live DB and paste the output</span>
+        <pre class="cmd">-- Size on disk, per table
+SELECT t.name,
+       p.rows,
+       SUM(a.total_pages) * 8 / 1024 AS total_mb
+FROM sys.tables t
+JOIN sys.indexes i      ON t.object_id = i.object_id
+JOIN sys.partitions p   ON i.object_id = p.object_id AND i.index_id = p.index_id
+JOIN sys.allocation_units a ON p.partition_id = a.container_id
+GROUP BY t.name, p.rows
+ORDER BY total_mb DESC;
+
+-- Total DB size + growth headroom
+SELECT name, size * 8 / 1024 AS size_mb, max_size, growth
+FROM sys.database_files;</pre>
+      </div>
+
+      <div class="note stop">
+        <span class="label">Licensing question that changes the quote</span>
+        <p>Ask the vendor which SQL Server edition is being proposed. <strong>Express</strong> is free but caps
+        at 10&nbsp;GB per database, 1.4&nbsp;GB buffer pool and 4 cores &mdash; workable at today's size, a
+        hard wall later. <strong>Standard</strong> is licensed per core and is a material cost. If the DB
+        moves onto the same VM as the app, its RAM must be budgeted separately from the app's.</p>
+      </div>
+    </section>
+
+    <!-- 04 -->
+    <section id="s4">
+      <div class="head"><span class="n">04</span><h2>Network diagram</h2><span class="chip verified">Verified from code</span></div>
+
+      <div class="dgm">
+        <div class="tier">
+          <span class="tier-label">Inbound — must be open to the public internet</span>
+          <div class="nodes">
+            <div class="node key"><b>TCP 443</b><span>HTTPS + WebSocket upgrade (wss)</span></div>
+            <div class="node key"><b>TCP 80</b><span>HTTPS redirect + Let's Encrypt challenge</span></div>
+          </div>
+        </div>
+
+        <div class="flow">
+          <span class="line"></span>
+          <span class="arrow">▼</span>
+        </div>
+
+        <div class="tier emphasis">
+          <span class="tier-label">Application VM</span>
+          <div class="nodes">
+            <div class="node key"><b>IIS → Node</b><span>single process · rate limit 200 req / 15 min / IP</span></div>
+          </div>
+        </div>
+
+        <div class="flow">
+          <span class="arrow">▼</span>
+          <span class="line"></span>
+        </div>
+
+        <div class="tier">
+          <span class="tier-label">Outbound — must be permitted by the firewall</span>
+          <div class="nodes">
+            <div class="node ext"><b>TCP 5691</b><span>winsome.grabweb.in — SQL Server / TDS</span></div>
+            <div class="node ext"><b>TCP 443</b><span>fcm.googleapis.com · oauth2.googleapis.com</span></div>
+            <div class="node ext"><b>TCP 443</b><span>api2.smsala.com</span></div>
+            <div class="node ext"><b>TCP 443</b><span>github.com — deploy pull</span></div>
+          </div>
+        </div>
+
+        <div class="flow">
+          <span class="line"></span>
+        </div>
+
+        <div class="tier">
+          <span class="tier-label">Management — restrict by source IP, never open to the world</span>
+          <div class="nodes">
+            <div class="node"><b>RDP 3389 or SSH 22</b><span>administration</span></div>
+            <div class="node"><b>Hosting panel port</b><span>Plesk or equivalent</span></div>
+          </div>
+        </div>
+      </div>
+      <p class="caption">Fig. 3 &mdash; firewall requirements. Nothing else needs to be reachable from outside.</p>
+
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Dir</th><th class="m">Port</th><th>Peer</th><th>Purpose</th><th>Breaks if blocked</th></tr></thead>
+        <tbody>
+          <tr><td>In</td><td class="m">443</td><td>Any</td><td>API, WebSocket, site, receipts</td><td>Everything</td></tr>
+          <tr><td>In</td><td class="m">80</td><td>Any</td><td>HTTPS redirect + Let's Encrypt challenge</td><td>Cert renewal</td></tr>
+          <tr><td>Out</td><td class="m">5691</td><td class="m">winsome.grabweb.in</td><td>SQL Server</td><td>Everything</td></tr>
+          <tr><td>Out</td><td class="m">443</td><td class="m">*.googleapis.com</td><td>FCM push, Remote Config</td><td>Push notifications, forced-update prompts</td></tr>
+          <tr><td>Out</td><td class="m">443</td><td class="m">api2.smsala.com</td><td>WhatsApp OTP, bill links, onboarding</td><td><strong>Login and signup</strong> &mdash; OTP is the auth path</td></tr>
+          <tr><td>Out</td><td class="m">443</td><td class="m">github.com</td><td>Deploy pull</td><td>Deployments only</td></tr>
+          <tr><td>Mgmt</td><td class="m">3389 / 22</td><td>Office IPs</td><td>Administration</td><td>&mdash;</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="note">
+        <span class="label">Non-negotiable at the edge</span>
+        <p><strong>WebSocket upgrade must survive the proxy.</strong> If the vendor puts a load balancer,
+        WAF, or CDN in front, it must pass <code>Upgrade</code>/<code>Connection</code> headers on <code>/ws</code> and
+        allow long-lived idle connections &mdash; the app heartbeats but idle timeouts under ~60&nbsp;s cause
+        reconnect storms. It must also forward <code>X-Forwarded-For</code>, or the rate limiter treats
+        every customer as one IP and locks the whole userbase out at 200 requests.</p>
+      </div>
+
+      <p>
+        Allowed browser origins are pinned in config, not wildcarded:
+        <code>https://vittam.vengurlatech.com</code> plus localhost dev ports. Mobile clients send no
+        <code>Origin</code> header and are always allowed.
+      </p>
+    </section>
+
+    <!-- 05 -->
+    <section id="s5">
+      <div class="head"><span class="n">05</span><h2>Current VM / container sizing</h2><span class="chip input">Needs a measurement</span></div>
+      <p>
+        The app currently runs in a <strong>Plesk shared-hosting vhost</strong> on Windows
+        (<code>C:\Inetpub\vhosts\vengurlatech.com</code>). There is no vCPU/RAM allocation recorded anywhere
+        in the codebase because the hosting plan defines it, not the app. Pull the plan's limits from
+        the Plesk panel or the hosting invoice.
+      </p>
+
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Resource</th><th>Today</th><th>Source of truth</th></tr></thead>
+        <tbody>
+          <tr><td>vCPU</td><td class="m">unknown</td><td>Plesk plan / hosting invoice</td></tr>
+          <tr><td>RAM</td><td class="m">unknown</td><td>Plesk plan / hosting invoice</td></tr>
+          <tr><td>Disk</td><td class="m">unknown total</td><td>Plesk plan</td></tr>
+          <tr><td>App payload on disk</td><td class="m">~20&nbsp;MB public + prod node_modules</td><td>Measured from repo</td></tr>
+          <tr><td>User uploads</td><td class="m">764&nbsp;KB and growing</td><td>Measured &mdash; <code>backend/uploads/</code></td></tr>
+          <tr><td>App logs</td><td class="m">72&nbsp;KB, daily rotation</td><td>Measured &mdash; <code>backend/logs/</code></td></tr>
+          <tr><td>iisnode logs</td><td class="m">100&nbsp;MB cap</td><td><code>web.config</code></td></tr>
+          <tr><td>Database</td><td class="m">separate host, size unknown</td><td>Query in §3</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>Recommended target sizing</h3>
+      <p>
+        Given a single-threaded Node process, a remote database, and no in-process caching, this
+        workload is small. Do not let a vendor upsell on core count &mdash; it buys nothing until the app
+        is clustered.
+      </p>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Tier</th><th class="m">vCPU</th><th class="m">RAM</th><th class="m">Disk</th><th>Fits</th></tr></thead>
+        <tbody>
+          <tr><td>Minimum viable</td><td class="num">2</td><td class="num">4 GB</td><td class="num">60 GB SSD</td><td>App only, DB stays remote</td></tr>
+          <tr><td><strong>Recommended</strong></td><td class="num">4</td><td class="num">8 GB</td><td class="num">100 GB SSD</td><td>App + headroom for a second process and log growth</td></tr>
+          <tr><td>App + SQL on one box</td><td class="num">4&ndash;8</td><td class="num">16 GB</td><td class="num">200 GB SSD</td><td>Only if you also bring the database in-house</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>
+        Prefer <strong>disk IOPS and single-core clock speed</strong> over core count. If the database is being
+        moved onto the same machine, add its RAM on top of the app's &mdash; SQL Server will consume
+        whatever it is allowed to, and must be capped explicitly with <code>max server memory</code>.
+      </p>
+    </section>
+
+    <!-- 06 -->
+    <section id="s6">
+      <div class="head"><span class="n">06</span><h2>Peak utilization metrics</h2><span class="chip input">Needs a measurement</span></div>
+      <p>
+        <strong>Not currently collected.</strong> The app emits structured pino logs but there is no metrics
+        agent, no APM, and no historical CPU/RAM series. Anything quoted without measuring would be
+        invented. Below is what to run, and what the workload's shape already tells you.
+      </p>
+
+      <h3>Collect for 7 days, then quote the 95th percentile</h3>
+      <pre class="cmd"># Windows — 5-minute samples to CSV, run as a scheduled task
+typeperf "\Processor(_Total)\% Processor Time" ^
+         "\Memory\Available MBytes" ^
+         "\Process(node)\% Processor Time" ^
+         "\Process(node)\Working Set - Private" ^
+         "\Web Service(_Total)\Current Connections" ^
+         -si 300 -o C:\perf\vittam.csv
+
+# SQL Server — top waits and buffer pressure
+SELECT TOP 20 wait_type, wait_time_ms, waiting_tasks_count
+FROM sys.dm_os_wait_stats ORDER BY wait_time_ms DESC;</pre>
+
+      <h3>Derive real peak concurrency from your own data</h3>
+      <p>
+        Bills carry timestamps, so the busiest minute the system has ever seen is already recorded. This
+        is more honest than a CPU graph for capacity planning:
+      </p>
+      <pre class="cmd">-- Busiest minute ever, and active businesses in it
+SELECT TOP 20
+       DATEADD(minute, DATEDIFF(minute, 0, created_at), 0) AS minute,
+       COUNT(*)                    AS bills,
+       COUNT(DISTINCT business_id) AS active_businesses
+FROM bills
+GROUP BY DATEADD(minute, DATEDIFF(minute, 0, created_at), 0)
+ORDER BY bills DESC;</pre>
+
+      <h3>Known load shape, without measuring</h3>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Dimension</th><th>Shape</th></tr></thead>
+        <tbody>
+          <tr><td>Traffic pattern</td><td>Sharply bimodal &mdash; Indian retail and restaurant meal times. Lunch and dinner peaks; near-zero overnight.</td></tr>
+          <tr><td>Persistent connections</td><td>One WebSocket per logged-in device, held open for the whole shift. Concurrency &asymp; devices online, not requests/sec.</td></tr>
+          <tr><td>Hard ceiling per user</td><td>200 requests / 15 min / IP. A whole restaurant behind one NAT shares that bucket.</td></tr>
+          <tr><td>DB concurrency ceiling</td><td>20 pooled connections. Query queueing shows up before CPU does.</td></tr>
+          <tr><td>CPU-heavy work</td><td>bcrypt on login, PDF/thermal receipt rendering. PDF generation happens <em>on the client</em>, not the server.</td></tr>
+          <tr><td>Memory profile</td><td>Flat. No in-process cache, no large buffers &mdash; image uploads stream to disk.</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <!-- 07 -->
+    <section id="s7">
+      <div class="head"><span class="n">07</span><h2>Existing DR / backup setup</h2><span class="chip risk">Blocker / risk</span></div>
+      <p>
+        <strong>There is no backup or disaster-recovery configuration in this repository</strong> &mdash; no backup
+        script, no scheduled job, no snapshot policy, no restore runbook. If backups exist, they are
+        provided silently by the shared host. Establish that before signing anything.
+      </p>
+
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Asset</th><th>Recoverable today?</th><th>If lost</th></tr></thead>
+        <tbody>
+          <tr><td>Application source</td><td><strong>Yes</strong> &mdash; GitHub</td><td>Nothing. Redeployable in minutes.</td></tr>
+          <tr><td>Deployed artefact</td><td><strong>Yes</strong> &mdash; branch <code>backend</code>, rebuildable</td><td>Nothing.</td></tr>
+          <tr><td>SQL database</td><td class="m">UNKNOWN &mdash; ask the host</td><td><strong>Total business loss.</strong> Every bill, item, user, and licence.</td></tr>
+          <tr><td>User uploads (<code>backend/uploads/</code>)</td><td><strong>No</strong> &mdash; not in Git, by design</td><td>All item photos. Silently broken image links.</td></tr>
+          <tr><td><code>backend/.env</code></td><td><strong>No</strong> &mdash; gitignored, correctly</td><td>App will not boot. JWT secrets lost &rarr; every user logged out.</td></tr>
+          <tr><td>Firebase service account</td><td><strong>No</strong> &mdash; gitignored</td><td>Push notifications and update prompts stop.</td></tr>
+          <tr><td>Android upload keystore</td><td>GitHub secret <code>KEYSTORE_BASE64</code></td><td><strong>Irrecoverable.</strong> Cannot ever update the Play Store listing. Keep a second offline copy.</td></tr>
+          <tr><td>Application logs</td><td>Local disk only</td><td>Audit trail for the current window</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="note ask">
+        <span class="label">Ask the vendor to quote against these</span>
+        <ul style="margin-bottom:0">
+          <li><strong>SQL:</strong> nightly full + hourly differential or log shipping, retained 30 days, stored off the app host. State the RPO in hours.</li>
+          <li><strong>Uploads directory:</strong> included in the file backup, or on object storage with versioning.</li>
+          <li><strong>VM snapshot:</strong> daily, retained 7 days &mdash; covers <code>.env</code> and the service account file.</li>
+          <li><strong>Restore drill:</strong> one documented, actually-executed restore before cutover. An untested backup is not a backup.</li>
+        </ul>
+      </div>
+
+      <div class="note stop">
+        <span class="label">Fix before handing this repo to anyone</span>
+        <p><code>backend/notes.txt</code> is <strong>committed to Git</strong> and contains a live
+        <code>ADMIN_SECRET</code> for the licence-activation endpoint. Rotate that secret and remove the
+        file from the working tree. Anyone with repository access can currently activate or extend
+        licences.</p>
+      </div>
+    </section>
+
+    <!-- 08 -->
+    <section id="s8">
+      <div class="head"><span class="n">08</span><h2>Application dependencies</h2><span class="chip verified">Verified from code</span></div>
+
+      <h3>Runtime &mdash; must exist on the server</h3>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Dependency</th><th class="m">Version</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>Node.js</td><td class="m">20 LTS</td><td>CI builds and tests against 20. Path hard-coded in <code>web.config</code>.</td></tr>
+          <tr><td>IIS + iisnode</td><td class="m">—</td><td>Current host model only. Replaceable &mdash; see §10.</td></tr>
+          <tr><td>Express</td><td class="m">5.2</td><td>Web framework</td></tr>
+          <tr><td>mssql / Tedious</td><td class="m">12.5</td><td>Pure JS &mdash; <strong>no native SQL client install needed</strong></td></tr>
+          <tr><td>ws</td><td class="m">8.21</td><td>WebSocket server</td></tr>
+          <tr><td>bcryptjs</td><td class="m">3.0</td><td>Pure JS &mdash; no compiler toolchain needed</td></tr>
+          <tr><td>jsonwebtoken</td><td class="m">9.0</td><td>Access + refresh tokens</td></tr>
+          <tr><td>firebase-admin</td><td class="m">12.0</td><td>Needs outbound HTTPS + the service-account JSON</td></tr>
+          <tr><td>pino / pino-http / pino-roll</td><td class="m">10 / 11 / 4</td><td>Writes rotating JSON logs to <code>backend/logs/</code></td></tr>
+          <tr><td>express-rate-limit</td><td class="m">8.5</td><td>In-memory store &mdash; resets on restart, not shared across instances</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>Whole dependency tree is pure JavaScript. <strong>No node-gyp, no Python, no C++ build tools.</strong></p>
+
+      <h3>External services &mdash; third-party, outside the vendor's control</h3>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Service</th><th>Used for</th><th>Failure impact</th></tr></thead>
+        <tbody>
+          <tr><td>MS SQL Server @ <code>winsome.grabweb.in</code></td><td>All persistence</td><td><strong>Total outage</strong></td></tr>
+          <tr><td>SMSala <code>api2.smsala.com</code></td><td>WhatsApp OTP, bill delivery, onboarding</td><td><strong>No login, no signup.</strong> Existing sessions survive.</td></tr>
+          <tr><td>Firebase Cloud Messaging</td><td>Push notifications</td><td>Degraded &mdash; in-app real-time uses the WebSocket, not FCM</td></tr>
+          <tr><td>Firebase Remote Config</td><td>Forced-update prompts</td><td>Cannot push an urgent client update</td></tr>
+          <tr><td>Google Play Developer API</td><td>App releases</td><td>Release pipeline only</td></tr>
+          <tr><td>GitHub</td><td>Source + deploy channel</td><td>Cannot deploy; running app unaffected</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>Environment variables the server must carry</h3>
+      <p>
+        Supplied via <code>backend/.env</code>, gitignored. The process refuses weak or short JWT secrets at
+        startup. Required: <code>NODE_ENV</code>, <code>DB_HOST</code>, <code>DB_PORT</code>, <code>DB_USER</code>,
+        <code>DB_PASSWORD</code>, <code>DB_NAME</code>, <code>JWT_ACCESS_SECRET</code>, <code>JWT_REFRESH_SECRET</code>,
+        <code>CORS_ORIGINS</code>. Also used: <code>PORT</code>, <code>RECEIPT_BASE_URL</code>, the
+        <code>WHATSAPP_*</code> set, <code>FIREBASE_SERVICE_ACCOUNT</code>, <code>ADMIN_SECRET</code>, and the
+        <code>ADMIN_URL_SLUG</code> / <code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD</code> /
+        <code>ADMIN_JWT_SECRET</code> set.
+      </p>
+
+      <h3>Client platforms served</h3>
+      <p>
+        Flutter 3.38.5 / Dart 3.9 &mdash; Android (Play Store), Windows desktop (zip download from the
+        landing page), iOS (configured, Firebase app registered). Plus browsers for the landing page and
+        public receipts. All of them talk to the same single origin.
+      </p>
+    </section>
+
+    <!-- 09 -->
+    <section id="s9">
+      <div class="head"><span class="n">09</span><h2>SSL certificate requirements</h2><span class="chip verified">Verified from code</span></div>
+
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Requirement</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td>Primary name</td><td class="m">vittam.vengurlatech.com</td></tr>
+          <tr><td>Also serving</td><td class="m">vengurlatech.com</td></tr>
+          <tr><td>Suggested</td><td>Wildcard <code>*.vengurlatech.com</code>, or a SAN covering both names</td></tr>
+          <tr><td>Issuer</td><td><strong>Publicly trusted CA required</strong> (Let's Encrypt is fine). Self-signed will not work &mdash; see below.</td></tr>
+          <tr><td>Protocol floor</td><td>TLS 1.2 minimum; 1.3 preferred. Disable TLS 1.0/1.1 and RC4/3DES.</td></tr>
+          <tr><td>Must cover</td><td>HTTPS <em>and</em> the <code>wss://</code> upgrade on <code>/ws</code> &mdash; same certificate, same port</td></tr>
+          <tr><td>Renewal</td><td>Automated. Port 80 stays open for the ACME challenge.</td></tr>
+          <tr><td>Chain</td><td>Full chain must be served. Android is stricter than desktop browsers about incomplete chains.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="note stop">
+        <span class="label">Why a self-signed or mismatched cert breaks the product</span>
+        <p>The shipped Flutter app pins its API base URL to
+        <code>https://vittam.vengurlatech.com/api</code> at compile time, and Android blocks cleartext
+        HTTP by default. A certificate error is not a warning users can click through &mdash; the app simply
+        fails to connect, for every installed copy, until a new release ships through the Play Store.
+        <strong>Validate the certificate from a real Android device before cutover, not just from a
+        browser.</strong></p>
+      </div>
+
+      <h3>Database TLS &mdash; worth fixing during the move</h3>
+      <p>
+        The database connection sets <code>encrypt: true</code> but also
+        <code>trustServerCertificate: true</code> in production, which encrypts the traffic while skipping
+        certificate validation. Traffic is protected from passive eavesdropping but not from an active
+        man-in-the-middle. If the new database has a properly issued certificate, set
+        <code>DB_SSL_CA</code> and turn that flag off &mdash; the code already supports a custom CA file.
+      </p>
+    </section>
+
+    <!-- 10 -->
+    <section id="s10">
+      <div class="head"><span class="n">10</span><h2>Cutover constraints</h2><span class="chip risk">Blocker / risk</span></div>
+      <p>
+        The binding constraint is not the server. It is that <strong>thousands of already-installed app
+        copies have the hostname compiled into them</strong>, and they cannot be reconfigured remotely.
+      </p>
+
+      <h3>Hard constraints &mdash; not negotiable</h3>
+      <div class="scroll">
+      <table>
+        <thead><tr><th>Constraint</th><th>Why</th><th>Consequence of ignoring</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Hostname cannot change</strong></td><td><code>baseUrl</code> is a compile-time constant in the Flutter client</td><td>Every installed app breaks until a Play Store release reaches each device</td></tr>
+          <tr><td><strong>Move by DNS, not by URL</strong></td><td>Same name must resolve to the new IP</td><td>Same as above</td></tr>
+          <tr><td><strong>Old host stays live through DNS propagation</strong></td><td>Both must answer during the TTL window</td><td>Split-brain: some shops bill against the old DB, some the new</td></tr>
+          <tr><td><strong>Database is the single source of truth</strong></td><td>Two live app hosts on two DBs = divergent bills</td><td>Unreconcilable accounting data</td></tr>
+          <tr><td><strong><code>backend/uploads/</code> must be copied manually</strong></td><td>Deliberately outside the deploy directory; CI force-pushes over <code>public/</code></td><td>All item photos disappear</td></tr>
+          <tr><td><strong>Old receipt links must keep resolving</strong></td><td><code>/receipt/*</code> URLs are already in customers' WhatsApp history</td><td>Customers hit dead links indefinitely</td></tr>
+          <tr><td><strong>JWT secrets must be carried over verbatim</strong></td><td>New secrets invalidate every issued token</td><td>Every user logged out mid-shift, forced to re-OTP</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>Timing</h3>
+      <ul>
+        <li><strong>Window: 02:00&ndash;05:00 IST.</strong> This is a live billing system for shops and restaurants; any daytime interruption means a merchant cannot take payment.</li>
+        <li><strong>Avoid month-end and month-start</strong> &mdash; GST and reporting periods.</li>
+        <li><strong>Drop the DNS TTL to 300&nbsp;s at least 48 hours ahead</strong>, restore it after.</li>
+        <li>DB migrations (<code>npm run migrate:up</code>) run against a quiesced database. Every migration has a rollback script &mdash; confirm which one is applied last before starting.</li>
+      </ul>
+
+      <h3>Pre-cutover checklist</h3>
+      <ul>
+        <li><code>.env</code> recreated on the new host with identical JWT secrets &mdash; it is gitignored and will not arrive with the code.</li>
+        <li>Firebase service-account JSON placed on the new host.</li>
+        <li>New server's outbound IP whitelisted by the SQL host, if it filters by IP. <strong>Verify this early &mdash; it is the most common cutover failure.</strong></li>
+        <li><code>web.config</code> temp path and Node binary path corrected for the new machine.</li>
+        <li>Certificate installed and validated from a physical Android device.</li>
+        <li><code>CORS_ORIGINS</code> and <code>RECEIPT_BASE_URL</code> reviewed.</li>
+        <li>Deploy mechanism from the <code>backend</code> branch re-established and proven with one test deploy.</li>
+        <li>Backup and restore drill completed &mdash; see §7.</li>
+        <li>Rollback plan: keep the old host intact and bootable for 7 days. Do not decommission on day one.</li>
+      </ul>
+
+      <div class="note">
+        <span class="label">Worth raising with the vendor</span>
+        <p>Nothing in the application code is Windows-specific &mdash; the dependency tree is pure JavaScript
+        and there are no native modules. Only <code>web.config</code> and two hard-coded paths tie it to
+        IIS. <strong>A Linux VM with nginx and a process manager would run this stack unchanged</strong>, at
+        lower licence cost and with simpler TLS automation, provided the SQL Server host stays where it
+        is. Ask for both quotes and compare.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    Compiled from the repository at branch <code>main</code> &middot; every "verified" claim traces to code,
+    config, or CI in this repo &middot; items marked as needing a measurement were left blank rather than estimated.
+  </footer>
+
+</div>
