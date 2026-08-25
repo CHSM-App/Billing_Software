@@ -65,6 +65,17 @@ const List<String> kDefaultExpenseCategories = [
   'Other',
 ];
 
+/// Vendor bills (purchases) falling in the expense filter's month. Purchases
+/// are money out just like expenses, so the Expenses tab lists and totals
+/// them alongside — but they stay separate records (edited via the purchase
+/// form, never via the expense form).
+final expensePurchasesProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final filter = ref.watch(expenseFilterProvider);
+  final rows = await api.getVendorBills(from: filter.fromStr, to: filter.toStr);
+  return rows.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+});
+
 final expenseCategoriesProvider = FutureProvider.autoDispose<List<String>>((ref) async {
   try {
     final remote = await api.getExpenseCategories();

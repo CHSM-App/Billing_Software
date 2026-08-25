@@ -49,9 +49,26 @@
       background: rgba(255,255,255,.18); }
     header .shop { font-weight: 700; font-size: 18px; line-height: 1.2; letter-spacing: -0.3px; }
     header .tbl { font-size: 13px; opacity: .85; font-weight: 500; margin-top: 2px; }
-    .cats { position: sticky; top: 78px; z-index: 15; background: rgba(248,249,252,.92);
-      backdrop-filter: saturate(180%) blur(8px); padding: 12px; display: flex; gap: 8px;
-      overflow-x: auto; border-bottom: 1px solid var(--line); }
+    .topbar { position: sticky; top: 78px; z-index: 15; background: rgba(248,249,252,.92);
+      backdrop-filter: saturate(180%) blur(8px); border-bottom: 1px solid var(--line); }
+    .search { position: relative; padding: 10px 12px 0; }
+    .search input { width: 100%; border: 1px solid var(--line); background: var(--card);
+      border-radius: 999px; padding: 10px 36px 10px 38px; font-size: 15px; font-family: inherit;
+      color: var(--text); outline: none; }
+    .search input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-light); }
+    .search .ico { position: absolute; left: 25px; top: 21px; color: var(--muted); pointer-events: none; }
+    .search .clr { position: absolute; right: 20px; top: 15px; border: 0; background: transparent;
+      color: var(--muted); font-size: 20px; line-height: 1; padding: 4px 6px; display: none; }
+    .search .clr.show { display: block; }
+    .cats { padding: 10px 12px 12px; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+    .cats::-webkit-scrollbar { display: none; }
+    .section-title { display: flex; align-items: center; gap: 10px; margin: 22px 0 10px;
+      padding: 8px 12px; background: var(--brand-light); color: var(--brand-dark);
+      border-left: 4px solid var(--brand); border-radius: var(--r-sm);
+      font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+    .section-title .cnt { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--brand);
+      background: var(--card); border-radius: 999px; padding: 2px 9px; }
+    .section-title:first-child { margin-top: 4px; }
     .cats button { flex: 0 0 auto; border: 1px solid var(--line); background: var(--card);
       color: var(--muted); padding: 8px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
       font-family: inherit; transition: all .18s ease; }
@@ -148,7 +165,14 @@
     </div>
   </header>
 
-  <div class="cats" id="cats"></div>
+  <div class="topbar" id="topbar">
+    <div class="search">
+      <svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="searchInput" type="search" placeholder="Search dishes…" autocomplete="off" />
+      <button class="clr" id="searchClear" aria-label="Clear search">×</button>
+    </div>
+    <div class="cats" id="cats"></div>
+  </div>
   <main id="main"><div class="center">Loading menu…</div></main>
 
   <div class="cart-bar hidden" id="cartBar">
@@ -194,6 +218,8 @@
     var cart = {};            // key -> { item_id, variant_id, name, price, qty }
     var selVariant = {};      // item_id -> variant_id
     var activeCat = null;
+    var query = '';           // current search text (lowercased)
+    var suppressSpy = 0;      // timestamp until which scroll-spy is ignored (after a chip tap)
     var orderToken = localStorage.getItem(LS_TOKEN) || null;
 
     var $ = function (id) { return document.getElementById(id); };
@@ -320,17 +346,76 @@
         return '<button data-cat="' + esc(c) + '" class="' + (c === activeCat ? 'active' : '') + '">' + esc(c) + '</button>';
       }).join('');
       Array.prototype.forEach.call($('cats').children, function (b) {
-        b.onclick = function () { activeCat = b.getAttribute('data-cat'); renderCats(); render(); scrollTo(0, 0); };
+        b.onclick = function () {
+          activeCat = b.getAttribute('data-cat');
+          if (query) { query = ''; $('searchInput').value = ''; $('searchClear').classList.remove('show'); render(); }
+          renderCats();
+          scrollToCat(activeCat);
+        };
       });
+      var act = $('cats').querySelector('.active');
+      if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'center' });
     }
+
+    function sectionId(c) { return 'cat-' + encodeURIComponent(c); }
+
+    function scrollToCat(c) {
+      var el = document.getElementById(sectionId(c));
+      if (!el) return;
+      var top = el.getBoundingClientRect().top + window.pageYOffset - stickyHeight() - 8;
+      suppressSpy = Date.now() + 700;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+
+    function stickyHeight() {
+      return document.querySelector('header').offsetHeight + $('topbar').offsetHeight;
+    }
+
+    // Highlight the category whose section is under the sticky bar as the
+    // customer scrolls, so the chips always reflect where they are.
+    function spy() {
+      if (query || Date.now() < suppressSpy) return;
+      var line = stickyHeight() + 12, cur = null;
+      Array.prototype.forEach.call(document.querySelectorAll('.section-title'), function (h) {
+        if (h.getBoundingClientRect().top <= line) cur = h.getAttribute('data-cat');
+      });
+      if (cur && cur !== activeCat) { activeCat = cur; renderCats(); }
+    }
+    window.addEventListener('scroll', spy, { passive: true });
+
+    $('searchInput').oninput = function () {
+      query = this.value.trim().toLowerCase();
+      $('searchClear').classList.toggle('show', !!query);
+      render();
+    };
+    $('searchClear').onclick = function () {
+      query = ''; $('searchInput').value = ''; this.classList.remove('show'); render(); $('searchInput').focus();
+    };
 
     function render() {
       var main = $('main');
       var running = $('runningBox');
-      var items = menu.filter(function (i) { return (i.category || 'Menu') === activeCat; });
       var html = '';
-      if (items.length === 0) html = '<div class="center">No items in this category.</div>';
-      items.forEach(function (item) {
+      function matches(i) {
+        if (!query) return true;
+        var hay = (i.name || '') + ' ' + (i.category || '') + ' ' +
+          (i.variants || []).map(function (v) { return v.label || ''; }).join(' ');
+        return hay.toLowerCase().indexOf(query) !== -1;
+      }
+      var groups = [];
+      if (query) {
+        var hits = menu.filter(matches);
+        groups.push({ title: hits.length ? hits.length + ' result' + (hits.length === 1 ? '' : 's') : null, items: hits });
+        if (!hits.length) html = '<div class="center">No dishes match "' + esc($('searchInput').value.trim()) + '".</div>';
+      } else {
+        categories().forEach(function (c) {
+          groups.push({ cat: c, title: c, items: menu.filter(function (i) { return (i.category || 'Menu') === c; }) });
+        });
+        if (!menu.length) html = '<div class="center">No items on the menu yet.</div>';
+      }
+      groups.forEach(function (g) {
+        if (g.title) html += '<div class="section-title"' + (g.cat ? ' id="' + sectionId(g.cat) + '" data-cat="' + esc(g.cat) + '"' : '') + '>' + esc(g.title) + (g.cat ? '<span class="cnt">' + g.items.length + '</span>' : '') + '</div>';
+        g.items.forEach(function (item) {
         var vSel = selVariant[item.id] || null;
         var price = unitPrice(item, vSel);
         var k = keyOf(item.id, vSel);
@@ -354,6 +439,7 @@
           html += '<button class="add" data-add="' + k + '" data-item="' + item.id + '">Add</button>';
         }
         html += '</div></div></div>';
+        });
       });
       main.innerHTML = html;
       if (running) main.insertAdjacentElement('afterbegin', running);

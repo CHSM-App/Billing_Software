@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
+import '../api.dart' as api;
 import '../providers.dart';
+import '../services/sales_report_export.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
@@ -36,12 +40,14 @@ class ReportsScreen extends ConsumerStatefulWidget {
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   // Tapped day in the 7-day chart; null = show the peak day by default.
   int? _selectedDayIndex;
+  bool _downloading = false;
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final filter = ref.watch(reportSummaryFilterProvider);
     final summaryAsync = ref.watch(reportSummaryProvider);
+    final summaryForExport = summaryAsync.valueOrNull;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -53,6 +59,18 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               icon: const Icon(Icons.calendar_month_outlined),
               tooltip: l10n.reportsChangePeriod,
               onPressed: () => _showPeriodPicker(context, filter),
+            ),
+            IconButton(
+              icon: _downloading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.download_outlined),
+              tooltip: 'Download report',
+              onPressed: _downloading || summaryForExport == null
+                  ? null
+                  : () => _pickDownloadFormat(summaryForExport, filter),
             ),
             IconButton(
               icon: const Icon(Icons.refresh_outlined),
@@ -106,6 +124,85 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
         ),
       ]),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Download (CSV / PDF) of the currently selected period
+  // ---------------------------------------------------------------------------
+
+  Future<void> _pickDownloadFormat(
+      ReportSummary summary, ReportSummaryFilter filter) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 12),
+          const Text('Download sales report',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text('${_fullDayFmt.format(filter.from)} – ${_fullDayFmt.format(filter.to)}',
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary)),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.table_chart_outlined,
+                color: AppColors.primary),
+            title: const Text('CSV (Excel)'),
+            subtitle: const Text('Totals, daily sales, top items and every bill'),
+            onTap: () => Navigator.pop(ctx, 'csv'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.picture_as_pdf_outlined,
+                color: AppColors.primary),
+            title: const Text('PDF'),
+            subtitle: const Text('Print-ready summary with invoice list'),
+            onTap: () => Navigator.pop(ctx, 'pdf'),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    await _download(summary, filter, pdf: choice == 'pdf');
+  }
+
+  Future<void> _download(ReportSummary summary, ReportSummaryFilter filter,
+      {required bool pdf}) async {
+    setState(() => _downloading = true);
+    try {
+      // The summary has only the 10 most recent bills; the export lists every
+      // bill in the period, so fetch the full list for the same range.
+      final bills = await api.getBills(from: filter.fromStr, to: filter.toStr);
+      final business = ref.read(businessNameProvider);
+      final slug = '${filter.fromStr}_to_${filter.toStr}';
+      if (pdf) {
+        final bytes = await SalesReportExport.buildPdf(
+            summary: summary, bills: bills, businessName: business);
+        // Platform print/save-as-PDF sheet, same as invoices and GSTR-1.
+        await Printing.layoutPdf(
+            onLayout: (_) async => bytes, name: 'Sales-Report-$slug');
+      } else {
+        final bytes = SalesReportExport.buildCsv(
+            summary: summary, bills: bills, businessName: business);
+        await Share.shareXFiles(
+          [
+            XFile.fromData(bytes,
+                name: 'Sales-Report-$slug.csv', mimeType: 'text/csv')
+          ],
+          text: 'Sales report $slug',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Could not create report: ${api.sanitizeUiErrorMessage(e)}')));
+      }
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
   }
 
   /// Entry points to the GST returns. All three live in Reports rather than

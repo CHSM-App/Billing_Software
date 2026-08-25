@@ -8,6 +8,8 @@ import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../l10n/l10n_ext.dart';
+import 'vendor_bills_screen.dart'
+    show VendorBillFormScreen, vendorBillsProvider, vendorsProvider;
 
 final _fmt = NumberFormat('#,##0.00');
 final _dateFmt = DateFormat('dd MMM yyyy');
@@ -122,7 +124,10 @@ class _ThisMonthTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final filter = ref.watch(expenseFilterProvider);
     final expensesAsync = ref.watch(expensesProvider);
+    final purchasesAsync = ref.watch(expensePurchasesProvider);
     final recurringAsync = ref.watch(recurringExpensesProvider);
+    final purchases =
+        purchasesAsync.valueOrNull ?? const <Map<String, dynamic>>[];
 
     // Check if any recurring expenses haven't been added this month yet
     final thisMonthExpenses = expensesAsync.valueOrNull ?? [];
@@ -149,7 +154,8 @@ class _ThisMonthTab extends ConsumerWidget {
         slivers: [
           // Filter bar
           SliverToBoxAdapter(
-            child: _buildFilterBar(context, ref, filter, expensesAsync),
+            child: _buildFilterBar(
+                context, ref, filter, expensesAsync, purchases),
           ),
 
         // Recurring reminder banner
@@ -174,7 +180,7 @@ class _ThisMonthTab extends ConsumerWidget {
               onRetry: () => ref.invalidate(expensesProvider),
             ),
           ),
-          data: (expenses) => expenses.isEmpty
+          data: (expenses) => expenses.isEmpty && purchases.isEmpty
               ? SliverFillRemaining(
                   child: EmptyState(
                     icon: Icons.receipt_long_outlined,
@@ -182,7 +188,7 @@ class _ThisMonthTab extends ConsumerWidget {
                   ),
                 )
               : SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                   sliver: SliverList.separated(
                     itemCount: expenses.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -193,14 +199,62 @@ class _ThisMonthTab extends ConsumerWidget {
                   ),
                 ),
         ),
+
+        // Purchases (vendor bills) for the same month — also money out.
+        if (purchases.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Row(children: [
+                const Icon(Icons.shopping_bag_outlined,
+                    size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 6),
+                Text('Purchases (${purchases.length})',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textSecondary)),
+                const Spacer(),
+                Text('Rs. ${_fmt.format(_sumTotals(purchases))}',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textSecondary)),
+              ]),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            sliver: SliverList.separated(
+              itemCount: purchases.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, i) => _PurchaseCard(
+                bill: purchases[i],
+                onChanged: () {
+                  ref.invalidate(expensePurchasesProvider);
+                  ref.invalidate(vendorBillsProvider);
+                  ref.invalidate(vendorsProvider);
+                },
+              ),
+            ),
+          ),
+        ],
+        const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
       ),
     );
   }
 
+  static double _sumTotals(List<Map<String, dynamic>> bills) =>
+      bills.fold<double>(0, (s, b) => s + _num(b['total']));
+
   Widget _buildFilterBar(BuildContext context, WidgetRef ref,
-      ExpenseFilter filter, AsyncValue<List<Expense>> expensesAsync) {
-    final total = expensesAsync.valueOrNull?.fold(0.0, (s, e) => s + e.amount) ?? 0;
+      ExpenseFilter filter, AsyncValue<List<Expense>> expensesAsync,
+      List<Map<String, dynamic>> purchases) {
+    // Month total = recorded expenses + vendor bills (purchases).
+    final total =
+        (expensesAsync.valueOrNull?.fold(0.0, (s, e) => s + e.amount) ?? 0) +
+            _sumTotals(purchases);
     final now = DateTime.now();
     final isCurrentMonth =
         filter.from.year == now.year && filter.from.month == now.month;
@@ -929,6 +983,100 @@ class _RecurringFormState extends ConsumerState<_RecurringForm> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+}
+
+double _num(Object? v) => v == null ? 0 : double.tryParse(v.toString()) ?? 0;
+
+// ---------------------------------------------------------------------------
+// Purchase (vendor bill) card — shown under expenses for the same month.
+// Tapping opens the purchase form; it is never edited as an expense.
+// ---------------------------------------------------------------------------
+
+class _PurchaseCard extends ConsumerWidget {
+  final Map<String, dynamic> bill;
+  final VoidCallback onChanged;
+
+  const _PurchaseCard({required this.bill, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    const colour = Color(0xFF0891B2);
+    final status = (bill['payment_status'] ?? 'paid').toString();
+    final date = DateTime.tryParse(bill['invoice_date']?.toString() ?? '');
+    final meta = [
+      (bill['payment_mode'] ?? '').toString().toUpperCase(),
+      if (status != 'paid') status.toUpperCase(),
+      if (date != null) _dateFmt.format(date),
+    ].join('  ·  ');
+    return AppCard(
+      onTap: () => _open(context, ref),
+      child: Row(children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: colour.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(AppRadius.small),
+          ),
+          child: const Icon(Icons.shopping_bag_outlined, color: colour, size: 22),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(bill['vendor_name']?.toString() ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            Text('Purchase - Inv ${bill['invoice_number'] ?? ''}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textSecondary)),
+            const SizedBox(height: 2),
+            Text(meta,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 11, color: AppColors.textDisabled)),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        Text('Rs. ${_fmt.format(_num(bill['total']))}',
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.error)),
+      ]),
+    );
+  }
+
+  Future<void> _open(BuildContext context, WidgetRef ref) async {
+    // The list row has no line items; the form needs the full bill.
+    Map<String, dynamic> full;
+    try {
+      full = await api.getVendorBill(bill['id'].toString());
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(api.sanitizeUiErrorMessage(e))));
+      return;
+    }
+    if (!context.mounted) return;
+    final gstEnabled = ref.read(gstEnabledProvider);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VendorBillFormScreen(
+          record: full,
+          gstEnabled: gstEnabled,
+          onSaved: onChanged,
+        ),
+      ),
+    );
   }
 }
 

@@ -232,11 +232,24 @@ class VendorBillsScreen extends ConsumerWidget {
     );
   }
 
-  void _openForm(
-      BuildContext context, WidgetRef ref, Map<String, dynamic>? record) {
+  Future<void> _openForm(
+      BuildContext context, WidgetRef ref, Map<String, dynamic>? record) async {
     // Flags are read ONCE here and passed in, matching the items form: the
     // form is a plain StatefulWidget and must not re-read providers mid-edit.
     final gstEnabled = ref.read(gstEnabledProvider);
+    // The list endpoint returns headers only (no `lines`); the form needs the
+    // full bill to prefill its line items, so fetch it by id first.
+    if (record != null && record['lines'] is! List) {
+      try {
+        record = await api.getVendorBill(record['id'].toString());
+      } catch (e) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(api.sanitizeUiErrorMessage(e))));
+        return;
+      }
+      if (!context.mounted) return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -515,7 +528,10 @@ class VendorBillFormScreen extends ConsumerStatefulWidget {
 class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _vendorCtrl;
+  final _vendorFocus = FocusNode();
   late final TextEditingController _gstinCtrl;
+  /// Vendors seen on past bills (name + GSTIN), for the vendor type-ahead.
+  List<Map<String, dynamic>> _vendors = const [];
   late final TextEditingController _invoiceCtrl;
   late final TextEditingController _discountCtrl;
   final List<_LineDraft> _lines = [];
@@ -564,6 +580,74 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
       }
     }
     if (_lines.isEmpty) _lines.add(_LineDraft());
+    // Loaded once; suggestions are a convenience, so a failure is silent.
+    ref.read(vendorsProvider.future).then((v) {
+      if (mounted) setState(() => _vendors = v);
+    }).catchError((_) {});
+  }
+
+  Iterable<Map<String, dynamic>> _vendorSuggestions(String q) {
+    final t = q.trim().toLowerCase();
+    if (t.isEmpty) return const [];
+    return _vendors.where(
+        (v) => (v['name']?.toString() ?? '').toLowerCase().contains(t));
+  }
+
+  void _onVendorPicked(Map<String, dynamic> v) {
+    _vendorCtrl.text = v['name']?.toString() ?? '';
+    final gstin = v['gstin']?.toString().trim() ?? '';
+    // Only fill a GSTIN when the vendor has one; never wipe what was typed.
+    if (gstin.isNotEmpty) _gstinCtrl.text = gstin.toUpperCase();
+  }
+
+  Widget _vendorNameField() {
+    return LayoutBuilder(builder: (context, constraints) {
+      return RawAutocomplete<Map<String, dynamic>>(
+        textEditingController: _vendorCtrl,
+        focusNode: _vendorFocus,
+        optionsBuilder: (v) => _vendorSuggestions(v.text),
+        displayStringForOption: (v) => v['name']?.toString() ?? '',
+        onSelected: _onVendorPicked,
+        fieldViewBuilder: (context, ctrl, focus, onSubmit) => AppTextField(
+          label: 'Vendor name',
+          controller: ctrl,
+          focusNode: focus,
+          validator: (v) => (v == null || v.trim().isEmpty)
+              ? 'Vendor name is required'
+              : null,
+        ),
+        optionsViewBuilder: (context, onSelected, options) => Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(AppRadius.small),
+            child: SizedBox(
+              width: constraints.maxWidth,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: options.length,
+                  itemBuilder: (_, i) {
+                    final v = options.elementAt(i);
+                    final gstin = v['gstin']?.toString().trim() ?? '';
+                    return ListTile(
+                      dense: true,
+                      title: Text(v['name']?.toString() ?? ''),
+                      subtitle: gstin.isNotEmpty
+                          ? Text(gstin, style: const TextStyle(fontSize: 11))
+                          : null,
+                      onTap: () => onSelected(v),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    });
   }
 
   /// Everything a purchase line can be received into, for the current
@@ -665,6 +749,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
   @override
   void dispose() {
     _vendorCtrl.dispose();
+    _vendorFocus.dispose();
     _gstinCtrl.dispose();
     _invoiceCtrl.dispose();
     _discountCtrl.dispose();
@@ -703,12 +788,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
               padding: EdgeInsets.fromLTRB(
                   20, 16, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-            AppTextField(
-              label: 'Vendor name',
-              controller: _vendorCtrl,
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Vendor name is required' : null,
-            ),
+            _vendorNameField(),
             const SizedBox(height: 12),
             AppTextField(
               label: 'Invoice number',
