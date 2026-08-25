@@ -52,8 +52,9 @@ export default function Footer() {
             </p>
           </div>
 
-          {/* Link columns */}
-          <div className="grid grid-cols-3 md:grid-cols-4 gap-7 text-sm">
+          {/* Link columns — two across on mobile, not three: at three the
+              columns are ~100px and two-word labels like "How It Works" wrap. */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-7 gap-y-8 text-sm">
             {Object.entries(LINKS).map(([col, items]) => (
               <div key={col}>
                 <p className="font-semibold text-white/55 mb-3">{col}</p>
@@ -67,22 +68,27 @@ export default function Footer() {
               </div>
             ))}
 
-            {/* Contact details shown directly */}
-            <div>
+            {/* Contact spans the full width on mobile so the phone number and
+                address get a whole line each — a half-width column is too narrow
+                for either and forces them to wrap mid-value. */}
+            <div className="col-span-2 md:col-span-1">
               <p className="font-semibold text-white/55 mb-3">Contact</p>
               <ul className="space-y-2">
                 <li>
                   <a
                     href="tel:+919422229951"
-                    className="text-white/30 hover:text-white/70 transition-colors"
+                    className="text-white/30 hover:text-white/70 transition-colors whitespace-nowrap"
                   >
                     +91 94222 29951
                   </a>
                 </li>
                 <li>
+                  {/* break-words, never break-all: break-all splits greedily at
+                      any character ("support@ / vengurlat / ech.com"), while
+                      break-words only breaks when the value genuinely cannot fit. */}
                   <a
                     href="mailto:support@vengurlatech.com"
-                    className="text-white/30 hover:text-white/70 transition-colors break-all"
+                    className="text-white/30 hover:text-white/70 transition-colors break-words"
                   >
                     support@vengurlatech.com
                   </a>
