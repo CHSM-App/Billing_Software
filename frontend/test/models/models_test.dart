@@ -355,29 +355,80 @@ void main() {
   // CartEntry
   // ─────────────────────────────────────────────────────────────
   group('CartEntry', () {
-    Item makeItem({double? taxRate}) => Item(
+    Item makeItem({double? taxRate, bool inclusive = false}) => Item(
           id: 'item-1',
           businessId: 'biz-1',
           name: 'Rice',
           price: 50.0,
           taxRate: taxRate,
+          priceInclusiveTax: inclusive,
           isActive: true,
         );
 
     test('lineTotal without tax = price * quantity', () {
       final entry = CartEntry(item: makeItem(), quantity: 3);
-      expect(entry.lineTotal, 150.0);
+      expect(entry.lineTotal(true), 150.0);
     });
 
     test('lineTotal with tax = price * quantity * (1 + tax/100)', () {
       final entry = CartEntry(item: makeItem(taxRate: 10.0), quantity: 2);
       // 50 * 2 * 1.10 = 110
-      expect(entry.lineTotal, closeTo(110.0, 0.001));
+      expect(entry.lineTotal(true), closeTo(110.0, 0.001));
     });
 
     test('lineTotal with 0 tax = price * quantity', () {
       final entry = CartEntry(item: makeItem(taxRate: 0.0), quantity: 4);
-      expect(entry.lineTotal, 200.0);
+      expect(entry.lineTotal(true), 200.0);
+    });
+
+    // ── Tax-inclusive (MRP) pricing ────────────────────────────
+    // An exclusive price is the net rate and tax goes on top; an inclusive
+    // price is the gross the customer pays and the net is backed out of it.
+
+    test('exclusive price: netPrice is the stored price, gross adds tax', () {
+      final entry = CartEntry(item: makeItem(taxRate: 10.0), quantity: 1);
+      expect(entry.netPrice(true), 50.0);
+      expect(entry.grossPrice(true), closeTo(55.0, 0.001));
+    });
+
+    test('inclusive price: tax is stripped out to get the net rate', () {
+      final entry = CartEntry(
+          item: makeItem(taxRate: 10.0, inclusive: true), quantity: 1);
+      // 50 inclusive of 10% is 45.4545… net + 4.5454… tax.
+      expect(entry.netPrice(true), closeTo(45.4545, 0.001));
+      expect(entry.lineTax(true), closeTo(4.5455, 0.001));
+    });
+
+    test('inclusive price: the customer still pays exactly the MRP', () {
+      final entry = CartEntry(
+          item: makeItem(taxRate: 10.0, inclusive: true), quantity: 3);
+      // The whole point: 3 x 50 MRP rings up at 150, not 165.
+      expect(entry.grossPrice(true), closeTo(50.0, 1e-9));
+      expect(entry.lineTotal(true), closeTo(150.0, 1e-9));
+      expect(entry.lineNet(true) + entry.lineTax(true), closeTo(150.0, 1e-9));
+    });
+
+    test('inclusive price bills lower than the same figure as exclusive', () {
+      final incl = CartEntry(
+          item: makeItem(taxRate: 18.0, inclusive: true), quantity: 1);
+      final excl = CartEntry(item: makeItem(taxRate: 18.0), quantity: 1);
+      expect(incl.lineTotal(true), lessThan(excl.lineTotal(true)));
+    });
+
+    test('GST off: an inclusive price is charged as-is, unsplit', () {
+      final entry = CartEntry(
+          item: makeItem(taxRate: 10.0, inclusive: true), quantity: 2);
+      // No tax to extract, so the MRP is the whole amount and tax is 0.
+      expect(entry.netPrice(false), 50.0);
+      expect(entry.lineTax(false), 0.0);
+      expect(entry.lineTotal(false), 100.0);
+    });
+
+    test('inclusive flag is inert when the item carries no tax rate', () {
+      final entry =
+          CartEntry(item: makeItem(inclusive: true), quantity: 2);
+      expect(entry.netPrice(true), 50.0);
+      expect(entry.lineTotal(true), 100.0);
     });
 
     test('copyWith changes quantity', () {

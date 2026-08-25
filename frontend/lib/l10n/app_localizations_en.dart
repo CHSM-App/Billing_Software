@@ -244,6 +244,21 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get kitchenTabPending => 'Pending';
+
+  @override
+  String get kitchenTabCompleted => 'Completed';
+
+  @override
+  String get kitchenNoPendingOrders => 'No pending orders right now.';
+
+  @override
+  String get kitchenNoCompletedOrders => 'No completed orders yet.';
+
+  @override
+  String get kitchenMarkCompleted => 'Mark as Completed';
+
+  @override
   String get kitchenJustNow => 'Just now';
 
   @override
@@ -834,6 +849,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingSaveDraft => 'Save Draft';
 
   @override
+  String get billingFinalizeBill => 'Finalize Bill';
+
+  @override
   String get billingClearCart => 'Clear selected items';
 
   @override
@@ -1165,10 +1183,50 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsFieldPrice => 'Price (₹)';
 
   @override
+  String get itemsFieldPriceInclusive => 'Price (₹) — including GST';
+
+  @override
+  String get itemsFieldPriceExclusive => 'Price (₹) — before GST';
+
+  @override
   String get itemsFieldTaxRate => 'Tax rate % (optional)';
 
   @override
   String get itemsFieldTaxRateHint => 'e.g. 5, 12, 18';
+
+  @override
+  String get itemsPriceInclusiveTax => 'Price already includes GST';
+
+  @override
+  String get itemsPriceInclusiveTaxHelp =>
+      'Turn ON if the price above is the final amount on your shelf label or menu. Turn OFF if GST should be added to it at billing.';
+
+  @override
+  String get itemsPriceInclusiveTaxOn =>
+      'The price you entered is the final amount. GST is taken out of it, not added.';
+
+  @override
+  String get itemsPriceInclusiveTaxOff =>
+      'GST will be added to the price you entered at billing time.';
+
+  @override
+  String itemsPriceBreakdownOn(
+      String gross, String net, String tax, String rate) {
+    return 'Customer pays ₹$gross — the price you entered. Of that, ₹$tax is GST ($rate%) and ₹$net is your amount.';
+  }
+
+  @override
+  String itemsPriceBreakdownOff(
+      String gross, String net, String tax, String rate) {
+    return 'Customer pays ₹$gross — your ₹$net plus ₹$tax GST ($rate%).';
+  }
+
+  @override
+  String get itemsPriceBreakdownNeedsRate =>
+      'Set a tax rate above to see how this splits.';
+
+  @override
+  String get itemsPriceBreakdownSized => 'Applies to every size of this item.';
 
   @override
   String get itemsFieldHsn => 'HSN/SAC code (optional)';
@@ -1323,7 +1381,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsAddQuantity => 'Add quantity';
 
   @override
+  String get itemsRemoveQuantity => 'Remove quantity';
+
+  @override
   String get itemsTotalAfterAdding => 'Total after adding';
+
+  @override
+  String get itemsTotalAfterRemoving => 'Total after removing';
+
+  @override
+  String get itemsStockModeAdd => 'Add';
+
+  @override
+  String get itemsStockModeRemove => 'Remove';
 
   @override
   String get itemsInventoryDisabled => 'Inventory tracking is disabled.';

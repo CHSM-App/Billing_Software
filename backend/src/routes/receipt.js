@@ -51,6 +51,15 @@ router.get('/:token', async (req, res) => {
     const items = itemsResult.recordset;
 
     const fmt = (n) => Number(n).toFixed(2);
+    // Split a tax figure into the CGST/SGST halves that RENDER, giving the odd
+    // paisa to CGST so the two always add back to exactly the original. Naively
+    // printing (tax / 2) twice loses or gains a paisa on any odd-paise tax
+    // (0.95 -> 0.47 + 0.47 = 0.94), which makes the receipt's Subtotal + CGST +
+    // SGST disagree with its Grand Total by 0.01.
+    const gstHalves = (tax) => {
+      const paise = Math.round(Number(tax) * 100);
+      return [((paise + 1) >> 1) / 100, (paise >> 1) / 100];
+    };
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const date = new Date(bill.created_at).toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
@@ -304,11 +313,11 @@ router.get('/:token', async (req, res) => {
     </div>
     ${gstEnabled ? `<div class="t-row">
       <span>CGST</span>
-      <span>&#8377;${fmt(Number(bill.tax_amount) / 2)}</span>
+      <span>&#8377;${fmt(gstHalves(bill.tax_amount)[0])}</span>
     </div>
     <div class="t-row">
       <span>SGST</span>
-      <span>&#8377;${fmt(Number(bill.tax_amount) / 2)}</span>
+      <span>&#8377;${fmt(gstHalves(bill.tax_amount)[1])}</span>
     </div>` : ''}
     ${Number(bill.discount_amount) > 0 ? `<div class="t-row">
       <span>Discount</span>

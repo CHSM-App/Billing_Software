@@ -20,12 +20,14 @@ class KitchenScreen extends ConsumerStatefulWidget {
   ConsumerState<KitchenScreen> createState() => _KitchenScreenState();
 }
 
-class _KitchenScreenState extends ConsumerState<KitchenScreen> {
+class _KitchenScreenState extends ConsumerState<KitchenScreen>
+    with SingleTickerProviderStateMixin {
   List<Map<String, dynamic>> _orders = [];
   bool _loading = true;
   String? _error;
   // Item ids currently being toggled — disables the tile to avoid double taps.
   final Set<String> _busy = {};
+  late final TabController _tabController;
 
   // Order ids seen on the last load. When a reload reveals an id not in this
   // set, a genuinely new order has arrived and we chime — but only while this
@@ -38,6 +40,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _load();
     NotificationService.instance.kitchenPing.addListener(_onPing);
   }
@@ -46,6 +49,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
   void dispose() {
     NotificationService.instance.kitchenPing.removeListener(_onPing);
     _chimePlayer.dispose();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -130,6 +134,47 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
     return '${o['bill_number'] ?? ''}';
   }
 
+  // "Mark as Completed" ticks every not-yet-ready dish in the order at once,
+  // so the whole card becomes all_ready and the next load shifts it from the
+  // Pending tab to the Completed tab. If a new dish is later added to this
+  // same order (e.g. the table orders more), that dish starts pending again,
+  // all_ready flips back to false, and the order reappears in Pending — no
+  // separate "completed" flag to get out of sync with the dishes themselves.
+  Future<void> _markOrderCompleted(Map<String, dynamic> order) async {
+    if (ref.read(userRoleProvider) != 'kitchen') return;
+    final items = (order['items'] as List).cast<Map<String, dynamic>>();
+    final pendingItems =
+        items.where((i) => i['kitchen_status'] != 'ready').toList();
+    if (pendingItems.isEmpty) return;
+
+    final ids = pendingItems.map((i) => i['id'] as String).toList();
+    setState(() {
+      _busy.addAll(ids);
+      for (final i in pendingItems) {
+        i['kitchen_status'] = 'ready'; // optimistic
+      }
+    });
+    try {
+      await Future.wait(ids.map((id) => markKitchenItem(id, 'ready')));
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          for (final i in pendingItems) {
+            i['kitchen_status'] = 'pending'; // revert
+          }
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(sanitizeUiErrorMessage(e)),
+              backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy.removeAll(ids));
+    }
+    _load(silent: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -143,33 +188,54 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
             onPressed: () => _load(),
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: [
+            Tab(text: l10n.kitchenTabPending),
+            Tab(text: l10n.kitchenTabCompleted),
+          ],
+        ),
       ),
-      body: RefreshIndicator(
-        onRefresh: () => _load(),
-        child: _buildBody(l10n),
-      ),
+      body: _loading
+          ? const KitchenSkeleton()
+          : _error != null && _orders.isEmpty
+              ? ListView(
+                  children: [
+                    const SizedBox(height: 120),
+                    Center(child: Text(_error!, textAlign: TextAlign.center)),
+                  ],
+                )
+              : TabBarView(
+                  controller: _tabController,
+                  children: [
+                    RefreshIndicator(
+                      onRefresh: () => _load(),
+                      child: _buildOrderGrid(
+                        _orders.where((o) => o['all_ready'] != true).toList(),
+                        l10n.kitchenNoPendingOrders,
+                      ),
+                    ),
+                    RefreshIndicator(
+                      onRefresh: () => _load(),
+                      child: _buildOrderGrid(
+                        _orders.where((o) => o['all_ready'] == true).toList(),
+                        l10n.kitchenNoCompletedOrders,
+                      ),
+                    ),
+                  ],
+                ),
     );
   }
 
-  Widget _buildBody(AppLocalizations l10n) {
-    if (_loading) {
-      return const KitchenSkeleton();
-    }
-    if (_error != null && _orders.isEmpty) {
-      return ListView(
-        children: [
-          const SizedBox(height: 120),
-          Center(child: Text(_error!, textAlign: TextAlign.center)),
-        ],
-      );
-    }
-    if (_orders.isEmpty) {
+  Widget _buildOrderGrid(
+      List<Map<String, dynamic>> orders, String emptyMessage) {
+    if (orders.isEmpty) {
       return Stack(
         children: [
           ListView(), // keeps pull-to-refresh working when empty
           EmptyState(
             icon: Icons.restaurant_menu,
-            message: l10n.kitchenNoOrders,
+            message: emptyMessage,
           ),
         ],
       );
@@ -192,8 +258,8 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
       // estimated from the header + one row per dish.
       final columns = List.generate(cols, (_) => <Widget>[]);
       final columnHeights = List.filled(cols, 0.0);
-      for (int i = 0; i < _orders.length; i++) {
-        final order = _orders[i];
+      for (int i = 0; i < orders.length; i++) {
+        final order = orders[i];
         int target = 0;
         for (int c = 1; c < cols; c++) {
           if (columnHeights[c] < columnHeights[target]) target = c;
@@ -212,6 +278,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
             busy: _busy,
             canEdit: canEdit,
             onToggle: _toggle,
+            onMarkCompleted: _markOrderCompleted,
           ),
         ));
       }
@@ -260,6 +327,7 @@ class _OrderCard extends StatelessWidget {
   final Set<String> busy;
   final bool canEdit;
   final Future<void> Function(Map<String, dynamic>) onToggle;
+  final Future<void> Function(Map<String, dynamic>) onMarkCompleted;
 
   const _OrderCard({
     required this.order,
@@ -268,6 +336,7 @@ class _OrderCard extends StatelessWidget {
     required this.busy,
     required this.canEdit,
     required this.onToggle,
+    required this.onMarkCompleted,
   });
 
   @override
@@ -373,6 +442,30 @@ class _OrderCard extends StatelessWidget {
               ],
             ],
           ),
+          // Lets the chef complete the whole order in one tap instead of
+          // ticking every dish individually. Ticking the last dish by hand
+          // has the same effect — this just moves the order to Completed
+          // immediately without needing every dish tapped one by one.
+          if (canEdit && !allReady)
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.space8),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: busy.intersection(
+                          items.map((i) => i['id'] as String).toSet())
+                          .isEmpty
+                      ? () => onMarkCompleted(order)
+                      : null,
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: Text(l10n.kitchenMarkCompleted),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.success,
+                    side: const BorderSide(color: AppColors.success),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

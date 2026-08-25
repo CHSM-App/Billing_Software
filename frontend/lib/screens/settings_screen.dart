@@ -27,6 +27,7 @@ import 'raster_lab_screen.dart';
 import 'conflict_resolution_screen.dart';
 import 'history_screen.dart';
 import 'reports_screen.dart';
+import 'vendor_bills_screen.dart';
 import 'expenses_screen.dart';
 import '../services/offline_service.dart';
 import '../services/realtime_service.dart';
@@ -199,6 +200,19 @@ class _SettingsContentState extends State<_SettingsContent>
                           context,
                           MaterialPageRoute(
                               builder: (_) => const ReportsScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.shopping_bag_outlined,
+                        iconColor: const Color(0xFF0891B2),
+                        title: 'Purchases',
+                        subtitle: 'Vendor bills, stock receipts and input tax credit',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const VendorBillsScreen()),
                         ),
                       ),
                       const SizedBox(height: AppSpacing.space8),

@@ -116,6 +116,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // GlobalKeys — give Scrollable.ensureVisible a handle to each field's context
   final _customerNameKey = GlobalKey();
   final _customerPhoneKey = GlobalKey();
+
+  // Past-customer autocomplete. One result list serves both fields: the search
+  // matches name OR phone, so whichever the user is typing into, picking a
+  // suggestion fills both.
+  List<Map<String, dynamic>> _customerSuggestions = const [];
+  Timer? _customerSearchDebounce;
+  // Which field the open list belongs to ('name' | 'phone' | null = closed).
+  String? _suggestFor;
+  // Set while a suggestion is being applied, so the controller listeners that
+  // fire during the write do not immediately re-open the list.
+  bool _applyingSuggestion = false;
   final _discountPctKey = GlobalKey();
   final _discountAmtKey = GlobalKey();
 
@@ -140,6 +151,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // Clear the inline credit error as soon as both name + phone are present.
     _customerNameController.addListener(_maybeClearCreditError);
     _customerPhoneController.addListener(_maybeClearCreditError);
+
+    _customerNameController.addListener(() => _onCustomerTyped('name'));
+    _customerPhoneController.addListener(() => _onCustomerTyped('phone'));
+    _customerNameFocus.addListener(_closeSuggestionsOnBlur);
+    _customerPhoneFocus.addListener(_closeSuggestionsOnBlur);
     // Look up any previous credit for the entered phone (10-digit trigger).
     _customerPhoneController.addListener(_onPhoneChangedForCredit);
     // Auto-scroll focused field above the keyboard
@@ -199,6 +215,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _searchAnimCtrl.dispose();
     _searchFocus.dispose();
     _searchController.dispose();
+    _customerSearchDebounce?.cancel();
     _customerNameController.dispose();
     _customerPhoneController.dispose();
     _discountPctController.dispose();
@@ -477,9 +494,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // never resurrect tax the order card doesn't show.
       final gstEnabled = ref.read(gstEnabledProvider);
       final lineItems = cart.map((e) {
-        final lineSub = e.effectivePrice * e.quantity;
+        // lineNet/lineTax back out the tax from an MRP (tax-inclusive) price,
+        // so unit_price sent to the server is always the NET rate — matching
+        // resolveNetPriceAndRate in routes/bills.js and keeping an offline bill
+        // identical to the one the server would have computed.
+        final lineSub = e.lineNet(gstEnabled);
         final taxRate = gstEnabled ? e.item.taxRate : null;
-        final lineTax = taxRate != null ? lineSub * (taxRate / 100) : 0.0;
+        final lineTax = e.lineTax(gstEnabled);
         subtotal += lineSub;
         taxAmount += lineTax;
         return {
@@ -487,7 +508,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           'variant_id': e.variant?.id,
           'item_name': e.displayName,
           'quantity': e.quantity,
-          'unit_price': e.effectivePrice,
+          'unit_price': e.netPrice(gstEnabled),
           'tax_rate': taxRate,
           'line_total': double.parse((lineSub + lineTax).toStringAsFixed(2)),
         };
@@ -915,6 +936,174 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   /// Debounced reaction to phone edits: when a full 10-digit number is entered,
   /// look up that customer's outstanding credit; clear the banner otherwise.
+  // ---------------------------------------------------------------------------
+  // Past-customer autocomplete
+  // ---------------------------------------------------------------------------
+
+  /// Debounced search as the user types into either customer field.
+  void _onCustomerTyped(String field) {
+    // Ignore the controller writes we make ourselves when filling a suggestion.
+    if (_applyingSuggestion) return;
+    // Only the focused field drives the list; the other is being written
+    // programmatically, or is simply not in play.
+    final focused = field == 'name'
+        ? _customerNameFocus.hasFocus
+        : _customerPhoneFocus.hasFocus;
+    if (!focused) return;
+
+    final q = (field == 'name'
+            ? _customerNameController.text
+            : _customerPhoneController.text)
+        .trim();
+
+    _customerSearchDebounce?.cancel();
+
+    if (q.length < 2) {
+      if (_customerSuggestions.isNotEmpty || _suggestFor != null) {
+        setState(() {
+          _customerSuggestions = const [];
+          _suggestFor = null;
+        });
+        _sheetSetState?.call(() {});
+      }
+      return;
+    }
+
+    _customerSearchDebounce = Timer(
+        const Duration(milliseconds: 300), () => _searchCustomers(q, field));
+  }
+
+  Future<void> _searchCustomers(String q, String field) async {
+    try {
+      final rows = await searchCustomers(q);
+      if (!mounted) return;
+      // The user may have typed on, or moved fields, while this was in flight.
+      final current = (field == 'name'
+              ? _customerNameController.text
+              : _customerPhoneController.text)
+          .trim();
+      if (current != q) return;
+      setState(() {
+        _customerSuggestions = rows;
+        _suggestFor = rows.isEmpty ? null : field;
+      });
+      _sheetSetState?.call(() {});
+    } catch (_) {
+      // A failed lookup must never block billing - just show no suggestions.
+      if (!mounted) return;
+      setState(() {
+        _customerSuggestions = const [];
+        _suggestFor = null;
+      });
+      _sheetSetState?.call(() {});
+    }
+  }
+
+  /// Fill both fields from a picked suggestion.
+  void _applyCustomerSuggestion(Map<String, dynamic> c) {
+    _customerSearchDebounce?.cancel();
+    _applyingSuggestion = true;
+    final name = (c['customer_name'] ?? '').toString();
+    final phone = (c['customer_phone'] ?? '').toString();
+    _customerNameController.text = name;
+    // Strip any country prefix: the field accepts 10 digits only, and a stored
+    // "918262878298" would otherwise be cut to the wrong number.
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    _customerPhoneController.text =
+        digits.length > 10 ? digits.substring(digits.length - 10) : digits;
+    _applyingSuggestion = false;
+
+    setState(() {
+      _customerSuggestions = const [];
+      _suggestFor = null;
+    });
+    _sheetSetState?.call(() {});
+
+    // A complete number means the previous-credit lookup should run for it.
+    _onPhoneChangedForCredit();
+    FocusScope.of(context).unfocus();
+  }
+
+  void _closeSuggestionsOnBlur() {
+    if (_customerNameFocus.hasFocus || _customerPhoneFocus.hasFocus) return;
+    if (_suggestFor == null && _customerSuggestions.isEmpty) return;
+    setState(() {
+      _customerSuggestions = const [];
+      _suggestFor = null;
+    });
+    _sheetSetState?.call(() {});
+  }
+
+  /// Dropdown of matching past customers, shown under whichever field is being
+  /// typed into. Each row carries the name AND the number, so a repeat customer
+  /// stays identifiable when several share a name.
+  Widget _customerSuggestionList(String field) {
+    if (_suggestFor != field || _customerSuggestions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      constraints: const BoxConstraints(maxHeight: 190),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadow.small,
+      ),
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: _customerSuggestions.length,
+        separatorBuilder: (_, __) =>
+            const Divider(height: 1, color: AppColors.border),
+        itemBuilder: (_, i) {
+          final c = _customerSuggestions[i];
+          final name = (c['customer_name'] ?? '').toString();
+          final phone = (c['customer_phone'] ?? '').toString();
+          final visits = int.tryParse('${c['visits'] ?? 0}') ?? 0;
+          return InkWell(
+            // onTapDown, not onTap: the field losing focus would otherwise
+            // dismiss the list before the tap completed.
+            onTapDown: (_) => _applyCustomerSuggestion(c),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(children: [
+                const Icon(Icons.history,
+                    size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name.isEmpty ? phone : name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                      if (name.isNotEmpty)
+                        Text(phone,
+                            maxLines: 1,
+                            style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+                if (visits > 1)
+                  Text('$visits visits',
+                      style: const TextStyle(
+                          fontSize: 11, color: AppColors.textSecondary)),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _onPhoneChangedForCredit() {
     final phone = _customerPhoneController.text.trim();
     _prevCreditDebounce?.cancel();
@@ -1271,9 +1460,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       double subtotal = 0;
       double taxAmount = 0;
       final lineItems = cart.map((e) {
-        final lineSub = e.effectivePrice * e.quantity;
+        // lineNet/lineTax back out the tax from an MRP (tax-inclusive) price,
+        // so unit_price sent to the server is always the NET rate — matching
+        // resolveNetPriceAndRate in routes/bills.js and keeping an offline bill
+        // identical to the one the server would have computed.
+        final lineSub = e.lineNet(gstEnabled);
         final taxRate = gstEnabled ? e.item.taxRate : null;
-        final lineTax = taxRate != null ? lineSub * (taxRate / 100) : 0.0;
+        final lineTax = e.lineTax(gstEnabled);
         subtotal += lineSub;
         taxAmount += lineTax;
         return {
@@ -1281,7 +1474,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           'variant_id': e.variant?.id,
           'item_name': e.displayName,
           'quantity': e.quantity,
-          'unit_price': e.effectivePrice,
+          'unit_price': e.netPrice(gstEnabled),
           'tax_rate': taxRate,
           'line_total':
               double.parse((lineSub + lineTax).toStringAsFixed(2)),
@@ -1407,10 +1600,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Bill _buildBillFromCart(List<CartEntry> cart) {
     double subtotal = 0;
     double taxAmount = 0;
+    // GST off → tax ignored entirely, and an MRP price stops being split. Same
+    // rule as the real billing paths so the preview matches the printed bill.
+    final gstEnabled = ref.read(gstEnabledProvider);
     final items = cart.map((e) {
-      final lineSub = e.effectivePrice * e.quantity;
-      final lineTax =
-          e.item.taxRate != null ? lineSub * (e.item.taxRate! / 100) : 0.0;
+      final lineSub = e.lineNet(gstEnabled);
+      final lineTax = e.lineTax(gstEnabled);
       subtotal += lineSub;
       taxAmount += lineTax;
       return BillItem(
@@ -1420,8 +1615,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         variantId: e.variant?.id,
         itemName: e.displayName,
         quantity: e.quantity,
-        unitPrice: e.effectivePrice,
-        taxRate: e.item.taxRate,
+        unitPrice: e.netPrice(gstEnabled),
+        taxRate: gstEnabled ? e.item.taxRate : null,
         lineTotal: double.parse((lineSub + lineTax).toStringAsFixed(2)),
       );
     }).toList();
@@ -2295,7 +2490,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// (e.g. 18% GST → CGST 9% / SGST 9%). Returns (label, amount) pairs.
   List<(String, String)> _gstSplitRows(
       AppLocalizations l10n, double subtotal, double tax) {
-    final half = (tax / 2).toStringAsFixed(2);
+    // Split in paise and give the odd one to CGST, so CGST + SGST always adds
+    // back to exactly [tax]. Printing (tax / 2) twice loses or gains a paisa on
+    // any odd-paise tax (0.95 -> 0.47 + 0.47 = 0.94), which would make this card
+    // disagree with the printed receipt by 0.01. Mirrors _gstHalves() in
+    // printer_service_native.dart.
+    final paise = (tax * 100).round();
+    final cgstAmt = ((paise + 1) ~/ 2) / 100;
+    final sgstAmt = (paise ~/ 2) / 100;
     // Effective half-rate for the label; blank-safe when subtotal is 0.
     String rate = '';
     if (subtotal > 0) {
@@ -2303,8 +2505,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       rate = r % 1 == 0 ? r.toStringAsFixed(0) : r.toStringAsFixed(1);
     }
     return [
-      (l10n.billingCgst(rate), half),
-      (l10n.billingSgst(rate), half),
+      (l10n.billingCgst(rate), cgstAmt.toStringAsFixed(2)),
+      (l10n.billingSgst(rate), sgstAmt.toStringAsFixed(2)),
     ];
   }
 
@@ -2585,6 +2787,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       size: 16,
                                       color: AppColors.textSecondary),
                                 ),
+                                _customerSuggestionList('name'),
                                 const SizedBox(height: AppSpacing.space8),
                                 AppTextField(
                                   key: _customerPhoneKey,
@@ -2600,6 +2803,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       size: 16,
                                       color: AppColors.textSecondary),
                                 ),
+                                _customerSuggestionList('phone'),
                               ],
                             ),
                           )
@@ -3154,12 +3358,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   Expanded(
                     child: PrimaryButton(
                       // With a printer set up the primary action prints the
-                      // receipt; without one it just saves (finalizes) the bill
-                      // so the sale is never blocked on printer setup.
-                      text: hasPrinter ? l10n.commonPrint : l10n.commonSave,
+                      // receipt; without one it finalizes the bill without
+                      // printing, so the sale is never blocked on printer setup.
+                      // Labeled distinctly from "Save Draft" (billingFinalizeBill,
+                      // not commonSave) since this one closes the order for good.
+                      text: hasPrinter
+                          ? l10n.commonPrint
+                          : l10n.billingFinalizeBill,
                       icon: hasPrinter
                           ? Icons.print_outlined
-                          : Icons.save_outlined,
+                          : Icons.receipt_long_outlined,
                       onPressed: (cart.isEmpty || _generatingBill)
                           ? null
                           : () {
@@ -3236,7 +3444,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     overflow: TextOverflow.ellipsis),
                 Text(
                   // Net (pre-tax) line amount — tax is shown in the totals below.
-                  '₹${entry.lineNet.toStringAsFixed(2)}',
+                  '₹${entry.lineNet(ref.read(gstEnabledProvider)).toStringAsFixed(2)}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w600,

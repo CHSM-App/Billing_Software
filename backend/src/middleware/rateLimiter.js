@@ -39,10 +39,10 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true, // only count failures toward the limit
 });
 
-// POST /api/register — 3 registrations per IP per hour
+// POST /api/register — 10 registrations per IP per hour
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 3,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: 'Too many registration attempts. Please try again in 1 hour.',
@@ -64,10 +64,10 @@ const refreshLimiter = rateLimit({
 });
 
 // POST /api/account/deletion/request + /confirm + /cancel
-// 5 attempts per IP per hour — tight because each attempt triggers a WhatsApp OTP
+// 15 attempts per IP per hour — bounded because each attempt triggers a WhatsApp OTP
 const deletionLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 5,
+  max: 15,
   standardHeaders: true,
   legacyHeaders: false,
   message: 'Too many account deletion attempts. Please try again in 1 hour.',

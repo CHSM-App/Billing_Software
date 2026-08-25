@@ -176,7 +176,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT id, business_id, name, barcode, category, price, tax_rate, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at
+      SELECT id, business_id, name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at
       FROM items
       WHERE ${where}
       ORDER BY name ASC
@@ -194,7 +194,7 @@ router.get('/', requireAuth, async (req, res) => {
           .input('barcode', sql.NVarChar(100), normalised);
         const variantMatch = await variantReq.query(`
           SELECT TOP 1 i.id, i.business_id, i.name, i.barcode, i.category, i.price,
-                 i.tax_rate, i.hsn_code, i.stock_quantity, i.low_stock_threshold, i.unit,
+                 i.tax_rate, i.price_inclusive_tax, i.hsn_code, i.stock_quantity, i.low_stock_threshold, i.unit,
                  i.is_active, i.created_at, v.id AS matched_variant_id
           FROM item_variants v
           JOIN items i ON i.id = v.item_id
@@ -234,7 +234,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, category, price, tax_rate, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at, image_url
+        SELECT id, business_id, name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at, image_url
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -253,8 +253,8 @@ router.get('/:id', requireAuth, async (req, res) => {
 // POST /api/items
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
   const {
-    name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit,
-    low_stock_threshold,
+    name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code,
+    stock_quantity, unit, low_stock_threshold,
     // Set by the client when the item is being created with sizes. The variants
     // themselves are POSTed separately straight after, so at INSERT time this is
     // the only signal that the missing price is intentional.
@@ -292,6 +292,10 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('price', sql.Decimal(10, 2),
         sizedItem || price == null ? null : parseFloat(price))
       .input('tax_rate', sql.Decimal(5, 2), tax_rate != null ? parseFloat(tax_rate) : null)
+      // Whether `price` (and each variant's price) is quoted GST-inclusive.
+      // Defaults to exclusive, matching every item created before this flag
+      // existed. Billing back-calculates the net rate when this is set.
+      .input('price_inclusive_tax', sql.Bit, price_inclusive_tax === true ? 1 : 0)
       .input('hsn_code', sql.NVarChar(10), hsn_code || null)
       .input('stock_quantity', sql.Decimal(10, 2),
         sizedItem || stock_quantity == null ? null : parseFloat(stock_quantity))
@@ -303,10 +307,10 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('low_stock_threshold', sql.Decimal(10, 2),
         low_stock_threshold != null ? parseFloat(low_stock_threshold) : 50)
       .query(`
-        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit, low_stock_threshold)
+        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, low_stock_threshold)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
-               INSERTED.price, INSERTED.tax_rate, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @hsn_code, @stock_quantity, @unit, @low_stock_threshold)
+               INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
+        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @low_stock_threshold)
       `);
 
     const created = result.recordset[0];
@@ -336,11 +340,11 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 // PUT /api/items/:id
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   const {
-    name, barcode, category, price, tax_rate, hsn_code, stock_quantity, unit,
+    name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit,
     low_stock_threshold,
   } = req.body;
 
-  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined) {
+  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   if (price != null && (isNaN(parseFloat(price)) || parseFloat(price) < 0)) {
@@ -410,6 +414,10 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       sets.push('tax_rate = @tax_rate');
       request.input('tax_rate', sql.Decimal(5, 2), tax_rate != null ? parseFloat(tax_rate) : null);
     }
+    if (price_inclusive_tax !== undefined) {
+      sets.push('price_inclusive_tax = @price_inclusive_tax');
+      request.input('price_inclusive_tax', sql.Bit, price_inclusive_tax === true ? 1 : 0);
+    }
     if (hsn_code !== undefined) {
       sets.push('hsn_code = @hsn_code');
       request.input('hsn_code', sql.NVarChar(10), hsn_code || null);
@@ -431,7 +439,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       UPDATE items
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
-             INSERTED.price, INSERTED.tax_rate, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
+             INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);
 

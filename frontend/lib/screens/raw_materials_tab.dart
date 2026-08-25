@@ -347,6 +347,24 @@ class _RawMaterialsTabState extends ConsumerState<RawMaterialsTab> {
     );
   }
 
+  void _showStockPopup(BuildContext context, WidgetRef ref, RawMaterial m) {
+    showDialog(
+      context: context,
+      builder: (_) => _MaterialStockPopupDialog(
+        material: m,
+        onStockUpdated: (newStock) async {
+          await ref
+              .read(rawMaterialsProvider.notifier)
+              .edit(m.id, {'stock_quantity': newStock});
+        },
+        onEditTapped: () {
+          Navigator.pop(context);
+          _showForm(context, ref, material: m);
+        },
+      ),
+    );
+  }
+
   Future<void> _delete(BuildContext context, WidgetRef ref, RawMaterial m) async {
     final l10n = context.l10n;
     final ok = await showDialog<bool>(
@@ -467,7 +485,7 @@ class _RawMaterialsTabState extends ConsumerState<RawMaterialsTab> {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadius.medium),
         child: InkWell(
-          onTap: () => _showForm(context, ref, material: m),
+          onTap: () => _showStockPopup(context, ref, m),
           borderRadius: BorderRadius.circular(AppRadius.medium),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -543,6 +561,204 @@ class _RawMaterialsTabState extends ConsumerState<RawMaterialsTab> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stock quick-update popup — tap a raw material to add or remove stock,
+// Edit button for the full edit form. Mirrors items_screen.dart's
+// _StockPopupDialog so raw materials get the same add/remove UX as items.
+// ---------------------------------------------------------------------------
+class _MaterialStockPopupDialog extends StatefulWidget {
+  final RawMaterial material;
+  final Future<void> Function(double stock) onStockUpdated;
+  final VoidCallback onEditTapped;
+
+  const _MaterialStockPopupDialog({
+    required this.material,
+    required this.onStockUpdated,
+    required this.onEditTapped,
+  });
+
+  @override
+  State<_MaterialStockPopupDialog> createState() =>
+      _MaterialStockPopupDialogState();
+}
+
+class _MaterialStockPopupDialogState extends State<_MaterialStockPopupDialog> {
+  late final TextEditingController _qtyCtrl;
+  bool _saving = false;
+  bool _removing = false;
+
+  double get _current => widget.material.stockQuantity ?? 0;
+  double get _entered => double.tryParse(_qtyCtrl.text.trim()) ?? 0;
+  double get _adjustment => _removing ? -_entered : _entered;
+  // Stock can never go negative, regardless of how much was requested to remove.
+  double get _total => (_current + _adjustment).clamp(0, double.infinity);
+
+  @override
+  void initState() {
+    super.initState();
+    _qtyCtrl = TextEditingController();
+    _qtyCtrl.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_entered <= 0) return;
+    setState(() => _saving = true);
+    try {
+      await widget.onStockUpdated(_total);
+      if (mounted) Navigator.pop(context);
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final material = widget.material;
+    final hasInput = _entered > 0;
+    final l10n = context.l10n;
+    final unitLabel = rawMaterialUnitLabel(context, material.unit);
+
+    return AlertDialog(
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 8, 0),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(material.name,
+                style: Theme.of(context).textTheme.titleMedium),
+          ),
+          IconButton(
+            tooltip: l10n.itemsEditItemTooltip,
+            icon: const Icon(Icons.edit_outlined, size: 20),
+            onPressed: widget.onEditTapped,
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 280,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Current stock display
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(l10n.itemsCurrentStock,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.textSecondary,
+                            )),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${formatQty(_current)} $unitLabel',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              // Add / Remove mode toggle. expandedInsets stretches the control
+              // to fill the row and split it into two equal-width segments, so
+              // the layout stays static when switching between "Add" and the
+              // wider "Remove" label — only the selected fill moves.
+              SegmentedButton<bool>(
+                expandedInsets: EdgeInsets.zero,
+                segments: [
+                  ButtonSegment(
+                      value: false, label: Text(l10n.itemsStockModeAdd)),
+                  ButtonSegment(
+                      value: true, label: Text(l10n.itemsStockModeRemove)),
+                ],
+                selected: {_removing},
+                onSelectionChanged: (selection) {
+                  setState(() => _removing = selection.first);
+                },
+              ),
+              const SizedBox(height: 12),
+              AppTextField(
+                label: _removing ? l10n.itemsRemoveQuantity : l10n.itemsAddQuantity,
+                controller: _qtyCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              // Total stock preview
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: hasInput
+                      ? AppColors.primaryLight
+                      : AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(AppRadius.small),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: Text(
+                          _removing
+                              ? l10n.itemsTotalAfterRemoving
+                              : l10n.itemsTotalAfterAdding,
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: hasInput
+                                        ? AppColors.primaryDark
+                                        : AppColors.textSecondary,
+                                    fontWeight: FontWeight.w500,
+                                  )),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${formatQty(_total)} $unitLabel',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: hasInput
+                                ? AppColors.primary
+                                : AppColors.textSecondary,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonCancel)),
+        ElevatedButton(
+          onPressed: (_saving || !hasInput) ? null : _save,
+          child: _saving
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : Text(l10n.commonUpdate),
+        ),
+      ],
     );
   }
 }

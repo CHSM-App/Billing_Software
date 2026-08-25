@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers/cart_provider.dart';
+import '../providers/session_provider.dart';
 import '../providers/tables_provider.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
@@ -11,18 +12,24 @@ import 'home_screen.dart';
 /// panel has its own completely independent cart state.
 List<Override> _cartOverrides() => [
       cartProvider.overrideWith(CartNotifier.new),
-      // effectivePrice, not item.price: a sized line is charged at its own
-      // size's price, and a sized item's own price is null. Reading item.price
-      // directly both ignored the size and would now be a null-arithmetic error.
+      // Mirrors the real cartSubtotal/cartTax providers: CartEntry.lineNet /
+      // lineTax resolve the size's own price (a sized item's own price is null)
+      // and split an MRP price into net + tax, so a split panel totals exactly
+      // like the main cart.
       cartSubtotalProvider.overrideWith(
-        (ref) => ref.watch(cartProvider).fold(
-            0.0, (s, e) => s + e.effectivePrice * e.quantity),
+        (ref) {
+          final gstEnabled = ref.watch(gstEnabledProvider);
+          return ref.watch(cartProvider)
+              .fold(0.0, (s, e) => s + e.lineNet(gstEnabled));
+        },
       ),
       cartTaxProvider.overrideWith(
-        (ref) => ref.watch(cartProvider).fold(0.0, (s, e) {
-          if (e.item.taxRate == null) return s;
-          return s + e.effectivePrice * e.quantity * (e.item.taxRate! / 100);
-        }),
+        (ref) {
+          final gstEnabled = ref.watch(gstEnabledProvider);
+          if (!gstEnabled) return 0.0;
+          return ref.watch(cartProvider)
+              .fold(0.0, (s, e) => s + e.lineTax(gstEnabled));
+        },
       ),
       cartTotalProvider.overrideWith(
         (ref) =>

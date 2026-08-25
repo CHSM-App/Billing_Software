@@ -10,6 +10,7 @@ Item makeItem({
   String name = 'Rice',
   double price = 50.0,
   double? taxRate,
+  bool priceInclusiveTax = false,
   double? stockQuantity,
   List<ItemVariant> variants = const [],
 }) =>
@@ -19,6 +20,7 @@ Item makeItem({
       name: name,
       price: price,
       taxRate: taxRate,
+      priceInclusiveTax: priceInclusiveTax,
       stockQuantity: stockQuantity,
       variants: variants,
       isActive: true,
@@ -448,6 +450,86 @@ void main() {
       ]);
       notifier.addItem(item, variant: item.variants[0]);
       expect(container.read(cartProvider).first.displayName, 'T-Shirt (XL)');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Tax-inclusive (MRP) pricing through the cart totals
+  // ─────────────────────────────────────────────────────────────
+  group('tax-inclusive pricing', () {
+    test('subtotal is the back-calculated NET, not the MRP', () {
+      final container = makeContainer();
+      container.read(cartProvider.notifier).addItem(
+            makeItem(price: 105.0, taxRate: 5.0, priceInclusiveTax: true),
+          );
+      // 105 inclusive of 5% = 100 net + 5 tax.
+      expect(container.read(cartSubtotalProvider), closeTo(100.0, 0.001));
+      expect(container.read(cartTaxProvider), closeTo(5.0, 0.001));
+    });
+
+    test('total equals the MRP the customer was quoted', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      notifier.addItem(
+        makeItem(price: 20.0, taxRate: 5.0, priceInclusiveTax: true),
+      );
+      notifier.changeQty('item-1', 2); // delta, so qty becomes 3
+      // The behaviour this feature exists for: 3 x 20 MRP totals 60, not 63.
+      expect(container.read(cartTotalProvider), closeTo(60.0, 1e-9));
+    });
+
+    test('an exclusive item with the same price totals higher', () {
+      final incl = makeContainer();
+      incl.read(cartProvider.notifier).addItem(
+            makeItem(price: 100.0, taxRate: 18.0, priceInclusiveTax: true),
+          );
+      final excl = makeContainer();
+      excl.read(cartProvider.notifier).addItem(
+            makeItem(price: 100.0, taxRate: 18.0),
+          );
+      expect(incl.read(cartTotalProvider), closeTo(100.0, 1e-9));
+      expect(excl.read(cartTotalProvider), closeTo(118.0, 1e-9));
+    });
+
+    test('GST off: an MRP price is charged whole, with no tax split', () {
+      final container = makeContainer(gstEnabled: false);
+      container.read(cartProvider.notifier).addItem(
+            makeItem(price: 105.0, taxRate: 5.0, priceInclusiveTax: true),
+          );
+      // Nothing to extract, so the subtotal is the full price and tax is 0.
+      expect(container.read(cartSubtotalProvider), closeTo(105.0, 0.001));
+      expect(container.read(cartTaxProvider), 0.0);
+      expect(container.read(cartTotalProvider), closeTo(105.0, 0.001));
+    });
+
+    test('inclusive and exclusive items mix correctly in one cart', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      notifier.addItem(
+        makeItem(id: 'a', price: 105.0, taxRate: 5.0, priceInclusiveTax: true),
+      );
+      notifier.addItem(makeItem(id: 'b', price: 200.0, taxRate: 5.0));
+      // a: 100 net + 5 tax (MRP 105).  b: 200 net + 10 tax (bills at 210).
+      expect(container.read(cartSubtotalProvider), closeTo(300.0, 0.001));
+      expect(container.read(cartTaxProvider), closeTo(15.0, 0.001));
+      expect(container.read(cartTotalProvider), closeTo(315.0, 0.001));
+    });
+
+    test('a variant price inherits the parent item inclusive flag', () {
+      final container = makeContainer();
+      final variant = makeVariant(id: 'v1', itemId: 'item-1', price: 210.0);
+      container.read(cartProvider.notifier).addItem(
+            makeItem(
+              price: 105.0,
+              taxRate: 5.0,
+              priceInclusiveTax: true,
+              variants: [variant],
+            ),
+            variant: variant,
+          );
+      // The size's 210 is an MRP too: 200 net + 10 tax.
+      expect(container.read(cartSubtotalProvider), closeTo(200.0, 0.001));
+      expect(container.read(cartTotalProvider), closeTo(210.0, 0.001));
     });
   });
 }

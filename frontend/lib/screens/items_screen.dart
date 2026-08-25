@@ -720,10 +720,13 @@ class _StockPopupDialog extends StatefulWidget {
 class _StockPopupDialogState extends State<_StockPopupDialog> {
   late final TextEditingController _addCtrl;
   bool _saving = false;
+  bool _removing = false;
 
   double get _current => widget.item.stockQuantity ?? 0;
-  double get _adding => double.tryParse(_addCtrl.text.trim()) ?? 0;
-  double get _total => _current + _adding;
+  double get _entered => double.tryParse(_addCtrl.text.trim()) ?? 0;
+  double get _adding => _removing ? -_entered : _entered;
+  // Stock can never go negative, regardless of how much was requested to remove.
+  double get _total => (_current + _adding).clamp(0, double.infinity);
 
   @override
   void initState() {
@@ -739,7 +742,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
   }
 
   Future<void> _save() async {
-    if (_adding <= 0) return;
+    if (_entered <= 0) return;
     setState(() => _saving = true);
     try {
       await widget.onStockUpdated(_total);
@@ -758,7 +761,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final hasInput = _adding > 0;
+    final hasInput = _entered > 0;
     final l10n = context.l10n;
 
     return AlertDialog(
@@ -833,8 +836,26 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                 ],
               ),
               const SizedBox(height: 12),
+              // Add / Remove mode toggle. expandedInsets stretches the control
+              // to fill the row and split it into two equal-width segments, so
+              // the layout stays static when switching between "Add" and the
+              // wider "Remove" label — only the selected fill moves.
+              SegmentedButton<bool>(
+                expandedInsets: EdgeInsets.zero,
+                segments: [
+                  ButtonSegment(
+                      value: false, label: Text(l10n.itemsStockModeAdd)),
+                  ButtonSegment(
+                      value: true, label: Text(l10n.itemsStockModeRemove)),
+                ],
+                selected: {_removing},
+                onSelectionChanged: (selection) {
+                  setState(() => _removing = selection.first);
+                },
+              ),
+              const SizedBox(height: 12),
               AppTextField(
-                label: l10n.itemsAddQuantity,
+                label: _removing ? l10n.itemsRemoveQuantity : l10n.itemsAddQuantity,
                 controller: _addCtrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
@@ -854,7 +875,10 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Flexible(
-                      child: Text(l10n.itemsTotalAfterAdding,
+                      child: Text(
+                          _removing
+                              ? l10n.itemsTotalAfterRemoving
+                              : l10n.itemsTotalAfterAdding,
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: hasInput
@@ -988,6 +1012,11 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   String _unit = 'piece';
   bool _saving = false;
 
+  /// Whether the entered price already contains GST (an MRP) rather than being
+  /// a net price GST is added to. Only meaningful when GST is on and a tax rate
+  /// is set; billing back-calculates the net rate from an inclusive price.
+  bool _priceInclusiveTax = false;
+
   /// Whether the user ticked "this item has variants" while CREATING. Editing an
   /// existing item still routes to the dedicated size manager, which already
   /// handles update/delete of persisted sizes safely.
@@ -1025,6 +1054,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _categoryCtrl.text = item.category ?? '';
       _priceCtrl.text = item.price.toString();
       _taxCtrl.text = item.taxRate?.toString() ?? '';
+      _priceInclusiveTax = item.priceInclusiveTax;
       _hsnCtrl.text = item.hsnCode ?? '';
       _barcodeCtrl.text = item.barcode ?? '';
       _stockCtrl.text = item.stockQuantity?.toString() ?? '';
@@ -1032,6 +1062,145 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _unit = _units.contains(item.unit) ? item.unit : 'piece';
     }
   }
+
+  /// "Price already includes GST" toggle.
+  ///
+  /// This is the one setting an owner cannot infer from the price field alone:
+  /// ₹100 at 5% is either ₹105.00 or ₹100.00 at the counter, and nothing on
+  /// screen distinguishes them. So the tile always carries a plain-language
+  /// explanation of what the switch decides, and — as soon as a price and a tax
+  /// rate are both entered — a live line stating the rupee amount the customer
+  /// will actually be charged. The owner should never have to run the division
+  /// in their head to find out what they just configured.
+  ///
+  /// Rebuilt from the price/tax controllers directly (AppTextField exposes no
+  /// onChanged) so the figures track every keystroke.
+  Widget _buildInclusiveTaxToggle(AppLocalizations l10n) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([_priceCtrl, _taxCtrl]),
+      builder: (context, _) {
+        final theme = Theme.of(context);
+        // A sized item has no price of its own — its sizes do — so there is no
+        // single figure to break down. The flag still applies to those sizes.
+        final sized = _hasVariants || (widget.item?.hasVariants ?? false);
+        final price = sized ? null : double.tryParse(_priceCtrl.text.trim());
+        final rate = double.tryParse(_taxCtrl.text.trim());
+
+        // What this switch means, in both positions. Shown always — it is the
+        // answer to "what is this for?", which a state readout never gives.
+        final meaning = _priceInclusiveTax
+            ? l10n.itemsPriceInclusiveTaxOn
+            : l10n.itemsPriceInclusiveTaxOff;
+
+        // The concrete consequence in rupees, once there is enough to compute.
+        // Mirrors CartEntry/netUnitPrice: an inclusive price is the gross and
+        // the net is backed out of it; an exclusive price is the net and tax
+        // goes on top.
+        String? outcome;
+        if (rate == null || rate <= 0) {
+          outcome = sized ? null : l10n.itemsPriceBreakdownNeedsRate;
+        } else if (sized) {
+          outcome = l10n.itemsPriceBreakdownSized;
+        } else if (price != null && price > 0) {
+          final net = _priceInclusiveTax ? price / (1 + rate / 100) : price;
+          final tax = net * (rate / 100);
+          final args = [
+            (net + tax).toStringAsFixed(2),
+            net.toStringAsFixed(2),
+            tax.toStringAsFixed(2),
+            _trimRate(rate),
+          ];
+          outcome = _priceInclusiveTax
+              ? l10n.itemsPriceBreakdownOn(args[0], args[1], args[2], args[3])
+              : l10n.itemsPriceBreakdownOff(args[0], args[1], args[2], args[3]);
+        }
+
+        return Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.medium),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SwitchListTile(
+                value: _priceInclusiveTax,
+                onChanged: _saving
+                    ? null
+                    : (v) => setState(() => _priceInclusiveTax = v),
+                title: Text(
+                  l10n.itemsPriceInclusiveTax,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    // Instruction first (when to switch it on), then what the
+                    // current position does.
+                    '${l10n.itemsPriceInclusiveTaxHelp}\n$meaning',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: AppColors.textSecondary),
+                  ),
+                ),
+                isThreeLine: true,
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.space12),
+              ),
+              if (outcome != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.space12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(AppRadius.medium),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.receipt_long_outlined,
+                          size: 16, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          outcome,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Price-field label, spelling out whether GST is already in the figure.
+  ///
+  /// Falls back to the plain label when GST is off for the business — there is
+  /// no distinction to draw, and naming GST there would only confuse.
+  String _priceLabel(AppLocalizations l10n) {
+    if (!widget.gstEnabled) return l10n.itemsFieldPrice;
+    return _priceInclusiveTax
+        ? l10n.itemsFieldPriceInclusive
+        : l10n.itemsFieldPriceExclusive;
+  }
+
+  /// Tax rate for display: "5" not "5.0", but "2.5" kept intact.
+  String _trimRate(double rate) => rate == rate.roundToDouble()
+      ? rate.toStringAsFixed(0)
+      : rate.toString();
 
   String _unitLabel(BuildContext context, String unit) {
     final l10n = context.l10n;
@@ -1231,6 +1400,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       'price': _hasVariants ? null : double.parse(_priceCtrl.text.trim()),
       if (_taxCtrl.text.trim().isNotEmpty)
         'tax_rate': double.parse(_taxCtrl.text.trim()),
+      // Always sent (not conditional on the tax field) so clearing the rate or
+      // switching the toggle off is persisted rather than leaving a stale 1
+      // behind on the server.
+      if (widget.gstEnabled) 'price_inclusive_tax': _priceInclusiveTax,
       if (widget.gstEnabled)
         'hsn_code': _hsnCtrl.text.trim().isNotEmpty ? _hsnCtrl.text.trim() : null,
       'barcode': effectiveBarcode,
@@ -1446,7 +1619,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 child: AppTextField(
                   // Required now: with no item-level price to fall back on, a
                   // size with no price would have nothing to charge.
-                  label: l10n.itemsFieldPrice,
+                  // Sizes inherit the item's inclusive/exclusive flag, so the
+                  // label tracks it too.
+                  label: _priceLabel(l10n),
                   controller: d.price,
                   keyboardType: numeric,
                   validator: (v) {
@@ -1574,7 +1749,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 if (!_hasVariants) ...[
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
-                    label: l10n.itemsFieldPrice,
+                    // The label states which kind of price is expected, so the
+                    // GST question is answered at the moment the number is
+                    // typed rather than only at the toggle further down.
+                    label: _priceLabel(l10n),
                     controller: _priceCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
@@ -1624,6 +1802,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                       return null;
                     },
                   ),
+                  const SizedBox(height: AppSpacing.space12),
+                  _buildInclusiveTaxToggle(l10n),
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
                     label: l10n.itemsFieldHsn,
@@ -2321,12 +2501,13 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
   late final List<ItemVariant> _variants;
   late final Map<String, TextEditingController> _ctrls;
   bool _saving = false;
+  bool _removing = false;
 
   @override
   void initState() {
     super.initState();
     _variants = [...widget.item.variants];
-    // Fields hold the quantity to ADD to the current stock — start empty.
+    // Fields hold the quantity to ADD/REMOVE relative to current stock — start empty.
     _ctrls = {
       for (final v in _variants) v.id: TextEditingController(),
     };
@@ -2343,24 +2524,29 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
     super.dispose();
   }
 
-  // Quantity being added for a size (0 when blank/invalid).
-  double _adding(ItemVariant v) =>
+  // Quantity entered for a size (0 when blank/invalid), always positive.
+  double _entered(ItemVariant v) =>
       double.tryParse(_ctrls[v.id]!.text.trim()) ?? 0;
 
-  bool get _anyInput => _variants.any((v) => _adding(v) > 0);
+  // Signed adjustment for a size, depending on the Add/Remove mode.
+  double _adding(ItemVariant v) => _removing ? -_entered(v) : _entered(v);
+
+  bool get _anyInput => _variants.any((v) => _entered(v) > 0);
 
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
       final updated = <ItemVariant>[];
       for (final v in _variants) {
-        final adding = _adding(v);
-        // Skip sizes with no quantity added.
-        if (adding <= 0) {
+        final entered = _entered(v);
+        // Skip sizes with no quantity entered.
+        if (entered <= 0) {
           updated.add(v);
           continue;
         }
-        final newStock = (v.stockQuantity ?? 0) + adding;
+        // Stock can never go negative, regardless of how much was requested to remove.
+        final newStock =
+            ((v.stockQuantity ?? 0) + _adding(v)).clamp(0, double.infinity);
         final result = await updateVariant(
           widget.item.id,
           v.id,
@@ -2424,6 +2610,25 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Add / Remove mode toggle — applies to all sizes below.
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.space12),
+                child: SegmentedButton<bool>(
+                  // expandedInsets keeps both segments equal-width so the
+                  // control's layout stays static when the mode is toggled.
+                  expandedInsets: EdgeInsets.zero,
+                  segments: [
+                    ButtonSegment(
+                        value: false, label: Text(l10n.itemsStockModeAdd)),
+                    ButtonSegment(
+                        value: true, label: Text(l10n.itemsStockModeRemove)),
+                  ],
+                  selected: {_removing},
+                  onSelectionChanged: (selection) {
+                    setState(() => _removing = selection.first);
+                  },
+                ),
+              ),
               for (final v in _variants)
                 Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.space12),
@@ -2444,10 +2649,10 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                                   .bodySmall
                                   ?.copyWith(color: AppColors.textSecondary),
                             ),
-                            // Live preview of the resulting stock after adding.
-                            if (_adding(v) > 0)
+                            // Live preview of the resulting stock after the adjustment.
+                            if (_entered(v) > 0)
                               Text(
-                                '${l10n.itemsTotalAfterAdding}: ${formatQty((v.stockQuantity ?? 0) + _adding(v))} ${itemUnitLabel(context, widget.item.unit)}',
+                                '${_removing ? l10n.itemsTotalAfterRemoving : l10n.itemsTotalAfterAdding}: ${formatQty(((v.stockQuantity ?? 0) + _adding(v)).clamp(0, double.infinity))} ${itemUnitLabel(context, widget.item.unit)}',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
@@ -2466,7 +2671,9 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                         // itself is wide enough to afford it.
                         width: _qtyFieldWidth(context),
                         child: AppTextField(
-                          label: l10n.itemsAddQuantity,
+                          label: _removing
+                              ? l10n.itemsRemoveQuantity
+                              : l10n.itemsAddQuantity,
                           controller: _ctrls[v.id]!,
                           keyboardType: const TextInputType.numberWithOptions(
                               decimal: true),

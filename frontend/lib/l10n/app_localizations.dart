@@ -506,6 +506,36 @@ abstract class AppLocalizations {
   /// **'Table {number}'**
   String kitchenTable(String number);
 
+  /// No description provided for @kitchenTabPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending'**
+  String get kitchenTabPending;
+
+  /// No description provided for @kitchenTabCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get kitchenTabCompleted;
+
+  /// No description provided for @kitchenNoPendingOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'No pending orders right now.'**
+  String get kitchenNoPendingOrders;
+
+  /// No description provided for @kitchenNoCompletedOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'No completed orders yet.'**
+  String get kitchenNoCompletedOrders;
+
+  /// No description provided for @kitchenMarkCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark as Completed'**
+  String get kitchenMarkCompleted;
+
   /// No description provided for @kitchenJustNow.
   ///
   /// In en, this message translates to:
@@ -1616,6 +1646,12 @@ abstract class AppLocalizations {
   /// **'Save Draft'**
   String get billingSaveDraft;
 
+  /// No description provided for @billingFinalizeBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Finalize Bill'**
+  String get billingFinalizeBill;
+
   /// No description provided for @billingClearCart.
   ///
   /// In en, this message translates to:
@@ -2186,6 +2222,18 @@ abstract class AppLocalizations {
   /// **'Price (₹)'**
   String get itemsFieldPrice;
 
+  /// No description provided for @itemsFieldPriceInclusive.
+  ///
+  /// In en, this message translates to:
+  /// **'Price (₹) — including GST'**
+  String get itemsFieldPriceInclusive;
+
+  /// No description provided for @itemsFieldPriceExclusive.
+  ///
+  /// In en, this message translates to:
+  /// **'Price (₹) — before GST'**
+  String get itemsFieldPriceExclusive;
+
   /// No description provided for @itemsFieldTaxRate.
   ///
   /// In en, this message translates to:
@@ -2197,6 +2245,56 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'e.g. 5, 12, 18'**
   String get itemsFieldTaxRateHint;
+
+  /// No description provided for @itemsPriceInclusiveTax.
+  ///
+  /// In en, this message translates to:
+  /// **'Price already includes GST'**
+  String get itemsPriceInclusiveTax;
+
+  /// No description provided for @itemsPriceInclusiveTaxHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn ON if the price above is the final amount on your shelf label or menu. Turn OFF if GST should be added to it at billing.'**
+  String get itemsPriceInclusiveTaxHelp;
+
+  /// No description provided for @itemsPriceInclusiveTaxOn.
+  ///
+  /// In en, this message translates to:
+  /// **'The price you entered is the final amount. GST is taken out of it, not added.'**
+  String get itemsPriceInclusiveTaxOn;
+
+  /// No description provided for @itemsPriceInclusiveTaxOff.
+  ///
+  /// In en, this message translates to:
+  /// **'GST will be added to the price you entered at billing time.'**
+  String get itemsPriceInclusiveTaxOff;
+
+  /// No description provided for @itemsPriceBreakdownOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer pays ₹{gross} — the price you entered. Of that, ₹{tax} is GST ({rate}%) and ₹{net} is your amount.'**
+  String itemsPriceBreakdownOn(
+      String gross, String net, String tax, String rate);
+
+  /// No description provided for @itemsPriceBreakdownOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer pays ₹{gross} — your ₹{net} plus ₹{tax} GST ({rate}%).'**
+  String itemsPriceBreakdownOff(
+      String gross, String net, String tax, String rate);
+
+  /// No description provided for @itemsPriceBreakdownNeedsRate.
+  ///
+  /// In en, this message translates to:
+  /// **'Set a tax rate above to see how this splits.'**
+  String get itemsPriceBreakdownNeedsRate;
+
+  /// No description provided for @itemsPriceBreakdownSized.
+  ///
+  /// In en, this message translates to:
+  /// **'Applies to every size of this item.'**
+  String get itemsPriceBreakdownSized;
 
   /// No description provided for @itemsFieldHsn.
   ///
@@ -2456,11 +2554,35 @@ abstract class AppLocalizations {
   /// **'Add quantity'**
   String get itemsAddQuantity;
 
+  /// No description provided for @itemsRemoveQuantity.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove quantity'**
+  String get itemsRemoveQuantity;
+
   /// No description provided for @itemsTotalAfterAdding.
   ///
   /// In en, this message translates to:
   /// **'Total after adding'**
   String get itemsTotalAfterAdding;
+
+  /// No description provided for @itemsTotalAfterRemoving.
+  ///
+  /// In en, this message translates to:
+  /// **'Total after removing'**
+  String get itemsTotalAfterRemoving;
+
+  /// No description provided for @itemsStockModeAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get itemsStockModeAdd;
+
+  /// No description provided for @itemsStockModeRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get itemsStockModeRemove;
 
   /// No description provided for @itemsInventoryDisabled.
   ///

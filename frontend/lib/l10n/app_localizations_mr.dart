@@ -244,6 +244,22 @@ class AppLocalizationsMr extends AppLocalizations {
   }
 
   @override
+  String get kitchenTabPending => 'प्रलंबित';
+
+  @override
+  String get kitchenTabCompleted => 'पूर्ण झाले';
+
+  @override
+  String get kitchenNoPendingOrders => 'सध्या कोणतीही प्रलंबित ऑर्डर नाही.';
+
+  @override
+  String get kitchenNoCompletedOrders =>
+      'अद्याप कोणतीही ऑर्डर पूर्ण झालेली नाही.';
+
+  @override
+  String get kitchenMarkCompleted => 'पूर्ण झाले म्हणून चिन्हांकित करा';
+
+  @override
   String get kitchenJustNow => 'आत्ताच';
 
   @override
@@ -836,6 +852,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingSaveDraft => 'ड्राफ्ट जतन करा';
 
   @override
+  String get billingFinalizeBill => 'बिल अंतिम करा';
+
+  @override
   String get billingClearCart => 'निवडलेल्या वस्तू काढा';
 
   @override
@@ -1169,10 +1188,51 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsFieldPrice => 'किंमत (₹)';
 
   @override
+  String get itemsFieldPriceInclusive => 'किंमत (₹) — GST सह';
+
+  @override
+  String get itemsFieldPriceExclusive => 'किंमत (₹) — GST पूर्वी';
+
+  @override
   String get itemsFieldTaxRate => 'कर दर % (ऐच्छिक)';
 
   @override
   String get itemsFieldTaxRateHint => 'उदा. ५, १२, १८';
+
+  @override
+  String get itemsPriceInclusiveTax => 'किंमतीत GST आधीच समाविष्ट आहे';
+
+  @override
+  String get itemsPriceInclusiveTaxHelp =>
+      'वरील किंमत ही तुमच्या लेबल किंवा मेनूवरची अंतिम किंमत असेल तर ON करा. बिलाच्या वेळी GST वेगळा जोडायचा असेल तर OFF ठेवा.';
+
+  @override
+  String get itemsPriceInclusiveTaxOn =>
+      'तुम्ही टाकलेली किंमत हीच अंतिम रक्कम आहे. GST त्यातून वेगळा काढला जातो, जोडला जात नाही.';
+
+  @override
+  String get itemsPriceInclusiveTaxOff =>
+      'बिलाच्या वेळी तुम्ही टाकलेल्या किंमतीवर GST जोडला जाईल.';
+
+  @override
+  String itemsPriceBreakdownOn(
+      String gross, String net, String tax, String rate) {
+    return 'ग्राहक ₹$gross देईल — तुम्ही टाकलेली किंमत. त्यापैकी ₹$tax GST ($rate%) आणि ₹$net तुमची रक्कम.';
+  }
+
+  @override
+  String itemsPriceBreakdownOff(
+      String gross, String net, String tax, String rate) {
+    return 'ग्राहक ₹$gross देईल — तुमचे ₹$net अधिक ₹$tax GST ($rate%).';
+  }
+
+  @override
+  String get itemsPriceBreakdownNeedsRate =>
+      'हे कसे विभागले जाईल हे पाहण्यासाठी वर कर दर टाका.';
+
+  @override
+  String get itemsPriceBreakdownSized =>
+      'या वस्तूच्या प्रत्येक आकाराला लागू होते.';
 
   @override
   String get itemsFieldHsn => 'HSN/SAC कोड (ऐच्छिक)';
@@ -1327,7 +1387,19 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsAddQuantity => 'संख्या जोडा';
 
   @override
+  String get itemsRemoveQuantity => 'संख्या कमी करा';
+
+  @override
   String get itemsTotalAfterAdding => 'जोडल्यानंतर एकूण';
+
+  @override
+  String get itemsTotalAfterRemoving => 'कमी केल्यानंतर एकूण';
+
+  @override
+  String get itemsStockModeAdd => 'जोडा';
+
+  @override
+  String get itemsStockModeRemove => 'कमी करा';
 
   @override
   String get itemsInventoryDisabled => 'स्टॉक नोंद बंद आहे.';
