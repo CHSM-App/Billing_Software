@@ -8,10 +8,12 @@ import Features     from './sections/Features'
 import HowItWorks   from './sections/HowItWorks'
 import WhoItsFor    from './sections/WhoItsFor'
 import AppPreview   from './sections/AppPreview'
+import FAQ          from './sections/FAQ'
 import CTA          from './sections/CTA'
 import HelpCenter    from './components/helpcenter'
 import PrivacyPolicy  from './components/privacyPolicy'
 import DeleteAccount  from './components/DeleteAccount'
+import NotFound       from './components/NotFound'
 
 function Landing() {
   return (
@@ -24,6 +26,7 @@ function Landing() {
         <HowItWorks />
         <WhoItsFor />
         <AppPreview />
+        <FAQ />
         <CTA />
       </main>
       <Footer />
@@ -38,6 +41,7 @@ export default function App() {
       <Route path="/help" element={<HelpCenter />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/delete-account" element={<DeleteAccount />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   )
 }

@@ -43,12 +43,42 @@ const app = express();
 app.set('trust proxy', 1);
 
 // ---------------------------------------------------------------------------
+// Canonical host — send page requests arriving on any other hostname (notably
+// the bare server IP) to the real domain, so search engines stop seeing two
+// copies of every page. Only page traffic is redirected; API, QR-order, receipt,
+// upload and health paths are left alone. See src/canonicalHost.js.
+// ---------------------------------------------------------------------------
+const { resolveCanonicalHost, canonicalRedirectTarget } = require('./canonicalHost');
+const CANONICAL_HOST = resolveCanonicalHost();
+
+if (CANONICAL_HOST) {
+  app.use((req, res, next) => {
+    const target = canonicalRedirectTarget(req, CANONICAL_HOST);
+    return target ? res.redirect(301, target) : next();
+  });
+}
+
+// Trailing slashes create a duplicate URL for every page ("/help" and "/help/").
+// Collapse them onto the canonical form before static lookup.
+app.use((req, res, next) => {
+  if ((req.method === 'GET' || req.method === 'HEAD') && req.path.length > 1 && req.path.endsWith('/')) {
+    const query = req.originalUrl.slice(req.path.length);
+    return res.redirect(301, req.path.replace(/\/+$/, '') + query);
+  }
+  next();
+});
+
+// ---------------------------------------------------------------------------
 // Static files — must be before CORS/rate-limit so assets are served without
 // any origin checks or request quotas.
+//
+// `extensions: ['html']` is what makes the prerendered pages work: /help resolves
+// to public/help.html, so crawlers get fully rendered HTML instead of an empty
+// SPA shell. See landingPage/prerender.js.
 // ---------------------------------------------------------------------------
 const path = require('path');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-app.use(express.static(PUBLIC_DIR));
+app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
 
 // Customer-uploaded item photos live in backend/uploads (OUTSIDE public/, which
 // CI rebuilds and force-pushes on deploy). Served read-only at /uploads so the
@@ -205,12 +235,28 @@ app.use((err, req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// SPA catch-all — return index.html for any unmatched route so React Router works.
+// Not found — every landing-page route is prerendered to its own HTML file and
+// already served by express.static above, so anything reaching here really is
+// missing. Previously this returned index.html with a 200, which is why the SEO
+// audit reported no custom 404 page: search engines saw an infinite supply of
+// duplicate "valid" URLs (soft 404s) instead of a single clear signal.
 // ---------------------------------------------------------------------------
 // Express 5 requires a named wildcard; `/{*path}` also matches `/`.
-app.get('/{*path}', (req, res) => {
+const NOT_FOUND_PAGE = path.join(PUBLIC_DIR, '404.html');
+
+app.use('/{*path}', (req, res) => {
+  res.status(404);
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+
+  if (req.originalUrl.startsWith('/api/')) {
+    return res.json({ error: 'Not found.' });
+  }
+  if (req.method === 'HEAD') return res.end();
+  if (req.method !== 'GET') return res.type('txt').send('Not Found');
+
+  return res.sendFile(NOT_FOUND_PAGE, (err) => {
+    if (err && !res.headersSent) res.type('txt').send('Not Found');
+  });
 });
 
 const PORT = process.env.PORT || 3000;

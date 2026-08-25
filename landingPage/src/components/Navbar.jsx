@@ -6,6 +6,7 @@ const LINKS = [
   { label: 'Features',    href: '#features' },
   { label: 'How It Works', href: '#how-it-works' },
   { label: 'Who It\'s For', href: '#who' },
+  { label: 'FAQ',         href: '#faq' },
   { label: 'Download',    href: '#download' },
 ]
 
@@ -26,7 +27,7 @@ export default function Navbar() {
       }`}
     >
       <div className="max-w-6xl mx-auto px-6 flex items-center justify-between">
-        <Logo size={50} />
+        <Logo size={50} priority />
 
         {/* Desktop links */}
         <div className="hidden md:flex items-center gap-7">
@@ -49,9 +50,11 @@ export default function Navbar() {
           Download Free
         </a>
 
-        {/* Mobile toggle */}
+        {/* Mobile toggle — min-w/h-12 is 48px, the floor below which mobile
+            usability audits flag a target as too small to tap reliably. */}
         <button
-          className="md:hidden p-2 rounded-lg text-navy-900 hover:bg-slate-100 transition-colors"
+          className="md:hidden flex items-center justify-center min-w-12 min-h-12 rounded-lg
+                     text-navy-900 hover:bg-slate-100 transition-colors"
           onClick={() => setOpen(!open)}
           aria-label="Toggle menu"
         >
@@ -67,7 +70,8 @@ export default function Navbar() {
               key={label}
               href={href}
               onClick={() => setOpen(false)}
-              className="block text-sm font-medium text-navy-900 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors"
+              className="flex items-center min-h-12 text-base font-medium text-navy-900 px-3
+                         rounded-xl hover:bg-slate-50 transition-colors"
             >
               {label}
             </a>
