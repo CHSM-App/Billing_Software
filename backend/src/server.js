@@ -178,6 +178,7 @@ app.use('/api/kitchen', require('./routes/kitchen'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/expenses/recurring', require('./routes/recurring_expenses'));
 app.use('/api/expenses', require('./routes/expenses'));
+app.use('/api/vendor-bills', require('./routes/vendor_bills'));
 app.use('/api/audit', require('./routes/audit'));
 app.use('/api/license', require('./routes/license'));
 app.use('/api/account', require('./routes/account'));

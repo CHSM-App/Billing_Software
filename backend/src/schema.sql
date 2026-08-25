@@ -64,6 +64,10 @@ CREATE TABLE items (
     -- own price). Required for a plain item — enforced in routes/items.js.
     price           DECIMAL(10,2)    NULL,
     tax_rate        DECIMAL(5,2)     NULL,
+    -- How to read `price` (and any variant price, which inherits this flag):
+    -- 0 = tax-exclusive, GST is added on top; 1 = tax-inclusive/MRP, GST is
+    -- already inside it and billing back-calculates the net rate.
+    price_inclusive_tax BIT          NOT NULL DEFAULT 0,
     hsn_code        NVARCHAR(10)     NULL,   -- optional per-item HSN/SAC (GST)
     stock_quantity  DECIMAL(10,2)    NULL,
     unit            NVARCHAR(20)     NOT NULL DEFAULT 'piece',
@@ -171,7 +175,9 @@ CREATE TABLE bill_items (
     variant_id  UNIQUEIDENTIFIER NULL,
     item_name   NVARCHAR(200)    NOT NULL,
     quantity    DECIMAL(10,2)    NOT NULL,
-    unit_price  DECIMAL(10,2)    NOT NULL,
+    -- 4dp: holds a back-calculated net rate for tax-inclusive (MRP) items
+    -- without rounding drift. Displayed to 2dp.
+    unit_price  DECIMAL(12,4)    NOT NULL,
     tax_rate    DECIMAL(5,2)     NULL,
     hsn_code    NVARCHAR(10)     NULL,   -- snapshot of the item's HSN/SAC at sale time
     line_total  DECIMAL(10,2)    NOT NULL,
@@ -283,7 +289,11 @@ CREATE TABLE audit_logs (
         'item_created', 'item_price_changed', 'item_stock_adjusted', 'item_deleted',
         'staff_added', 'staff_updated', 'staff_deleted',
         'user_login', 'user_login_failed', 'user_locked',
-        'business_profile_updated'
+        'business_profile_updated',
+        -- Added by migration 010
+        'account_deletion_requested', 'account_deletion_cancelled', 'account_deleted',
+        -- Added by migration 034
+        'vendor_bill_created', 'vendor_bill_updated', 'vendor_bill_deleted'
     ))
 );
 
@@ -322,3 +332,108 @@ CREATE TABLE whatsapp_otp_log (
 
 CREATE INDEX IX_whatsapp_otp_log_phone_purpose
     ON whatsapp_otp_log (phone, purpose, used, expires_at);
+
+-- ---------------------------------------------------------------------------
+-- Vendor bills (purchase invoices) — added by migration 034
+-- ---------------------------------------------------------------------------
+-- The inward-supply counterpart to `bills`. Unlike `expenses` (a flat amount),
+-- a vendor bill has line items that INCREASE stock and carries the GST detail
+-- needed for input tax credit: supplier GSTIN, their invoice number/date, and
+-- the taxable/tax split.
+CREATE TABLE vendor_bills (
+    id                  UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    business_id         UNIQUEIDENTIFIER NOT NULL,
+    vendor_name         NVARCHAR(200)    NOT NULL,
+    vendor_gstin        NVARCHAR(15)     NULL,   -- NULL = unregistered: no ITC
+    vendor_state        NVARCHAR(100)    NULL,
+    invoice_number      NVARCHAR(50)     NOT NULL,
+    invoice_date        DATE             NOT NULL,
+    subtotal            DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    tax_amount          DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    cgst_amount         DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    sgst_amount         DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    igst_amount         DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    cess_amount         DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    discount_amount     DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    round_off           DECIMAL(10,2)    NOT NULL DEFAULT 0,
+    total               DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    is_interstate       BIT              NOT NULL DEFAULT 0,  -- IGST vs CGST/SGST
+    itc_eligible        BIT              NOT NULL DEFAULT 1,  -- 0 = blocked, s.17(5)
+    reverse_charge      BIT              NOT NULL DEFAULT 0,
+    payment_mode        NVARCHAR(20)     NOT NULL DEFAULT 'cash',
+    payment_status      NVARCHAR(20)     NOT NULL DEFAULT 'paid',
+    amount_paid         DECIMAL(12,2)    NOT NULL DEFAULT 0,
+    notes               NVARCHAR(500)    NULL,
+    stock_applied       BIT              NOT NULL DEFAULT 0,  -- did this move stock?
+    created_by_user_id  UNIQUEIDENTIFIER NOT NULL,
+    created_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
+    updated_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
+
+    CONSTRAINT FK_vendor_bills_business
+        FOREIGN KEY (business_id) REFERENCES businesses (id)
+        ON UPDATE NO ACTION ON DELETE CASCADE,
+
+    -- NO ACTION: purchase records are financial audit trail (mirrors expenses).
+    CONSTRAINT FK_vendor_bills_created_by_user
+        FOREIGN KEY (created_by_user_id) REFERENCES users (id)
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
+
+    CONSTRAINT CK_vendor_bills_payment_status
+        CHECK (payment_status IN ('paid', 'unpaid', 'partial'))
+);
+
+CREATE INDEX IX_vendor_bills_business_date
+    ON vendor_bills (business_id, invoice_date DESC);
+
+CREATE INDEX IX_vendor_bills_recon
+    ON vendor_bills (business_id, vendor_gstin, invoice_number)
+    WHERE vendor_gstin IS NOT NULL;
+
+CREATE UNIQUE INDEX UQ_vendor_bills_invoice
+    ON vendor_bills (business_id, vendor_gstin, invoice_number)
+    WHERE vendor_gstin IS NOT NULL;
+
+CREATE TABLE vendor_bill_items (
+    id               UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    vendor_bill_id   UNIQUEIDENTIFIER NOT NULL,
+    -- At most one target; all NULL = a service/freight line (ITC, no stock).
+    item_id          UNIQUEIDENTIFIER NULL,
+    variant_id       UNIQUEIDENTIFIER NULL,
+    raw_material_id  UNIQUEIDENTIFIER NULL,
+    item_name        NVARCHAR(200)    NOT NULL,  -- snapshot
+    quantity         DECIMAL(10,2)    NOT NULL,
+    unit             NVARCHAR(20)     NULL,
+    unit_price       DECIMAL(12,4)    NOT NULL,  -- net rate, 4dp like bill_items
+    tax_rate         DECIMAL(5,2)     NULL,
+    hsn_code         NVARCHAR(10)     NULL,
+    line_total       DECIMAL(12,2)    NOT NULL,
+    sort_order       INT              NOT NULL DEFAULT 0,
+
+    CONSTRAINT FK_vendor_bill_items_bill
+        FOREIGN KEY (vendor_bill_id) REFERENCES vendor_bills (id)
+        ON UPDATE NO ACTION ON DELETE CASCADE,
+
+    CONSTRAINT FK_vendor_bill_items_item
+        FOREIGN KEY (item_id) REFERENCES items (id)
+        ON UPDATE NO ACTION ON DELETE SET NULL,
+
+    -- NO ACTION avoids multiple cascade paths (variant -> item -> business).
+    CONSTRAINT FK_vendor_bill_items_variant
+        FOREIGN KEY (variant_id) REFERENCES item_variants (id)
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
+
+    CONSTRAINT FK_vendor_bill_items_raw_material
+        FOREIGN KEY (raw_material_id) REFERENCES raw_materials (id)
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
+
+    CONSTRAINT CK_vendor_bill_items_single_target CHECK (
+        (CASE WHEN item_id         IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN variant_id      IS NOT NULL THEN 1 ELSE 0 END) +
+        (CASE WHEN raw_material_id IS NOT NULL THEN 1 ELSE 0 END) <= 1
+    )
+);
+
+CREATE INDEX IX_vendor_bill_items_bill ON vendor_bill_items (vendor_bill_id);
+CREATE INDEX IX_vendor_bill_items_item ON vendor_bill_items (item_id) WHERE item_id IS NOT NULL;
+CREATE INDEX IX_vendor_bill_items_variant ON vendor_bill_items (variant_id) WHERE variant_id IS NOT NULL;
+CREATE INDEX IX_vendor_bill_items_raw_material ON vendor_bill_items (raw_material_id) WHERE raw_material_id IS NOT NULL;

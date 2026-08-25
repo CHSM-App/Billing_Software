@@ -90,7 +90,7 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
     );
@@ -107,6 +107,9 @@ class OfflineService {
         category       TEXT,
         price          REAL    NOT NULL,
         tax_rate       REAL,
+        -- 1 = `price` is GST-inclusive (MRP) and billing back-calculates the
+        -- net rate; 0 = tax is added on top. Mirrors items.price_inclusive_tax.
+        price_inclusive_tax INTEGER NOT NULL DEFAULT 0,
         stock_quantity REAL,
         is_active      INTEGER NOT NULL DEFAULT 1,
         cached_at      INTEGER NOT NULL
@@ -258,6 +261,15 @@ class OfflineService {
       // v7 → v8: cache SERVER bills/drafts so they survive going offline.
       await _createServerBillCacheTable(db);
     }
+    if (oldVersion < 9) {
+      // v8 → v9: cached_items gains price_inclusive_tax so offline billing can
+      // tell an MRP price from a net one. DEFAULT 0 keeps every already-cached
+      // row tax-exclusive — the behaviour it was cached under — until the next
+      // sync refreshes it from the server.
+      await db.execute(
+        'ALTER TABLE cached_items ADD COLUMN price_inclusive_tax INTEGER NOT NULL DEFAULT 0',
+      );
+    }
   }
 
   /// Cache of bills and drafts fetched FROM the server.
@@ -312,6 +324,7 @@ class OfflineService {
           'category': item.category,
           'price': item.price,
           'tax_rate': item.taxRate,
+          'price_inclusive_tax': item.priceInclusiveTax ? 1 : 0,
           'stock_quantity': item.stockQuantity,
           'is_active': item.isActive ? 1 : 0,
           'cached_at': now,
@@ -470,6 +483,7 @@ class OfflineService {
         category: base.category,
         price: base.price,
         taxRate: base.taxRate,
+        priceInclusiveTax: base.priceInclusiveTax,
         stockQuantity: base.stockQuantity,
         lowStockThreshold: base.lowStockThreshold,
         unit: base.unit,
@@ -614,6 +628,7 @@ class OfflineService {
       price: (row['price'] as num).toDouble(),
       taxRate:
           row['tax_rate'] != null ? (row['tax_rate'] as num).toDouble() : null,
+      priceInclusiveTax: (row['price_inclusive_tax'] as int? ?? 0) == 1,
       stockQuantity: row['stock_quantity'] != null
           ? (row['stock_quantity'] as num).toDouble()
           : null,
@@ -654,21 +669,9 @@ class OfflineService {
     final base = _rowToItem(row);
     final variants = await _variantsForItem(base.id);
     if (variants.isEmpty) return base;
-    return Item(
-      id: base.id,
-      businessId: base.businessId,
-      name: base.name,
-      barcode: base.barcode,
-      category: base.category,
-      price: base.price,
-      taxRate: base.taxRate,
-      stockQuantity: base.stockQuantity,
-      lowStockThreshold: base.lowStockThreshold,
-      unit: base.unit,
-      variants: variants,
-      isActive: base.isActive,
-      imageUrl: base.imageUrl,
-    );
+    // copyWithVariants carries every field across, so a new item field can't be
+    // silently dropped here the way an inline Item(...) rebuild would drop it.
+    return base.copyWithVariants(variants);
   }
 
   // ── Offline bill queue ────────────────────────────────────────────────────

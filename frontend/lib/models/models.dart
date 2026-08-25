@@ -109,6 +109,17 @@ class Item {
   /// than reading this directly when billing.
   final double? price;
   final double? taxRate;
+
+  /// Whether [price] (and each variant's price) already contains GST.
+  ///
+  /// false — the price is NET and tax is added on top: 20 @5% bills at 21.00.
+  /// true  — the price is the GROSS/MRP the customer pays: 20 @5% bills at
+  ///         20.00, of which 0.95 is tax. Billing back-calculates the net rate.
+  ///
+  /// Defaults to false so items saved before this flag existed keep billing
+  /// exactly as they did. Has no effect when GST is off or [taxRate] is null —
+  /// there is no tax to extract, so the price is net either way.
+  final bool priceInclusiveTax;
   final String? hsnCode;
   final double? stockQuantity;
   final double? lowStockThreshold;
@@ -129,6 +140,7 @@ class Item {
     this.category,
     this.price,
     this.taxRate,
+    this.priceInclusiveTax = false,
     this.hsnCode,
     this.stockQuantity,
     this.lowStockThreshold,
@@ -146,6 +158,9 @@ class Item {
         category: j['category'],
         price: j['price'] != null ? double.parse(j['price'].toString()) : null,
         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
+        // SQL Server BIT arrives as bool or 0/1 depending on the driver/cache.
+        priceInclusiveTax:
+            j['price_inclusive_tax'] == true || j['price_inclusive_tax'] == 1,
         hsnCode: j['hsn_code'] as String?,
         stockQuantity: j['stock_quantity'] != null ? double.parse(j['stock_quantity'].toString()) : null,
         lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
@@ -175,6 +190,7 @@ class Item {
         category: category,
         price: price,
         taxRate: taxRate,
+        priceInclusiveTax: priceInclusiveTax,
         hsnCode: hsnCode,
         stockQuantity: stockQuantity,
         lowStockThreshold: lowStockThreshold,

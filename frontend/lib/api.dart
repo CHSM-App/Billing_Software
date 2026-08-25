@@ -6,7 +6,8 @@ import 'package:http/http.dart' as http;
 import 'storage.dart';
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'http://192.168.1.3:5000/api';
+// const String baseUrl = 'http://192.168.1.8:5000/api';
+const String baseUrl = 'https://vittam.vengurlatech.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
           
@@ -837,6 +838,101 @@ Future<Map<String, dynamic>> getWeeklySales({String? date}) async {
   final data = _parse(await _authGet(uri));
   return Map<String, dynamic>.from(data as Map);
 }
+
+/// GSTR-1 outward-supplies summary for a filing period.
+///
+/// Bills carry no buyer GSTIN, so every sale is B2C: the response has a
+/// consolidated rate-wise `b2cs` list and an `hsn` summary, with no B2B
+/// (invoice-wise) section. [from]/[to] are YYYY-MM-DD, inclusive.
+Future<Map<String, dynamic>> getGstr1Report(
+    {required String from, required String to}) async {
+  final uri = Uri.parse('$baseUrl/reports/gstr1')
+      .replace(queryParameters: {'from': from, 'to': to});
+  final data = _parse(await _authGet(uri));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+/// GSTR-2 — ITC summary of recorded purchases for a filing period.
+///
+/// Not a filed return (GSTR-2 was suspended in 2017); it is the inward-supply
+/// summary used to reconcile against GSTR-2B and to fill GSTR-3B Table 4.
+Future<Map<String, dynamic>> getGstr2Report(
+    {required String from, required String to}) async {
+  final uri = Uri.parse('$baseUrl/reports/gstr2')
+      .replace(queryParameters: {'from': from, 'to': to});
+  return Map<String, dynamic>.from(_parse(await _authGet(uri)) as Map);
+}
+
+/// GSTR-3B — the summary return that IS still filed monthly.
+Future<Map<String, dynamic>> getGstr3bReport(
+    {required String from, required String to}) async {
+  final uri = Uri.parse('$baseUrl/reports/gstr3b')
+      .replace(queryParameters: {'from': from, 'to': to});
+  return Map<String, dynamic>.from(_parse(await _authGet(uri)) as Map);
+}
+
+/// Reconcile a GSTR-2B statement against recorded vendor bills.
+///
+/// [invoices] is the pre-parsed portal data: the app extracts it on-device so
+/// the payload stays small (the server body limit is 100KB, and a raw 2B file
+/// can be several MB).
+Future<Map<String, dynamic>> reconcileGstr2b({
+  required String from,
+  required String to,
+  required List<Map<String, dynamic>> invoices,
+}) async {
+  final body = jsonEncode({'from': from, 'to': to, 'invoices': invoices});
+  return Map<String, dynamic>.from(
+      _parse(await _authPost(Uri.parse('$baseUrl/reports/gstr2b/reconcile'),
+          body: body)) as Map);
+}
+
+/// Past customers matching [q] (a partial name or phone), for the billing
+/// screen's autocomplete. Returns [] for queries shorter than 2 characters.
+Future<List<Map<String, dynamic>>> searchCustomers(String q,
+    {int limit = 8}) async {
+  final uri = Uri.parse('$baseUrl/bills/customers/search')
+      .replace(queryParameters: {'q': q, 'limit': '$limit'});
+  final rows = _parse(await _authGet(uri)) as List;
+  return rows.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+}
+
+// ---------------------------------------------------------------------------
+// Vendor bills (purchase invoices)
+// ---------------------------------------------------------------------------
+
+Future<List<dynamic>> getVendorBills(
+    {String? from, String? to, String? vendor, String? paymentStatus}) async {
+  final params = <String, String>{};
+  if (from != null) params['from'] = from;
+  if (to != null) params['to'] = to;
+  if (vendor != null && vendor.isNotEmpty) params['vendor'] = vendor;
+  if (paymentStatus != null) params['payment_status'] = paymentStatus;
+  final uri = Uri.parse('$baseUrl/vendor-bills')
+      .replace(queryParameters: params.isEmpty ? null : params);
+  return _parse(await _authGet(uri));
+}
+
+Future<Map<String, dynamic>> getVendorBill(String id) async =>
+    Map<String, dynamic>.from(
+        _parse(await _authGet(Uri.parse('$baseUrl/vendor-bills/$id'))) as Map);
+
+Future<Map<String, dynamic>> createVendorBill(Map<String, dynamic> data) async =>
+    Map<String, dynamic>.from(_parse(await _authPost(
+        Uri.parse('$baseUrl/vendor-bills'), body: jsonEncode(data))) as Map);
+
+Future<Map<String, dynamic>> updateVendorBill(
+        String id, Map<String, dynamic> data) async =>
+    Map<String, dynamic>.from(_parse(await _authPut(
+        Uri.parse('$baseUrl/vendor-bills/$id'), body: jsonEncode(data))) as Map);
+
+Future<void> deleteVendorBill(String id) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/vendor-bills/$id')));
+}
+
+/// Distinct vendors seen on past bills, for the entry form's autocomplete.
+Future<List<dynamic>> getVendors() async =>
+    _parse(await _authGet(Uri.parse('$baseUrl/vendor-bills/vendors')));
 
 // ---------------------------------------------------------------------------
 // Expenses

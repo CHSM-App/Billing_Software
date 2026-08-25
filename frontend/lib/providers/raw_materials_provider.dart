@@ -19,10 +19,11 @@ class RawMaterialsNotifier extends AsyncNotifier<List<RawMaterial>> {
     state = await AsyncValue.guard(_fetch);
   }
 
-  Future<void> add(Map<String, dynamic> data) async {
+  Future<RawMaterial> add(Map<String, dynamic> data) async {
     final created = RawMaterial.fromJson(await api.createRawMaterial(data));
     final current = state.valueOrNull ?? [];
     state = AsyncData([...current, created]..sort((a, b) => a.name.compareTo(b.name)));
+    return created;
   }
 
   Future<void> edit(String id, Map<String, dynamic> data) async {

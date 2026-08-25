@@ -9,5 +9,6 @@
         <domain includeSubdomains="true">10.0.2.2</domain>       <!-- Android emulator -> host localhost -->
         <domain includeSubdomains="true">localhost</domain>
         <domain includeSubdomains="true">192.168.1.6</domain>    <!-- dev machine LAN IP (see api.dart) -->
+        <domain includeSubdomains="true">192.168.1.8</domain>    <!-- dev machine LAN IP (see api.dart) -->
     </domain-config>
 </network-security-config>

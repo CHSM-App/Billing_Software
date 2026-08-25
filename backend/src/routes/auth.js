@@ -14,6 +14,34 @@ const router = express.Router();
 
 const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables', 'restaurant_no_tables'];
 
+// Starter catalog seeded into every new business so the item list isn't empty
+// on first login. Picked by business_type; restaurant types share one menu.
+// stock_quantity is only meaningful for retail (restaurants don't track stock
+// per dish here), so it's omitted for restaurant items.
+const STARTER_ITEMS = {
+  retail: [
+    { name: 'Parle-G Biscuit',     category: 'Snacks',    price: 10,  unit: 'piece', stock_quantity: 50 },
+    { name: 'Amul Milk 500ml',     category: 'Dairy',      price: 30,  unit: 'piece', stock_quantity: 30 },
+    { name: 'Tata Salt 1kg',       category: 'Grocery',    price: 25,  unit: 'piece', stock_quantity: 40 },
+    { name: 'Colgate Toothpaste',  category: 'Personal Care', price: 55, unit: 'piece', stock_quantity: 20 },
+    { name: 'Basmati Rice',        category: 'Grocery',    price: 120, unit: 'kg',    stock_quantity: 25 },
+  ],
+  restaurant_with_tables: [
+    { name: 'Paneer Butter Masala', category: 'Main Course', price: 220, unit: 'plate' },
+    { name: 'Veg Biryani',          category: 'Rice',        price: 180, unit: 'plate' },
+    { name: 'Butter Naan',          category: 'Breads',      price: 40,  unit: 'piece' },
+    { name: 'Masala Papad',         category: 'Starters',    price: 30,  unit: 'piece' },
+    { name: 'Cold Coffee',          category: 'Beverages',   price: 90,  unit: 'glass' },
+  ],
+  restaurant_no_tables: [
+    { name: 'Paneer Butter Masala', category: 'Main Course', price: 220, unit: 'plate' },
+    { name: 'Veg Biryani',          category: 'Rice',        price: 180, unit: 'plate' },
+    { name: 'Butter Naan',          category: 'Breads',      price: 40,  unit: 'piece' },
+    { name: 'Masala Papad',         category: 'Starters',    price: 30,  unit: 'piece' },
+    { name: 'Cold Coffee',          category: 'Beverages',   price: 90,  unit: 'glass' },
+  ],
+};
+
 // Tax identifier formats — kept identical to routes/businesses.js so a value
 // accepted at sign-up is never rejected later in Business Profile.
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
@@ -132,6 +160,23 @@ router.post('/register', registerLimiter, async (req, res) => {
           INSERT INTO users (business_id, name, phone, pin_hash, role)
           VALUES (@business_id, @name, @phone, @pin_hash, 'owner')
         `);
+
+      // Seed a small starter catalog so the Items screen isn't empty on first
+      // login — picked by business_type. Best-effort: never block registration.
+      const starterItems = STARTER_ITEMS[business_type] || [];
+      for (const item of starterItems) {
+        await transaction.request()
+          .input('business_id', sql.UniqueIdentifier, businessId)
+          .input('name', sql.NVarChar(200), item.name)
+          .input('category', sql.NVarChar(100), item.category)
+          .input('price', sql.Decimal(10, 2), item.price)
+          .input('unit', sql.NVarChar(20), item.unit)
+          .input('stock_quantity', sql.Decimal(10, 2), item.stock_quantity ?? null)
+          .query(`
+            INSERT INTO items (business_id, name, category, price, unit, stock_quantity)
+            VALUES (@business_id, @name, @category, @price, @unit, @stock_quantity)
+          `);
+      }
 
       // --- Free trial: 96 hours from registration, no grace period ---
       // Auto-provision an active trial subscription so the user can log in and

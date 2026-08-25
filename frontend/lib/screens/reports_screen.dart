@@ -7,6 +7,9 @@ import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../l10n/l10n_ext.dart';
+import 'gstr1_screen.dart';
+import 'gstr2_screen.dart';
+import 'gstr3b_screen.dart';
 
 final _amt = NumberFormat('#,##0');
 final _timeFmt = DateFormat('h:mm a');
@@ -88,6 +91,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                   ],
                   _buildPaymentSplit(l10n, summary),
                   const SizedBox(height: 16),
+                  // GSTR-1 return — only meaningful once GST invoicing is on,
+                  // since with the toggle off no bill carries tax.
+                  if (ref.watch(gstEnabledProvider)) ...[
+                    _buildGstReturns(),
+                    const SizedBox(height: 16),
+                  ],
                   if (summary.recentBills.isNotEmpty)
                     _buildRecentBills(l10n, summary),
                 ],
@@ -96,6 +105,88 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
           ),
         ),
       ]),
+    );
+  }
+
+  /// Entry points to the GST returns. All three live in Reports rather than
+  /// Settings because they are reports, not settings.
+  Widget _buildGstReturns() {
+    return _SectionCard(
+      title: 'GST returns',
+      child: Column(children: [
+        _gstRow(
+          icon: Icons.description_outlined,
+          colour: const Color(0xFF7C3AED),
+          title: 'GSTR-1',
+          subtitle: 'Sales — outward supplies',
+          onTap: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const Gstr1Screen())),
+        ),
+        const Divider(height: 20),
+        _gstRow(
+          icon: Icons.shopping_bag_outlined,
+          colour: const Color(0xFF0891B2),
+          title: 'GSTR-2',
+          subtitle: 'Purchase ITC summary and 2B reconciliation',
+          onTap: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const Gstr2Screen())),
+        ),
+        const Divider(height: 20),
+        _gstRow(
+          icon: Icons.account_balance_outlined,
+          colour: const Color(0xFFEA580C),
+          title: 'GSTR-3B',
+          subtitle: 'Monthly summary — tax payable after credit',
+          onTap: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const Gstr3bScreen())),
+        ),
+      ]),
+    );
+  }
+
+  Widget _gstRow({
+    required IconData icon,
+    required Color colour,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadius.small),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: colour.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(AppRadius.small),
+            ),
+            child: Icon(icon, size: 20, color: colour),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right,
+              size: 20, color: AppColors.textSecondary),
+        ]),
+      ),
     );
   }
 

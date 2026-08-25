@@ -35,6 +35,7 @@ const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
+const { netUnitPrice } = require('../money');
 
 const router = express.Router();
 
@@ -390,7 +391,7 @@ router.post('/:qrToken', orderLimiter, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, table.business_id);
     itemIds.forEach((id, i) => priceReq.input(`it${i}`, sql.UniqueIdentifier, id));
     const priceResult = await priceReq.query(`
-      SELECT id, name, price, tax_rate
+      SELECT id, name, price, tax_rate, price_inclusive_tax
       FROM items
       WHERE business_id = @business_id AND is_active = 1 AND id IN (${inNames.join(',')})
     `);
@@ -426,6 +427,17 @@ router.post('/:qrToken', orderLimiter, async (req, res) => {
         if (v.price != null) unitPrice = Number(v.price);
         itemName = `${item.name} (${v.label})`;
       }
+      // An MRP-priced item quotes its price GST-inclusive, so strip the tax to
+      // get the net rate this draft line must store. bill_items.unit_price is
+      // net everywhere (see resolveNetPriceAndRate in routes/bills.js), and the
+      // draft's subtotal is summed straight from these lines — storing the gross
+      // rate here would show the diner a subtotal that grew again once staff
+      // finalized the bill and tax was added on top.
+      unitPrice = netUnitPrice(
+        unitPrice,
+        item.tax_rate,
+        item.price_inclusive_tax === true || item.price_inclusive_tax === 1,
+      );
       priced.push({
         item_id: l.item_id,
         variant_id: l.variant_id,
@@ -528,7 +540,7 @@ router.post('/:qrToken', orderLimiter, async (req, res) => {
         .input('variant_id', sql.UniqueIdentifier, l.variant_id)
         .input('item_name', sql.NVarChar(200), l.item_name)
         .input('quantity', sql.Decimal(10, 2), l.quantity)
-        .input('unit_price', sql.Decimal(10, 2), l.unit_price)
+        .input('unit_price', sql.Decimal(12, 4), l.unit_price)
         .input('tax_rate', sql.Decimal(5, 2), l.tax_rate)
         .input('line_total', sql.Decimal(10, 2), l.line_total)
         .input('diner_phone', sql.NVarChar(20), payload.phone)

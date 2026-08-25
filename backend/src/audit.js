@@ -202,11 +202,15 @@ async function logItemCreated(actor, item) {
       name:           item.name,
       price:          item.price,
       tax_rate:       item.tax_rate,
+      // Records whether `price` above is GST-inclusive — without it the logged
+      // figure is ambiguous, since the same number bills differently either way.
+      price_inclusive_tax: item.price_inclusive_tax,
       category:       item.category,
       stock_quantity: item.stock_quantity,
       barcode:        item.barcode,
     },
-    description: `Item "${item.name}" created at ₹${item.price}`,
+    description: `Item "${item.name}" created at ₹${item.price}`
+      + (item.price_inclusive_tax ? ' (GST incl.)' : ''),
   });
 }
 
@@ -486,6 +490,67 @@ async function logAccountDeleted(businessId, userId, userName) {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Vendor bills (purchase invoices)
+// ---------------------------------------------------------------------------
+
+/** A vendor bill was recorded. `bill` is the inserted row. */
+async function logVendorBillCreated(actor, bill, lineCount) {
+  await writeAudit({
+    business_id:  bill.business_id,
+    user_id:      actor.user_id,
+    user_name:    actor.user_name,
+    event_type:   'vendor_bill_created',
+    entity_id:    bill.id,
+    entity_label: `${bill.vendor_name} ${bill.invoice_number}`,
+    new_value:    {
+      vendor_name: bill.vendor_name,
+      vendor_gstin: bill.vendor_gstin,
+      invoice_number: bill.invoice_number,
+      total: bill.total,
+      tax_amount: bill.tax_amount,
+      line_count: lineCount,
+    },
+    description:
+      `Purchase "${bill.invoice_number}" from ${bill.vendor_name} recorded — Rs.${bill.total}`,
+  });
+}
+
+/** A vendor bill was edited. Totals only — the line diff would be unreadable. */
+async function logVendorBillUpdated(actor, before, after) {
+  await writeAudit({
+    business_id:  after.business_id,
+    user_id:      actor.user_id,
+    user_name:    actor.user_name,
+    event_type:   'vendor_bill_updated',
+    entity_id:    after.id,
+    entity_label: `${after.vendor_name} ${after.invoice_number}`,
+    old_value:    { total: before.total, tax_amount: before.tax_amount },
+    new_value:    { total: after.total, tax_amount: after.tax_amount },
+    description:
+      `Purchase "${after.invoice_number}" from ${after.vendor_name} updated — Rs.${before.total} → Rs.${after.total}`,
+  });
+}
+
+/** A vendor bill was deleted (and any stock it added was reversed). */
+async function logVendorBillDeleted(actor, bill) {
+  await writeAudit({
+    business_id:  bill.business_id,
+    user_id:      actor.user_id,
+    user_name:    actor.user_name,
+    event_type:   'vendor_bill_deleted',
+    entity_id:    bill.id,
+    entity_label: `${bill.vendor_name} ${bill.invoice_number}`,
+    old_value:    {
+      vendor_name: bill.vendor_name,
+      invoice_number: bill.invoice_number,
+      total: bill.total,
+    },
+    description:
+      `Purchase "${bill.invoice_number}" from ${bill.vendor_name} deleted — Rs.${bill.total}`,
+  });
+}
+
 module.exports = {
   writeAudit,
   // Bills
@@ -514,4 +579,8 @@ module.exports = {
   logAccountDeletionRequested,
   logAccountDeletionCancelled,
   logAccountDeleted,
+  // Vendor bills
+  logVendorBillCreated,
+  logVendorBillUpdated,
+  logVendorBillDeleted,
 };

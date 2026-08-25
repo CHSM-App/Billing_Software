@@ -401,6 +401,10 @@ class RasterLab {
     return img;
   }
 
+  /// Horizontal breathing room (unscaled px) between a vertical separator and
+  /// the cell text on either side of it, so glyphs never touch the line.
+  static const double _cellPadX = 4.0;
+
   /// Render structured [rows] with true fractional-column alignment.
   static Future<ui.Image> _renderRows(
     List<ReceiptRow> rows, {
@@ -410,6 +414,10 @@ class RasterLab {
   }) async {
     const ss = 2.0;
     final renderW = (width * ss).round();
+    // The outer border is drawn in the margin, with the content inset far
+    // enough inside it that text never touches the frame.
+    const borderW = 1.0 * ss;
+    const borderInset = 3.0 * ss;
     const padX = 10.0 * ss;
     const gapY = 7.0 * ss;
     final contentW = renderW - padX * 2;
@@ -447,9 +455,11 @@ class RasterLab {
     double totalH = gapY;
     for (final r in rows) {
       if (r.isRule) {
-        final hh = (r.bold ? 3.0 : 2.0) * ss;
-        measured.add(_MRow.rule(hh));
-        totalH += hh + gapY;
+        // Light rules are hairlines and sit tighter to the rows they divide, so
+        // repeating one after every item doesn't stretch the receipt.
+        final hh = (r.light ? 1.0 : (r.bold ? 3.0 : 2.0)) * ss;
+        measured.add(_MRow.rule(hh, light: r.light));
+        totalH += hh + (r.light ? gapY * 0.5 : gapY);
       } else if (r.isCenter) {
         final p = mk(r.cells.first.text, r.size, TextAlign.center, r.bold,
             contentW, italic: r.italic);
@@ -460,44 +470,114 @@ class RasterLab {
         final ps = <ui.Paragraph>[];
         double maxH = 0;
         for (final c in r.cells) {
-          final w = contentW * c.widthFraction;
+          // On a ruled row the text is laid out inside a slightly narrower box
+          // so glyphs never touch the vertical separators drawn on the
+          // boundaries (padding on both sides of each cell).
+          final w = contentW * c.widthFraction -
+              (r.verticalRules ? _cellPadX * 2 * ss : 0);
           final p = mk(c.text, r.size, c.align, r.bold, w);
           ps.add(p);
           if (p.height > maxH) maxH = p.height;
         }
-        measured.add(_MRow.cols(ps, r.cells, maxH));
+        measured.add(_MRow.cols(ps, r.cells, maxH,
+            verticalRules: r.verticalRules));
         totalH += maxH + gapY;
       }
     }
+    // Room for the border above the first row and below the last.
+    totalH += gapY;
     final bigH = totalH.ceil().clamp(1, 60000);
 
     final rec = ui.PictureRecorder();
     final canvas = Canvas(rec);
     canvas.drawRect(Rect.fromLTWH(0, 0, renderW.toDouble(), bigH.toDouble()),
         Paint()..color = const Color(0xFFFFFFFF));
-    double y = gapY;
-    for (final m in measured) {
+    double y = gapY * 1.5;
+    for (var idx = 0; idx < measured.length; idx++) {
+      final m = measured[idx];
       if (m.isRule) {
-        // Solid bold horizontal line (full width) — bolder than before.
+        // Solid bold horizontal line. It runs all the way out to the outer
+        // border on both sides so the two meet as a proper T-junction rather
+        // than leaving the rule floating inside the frame.
         canvas.drawRect(
-          Rect.fromLTWH(padX, y, contentW, m.height),
+          Rect.fromLTWH(borderInset, y, renderW - borderInset * 2, m.height),
           Paint()..color = const Color(0xFF000000),
         );
-        y += m.height + gapY;
+        // Must match the spacing used when measuring, or every row below this
+        // one drifts out of the height that was reserved for it.
+        y += m.height + (m.light ? gapY * 0.5 : gapY);
       } else if (m.isCenter) {
         canvas.drawParagraph(m.paras.first, Offset(padX, y));
         y += m.height + gapY;
       } else {
+        final pad = m.verticalRules ? _cellPadX * ss : 0.0;
         double x = padX;
         for (var i = 0; i < m.paras.length; i++) {
           final cell = m.cells![i];
           final w = contentW * cell.widthFraction;
-          canvas.drawParagraph(m.paras[i], Offset(x, y));
+          canvas.drawParagraph(m.paras[i], Offset(x + pad, y));
           x += w;
+        }
+        if (m.verticalRules) {
+          // Separators on every interior column boundary. The row extends its
+          // lines by half a gap so consecutive ruled rows join into one
+          // continuous line — but only towards a neighbour that is itself
+          // ruled. At the top and bottom of the table the line stops flush with
+          // the row, instead of overhanging into the blank space around it.
+          // A horizontal rule sits between the header and the first item row,
+          // so look THROUGH an adjacent rule to find the next real row —
+          // otherwise the verticals break where they cross a horizontal.
+          bool ruledAt(int i) =>
+              i >= 0 && i < measured.length && measured[i].verticalRules;
+          final prevRuled = ruledAt(idx - 1) ||
+              (idx > 0 && measured[idx - 1].isRule && ruledAt(idx - 2));
+          final nextRuled = ruledAt(idx + 1) ||
+              (idx + 1 < measured.length &&
+                  measured[idx + 1].isRule &&
+                  ruledAt(idx + 2));
+          // Extend far enough to reach the neighbouring row THROUGH whatever
+          // sits between — a light inter-item rule is tighter than a full one,
+          // so measure the actual gap rather than assuming gapY/2. Overshooting
+          // onto the horizontal rule itself is harmless (both are black).
+          double reach(int i) {
+            if (i < 0 || i >= measured.length) return 0;
+            final between = measured[i];
+            if (!between.isRule) return gapY / 2;
+            final g = between.light ? gapY * 0.5 : gapY;
+            return g + between.height;
+          }
+
+          final lineW = 1.0 * ss;
+          final top = y - (prevRuled ? reach(idx - 1) : 0);
+          final bottom = y + m.height + (nextRuled ? reach(idx + 1) : 0);
+          final paint = Paint()..color = const Color(0xFF000000);
+          double bx = padX;
+          for (var i = 0; i < m.paras.length - 1; i++) {
+            bx += contentW * m.cells![i].widthFraction;
+            canvas.drawRect(
+                Rect.fromLTWH(bx - lineW / 2, top, lineW, bottom - top), paint);
+          }
         }
         y += m.height + gapY;
       }
     }
+
+    // Outer border around the whole receipt, drawn last so it sits on top of
+    // any full-width horizontal rule that reaches the margin. Stroke is
+    // centred on the rect, hence the half-width inset on each side.
+    canvas.drawRect(
+      Rect.fromLTWH(
+        borderInset + borderW / 2,
+        borderInset + borderW / 2,
+        renderW - borderInset * 2 - borderW,
+        bigH - borderInset * 2 - borderW,
+      ),
+      Paint()
+        ..color = const Color(0xFF000000)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = borderW,
+    );
+
     final bigImg = await rec.endRecording().toImage(renderW, bigH);
 
     final finalH = (bigH * width / renderW).round().clamp(1, 60000);
@@ -946,25 +1026,38 @@ class ReceiptRow {
   final bool italic;
   final bool isCenter;
   final bool isRule;
+
+  /// Draw vertical separator lines on the column boundaries of this row.
+  /// Opt-in so only the item table gets them — the header, bill-info and
+  /// totals rows share the same [ReceiptRow.cols] plumbing but must stay clean.
+  final bool verticalRules;
   const ReceiptRow._(this.cells,
       {this.size = 24,
       this.bold = false,
       this.italic = false,
       this.isCenter = false,
-      this.isRule = false});
+      this.isRule = false,
+      this.verticalRules = false,
+      this.light = false});
 
   factory ReceiptRow.center(String t,
           {double size = 24, bool bold = false, bool italic = false}) =>
       ReceiptRow._([ReceiptCell(t, align: TextAlign.center)],
           size: size, bold: bold, italic: italic, isCenter: true);
 
-  /// Bold rule = thicker line.
-  factory ReceiptRow.rule({bool bold = false}) =>
-      ReceiptRow._(const [], isRule: true, bold: bold);
+  /// A thin rule used between item rows — heavy enough to divide the rows,
+  /// light enough not to compete with the rules that open and close the table.
+  final bool light;
+
+  /// Bold rule = thicker line. [light] draws a hairline instead, for separators
+  /// repeated inside a table.
+  factory ReceiptRow.rule({bool bold = false, bool light = false}) =>
+      ReceiptRow._(const [], isRule: true, bold: bold, light: light);
 
   factory ReceiptRow.cols(List<ReceiptCell> cells,
-          {double size = 24, bool bold = false}) =>
-      ReceiptRow._(cells, size: size, bold: bold);
+          {double size = 24, bool bold = false, bool verticalRules = false}) =>
+      ReceiptRow._(cells,
+          size: size, bold: bold, verticalRules: verticalRules);
 }
 
 /// Measured multi-column row (internal to _renderRows).
@@ -974,12 +1067,19 @@ class _MRow {
   final double height;
   final bool isCenter;
   final bool isRule;
+  final bool verticalRules;
+  final bool light;
   const _MRow._(this.paras, this.cells, this.height,
-      {this.isCenter = false, this.isRule = false});
+      {this.isCenter = false,
+      this.isRule = false,
+      this.verticalRules = false,
+      this.light = false});
   factory _MRow.center(ui.Paragraph p, double h) =>
       _MRow._([p], null, h, isCenter: true);
-  factory _MRow.cols(List<ui.Paragraph> ps, List<ReceiptCell> cells, double h) =>
-      _MRow._(ps, cells, h);
-  factory _MRow.rule(double h) => _MRow._(const [], null, h, isRule: true);
+  factory _MRow.cols(List<ui.Paragraph> ps, List<ReceiptCell> cells, double h,
+          {bool verticalRules = false}) =>
+      _MRow._(ps, cells, h, verticalRules: verticalRules);
+  factory _MRow.rule(double h, {bool light = false}) =>
+      _MRow._(const [], null, h, isRule: true, light: light);
 }
 

@@ -8,7 +8,7 @@ const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUti
 const { sendBillLink, normalisePhone } = require('../whatsapp');
 const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
-const { computeRoundOff } = require('../money');
+const { computeRoundOff, netUnitPrice } = require('../money');
 
 // Base URL used in receipt links — no trailing slash
 const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
@@ -131,6 +131,30 @@ function resolveUnitPrice(dbItem, variant) {
   if (variant && variant.price != null) return parseFloat(variant.price);
   if (dbItem.price != null) return parseFloat(dbItem.price);
   return null;
+}
+
+// Resolve one line's net (pre-tax) unit price and tax rate from the item's
+// stored price, honouring items.price_inclusive_tax.
+//
+// An exclusive-priced item quotes the net rate directly and tax is added on top.
+// An inclusive-priced (MRP) item quotes the GROSS rate, so the net rate is
+// back-calculated: net = gross / (1 + rate/100). Billing then proceeds
+// identically for both — bill_items.unit_price always holds the NET rate, so
+// subtotal, discount-on-net, tax_amount, round-off and the printed tax invoice
+// need no special cases, and an inclusive line still totals to its MRP.
+//
+// Rounding is deliberately left to the caller's existing line/bill rounding: we
+// return full precision here so qty x net + tax lands on the MRP rather than
+// drifting a paisa per unit.
+//
+// When GST is off (or the item carries no rate) there is no tax to extract, so
+// an inclusive price IS the net price and both branches agree.
+function resolveNetPriceAndRate(dbItem, variant, gstEnabled) {
+  const grossOrNet = resolveUnitPrice(dbItem, variant);
+  const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
+  if (grossOrNet == null) return { unitPrice: null, taxRate };
+  const inclusive = dbItem.price_inclusive_tax === true || dbItem.price_inclusive_tax === 1;
+  return { unitPrice: netUnitPrice(grossOrNet, taxRate, inclusive), taxRate };
 }
 
 // Thrown when a line has no price on either the variant or its parent item —
@@ -500,7 +524,7 @@ router.post('/', requireAuth, async (req, res) => {
       const itemsData = await bindItems(transaction.request())
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT id, name, price, tax_rate, hsn_code, stock_quantity, low_stock_threshold
+          SELECT id, name, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold
           FROM items
           WHERE id IN (${itemClause}) AND business_id = @business_id AND is_active = 1
         `);
@@ -543,11 +567,11 @@ router.post('/', requireAuth, async (req, res) => {
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
         // Variant price overrides item price when set; otherwise fall back.
-        const unitPrice = resolveUnitPrice(dbItem, variant);
+        // GST off → tax ignored entirely (rate treated as null, line tax 0).
+        // Inclusive-priced items are converted to their net rate here.
+        const { unitPrice, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
         if (unitPrice == null) throw new PricelessLineError(dbItem.name);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
-        // GST off → tax ignored entirely (rate treated as null, line tax 0).
-        const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         const lineTotal = qty * unitPrice + lineTax;
         subtotal += qty * unitPrice;
@@ -664,7 +688,7 @@ router.post('/', requireAuth, async (req, res) => {
           .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
           .input('item_name', sql.NVarChar(200), li.item_name)
           .input('quantity', sql.Decimal(10, 2), li.quantity)
-          .input('unit_price', sql.Decimal(10, 2), li.unit_price)
+          .input('unit_price', sql.Decimal(12, 4), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
           .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
@@ -889,6 +913,94 @@ router.get('/drafts', requireAuth, async (req, res) => {
 });
 
 // GET /api/bills/:id
+// ---------------------------------------------------------------------------
+// GET /api/bills/customers/search?q=<name or phone>&limit=8
+//
+// Past customers of this business, for the billing screen's name/phone
+// autocomplete. Matches on either field so one endpoint serves both inputs.
+//
+// A customer is not a table here - they exist only as the name/phone recorded
+// on past bills - so this aggregates those bills. The most recent name wins
+// (people correct a typo on a later visit), and results are ordered by visit
+// count so a regular appears before a one-off.
+//
+// Not owner-gated: a cashier taking an order needs it. It exposes nothing the
+// cashier cannot already see on the bill history.
+// ---------------------------------------------------------------------------
+router.get('/customers/search', requireAuth, async (req, res) => {
+  try {
+    await poolConnect;
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 20);
+
+    // Digits-only copy so "98765 43210", "+91 9876543210" and "9876543210"
+    // all match the same stored number.
+    const digits = q.replace(/\D/g, '');
+
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .input('name_like', sql.NVarChar(200), `%${q}%`)
+      .input('phone_like', sql.NVarChar(20), digits ? `%${digits}%` : '~no~match~')
+      .query(`
+        WITH matched AS (
+          -- Every phone that has at least one bill matching the query.
+          SELECT DISTINCT customer_phone
+          FROM bills
+          WHERE business_id = @business_id
+            AND customer_phone IS NOT NULL
+            AND LTRIM(RTRIM(customer_phone)) <> ''
+            AND (customer_name LIKE @name_like OR customer_phone LIKE @phone_like)
+        )
+        SELECT TOP (${limit})
+          -- Prefer the most recent name that MATCHES what was typed; fall back
+          -- to the most recent name otherwise. Showing an unrelated name for
+          -- the same phone (the person used two names) would look like a bug
+          -- in an autocomplete: you type "Sh" and get back "Sagar".
+          (SELECT TOP 1 b2.customer_name FROM bills b2
+            WHERE b2.business_id = @business_id
+              AND b2.customer_phone = b.customer_phone
+              AND b2.customer_name IS NOT NULL
+              AND LTRIM(RTRIM(b2.customer_name)) <> ''
+            ORDER BY
+              CASE WHEN b2.customer_name LIKE @name_like THEN 0 ELSE 1 END,
+              b2.created_at DESC)          AS customer_name,
+          b.customer_phone,
+          -- Count ALL of that phone's bills, not just the matching rows: a
+          -- name search would otherwise under-report a regular's visit count.
+          COUNT(*)                         AS visits,
+          MAX(b.created_at)                AS last_bill_at
+        FROM bills b
+        INNER JOIN matched m ON m.customer_phone = b.customer_phone
+        WHERE b.business_id = @business_id
+        GROUP BY b.customer_phone
+        ORDER BY COUNT(*) DESC, MAX(b.created_at) DESC`);
+
+    // The same person often appears as 9876543210 and 919876543210. Collapse on
+    // the last 10 digits so the list does not offer the same customer twice.
+    const seen = new Map();
+    for (const r of result.recordset) {
+      const phone = String(r.customer_phone || '').trim();
+      const key = phone.replace(/\D/g, '').slice(-10) || phone;
+      const existing = seen.get(key);
+      if (!existing || Number(r.visits) > existing.visits) {
+        seen.set(key, {
+          customer_name: r.customer_name || '',
+          customer_phone: phone,
+          visits: Number(r.visits),
+          last_bill_at: r.last_bill_at,
+        });
+      }
+    }
+
+    return res.json([...seen.values()]);
+  } catch (err) {
+    logger.error({ err }, 'customer search error');
+    return res.status(500).json({ error: 'Failed to search customers' });
+  }
+});
+
 router.get('/:id', requireAuth, async (req, res) => {
   try {
     await poolConnect;
@@ -1016,7 +1128,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       const itemsData = await bindItems2(transaction.request())
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT id, name, price, tax_rate, hsn_code, stock_quantity, low_stock_threshold
+          SELECT id, name, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold
           FROM items
           WHERE id IN (${itemClause2}) AND business_id = @business_id AND is_active = 1
         `);
@@ -1052,11 +1164,11 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         const dbItem = itemMap[i.item_id];
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
-        const unitPrice = resolveUnitPrice(dbItem, variant);
+        // GST off → tax ignored entirely (rate treated as null, line tax 0).
+        // Inclusive-priced items are converted to their net rate here.
+        const { unitPrice, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
         if (unitPrice == null) throw new PricelessLineError(dbItem.name);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
-        // GST off → tax ignored entirely (rate treated as null, line tax 0).
-        const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
           item_id: dbItem.id,
@@ -1090,7 +1202,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
           .input('item_name', sql.NVarChar(200), li.item_name)
           .input('quantity', sql.Decimal(10, 2), li.quantity)
-          .input('unit_price', sql.Decimal(10, 2), li.unit_price)
+          .input('unit_price', sql.Decimal(12, 4), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
           .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
           .input('line_total', sql.Decimal(10, 2), li.line_total)
@@ -1247,7 +1359,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       const itemsData = await bindItems3(transaction.request())
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT id, name, price, tax_rate, hsn_code, stock_quantity
+          SELECT id, name, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity
           FROM items
           WHERE id IN (${itemClause3}) AND business_id = @business_id AND is_active = 1
         `);
@@ -1283,11 +1395,11 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         const dbItem = itemMap[i.item_id];
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
-        const unitPrice = resolveUnitPrice(dbItem, variant);
+        // GST off → tax ignored entirely (rate treated as null, line tax 0).
+        // Inclusive-priced items are converted to their net rate here.
+        const { unitPrice, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
         if (unitPrice == null) throw new PricelessLineError(dbItem.name);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
-        // GST off → tax ignored entirely (rate treated as null, line tax 0).
-        const taxRate = gstEnabled && dbItem.tax_rate != null ? parseFloat(dbItem.tax_rate) : null;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
           item_id: dbItem.id,
@@ -1371,7 +1483,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
           .input('item_name', sql.NVarChar(200), li.item_name)
           .input('quantity', sql.Decimal(10, 2), li.quantity)
-          .input('unit_price', sql.Decimal(10, 2), li.unit_price)
+          .input('unit_price', sql.Decimal(12, 4), li.unit_price)
           .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
           .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
           .input('line_total', sql.Decimal(10, 2), li.line_total)

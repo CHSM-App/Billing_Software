@@ -144,5 +144,27 @@ void main() {
     expect(text.contains('Grand'), true);
     // No CGST/SGST HSN table when GST is off.
     expect(text.contains('CGST'), false);
+    expect(text.contains('SGST'), false);
+    // No per-line GST column header either.
+    expect(text.contains('GST'), false);
+    // "Tax Invoice" is a GST term — a non-GST bill is a plain Invoice.
+    expect(text.contains('Tax Invoice'), false);
+    expect(text.contains('Invoice'), true);
+  });
+
+  test('GST invoice keeps the Tax Invoice heading and GST column', () async {
+    final bytes = await InvoicePdf.build(
+      bill: _sampleBill(withTax: true),
+      pageFormat: PdfPageFormat.a4,
+      businessName: 'GST Shop',
+      gstEnabled: true,
+    );
+    final text = _renderedText(bytes);
+    // Counterpart to the non-GST case above: with GST on, the heading is the
+    // GST one and the tax wording is present. (CGST/SGST are asserted only in
+    // the negative direction — PDF text operators can split a short word across
+    // draw calls, so their absence is reliable but their presence is not.)
+    expect(text.contains('Tax'), true);
+    expect(text.contains('GST'), true);
   });
 }

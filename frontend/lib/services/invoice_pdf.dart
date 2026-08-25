@@ -126,7 +126,11 @@ class InvoicePdf {
           ),
           build: (context) => [
             pw.Center(
-              child: pw.Text('Tax Invoice',
+              // "Tax Invoice" is a GST term: it means the document carries a
+              // tax breakdown a buyer can claim input credit against. With GST
+              // off there are no GST columns and no CGST/SGST box, so calling
+              // it that would misrepresent a plain sale bill.
+              child: pw.Text(showGst ? 'Tax Invoice' : 'Invoice',
                   style: pw.TextStyle(
                       fontSize: 16, fontWeight: pw.FontWeight.bold)),
             ),
@@ -394,8 +398,14 @@ class InvoicePdf {
                 if (bill.discountAmount > 0)
                   _totRow('Discount', '- ${money(bill.discountAmount)}'),
                 if (showGst) ...[
-                  _totRow('CGST', money(bill.taxAmount / 2)),
-                  _totRow('SGST', money(bill.taxAmount / 2)),
+                  // Split in paise, odd paisa to CGST, so CGST + SGST adds back
+                  // to exactly taxAmount. money(taxAmount / 2) twice loses or
+                  // gains 0.01 on any odd-paise tax and the invoice stops
+                  // footing. Mirrors _gstHalves() in printer_service_native.dart.
+                  _totRow('CGST',
+                      money((((bill.taxAmount * 100).round() + 1) ~/ 2) / 100)),
+                  _totRow('SGST',
+                      money(((bill.taxAmount * 100).round() ~/ 2) / 100)),
                 ],
                 if (bill.roundOff != 0)
                   _totRow('Round Off',

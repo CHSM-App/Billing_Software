@@ -15,6 +15,9 @@ class ReceiptLabels {
   final String colQty;
   final String colPrice;
   final String colTotal;
+  // GST% is an acronym — identical across all supported languages, so it isn't
+  // routed through the ARB files. Defaults to 'GST%'.
+  final String colGst;
   final String subtotal;
   final String tax;
   final String cgst;
@@ -46,6 +49,7 @@ class ReceiptLabels {
     required this.colQty,
     required this.colPrice,
     required this.colTotal,
+    this.colGst = 'GST%',
     required this.subtotal,
     required this.tax,
     required this.cgst,

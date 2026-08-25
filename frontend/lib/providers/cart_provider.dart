@@ -98,17 +98,21 @@ final cartProvider =
     NotifierProvider<CartNotifier, List<CartEntry>>(CartNotifier.new);
 
 // Fine-grained computed providers — only affected widgets rebuild
+// NET subtotal. For an MRP (tax-inclusive) item this is the back-calculated
+// pre-tax value, so subtotal + tax still lands on the shelf price.
 final cartSubtotalProvider = Provider<double>((ref) {
-  return ref.watch(cartProvider).fold(0.0, (s, e) => s + e.effectivePrice * e.quantity);
+  final gstEnabled = ref.watch(gstEnabledProvider);
+  return ref.watch(cartProvider)
+      .fold(0.0, (s, e) => s + e.lineNet(gstEnabled));
 });
 
 final cartTaxProvider = Provider<double>((ref) {
   // GST off → tax is ignored entirely, even if items carry a leftover tax_rate.
-  if (!ref.watch(gstEnabledProvider)) return 0.0;
-  return ref.watch(cartProvider).fold(0.0, (s, e) {
-    if (e.item.taxRate == null) return s;
-    return s + e.effectivePrice * e.quantity * (e.item.taxRate! / 100);
-  });
+  // CartEntry applies that rule itself, so an MRP price also stops being split.
+  final gstEnabled = ref.watch(gstEnabledProvider);
+  if (!gstEnabled) return 0.0;
+  return ref.watch(cartProvider)
+      .fold(0.0, (s, e) => s + e.lineTax(gstEnabled));
 });
 
 final cartTotalProvider = Provider<double>((ref) =>
