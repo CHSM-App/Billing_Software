@@ -85,12 +85,14 @@ function validateLines(lines) {
  * identical on both sides means the P&L never disagrees with itself.
  */
 function computeTotals(lines, opts) {
-  const { gstEnabled, isInterstate, discountAmount, roundOff } = opts;
+  const { isInterstate, discountAmount, roundOff } = opts;
 
   const priced = lines.map((l, idx) => {
-    // GST off -> tax is ignored ENTIRELY, even if the item still carries a
-    // stale rate. Without this a disabled-GST bill would create phantom ITC.
-    const rate = gstEnabled && l.tax_rate != null && l.tax_rate !== ''
+    // A line's rate is honoured whatever the business-wide GST setting says.
+    // A shop that bills without GST can still BUY from a registered vendor,
+    // and that vendor's tax is a real cost that has to land on the bill; the
+    // form asks for it per line, so an absent rate already means 'no tax'.
+    const rate = l.tax_rate != null && l.tax_rate !== ''
       ? parseFloat(l.tax_rate)
       : null;
     const qty = parseFloat(l.quantity);
@@ -471,7 +473,6 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
         : !!req.body.is_interstate;
 
       const totals = computeTotals(req.body.lines, {
-        gstEnabled: flags.gstEnabled,
         isInterstate,
         discountAmount: req.body.discount_amount,
         roundOff: req.body.round_off,
@@ -624,7 +625,6 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
         : !!req.body.is_interstate;
 
       const totals = computeTotals(req.body.lines, {
-        gstEnabled: flags.gstEnabled,
         isInterstate,
         discountAmount: req.body.discount_amount,
         roundOff: req.body.round_off,

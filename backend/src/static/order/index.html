@@ -296,6 +296,13 @@
         document.title = data.shop_name + ' — Table ' + data.table_number;
         if (data.shop_logo) { $('logo').src = data.shop_logo; $('logo').style.display = 'block'; }
         menu = data.items || [];
+        // With a single variant there is nothing to choose, so pick it for the
+        // customer instead of making them tap it before "Add" uses the right price.
+        menu.forEach(function (i) {
+          if (i.variants && i.variants.length === 1 && !selVariant[i.id]) {
+            selVariant[i.id] = i.variants[0].id;
+          }
+        });
         renderCats();
         render();
         loadCurrent();

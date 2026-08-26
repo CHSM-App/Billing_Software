@@ -16,6 +16,16 @@ import 'purchase_list_screen.dart';
 
 final _money = NumberFormat('#,##0.00');
 final _dateFmt = DateFormat('dd MMM yyyy');
+
+/// A derived per-unit rate rarely lands on two decimals — an amount split
+/// across an awkward quantity gives 166.6667. Showing the extra digits when
+/// they exist keeps the number honest about what the server was sent, while a
+/// clean rate still reads as a plain 50.00.
+String _rate(double v) {
+  final two = v.toStringAsFixed(2);
+  return double.parse(two) == v ? _money.format(v) : v.toStringAsFixed(4);
+}
+
 final _apiDate = DateFormat('yyyy-MM-dd');
 
 /// The month currently being listed.
@@ -328,7 +338,8 @@ class _LineDraft {
 
   /// Ties the line to [t]: sets the single target id, the display name and
   /// unit, and pre-fills HSN / GST % from the item when the user hasn't typed
-  /// them. Rate is never pre-filled — a purchase cost is not the sale price.
+  /// them. The amount is never pre-filled — a purchase cost is not the
+  /// sale price.
   void link(StockTarget t) {
     itemId = t.itemId;
     variantId = t.variantId;
@@ -355,11 +366,19 @@ class _LineDraft {
   }
 
   double get quantity => double.tryParse(qty.text.trim()) ?? 0;
-  double get unitPrice => double.tryParse(price.text.trim()) ?? 0;
+
+  /// The user types the line's total amount, not a per-unit price — a vendor
+  /// bill quotes "10 kg — Rs. 500", and dividing that by hand is a step the
+  /// form can take instead.
+  double get amount => double.tryParse(price.text.trim()) ?? 0;
+
+  /// Derived for the server, which stores purchases per unit. A zero quantity
+  /// can't yield a rate; the form's validator blocks saving in that state.
+  double get unitPrice => quantity == 0 ? 0 : amount / quantity;
   double? get taxRate =>
       rate.text.trim().isEmpty ? null : double.tryParse(rate.text.trim());
 
-  double get net => quantity * unitPrice;
+  double get net => amount;
   double get tax => net * ((taxRate ?? 0) / 100);
 
   Map<String, dynamic> toJson() => {
@@ -569,7 +588,9 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
         _lines.add(_LineDraft(
           name: m['item_name']?.toString() ?? '',
           qty: _n(m['quantity']).toString(),
-          price: _n(m['unit_price']).toStringAsFixed(2),
+          // Stored per unit, shown as the line's total — the inverse of the
+          // division done on save.
+          price: (_n(m['unit_price']) * _n(m['quantity'])).toStringAsFixed(2),
           rate: m['tax_rate'] == null ? '' : _n(m['tax_rate']).toString(),
           hsn: m['hsn_code']?.toString() ?? '',
           itemId: m['item_id']?.toString(),
@@ -800,57 +821,55 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
             const SizedBox(height: 12),
             _dateField(),
 
-            if (widget.gstEnabled) ...[
-              const SizedBox(height: 12),
-              AppTextField(
-                label: 'Vendor GSTIN (optional)',
-                controller: _gstinCtrl,
-                hint: '27AAAAA0000A1Z5',
-                validator: (v) {
-                  final t = (v ?? '').trim().toUpperCase();
-                  if (t.isEmpty) return null;
-                  final ok = RegExp(
-                          r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$')
-                      .hasMatch(t);
-                  // A wrong GSTIN silently breaks GSTR-2B matching later, so
-                  // it is rejected at entry rather than at reconciliation.
-                  return ok ? null : 'Not a valid GSTIN';
-                },
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Leave blank for an unregistered vendor — no input tax credit '
-                'can be claimed on their bills.',
-                style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                value: _interstate,
-                onChanged: (v) => setState(() => _interstate = v),
-                title: const Text('Inter-state purchase (IGST)',
-                    style: TextStyle(fontSize: 13)),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                value: _itcEligible,
-                onChanged: (v) => setState(() => _itcEligible = v),
-                title: const Text('Input tax credit claimable',
-                    style: TextStyle(fontSize: 13)),
-                subtitle: const Text('Turn off for blocked credit (s.17(5))',
-                    style: TextStyle(fontSize: 11)),
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                value: _reverseCharge,
-                onChanged: (v) => setState(() => _reverseCharge = v),
-                title: const Text('Reverse charge',
-                    style: TextStyle(fontSize: 13)),
-              ),
-            ],
+            const SizedBox(height: 12),
+            AppTextField(
+              label: 'Vendor GSTIN (optional)',
+              controller: _gstinCtrl,
+              hint: '27AAAAA0000A1Z5',
+              validator: (v) {
+                final t = (v ?? '').trim().toUpperCase();
+                if (t.isEmpty) return null;
+                final ok = RegExp(
+                        r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$')
+                    .hasMatch(t);
+                // A wrong GSTIN silently breaks GSTR-2B matching later, so
+                // it is rejected at entry rather than at reconciliation.
+                return ok ? null : 'Not a valid GSTIN';
+              },
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Leave blank for an unregistered vendor — no input tax credit '
+              'can be claimed on their bills.',
+              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              value: _interstate,
+              onChanged: (v) => setState(() => _interstate = v),
+              title: const Text('Inter-state purchase (IGST)',
+                  style: TextStyle(fontSize: 13)),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              value: _itcEligible,
+              onChanged: (v) => setState(() => _itcEligible = v),
+              title: const Text('Input tax credit claimable',
+                  style: TextStyle(fontSize: 13)),
+              subtitle: const Text('Turn off for blocked credit (s.17(5))',
+                  style: TextStyle(fontSize: 11)),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              value: _reverseCharge,
+              onChanged: (v) => setState(() => _reverseCharge = v),
+              title: const Text('Reverse charge',
+                  style: TextStyle(fontSize: 13)),
+            ),
 
             const SizedBox(height: 16),
             const Align(
@@ -980,7 +999,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           const SizedBox(width: 8),
           Expanded(
             child: AppTextField(
-              label: 'Rate',
+              label: 'Amount',
               controller: l.price,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
@@ -990,22 +1009,27 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
               },
             ),
           ),
-          if (widget.gstEnabled) ...[
-            const SizedBox(width: 8),
-            Expanded(
-              child: AppTextField(
-                label: 'GST %',
-                controller: l.rate,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-              ),
+          const SizedBox(width: 8),
+          // Always offered, never required: a shop that bills without GST can
+          // still buy from a registered vendor, and leaving this blank is how
+          // a line says it carries no tax.
+          Expanded(
+            child: AppTextField(
+              label: 'GST % (optional)',
+              controller: l.rate,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              validator: (v) {
+                final t = (v ?? '').trim();
+                if (t.isEmpty) return null;
+                final r = double.tryParse(t);
+                return (r == null || r < 0 || r > 100) ? 'Invalid' : null;
+              },
             ),
-          ],
+          ),
         ]),
-        if (widget.gstEnabled) ...[
-          const SizedBox(height: 8),
-          AppTextField(label: 'HSN/SAC (optional)', controller: l.hsn),
-        ],
+        const SizedBox(height: 8),
+        AppTextField(label: 'HSN/SAC (optional)', controller: l.hsn),
         const SizedBox(height: 6),
         // AppTextField exposes no onChanged, so the live line total tracks the
         // controllers directly.
@@ -1031,9 +1055,25 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                 ),
               ),
             const Spacer(),
-            Text('Line total: Rs. ${_money.format(l.net + l.tax)}',
-                style: const TextStyle(
-                    fontSize: 12, color: AppColors.textSecondary)),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              // The amount is what the vendor bills; this is the per-unit rate
+              // it works out to, which is what actually reaches the server and
+              // prices the stock.
+              if (l.quantity > 0 && l.amount > 0)
+                Text(
+                  'Rs. ${_rate(l.unitPrice)} per '
+                  '${l.unit == null || l.unit!.isEmpty ? 'unit' : l.unit}',
+                  style: const TextStyle(
+                      fontSize: 11, color: AppColors.textSecondary),
+                ),
+              // With GST off the line total would just echo the Amount the
+              // user typed, so it only earns its place when tax is added on
+              // top of it.
+              if (l.tax > 0)
+                Text('Line total: Rs. ${_money.format(l.net + l.tax)}',
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary)),
+            ]),
           ]),
         ),
       ]),
@@ -1170,8 +1210,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           child: Column(children: [
             _kv('Taxable value', subtotal),
             if (discount > 0) _kv('Discount', -discount),
-            if (widget.gstEnabled)
-              _kv(_interstate ? 'IGST' : 'CGST + SGST', tax),
+            if (tax > 0) _kv(_interstate ? 'IGST' : 'CGST + SGST', tax),
             const Divider(height: 16),
             _kv('Total', total, bold: true),
           ]),
@@ -1199,8 +1238,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
 
   /// Lets the user pick a purchase-list PDF (from purchase_list_screen.dart's
   /// export), recovers the item/quantity rows via text extraction, shows them
-  /// for review/edit, then inserts them as blank-rate lines below whatever is
-  /// already in the form — the user only has to type each item's rate.
+  /// for review/edit, then inserts them as blank-amount lines below whatever is
+  /// already in the form — the user only has to type each item's amount.
   Future<void> _importFromPdf() async {
     final FilePickerResult? picked;
     try {
@@ -1259,8 +1298,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                   ? row.quantity!.toInt().toString()
                   : row.quantity!.toString())
               : '',
-          // Rate is deliberately left blank — the user fills in each item's
-          // price; the PDF only ever carried a quantity to buy, never a cost.
+          // The amount is deliberately left blank — the user fills in each item's
+          // what each item cost; the PDF only carried a quantity to buy.
         );
         final match = findStockTargetByName(targets, row.name);
         if (match != null) line.link(match);
@@ -1316,13 +1355,13 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
     try {
       final data = <String, dynamic>{
         'vendor_name': _vendorCtrl.text.trim(),
-        if (widget.gstEnabled && _gstinCtrl.text.trim().isNotEmpty)
+        if (_gstinCtrl.text.trim().isNotEmpty)
           'vendor_gstin': _gstinCtrl.text.trim().toUpperCase(),
         'invoice_number': _invoiceCtrl.text.trim(),
         'invoice_date': _apiDate.format(_invoiceDate),
-        'is_interstate': widget.gstEnabled && _interstate,
-        'itc_eligible': !widget.gstEnabled || _itcEligible,
-        'reverse_charge': widget.gstEnabled && _reverseCharge,
+        'is_interstate': _interstate,
+        'itc_eligible': _itcEligible,
+        'reverse_charge': _reverseCharge,
         'payment_mode': _paymentMode,
         'payment_status': _paymentStatus,
         if (_discountCtrl.text.trim().isNotEmpty)
@@ -1438,7 +1477,7 @@ class _PdfImportReviewSheetState extends State<_PdfImportReviewSheet> {
               padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
                 'Check each item and quantity before adding them to the '
-                'purchase — you\'ll fill in the rate next.',
+                'purchase — you\'ll fill in the amount next.',
                 style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
               ),
             ),
