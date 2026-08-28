@@ -1,7 +1,6 @@
 import 'dart:async' show Timer, unawaited;
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,6 +14,8 @@ import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/whatsapp_mark.dart';
+import '../widgets/stock_target_picker.dart' show isRestaurantBusiness;
 import '../widgets/skeletons.dart';
 import '../services/printer_service.dart';
 import '../services/receipt_output.dart';
@@ -472,6 +473,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  /// Parking an unfinished cart means different things in the two trades, so
+  /// the button says what the user would say. A restaurant is holding a live
+  /// order for a table; a shop is setting a bill aside while the customer
+  /// fetches one more thing. "Draft" fit neither.
+  String _parkLabel(AppLocalizations l10n) =>
+      isRestaurantBusiness(ref.read(businessTypeProvider))
+          ? l10n.billingSaveDraft
+          : l10n.billingHoldBill;
+
+  /// Confirms what parking actually achieved, which differs by trade AND by
+  /// connectivity.
+  ///
+  /// A restaurant draft is broadcast to the kitchen queue the moment the server
+  /// accepts it, so "sent to the kitchen" is the outcome the user cares about —
+  /// but only once it has reached the server. Offline the bill is still sitting
+  /// in the local queue, so promising the kitchen has it would be a lie the
+  /// cook would discover before the cashier did.
+  String _parkedMessage(AppLocalizations l10n, {required bool online}) {
+    final restaurant = isRestaurantBusiness(ref.read(businessTypeProvider));
+    if (restaurant) {
+      return online ? l10n.billingDraftSaved : l10n.billingDraftSavedOffline;
+    }
+    return online ? l10n.billingBillHeld : l10n.billingBillHeldOffline;
+  }
+
+  /// What the customer actually hands over: the same figure the totals box
+  /// shows as Net Payable. The settle button prints it, so it must be derived
+  /// exactly as the summary derives it — discount reduces the taxable base,
+  /// round-off applies to this bill alone, and a previous due is folded in only
+  /// when the cashier chose to clear it here.
+  double _netPayable() {
+    final subtotal = ref.read(cartSubtotalProvider);
+    final tax = ref.read(cartTaxProvider);
+    final discountAmt = (double.tryParse(_discountAmtController.text) ?? 0.0)
+        .clamp(0.0, subtotal);
+    final effectiveTax =
+        subtotal > 0 ? tax * (subtotal - discountAmt) / subtotal : 0.0;
+    final total = subtotal + effectiveTax;
+    final roundOff =
+        computeRoundOff(total - discountAmt, ref.read(roundOffEnabledProvider));
+    final prevDue = _settlePrevCredit ? _prevCreditDue : 0.0;
+    return total - discountAmt + roundOff + prevDue;
+  }
+
   /// Queues a brand-new draft locally while offline and shows it optimistically.
   /// Mirrors [_generateBillOffline] but stores it in the offline_drafts queue
   /// (status:'draft') so it syncs to POST /bills on reconnect. Only called when
@@ -584,7 +629,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(openDraftsProvider.notifier).addLocalDraft(localBill);
       }
       if (!mounted) return;
-      _showSnack(l10n.billingDraftSaved);
+      _showSnack(_parkedMessage(l10n, online: false));
 
       if (widget.onBillDone != null) {
         widget.onBillDone!();
@@ -656,7 +701,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (tableId != null) {
       tablesNotifier.applyDraftSaved(tableId, billId: activeBillId);
     }
-    _showSnack(l10n.billingDraftSaved);
+    _showSnack(_parkedMessage(l10n, online: true));
     if (widget.onBillDone != null) {
       widget.onBillDone!();
     } else if (Navigator.canPop(context)) {
@@ -670,7 +715,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _discountPctController.clear();
       _discountAmtController.clear();
       // This screen stays alive (nothing was popped), so reset the saving flag
-      // ourselves — otherwise the Save Draft FAB spins forever.
+      // ourselves — otherwise the park-order FAB spins forever.
       if (mounted) setState(() => _savingDraft = false);
     }
 
@@ -894,6 +939,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
+  /// Park the unfinished cart. Wrapped so the row and the wide layout share one
+  /// call: the sheet must close FIRST, or _saveDraft's own Navigator.pop closes
+  /// the sheet instead of the billing screen and the user lands in the wrong
+  /// place.
+  void _park({required bool inSheet}) {
+    if (inSheet) Navigator.pop(context);
+    _saveDraft();
+  }
+
+  /// Settle the bill. [print] defaults to whatever the printer can do; passing
+  /// false is the long-press escape hatch — settle deliberately without a slip
+  /// even though a printer is connected.
+  ///
+  /// Every settle path runs the credit guard first, so no finish can bypass the
+  /// name/phone a credit bill requires.
+  void _settle({required bool inSheet, bool? withReceipt}) {
+    if (!_validateCreditCustomer()) return;
+    final canPrint = ref.read(printReadyProvider);
+    final wantsPrint = (withReceipt ?? true) && canPrint;
+    if (inSheet) Navigator.pop(context);
+    if (wantsPrint) {
+      _generateBillAndPrint();
+    } else {
+      _generateBill(onBillReady: (_) {
+        _navigateAfterBill();
+        // Say it out loud: a deliberate skip and a failed print look identical
+        // otherwise, and the cashier needs to know no slip is coming.
+        if (withReceipt == false && canPrint) {
+          _showSnack(context.l10n.billingSettleOnlyDone);
+        }
+      });
+    }
+  }
+
+  /// Settle, then hand the bill to WhatsApp. Not a share — this finalizes the
+  /// sale exactly as [_settle] does, which is why its tile is captioned and
+  /// coloured as a money action rather than as a share icon.
+  void _settleWhatsApp({required bool inSheet}) {
+    // Both guards run BEFORE anything is finalized: a missing phone must not
+    // leave a settled bill with nowhere to send it.
+    if (!_validateCreditCustomer()) return;
+    if (!_ensureCustomerPhoneForWhatsApp()) return;
+    if (inSheet) Navigator.pop(context);
+    _generateBillAndWhatsApp();
+  }
+
+
   /// True when a customer phone is present. Otherwise it reveals and focuses the
   /// customer-phone field (and warns) so the user can add it — WhatsApp needs a
   /// number and we must NOT finalize/clear the bill without one.
@@ -999,24 +1091,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
-  /// Fill both fields from a picked suggestion.
+  /// Fill BOTH fields from a picked suggestion, whichever field was typed in.
+  ///
+  /// Picking "Ramesh" from the name list must bring his number along, and
+  /// picking a number must bring the name — the whole point of the list is to
+  /// recover a customer you already have, not just to complete one field.
   void _applyCustomerSuggestion(Map<String, dynamic> c) {
+    // Kill the in-flight search first: it was started by the keystrokes that
+    // opened this list, and letting it land would reopen the dropdown over the
+    // values we are about to write.
     _customerSearchDebounce?.cancel();
-    _applyingSuggestion = true;
-    final name = (c['customer_name'] ?? '').toString();
+
+    final name = (c['customer_name'] ?? '').toString().trim();
     final phone = (c['customer_phone'] ?? '').toString();
-    _customerNameController.text = name;
     // Strip any country prefix: the field accepts 10 digits only, and a stored
     // "918262878298" would otherwise be cut to the wrong number.
     final digits = phone.replaceAll(RegExp(r'\D'), '');
-    _customerPhoneController.text =
+    final localPhone =
         digits.length > 10 ? digits.substring(digits.length - 10) : digits;
+
+    _applyingSuggestion = true;
+    // Assign via `value` so the caret lands after the text; a bare `.text =`
+    // leaves the selection at offset 0, and the next keystroke would insert
+    // in front of the name.
+    if (name.isNotEmpty) {
+      _customerNameController.value = TextEditingValue(
+        text: name,
+        selection: TextSelection.collapsed(offset: name.length),
+      );
+    }
+    if (localPhone.isNotEmpty) {
+      _customerPhoneController.value = TextEditingValue(
+        text: localPhone,
+        selection: TextSelection.collapsed(offset: localPhone.length),
+      );
+    }
     _applyingSuggestion = false;
 
-    setState(() {
-      _customerSuggestions = const [];
-      _suggestFor = null;
-    });
+    _customerSuggestions = const [];
+    _suggestFor = null;
+    // Both hosts must repaint: the panel owns the fields in the wide layout,
+    // while in the bottom sheet they are rebuilt by the sheet's own builder.
+    if (mounted) setState(() {});
     _sheetSetState?.call(() {});
 
     // A complete number means the previous-credit lookup should run for it.
@@ -1669,6 +1785,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
     final profile = await getGstProfile();
     final addr = profile['business_address'] ?? '';
+    final phone = profile['business_phone'] ?? '';
     final fss = profile['fssai_number'] ?? '';
     final sac = profile['default_sac_code'] ?? '';
     final gstEnabled = ref.read(gstEnabledProvider);
@@ -1684,6 +1801,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         bill,
         businessName: businessName,
         businessAddress: addr.isNotEmpty ? addr : null,
+        businessPhone: phone.isNotEmpty ? phone : null,
         businessGstin: gstin,
         businessFssai: fss.isNotEmpty ? fss : null,
         defaultSacCode: sac.isNotEmpty ? sac : null,
@@ -1708,13 +1826,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final l10n = context.l10n;
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
-    // Address and FSSAI print whenever available, regardless of GST. GSTIN
-    // remains gated on GST being enabled (gstin stays null when off, so a
+    // Address, phone and FSSAI print whenever available, regardless of GST.
+    // GSTIN remains gated on GST being enabled (gstin stays null when off, so a
     // non-GST receipt is byte-for-byte as before).
     final profile = await getGstProfile();
     final addr = profile['business_address'] ?? '';
+    final ph = profile['business_phone'] ?? '';
     final fss = profile['fssai_number'] ?? '';
     final String? address = addr.isNotEmpty ? addr : null;
+    final String? phone = ph.isNotEmpty ? ph : null;
     final String? fssai = fss.isNotEmpty ? fss : null;
     final sac = profile['default_sac_code'] ?? '';
     final gstEnabled = ref.read(gstEnabledProvider);
@@ -1733,6 +1853,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       await ReceiptOutput.emit([bill, ...prevBills],
           businessName: businessName,
           businessAddress: address,
+          businessPhone: phone,
           businessGstin: gstin,
           businessFssai: fssai,
           defaultSacCode: sac.isNotEmpty ? sac : null,
@@ -2117,7 +2238,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return Stack(
         children: [
           _buildItemsPanel(),
-          // Save Draft + Cart row. Shown whenever the cart has items — for
+          // Park-order + Cart row. Shown whenever the cart has items — for
           // tables it saves a table draft; on the standalone billing page it
           // saves a table-less "open order" everyone can create.
           if (count > 0)
@@ -2142,7 +2263,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             )
                           : const Icon(Icons.save_outlined, size: 20),
                       label: Text(
-                        _savingDraft ? l10n.commonSaving : l10n.billingSaveDraft,
+                        _savingDraft ? l10n.commonSaving : _parkLabel(l10n),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppFont.style(
@@ -2529,10 +2650,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // A server takes/builds orders and sends them to the kitchen but cannot
       // finalize or take payment — hide the finalize (WhatsApp/Print) actions.
       final canFinalize = ref.watch(userRoleProvider) != 'server';
-      // Can we actually print right now (printer configured AND Bluetooth on)?
-      // If not, the primary action becomes "Save" (finalize without printing)
-      // and a compact hint offers a link to connect. Re-checked on app resume.
-      final hasPrinter = ref.watch(printReadyProvider);
+      // Printer reachability no longer changes any label here — it only picks
+      // which finish the default settle runs, read at that moment in _settle.
+      // Still watched so the settle menu's print row reflects a printer that
+      // connects or drops while the cart is open.
+      ref.watch(printReadyProvider);
 
       return Container(
         color: AppColors.surface,
@@ -2552,7 +2674,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ),
               ),
-            // Header — always visible
+            // Header — always visible. Same 16px gutter as the payment mode,
+            // customer and discount fields below, so the trailing icons line up
+            // with the right edge of those inputs rather than floating past it.
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                   AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
@@ -2569,50 +2693,78 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         size: 18, color: Colors.white),
                   ),
                   const SizedBox(width: AppSpacing.space12),
-                  Flexible(
-                    child: Text(l10n.billingOrder,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge),
-                  ),
-                  // Item count beside the title — distinct LINES, not summed
-                  // quantity, so a 1.5 kg line still reads as one item (matches
-                  // the cart badge). Hidden on an empty cart: the placeholder
-                  // below already says there's nothing in it.
-                  if (cart.isNotEmpty) ...[
-                    const SizedBox(width: AppSpacing.space8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryLight,
-                        borderRadius: BorderRadius.circular(AppRadius.large),
-                      ),
-                      child: Text(
-                        l10n.billingOrderItemCount(cart.length),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppColors.primaryDark,
-                              fontWeight: FontWeight.w600,
+                  // Title + count share ONE Expanded, which absorbs all the
+                  // free width. A Spacer here instead would get nothing —
+                  // Flexible and Spacer compete for the same slack, and the
+                  // Flexible wins, which left the trailing icons stranded in
+                  // the middle of the row instead of at its edge.
+                  Expanded(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(l10n.billingOrder,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge),
+                        ),
+                        // Item count beside the title — distinct LINES, not
+                        // summed quantity, so a 1.5 kg line still reads as one
+                        // item (matches the cart badge). Hidden on an empty
+                        // cart: the placeholder below already says so.
+                        if (cart.isNotEmpty) ...[
+                          const SizedBox(width: AppSpacing.space8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryLight,
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.large),
                             ),
-                      ),
+                            child: Text(
+                              l10n.billingOrderItemCount(cart.length),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: AppColors.primaryDark,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                  ],
-                  const Spacer(),
+                  ),
+                  // Preview lives up here with the other order-level actions
+                  // because it is the one control that touches no money — it
+                  // must not sit in the footer row where everything settles.
+                  if (cart.isNotEmpty)
+                    _HeaderIconAction(
+                      icon: Icons.visibility_outlined,
+                      color: AppColors.primary,
+                      tooltip: l10n.billingPreviewReceipt,
+                      onPressed: _savingDraft ? null : _previewBill,
+                    ),
                   // Clearing a cart / releasing a table is a cashier/owner
                   // action — hidden for servers, who only build orders.
-                  if (cart.isNotEmpty && canFinalize)
-                    TextButton.icon(
+                  //
+                  // The word is dropped: a red bin next to a blue eye reads
+                  // faster than a labelled button, and the label was the only
+                  // thing making this header row crowd on a narrow phone. The
+                  // tooltip and the confirm dialog carry the meaning.
+                  if (cart.isNotEmpty && canFinalize) ...[
+                    const SizedBox(width: 6),
+                    _HeaderIconAction(
+                      icon: Icons.delete_outline,
+                      color: AppColors.error,
+                      tooltip: l10n.commonClear,
                       onPressed: () => _clearCart(inSheet: inSheet),
-                      icon: const Icon(Icons.delete_outline, size: 14),
-                      label: Text(l10n.commonClear,
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppColors.error,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -3223,188 +3375,100 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 }),
               ),
 
-            // Save Draft is available to everyone — for tables and for
-            // table-less "open orders" on the standalone billing page.
+            // ONE action row: Hold · WhatsApp · Settle, then the printer's
+            // state on the line below.
+            //
+            // Every action is visible — nothing hidden behind a dropdown the
+            // cashier would have to open to learn what the main button does.
+            // The two icons carry one-word captions because an icon alone
+            // cannot say whether it takes the customer's money: WhatsApp
+            // finalizes the bill exactly as settling does, so it is captioned
+            // "Settle" and coloured as a money action, not as a share.
+            //
+            // A captain cannot settle, so only Hold renders and it takes the
+            // whole row.
             Padding(
-                padding: EdgeInsets.fromLTRB(
-                    AppSpacing.space16,
-                    AppSpacing.space12,
-                    AppSpacing.space16,
-                    // When this is the only action (a server with no finalize
-                    // row), add the bottom safe-area inset here instead.
-                    canFinalize ? 0 : AppSpacing.space16 + MediaQuery.of(context).padding.bottom),
-                child: Row(
-                  children: [
-                    // Preview the bill exactly as it will print (thermal receipt
-                    // or A5/A4 PDF), read-only — sits just left of Save Draft.
-                    _PreviewButton(
-                      tooltip: l10n.billingPreview,
-                      onPressed:
-                          (cart.isEmpty || _savingDraft) ? null : _previewBill,
-                    ),
-                    const SizedBox(width: AppSpacing.space8),
-                    Expanded(
-                      child: SecondaryButton(
-                        text: _savingDraft
-                            ? l10n.commonSaving
-                            : l10n.billingSaveDraft,
-                        icon: Icons.save_outlined,
-                        onPressed: (cart.isEmpty || _savingDraft)
-                            ? null
-                            : () {
-                                // This button lives inside the cart bottom sheet.
-                                // Close the sheet first so _saveDraft's
-                                // Navigator.pop pops the billing screen (not the
-                                // sheet) and the Tables list is what the user
-                                // returns to.
-                                if (inSheet) Navigator.pop(context);
-                                _saveDraft();
-                              },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            if (canFinalize)
-              Padding(
               padding: EdgeInsets.fromLTRB(
                 AppSpacing.space16,
-                AppSpacing.space16,
+                AppSpacing.space12,
                 AppSpacing.space16,
                 AppSpacing.space16 + MediaQuery.of(context).padding.bottom,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Compact printer hint — shown only when no printer is set up.
-                  // Kept to a single small red line so it never crowds the UI;
-                  // "Connect" links straight to printer setup.
-                  if (!hasPrinter)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.print_disabled_outlined,
-                              size: 13, color: AppColors.error),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text.rich(
-                              TextSpan(
-                                text: l10n.billingPrinterNotConnected,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.error,
-                                ),
-                                children: [
-                                  const TextSpan(text: ' '),
-                                  TextSpan(
-                                    text: l10n.billingPrinterConnect,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppColors.error,
-                                      fontWeight: FontWeight.w700,
-                                      decoration: TextDecoration.underline,
-                                    ),
-                                    recognizer: TapGestureRecognizer()
-                                      ..onTap = _openPrinterSetup,
-                                  ),
-                                ],
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: Icon(
-                        Icons.message_outlined,
-                        size: 16,
-                        color: (cart.isEmpty || _generatingBill)
-                            ? AppColors.textSecondary
-                            : const Color(0xFF25D366),
-                      ),
-                      label: Text(
-                        l10n.billingWhatsapp,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppFont.style(
-                          color: (cart.isEmpty || _generatingBill)
-                              ? AppColors.textSecondary
-                              : const Color(0xFF25D366),
-                          fontWeight: FontWeight.w600,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (canFinalize) ...[
+                        // Reversible, and the only control in the row that is.
+                        IconAction(
+                          icon: Icons.pause_circle_outline,
+                          caption: l10n.billingHoldShort,
+                          color: AppColors.warning,
+                          tooltip: _parkLabel(l10n),
+                          onPressed: (cart.isEmpty || _savingDraft)
+                              ? null
+                              : () => _park(inSheet: inSheet),
                         ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(
-                          color: (cart.isEmpty || _generatingBill)
-                              ? AppColors.textSecondary
-                              : const Color(0xFF25D366),
+                        const SizedBox(width: AppSpacing.space8),
+                        IconAction(
+                          // The real mark, so the destination is unmistakable —
+                          // a generic speech bubble could be SMS or a note.
+                          glyphBuilder: (size, color) =>
+                              WhatsAppMark(size: size, color: color),
+                          // Captioned for what it DOES, not for the app it
+                          // opens — it settles first and shares second.
+                          caption: l10n.billingWhatsappCaption,
+                          color: whatsAppGreen,
+                          tooltip: l10n.billingSettleWhatsapp,
+                          onPressed: (cart.isEmpty || _generatingBill)
+                              ? null
+                              : () => _settleWhatsApp(inSheet: inSheet),
                         ),
-                        padding: const EdgeInsets.symmetric(
-                            vertical: AppSpacing.space12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppRadius.small),
+                        const SizedBox(width: AppSpacing.space8),
+                        Expanded(
+                          child: SettleButton(
+                            // The amount IS the label: the cashier reads the
+                            // figure at the instant of committing to it.
+                            amountLabel: l10n.billingSettleAmount(
+                                '₹${_netPayable().toStringAsFixed(2)}'),
+                            // ...and the second line says how it ends, so a
+                            // printer that dropped is visible BEFORE the tap.
+                            outcomeLabel: ref.watch(printReadyProvider)
+                                ? l10n.billingSettleAndPrint
+                                : l10n.billingSettleNoReceipt,
+                            isLoading: _generatingBill,
+                            longPressHint: l10n.billingSettleOnlyHint,
+                            onPressed: (cart.isEmpty || _generatingBill)
+                                ? null
+                                : () => _settle(inSheet: inSheet),
+                            // The deliberate skip, for when a printer is
+                            // connected but this one sale needs no slip.
+                            onLongPress: (cart.isEmpty || _generatingBill)
+                                ? null
+                                : () => _settle(inSheet: inSheet, withReceipt: false),
+                          ),
                         ),
-                      ),
-                      onPressed: (cart.isEmpty || _generatingBill)
-                          ? null
-                          : () {
-                              // Credit needs name + phone. Validate BEFORE
-                              // popping so the card stays open with the inline
-                              // message (same pattern as the phone guard below).
-                              if (!_validateCreditCustomer()) return;
-                              // WhatsApp needs a phone. Without one, don't
-                              // finalize/clear the bill — prompt for the number.
-                              if (!_ensureCustomerPhoneForWhatsApp()) return;
-                              if (inSheet) Navigator.pop(context);
-                              _generateBillAndWhatsApp();
-                            },
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.space12),
-                  Expanded(
-                    child: PrimaryButton(
-                      // With a printer set up the primary action prints the
-                      // receipt; without one it finalizes the bill without
-                      // printing, so the sale is never blocked on printer setup.
-                      // Labeled distinctly from "Save Draft" (billingFinalizeBill,
-                      // not commonSave) since this one closes the order for good.
-                      text: hasPrinter
-                          ? l10n.commonPrint
-                          : l10n.billingFinalizeBill,
-                      icon: hasPrinter
-                          ? Icons.print_outlined
-                          : Icons.receipt_long_outlined,
-                      onPressed: (cart.isEmpty || _generatingBill)
-                          ? null
-                          : () {
-                              // Credit needs name + phone. Validate BEFORE
-                              // popping so the card stays open with the inline
-                              // message instead of closing then failing.
-                              if (!_validateCreditCustomer()) return;
-                              if (inSheet) Navigator.pop(context);
-                              if (hasPrinter) {
-                                _generateBillAndPrint();
-                              } else {
-                                // No printer — finalize without printing.
-                                _generateBill(onBillReady: (_) {
-                                  _navigateAfterBill();
-                                });
-                              }
-                            },
-                      isLoading: _generatingBill,
-                    ),
-                  ),
+                      ] else
+                        // Captain: parking is the only thing they can do, so it
+                        // gets its full label and the whole width.
+                        Expanded(
+                          child: SecondaryButton(
+                            text: _savingDraft
+                                ? l10n.commonSaving
+                                : _parkLabel(l10n),
+                            icon: Icons.pause_circle_outline,
+                            onPressed: (cart.isEmpty || _savingDraft)
+                                ? null
+                                : () => _park(inSheet: inSheet),
+                          ),
+                        ),
                     ],
                   ),
+                  if (canFinalize)
+                    _PrinterStatusLine(onConnect: _openPrinterSetup),
                 ],
               ),
             ),
@@ -3906,36 +3970,119 @@ class _ExcelItemTable extends StatelessWidget {
   }
 }
 
-/// Compact square outlined button for previewing the bill, sized (52×52) to
-/// line up with the full-height [SecondaryButton] (Save Draft) beside it.
-/// Disabled (greyed) when [onPressed] is null (empty cart or a save in progress).
-class _PreviewButton extends StatelessWidget {
+/// A header action rendered as a tinted tile: preview (blue) and clear (red).
+///
+/// Without the tint these read as flat grey glyphs and get missed — the header
+/// is a dense row of title, count and controls. The tint is what makes them
+/// look pressable, and it separates the two by consequence: blue looks at the
+/// bill, red throws it away.
+class _HeaderIconAction extends StatelessWidget {
+  final IconData icon;
+  final Color color;
   final String tooltip;
   final VoidCallback? onPressed;
 
-  const _PreviewButton({required this.tooltip, this.onPressed});
+  const _HeaderIconAction({
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
-    final color = enabled ? AppColors.primary : AppColors.textSecondary;
+    final c = enabled ? color : AppColors.textDisabled;
     return Tooltip(
       message: tooltip,
-      child: SizedBox(
-        height: 52,
-        width: 52,
-        child: OutlinedButton(
-          onPressed: onPressed,
-          style: OutlinedButton.styleFrom(
-            padding: EdgeInsets.zero,
-            side: BorderSide(color: color),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadius.medium),
-            ),
+      child: Material(
+        color: c.withValues(alpha: enabled ? 0.10 : 0.06),
+        // A rounded square, not a circle: its straight right edge meets the
+        // row's boundary, so the icon reads as aligned to it. A circle only
+        // touches at one point and leaves the glyph looking inset. It also
+        // echoes the cart tile at the other end of the same row.
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox(
+            width: 36,
+            height: 36,
+            child: Icon(icon, size: 19, color: c),
           ),
-          child: Icon(Icons.receipt_long_outlined, size: 22, color: color),
         ),
       ),
+    );
+  }
+}
+
+/// The line under the settle button: whether a receipt can actually print, and
+/// what to do about it when it can't.
+///
+/// This is shown ALWAYS, not only when something is wrong. A warning that only
+/// appears on failure teaches nobody what the normal state looks like, and the
+/// cashier needs to know before pressing — afterwards the customer has gone.
+class _PrinterStatusLine extends ConsumerWidget {
+  final VoidCallback onConnect;
+  const _PrinterStatusLine({required this.onConnect});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    // A5/A4 output goes through the OS print dialog and needs no paired thermal
+    // printer, so there is nothing useful to report about one.
+    if (ref.watch(pdfPaperSelectedProvider)) return const SizedBox.shrink();
+
+    final printer = ref.watch(activePrinterProvider).valueOrNull;
+    final reachable = ref.watch(canPrintProvider).valueOrNull ?? false;
+
+    final (String text, String? action, Color color) = switch ((printer, reachable)) {
+      (null, _) => (l10n.billingPrinterNone, l10n.billingPrinterConnectOne,
+          AppColors.warning),
+      // Set up but not answering: Bluetooth off, out of range, powered down.
+      (_, false) => (l10n.billingPrinterUnreachable, l10n.billingPrinterRetry,
+          AppColors.warning),
+      (final p, true) => (
+          (p?.name?.trim().isNotEmpty ?? false)
+              ? l10n.billingPrinterReadyNamed(p!.name!.trim())
+              : l10n.billingPrinterReady,
+          null,
+          AppColors.success
+        ),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 7),
+      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppFont.style(fontSize: 11, color: color),
+          ),
+        ),
+        if (action != null) ...[
+          const SizedBox(width: 5),
+          InkWell(
+            onTap: onConnect,
+            child: Text(
+              action,
+              style: AppFont.style(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ).copyWith(decoration: TextDecoration.underline),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 }

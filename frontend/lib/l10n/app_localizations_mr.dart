@@ -849,10 +849,66 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingGenerateBill => 'बिल तयार करा';
 
   @override
-  String get billingSaveDraft => 'ड्राफ्ट जतन करा';
+  String get billingSaveDraft => 'ऑर्डर नोंदवा';
+
+  @override
+  String get billingHoldBill => 'बिल होल्ड करा';
 
   @override
   String get billingFinalizeBill => 'बिल अंतिम करा';
+
+  @override
+  String get billingHoldShort => 'होल्ड';
+
+  @override
+  String billingSettleAmount(String amount) {
+    return '$amount घ्या';
+  }
+
+  @override
+  String get billingWhatsappCaption => 'पैसे घ्या';
+
+  @override
+  String get billingSettleAndPrint => 'आणि प्रिंट';
+
+  @override
+  String get billingSettleNoReceipt => 'पावती नाही';
+
+  @override
+  String get billingSettleWhatsapp => 'पैसे घ्या आणि व्हॉट्सॲपवर पाठवा';
+
+  @override
+  String get billingSettleOnly => 'पावतीशिवाय पैसे घ्या';
+
+  @override
+  String get billingSettleOnlyDone => 'प्रिंटशिवाय पैसे घेतले.';
+
+  @override
+  String get billingSettleOnlyHint =>
+      'प्रिंटशिवाय पैसे घेण्यासाठी बटण दाबून धरा';
+
+  @override
+  String get billingPreviewReceipt => 'पावती पहा';
+
+  @override
+  String get billingPrinterReady => 'प्रिंटर जोडलेला आहे';
+
+  @override
+  String billingPrinterReadyNamed(String name) {
+    return 'प्रिंटर जोडलेला · $name';
+  }
+
+  @override
+  String get billingPrinterUnreachable => 'प्रिंटर बंद किंवा रेंजबाहेर';
+
+  @override
+  String get billingPrinterRetry => 'पुन्हा प्रयत्न';
+
+  @override
+  String get billingPrinterNone => 'प्रिंटर नाही';
+
+  @override
+  String get billingPrinterConnectOne => 'जोडा';
 
   @override
   String get billingClearCart => 'निवडलेल्या वस्तू काढा';
@@ -884,7 +940,19 @@ class AppLocalizationsMr extends AppLocalizations {
       'ही ऑर्डर अजून जतन होत आहे. संपादित किंवा अंतिम करण्यासाठी पुन्हा कनेक्ट करा.';
 
   @override
-  String get billingDraftSaved => 'ड्राफ्ट जतन झाला.';
+  String get billingDraftSaved => 'ऑर्डर किचनला पाठवली.';
+
+  @override
+  String get billingBillHeld =>
+      'बिल होल्डवर ठेवले. खुल्या ऑर्डरमधून पुन्हा उघडा.';
+
+  @override
+  String get billingDraftSavedOffline =>
+      'ऑर्डर जतन केली. पुन्हा ऑनलाइन झाल्यावर किचनला पोहोचेल.';
+
+  @override
+  String get billingBillHeldOffline =>
+      'बिल होल्डवर ठेवले. पुन्हा ऑनलाइन झाल्यावर सिंक होईल.';
 
   @override
   String get billingSaveFailed => 'जतन करता आले नाही. तुमचे कनेक्शन तपासा.';
@@ -921,7 +989,11 @@ class AppLocalizationsMr extends AppLocalizations {
   }
 
   @override
-  String get billingWhatsappSent => 'पावतीची लिंक व्हॉट्सअ‍ॅपवर पाठवली';
+  String get billingWhatsappSent => 'पावती व्हॉट्सॅपवर पाठवली.';
+
+  @override
+  String get billingWhatsappOpened =>
+      'पावती व्हॉट्सॅपमध्ये तयार आहे — पाठवण्यासाठी Send दाबा.';
 
   @override
   String get billingWhatsappNeedsPhone =>
@@ -1911,7 +1983,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get staffRoleWaiter => 'वेटर';
 
   @override
-  String get staffRoleServer => 'सर्व्हर';
+  String get staffRoleServer => 'कॅप्टन';
 
   @override
   String get staffRoleKitchen => 'किचन शेफ';

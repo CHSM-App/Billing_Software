@@ -1643,14 +1643,116 @@ abstract class AppLocalizations {
   /// No description provided for @billingSaveDraft.
   ///
   /// In en, this message translates to:
-  /// **'Save Draft'**
+  /// **'Save Order'**
   String get billingSaveDraft;
+
+  /// No description provided for @billingHoldBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold Bill'**
+  String get billingHoldBill;
 
   /// No description provided for @billingFinalizeBill.
   ///
   /// In en, this message translates to:
   /// **'Finalize Bill'**
   String get billingFinalizeBill;
+
+  /// No description provided for @billingHoldShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold'**
+  String get billingHoldShort;
+
+  /// No description provided for @billingSettleAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle {amount}'**
+  String billingSettleAmount(String amount);
+
+  /// No description provided for @billingWhatsappCaption.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle'**
+  String get billingWhatsappCaption;
+
+  /// No description provided for @billingSettleAndPrint.
+  ///
+  /// In en, this message translates to:
+  /// **'and print'**
+  String get billingSettleAndPrint;
+
+  /// No description provided for @billingSettleNoReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'no receipt'**
+  String get billingSettleNoReceipt;
+
+  /// No description provided for @billingSettleWhatsapp.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle & send on WhatsApp'**
+  String get billingSettleWhatsapp;
+
+  /// No description provided for @billingSettleOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle without a receipt'**
+  String get billingSettleOnly;
+
+  /// No description provided for @billingSettleOnlyDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Settled without printing.'**
+  String get billingSettleOnlyDone;
+
+  /// No description provided for @billingSettleOnlyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold the button down to settle without printing'**
+  String get billingSettleOnlyHint;
+
+  /// No description provided for @billingPreviewReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview receipt'**
+  String get billingPreviewReceipt;
+
+  /// No description provided for @billingPrinterReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer connected'**
+  String get billingPrinterReady;
+
+  /// No description provided for @billingPrinterReadyNamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer connected · {name}'**
+  String billingPrinterReadyNamed(String name);
+
+  /// No description provided for @billingPrinterUnreachable.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer off or out of range'**
+  String get billingPrinterUnreachable;
+
+  /// No description provided for @billingPrinterRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get billingPrinterRetry;
+
+  /// No description provided for @billingPrinterNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No printer'**
+  String get billingPrinterNone;
+
+  /// No description provided for @billingPrinterConnectOne.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect one'**
+  String get billingPrinterConnectOne;
 
   /// No description provided for @billingClearCart.
   ///
@@ -1703,8 +1805,26 @@ abstract class AppLocalizations {
   /// No description provided for @billingDraftSaved.
   ///
   /// In en, this message translates to:
-  /// **'Draft saved.'**
+  /// **'Order sent to the kitchen.'**
   String get billingDraftSaved;
+
+  /// No description provided for @billingBillHeld.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill kept on hold. Reopen it from Open Orders.'**
+  String get billingBillHeld;
+
+  /// No description provided for @billingDraftSavedOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Order saved. It reaches the kitchen once you\'re back online.'**
+  String get billingDraftSavedOffline;
+
+  /// No description provided for @billingBillHeldOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill kept on hold. It syncs once you\'re back online.'**
+  String get billingBillHeldOffline;
 
   /// No description provided for @billingSaveFailed.
   ///
@@ -1757,8 +1877,14 @@ abstract class AppLocalizations {
   /// No description provided for @billingWhatsappSent.
   ///
   /// In en, this message translates to:
-  /// **'Receipt link sent to WhatsApp'**
+  /// **'Receipt sent on WhatsApp.'**
   String get billingWhatsappSent;
+
+  /// No description provided for @billingWhatsappOpened.
+  ///
+  /// In en, this message translates to:
+  /// **'Receipt ready in WhatsApp — tap Send to deliver it.'**
+  String get billingWhatsappOpened;
 
   /// No description provided for @billingWhatsappNeedsPhone.
   ///
@@ -3457,7 +3583,7 @@ abstract class AppLocalizations {
   /// No description provided for @staffRoleServer.
   ///
   /// In en, this message translates to:
-  /// **'Server'**
+  /// **'Captain'**
   String get staffRoleServer;
 
   /// No description provided for @staffRoleKitchen.

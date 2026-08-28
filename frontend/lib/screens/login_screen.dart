@@ -254,6 +254,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       await saveGstProfile(
         gstNumber: business['gst_number'] as String?,
         businessAddress: business['address'] as String?,
+        businessPhone: business['phone'] as String?,
         defaultSacCode: business['default_sac_code'] as String?,
         fssaiNumber: business['fssai_number'] as String?,
       );

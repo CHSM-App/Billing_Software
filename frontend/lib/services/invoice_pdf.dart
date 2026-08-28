@@ -34,6 +34,7 @@ class InvoicePdf {
     required PdfPageFormat pageFormat,
     required String businessName,
     String? address,
+    String? phone,
     String? gstin,
     String? fssai,
     String? defaultSacCode,
@@ -45,6 +46,7 @@ class InvoicePdf {
         pageFormat: pageFormat,
         businessName: businessName,
         address: address,
+        phone: phone,
         gstin: gstin,
         fssai: fssai,
         defaultSacCode: defaultSacCode,
@@ -60,6 +62,7 @@ class InvoicePdf {
     required PdfPageFormat pageFormat,
     required String businessName,
     String? address,
+    String? phone,
     String? gstin,
     String? fssai,
     String? defaultSacCode,
@@ -135,7 +138,7 @@ class InvoicePdf {
                       fontSize: 16, fontWeight: pw.FontWeight.bold)),
             ),
             pw.SizedBox(height: 8),
-            _headerBox(businessName, address, gstin, fssai,
+            _headerBox(businessName, address, phone, gstin, fssai,
                 bill.billNumber, dateStr),
             _billToBox(bill),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money),
@@ -156,8 +159,8 @@ class InvoicePdf {
   }
 
   // --- Header box: business (left) | Invoice No/Date (right) --------------
-  static pw.Widget _headerBox(String name, String? address, String? gstin,
-      String? fssai, String billNumber, String dateStr) {
+  static pw.Widget _headerBox(String name, String? address, String? phone,
+      String? gstin, String? fssai, String billNumber, String dateStr) {
     final left = <pw.Widget>[
       pw.Text(name,
           style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold)),
@@ -165,6 +168,13 @@ class InvoicePdf {
     if (address != null && address.trim().isNotEmpty) {
       left.add(pw.SizedBox(height: 3));
       left.add(pw.Text(address.replaceAll('\r\n', '\n'),
+          style: const pw.TextStyle(fontSize: 9)));
+    }
+    // Sits under the address, as on the thermal receipt, so the shop's contact
+    // details read as one block.
+    if (phone != null && phone.trim().isNotEmpty) {
+      left.add(pw.SizedBox(height: 3));
+      left.add(pw.Text('Ph: ${phone.trim()}',
           style: const pw.TextStyle(fontSize: 9)));
     }
     if (gstin != null && gstin.isNotEmpty) {
