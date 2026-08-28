@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../api.dart' as api;
+import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../services/purchase_list_pdf_import.dart';
 import '../theme/app_theme.dart';
@@ -86,7 +87,9 @@ class VendorBillsScreen extends ConsumerWidget {
               MaterialPageRoute(builder: (_) => const PurchaseListScreen()),
             ),
             icon: const Icon(Icons.checklist_outlined),
-            label: Text(compact ? 'Purchase list' : 'Create purchase list'),
+            label: Text(compact
+                ? context.l10n.purchaseListFabShort
+                : context.l10n.purchaseListFabLong),
           );
           final addPurchaseFab = FloatingActionButton.extended(
             // Unique tag: a duplicate throws during a route transition when two
@@ -94,7 +97,9 @@ class VendorBillsScreen extends ConsumerWidget {
             heroTag: 'vendorBillFab',
             onPressed: () => _openForm(context, ref, null),
             icon: const Icon(Icons.add),
-            label: Text(compact ? 'Purchase' : 'Add purchase'),
+            label: Text(compact
+                ? context.l10n.purchaseFabShort
+                : context.l10n.purchaseFabLong),
           );
 
           return Row(
@@ -108,7 +113,7 @@ class VendorBillsScreen extends ConsumerWidget {
         },
       ),
       body: Column(children: [
-        const ShellAppBar(title: Text('Purchases')),
+        ShellAppBar(title: Text(context.l10n.purchasesTitle)),
         Expanded(
           child: Column(children: [
             _monthBar(context, ref, month, isCurrentMonth, billsAsync),
@@ -120,9 +125,9 @@ class VendorBillsScreen extends ConsumerWidget {
                     error: e,
                     onRetry: () => ref.invalidate(vendorBillsProvider)),
                 data: (bills) => bills.isEmpty
-                    ? const EmptyState(
+                    ? EmptyState(
                         icon: Icons.receipt_long_outlined,
-                        message: 'No purchases recorded this month')
+                        message: context.l10n.purchaseNoneThisMonth)
                     : RefreshIndicator(
                         onRefresh: () async =>
                             ref.invalidate(vendorBillsProvider),
@@ -235,11 +240,22 @@ class VendorBillsScreen extends ConsumerWidget {
                     fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary)),
             const SizedBox(height: 4),
-            StatusBadge(label: status, status: statusType),
+            StatusBadge(label: _statusLabel(context, status), status: statusType),
           ],
         ),
       ]),
     );
+  }
+
+  String _statusLabel(BuildContext context, String status) {
+    switch (status) {
+      case 'unpaid':
+        return context.l10n.purchaseStatusUnpaid;
+      case 'partial':
+        return context.l10n.purchaseStatusPartial;
+      default:
+        return context.l10n.purchaseStatusPaid;
+    }
   }
 
   Future<void> _openForm(
@@ -451,22 +467,26 @@ class _QuickAddDialogState extends State<_QuickAddDialog> {
   Widget build(BuildContext context) {
     final units = widget.isRestaurant ? _materialUnits : _itemUnits;
     return AlertDialog(
-      title: Text(widget.isRestaurant ? 'New raw material' : 'New item'),
+      title: Text(widget.isRestaurant
+          ? context.l10n.purchaseQuickAddRawMaterial
+          : context.l10n.purchaseQuickAddItem),
       content: Form(
         key: _formKey,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           AppTextField(
-            label: 'Name',
+            label: context.l10n.purchaseFieldName,
             controller: _name,
             capitalizeWords: true,
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Name required' : null,
+            validator: (v) => (v == null || v.trim().isEmpty)
+                ? context.l10n.purchaseNameRequired
+                : null,
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: _unit,
-            decoration: const InputDecoration(
-                labelText: 'Unit', border: OutlineInputBorder()),
+            decoration: InputDecoration(
+                labelText: context.l10n.purchaseFieldUnit,
+                border: const OutlineInputBorder()),
             items: [
               for (final u in units) DropdownMenuItem(value: u, child: Text(u)),
             ],
@@ -475,18 +495,20 @@ class _QuickAddDialogState extends State<_QuickAddDialog> {
           if (!widget.isRestaurant) ...[
             const SizedBox(height: 12),
             AppTextField(
-              label: 'Sale price',
+              label: context.l10n.purchaseFieldSalePrice,
               controller: _price,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               validator: (v) {
                 final p = double.tryParse((v ?? '').trim());
-                return (p == null || p < 0) ? 'Sale price required' : null;
+                return (p == null || p < 0)
+                    ? context.l10n.purchaseSalePriceRequired
+                    : null;
               },
             ),
             if (widget.gstEnabled) ...[
               const SizedBox(height: 12),
               AppTextField(
-                label: 'GST % (optional)',
+                label: context.l10n.purchaseFieldGstOptional,
                 controller: _tax,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
@@ -498,7 +520,7 @@ class _QuickAddDialogState extends State<_QuickAddDialog> {
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel')),
+            child: Text(context.l10n.commonCancel)),
         TextButton(
           onPressed: () {
             if (!_formKey.currentState!.validate()) return;
@@ -514,7 +536,7 @@ class _QuickAddDialogState extends State<_QuickAddDialog> {
               ),
             );
           },
-          child: const Text('Add'),
+          child: Text(context.l10n.commonAdd),
         ),
       ],
     );
@@ -630,11 +652,11 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
         displayStringForOption: (v) => v['name']?.toString() ?? '',
         onSelected: _onVendorPicked,
         fieldViewBuilder: (context, ctrl, focus, onSubmit) => AppTextField(
-          label: 'Vendor name',
+          label: context.l10n.purchaseFieldVendorName,
           controller: ctrl,
           focusNode: focus,
           validator: (v) => (v == null || v.trim().isEmpty)
-              ? 'Vendor name is required'
+              ? context.l10n.purchaseVendorNameRequired
               : null,
         ),
         optionsViewBuilder: (context, onSelected, options) => Align(
@@ -787,17 +809,19 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
       backgroundColor: AppColors.background,
       body: Column(children: [
         ShellAppBar(
-          title: Text(_isEdit ? 'Edit purchase' : 'Add purchase'),
+          title: Text(_isEdit
+              ? context.l10n.purchaseEditTitle
+              : context.l10n.purchaseAddTitle),
           actions: [
             IconButton(
               icon: const Icon(Icons.file_upload_outlined),
-              tooltip: 'Import from purchase list PDF',
+              tooltip: context.l10n.purchaseImportPdfTooltip,
               onPressed: _saving ? null : _importFromPdf,
             ),
             if (_isEdit)
               IconButton(
                 icon: const Icon(Icons.delete_outline, color: AppColors.error),
-                tooltip: 'Delete',
+                tooltip: context.l10n.commonDelete,
                 onPressed: _saving ? null : _confirmDelete,
               ),
           ],
@@ -812,10 +836,10 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
             _vendorNameField(),
             const SizedBox(height: 12),
             AppTextField(
-              label: 'Invoice number',
+              label: context.l10n.purchaseFieldInvoiceNumber,
               controller: _invoiceCtrl,
               validator: (v) => (v == null || v.trim().isEmpty)
-                  ? 'Invoice number is required'
+                  ? context.l10n.purchaseInvoiceNumberRequired
                   : null,
             ),
             const SizedBox(height: 12),
@@ -823,7 +847,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
 
             const SizedBox(height: 12),
             AppTextField(
-              label: 'Vendor GSTIN (optional)',
+              label: context.l10n.purchaseFieldVendorGstin,
               controller: _gstinCtrl,
               hint: '27AAAAA0000A1Z5',
               validator: (v) {
@@ -834,14 +858,14 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                     .hasMatch(t);
                 // A wrong GSTIN silently breaks GSTR-2B matching later, so
                 // it is rejected at entry rather than at reconciliation.
-                return ok ? null : 'Not a valid GSTIN';
+                return ok ? null : context.l10n.purchaseGstinInvalid;
               },
             ),
             const SizedBox(height: 4),
-            const Text(
-              'Leave blank for an unregistered vendor — no input tax credit '
-              'can be claimed on their bills.',
-              style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+            Text(
+              context.l10n.purchaseGstinHelp,
+              style: const TextStyle(
+                  fontSize: 11, color: AppColors.textSecondary),
             ),
             const SizedBox(height: 8),
             SwitchListTile(
@@ -849,45 +873,45 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
               dense: true,
               value: _interstate,
               onChanged: (v) => setState(() => _interstate = v),
-              title: const Text('Inter-state purchase (IGST)',
-                  style: TextStyle(fontSize: 13)),
+              title: Text(context.l10n.purchaseInterstate,
+                  style: const TextStyle(fontSize: 13)),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
               value: _itcEligible,
               onChanged: (v) => setState(() => _itcEligible = v),
-              title: const Text('Input tax credit claimable',
-                  style: TextStyle(fontSize: 13)),
-              subtitle: const Text('Turn off for blocked credit (s.17(5))',
-                  style: TextStyle(fontSize: 11)),
+              title: Text(context.l10n.purchaseItcClaimable,
+                  style: const TextStyle(fontSize: 13)),
+              subtitle: Text(context.l10n.purchaseItcBlockedHint,
+                  style: const TextStyle(fontSize: 11)),
             ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
               value: _reverseCharge,
               onChanged: (v) => setState(() => _reverseCharge = v),
-              title: const Text('Reverse charge',
-                  style: TextStyle(fontSize: 13)),
+              title: Text(context.l10n.purchaseReverseCharge,
+                  style: const TextStyle(fontSize: 13)),
             ),
 
             const SizedBox(height: 16),
-            const Align(
+            Align(
               alignment: Alignment.centerLeft,
-              child: Text('Items',
-                  style: TextStyle(
+              child: Text(context.l10n.purchaseItemsSection,
+                  style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: AppColors.textPrimary)),
             ),
             if (!ref.watch(inventoryEnabledProvider)) ...[
               const SizedBox(height: 4),
-              const Align(
+              Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Turn on inventory in Settings to update stock from purchases.',
-                  style:
-                      TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  context.l10n.purchaseInventoryOffHint,
+                  style: const TextStyle(
+                      fontSize: 11, color: AppColors.textSecondary),
                 ),
               ),
             ],
@@ -898,7 +922,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
             SizedBox(
               width: double.infinity,
               child: SecondaryButton(
-                text: 'Add line',
+                text: context.l10n.purchaseAddLine,
                 icon: Icons.add,
                 onPressed: () => setState(() => _lines.add(_LineDraft())),
               ),
@@ -906,7 +930,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
 
             const SizedBox(height: 12),
             AppTextField(
-              label: 'Discount (optional)',
+              label: context.l10n.purchaseFieldDiscountOptional,
               controller: _discountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
@@ -917,8 +941,10 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
             const SizedBox(height: 16),
             PrimaryButton(
               text: _saving
-                  ? 'Saving…'
-                  : (_isEdit ? 'Update purchase' : 'Save purchase'),
+                  ? context.l10n.commonSaving
+                  : (_isEdit
+                      ? context.l10n.purchaseUpdateButton
+                      : context.l10n.purchaseSaveButton),
               onPressed: _saving ? null : _save,
             ),
               ]),
@@ -952,7 +978,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
               size: 18, color: AppColors.textSecondary),
           const SizedBox(width: 10),
           Expanded(
-            child: Text('Invoice date: ${_dateFmt.format(_invoiceDate)}',
+            child: Text(
+                context.l10n.purchaseInvoiceDate(_dateFmt.format(_invoiceDate)),
                 style: const TextStyle(fontSize: 14)),
           ),
           const Icon(Icons.chevron_right, color: AppColors.textSecondary),
@@ -986,26 +1013,30 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
         Row(children: [
           Expanded(
             child: AppTextField(
-              label: 'Qty',
+              label: context.l10n.purchaseFieldQty,
               controller: l.qty,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               validator: (v) {
                 final q = double.tryParse((v ?? '').trim());
-                return (q == null || q <= 0) ? 'Invalid' : null;
+                return (q == null || q <= 0)
+                    ? context.l10n.purchaseInvalid
+                    : null;
               },
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: AppTextField(
-              label: 'Amount',
+              label: context.l10n.purchaseFieldAmount,
               controller: l.price,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               validator: (v) {
                 final p = double.tryParse((v ?? '').trim());
-                return (p == null || p < 0) ? 'Invalid' : null;
+                return (p == null || p < 0)
+                    ? context.l10n.purchaseInvalid
+                    : null;
               },
             ),
           ),
@@ -1015,7 +1046,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           // a line says it carries no tax.
           Expanded(
             child: AppTextField(
-              label: 'GST % (optional)',
+              label: context.l10n.purchaseFieldGstOptional,
               controller: l.rate,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
@@ -1023,13 +1054,16 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                 final t = (v ?? '').trim();
                 if (t.isEmpty) return null;
                 final r = double.tryParse(t);
-                return (r == null || r < 0 || r > 100) ? 'Invalid' : null;
+                return (r == null || r < 0 || r > 100)
+                    ? context.l10n.purchaseInvalid
+                    : null;
               },
             ),
           ),
         ]),
         const SizedBox(height: 8),
-        AppTextField(label: 'HSN/SAC (optional)', controller: l.hsn),
+        AppTextField(
+            label: context.l10n.purchaseFieldHsnOptional, controller: l.hsn),
         const SizedBox(height: 6),
         // AppTextField exposes no onChanged, so the live line total tracks the
         // controllers directly.
@@ -1048,8 +1082,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                 ),
                 child: Text(
                   l.unit == null || l.unit!.isEmpty
-                      ? 'Updates stock'
-                      : 'Updates stock · ${l.unit}',
+                      ? context.l10n.purchaseUpdatesStock
+                      : context.l10n.purchaseUpdatesStockUnit(l.unit!),
                   style:
                       const TextStyle(fontSize: 11, color: AppColors.primary),
                 ),
@@ -1061,8 +1095,11 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
               // prices the stock.
               if (l.quantity > 0 && l.amount > 0)
                 Text(
-                  'Rs. ${_rate(l.unitPrice)} per '
-                  '${l.unit == null || l.unit!.isEmpty ? 'unit' : l.unit}',
+                  context.l10n.purchaseRatePerUnit(
+                      _rate(l.unitPrice),
+                      l.unit == null || l.unit!.isEmpty
+                          ? context.l10n.purchaseUnitFallback
+                          : l.unit!),
                   style: const TextStyle(
                       fontSize: 11, color: AppColors.textSecondary),
                 ),
@@ -1070,7 +1107,9 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
               // user typed, so it only earns its place when tax is added on
               // top of it.
               if (l.tax > 0)
-                Text('Line total: Rs. ${_money.format(l.net + l.tax)}',
+                Text(
+                    context.l10n
+                        .purchaseLineTotal(_money.format(l.net + l.tax)),
                     style: const TextStyle(
                         fontSize: 12, color: AppColors.textSecondary)),
             ]),
@@ -1092,12 +1131,13 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
         displayStringForOption: (t) => t.name,
         onSelected: (t) => _onSuggestionPicked(l, t),
         fieldViewBuilder: (context, ctrl, focus, onSubmit) => AppTextField(
-          label: 'Item name',
+          label: context.l10n.purchaseFieldItemName,
           controller: ctrl,
           focusNode: focus,
           capitalizeWords: true,
-          validator: (v) =>
-              (v == null || v.trim().isEmpty) ? 'Item name required' : null,
+          validator: (v) => (v == null || v.trim().isEmpty)
+              ? context.l10n.purchaseItemNameRequired
+              : null,
         ),
         optionsViewBuilder: (context, onSelected, options) => Align(
           alignment: Alignment.topLeft,
@@ -1121,8 +1161,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                             color: AppColors.primary),
                         title: Text(
                           _isRestaurant
-                              ? 'Add "${t.name}" as a new raw material'
-                              : 'Add "${t.name}" as a new item',
+                              ? context.l10n.purchaseAddAsRawMaterial(t.name)
+                              : context.l10n.purchaseAddAsItem(t.name),
                           style: const TextStyle(
                               color: AppColors.primary,
                               fontWeight: FontWeight.w600),
@@ -1134,7 +1174,9 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                       dense: true,
                       title: Text(t.name),
                       subtitle: t.currentStock != null
-                          ? Text('In stock: ${_qty(t.currentStock!)} ${t.unit}',
+                          ? Text(
+                              context.l10n.purchaseInStock(
+                                  _qty(t.currentStock!), t.unit),
                               style: const TextStyle(fontSize: 11))
                           : null,
                       onTap: () => onSelected(t),
@@ -1157,13 +1199,18 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
       Expanded(
         child: DropdownButtonFormField<String>(
           initialValue: _paymentMode,
-          decoration: const InputDecoration(
-              labelText: 'Payment mode', border: OutlineInputBorder()),
-          items: const [
-            DropdownMenuItem(value: 'cash', child: Text('Cash')),
-            DropdownMenuItem(value: 'upi', child: Text('UPI')),
-            DropdownMenuItem(value: 'card', child: Text('Card')),
-            DropdownMenuItem(value: 'other', child: Text('Other')),
+          decoration: InputDecoration(
+              labelText: context.l10n.purchaseFieldPaymentMode,
+              border: const OutlineInputBorder()),
+          items: [
+            DropdownMenuItem(
+                value: 'cash', child: Text(context.l10n.paymentCash)),
+            DropdownMenuItem(
+                value: 'upi', child: Text(context.l10n.paymentUpi)),
+            DropdownMenuItem(
+                value: 'card', child: Text(context.l10n.paymentCard)),
+            DropdownMenuItem(
+                value: 'other', child: Text(context.l10n.paymentOther)),
           ],
           onChanged: (v) => setState(() => _paymentMode = v ?? 'cash'),
         ),
@@ -1172,12 +1219,18 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
       Expanded(
         child: DropdownButtonFormField<String>(
           initialValue: _paymentStatus,
-          decoration: const InputDecoration(
-              labelText: 'Status', border: OutlineInputBorder()),
-          items: const [
-            DropdownMenuItem(value: 'paid', child: Text('Paid')),
-            DropdownMenuItem(value: 'unpaid', child: Text('Unpaid')),
-            DropdownMenuItem(value: 'partial', child: Text('Partial')),
+          decoration: InputDecoration(
+              labelText: context.l10n.purchaseFieldStatus,
+              border: const OutlineInputBorder()),
+          items: [
+            DropdownMenuItem(
+                value: 'paid', child: Text(context.l10n.purchaseStatusPaid)),
+            DropdownMenuItem(
+                value: 'unpaid',
+                child: Text(context.l10n.purchaseStatusUnpaid)),
+            DropdownMenuItem(
+                value: 'partial',
+                child: Text(context.l10n.purchaseStatusPartial)),
           ],
           onChanged: (v) => setState(() => _paymentStatus = v ?? 'paid'),
         ),
@@ -1208,11 +1261,11 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
             borderRadius: BorderRadius.circular(AppRadius.medium),
           ),
           child: Column(children: [
-            _kv('Taxable value', subtotal),
-            if (discount > 0) _kv('Discount', -discount),
+            _kv(context.l10n.purchaseTaxableValue, subtotal),
+            if (discount > 0) _kv(context.l10n.purchaseDiscount, -discount),
             if (tax > 0) _kv(_interstate ? 'IGST' : 'CGST + SGST', tax),
             const Divider(height: 16),
-            _kv('Total', total, bold: true),
+            _kv(context.l10n.purchaseTotal, total, bold: true),
           ]),
         );
       },
@@ -1249,7 +1302,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
         withData: true,
       );
     } catch (e) {
-      if (mounted) _snack('Could not open file picker: $e');
+      if (mounted) _snack(context.l10n.purchaseFilePickerFailed('$e'));
       return;
     }
     if (picked == null || picked.files.isEmpty) return;
@@ -1261,12 +1314,12 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
       parsed = PurchaseListPdfImporter.parseBytes(bytes);
     } catch (e) {
       if (mounted) {
-        _snack('Could not read that PDF — is it a purchase list export?');
+        _snack(context.l10n.purchasePdfReadFailed);
       }
       return;
     }
     if (parsed.isEmpty) {
-      if (mounted) _snack('No items found in that PDF.');
+      if (mounted) _snack(context.l10n.purchasePdfNoItems);
       return;
     }
     if (!mounted) return;
@@ -1321,17 +1374,16 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Delete purchase?'),
-        content: const Text(
-            'Any stock this purchase added will be reversed. This cannot be undone.'),
+        title: Text(context.l10n.purchaseDeleteTitle),
+        content: Text(context.l10n.purchaseDeleteBody),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
+              child: Text(context.l10n.commonCancel)),
           TextButton(
               onPressed: () => Navigator.pop(c, true),
-              child: const Text('Delete',
-                  style: TextStyle(color: AppColors.error))),
+              child: Text(context.l10n.commonDelete,
+                  style: const TextStyle(color: AppColors.error))),
         ],
       ),
     );
@@ -1462,9 +1514,9 @@ class _PdfImportReviewSheetState extends State<_PdfImportReviewSheet> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Row(children: [
-                const Expanded(
-                  child: Text('Review imported items',
-                      style: TextStyle(
+                Expanded(
+                  child: Text(context.l10n.purchaseReviewImportTitle,
+                      style: const TextStyle(
                           fontSize: 16, fontWeight: FontWeight.w700)),
                 ),
                 IconButton(
@@ -1473,12 +1525,12 @@ class _PdfImportReviewSheetState extends State<_PdfImportReviewSheet> {
                 ),
               ]),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
-                'Check each item and quantity before adding them to the '
-                'purchase — you\'ll fill in the amount next.',
-                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                context.l10n.purchaseReviewImportHint,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textSecondary),
               ),
             ),
             Expanded(
@@ -1498,14 +1550,14 @@ class _PdfImportReviewSheetState extends State<_PdfImportReviewSheet> {
                     Expanded(
                       flex: 3,
                       child: AppTextField(
-                        label: 'Item',
+                        label: context.l10n.purchaseReviewItem,
                         controller: _names[i],
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: AppTextField(
-                        label: 'Qty',
+                        label: context.l10n.purchaseFieldQty,
                         controller: _qtys[i],
                         keyboardType:
                             const TextInputType.numberWithOptions(decimal: true),
@@ -1520,8 +1572,8 @@ class _PdfImportReviewSheetState extends State<_PdfImportReviewSheet> {
               child: SizedBox(
                 width: double.infinity,
                 child: PrimaryButton(
-                  text:
-                      'Add ${_included.where((v) => v).length} item(s) to purchase',
+                  text: context.l10n.purchaseReviewConfirm(
+                      _included.where((v) => v).length),
                   onPressed: _confirm,
                 ),
               ),

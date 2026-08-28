@@ -985,11 +985,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get billingWhatsappSent => 'Receipt sent on WhatsApp.';
-
-  @override
-  String get billingWhatsappOpened =>
-      'Receipt ready in WhatsApp — tap Send to deliver it.';
+  String get billingWhatsappSent => 'Receipt link sent to WhatsApp';
 
   @override
   String get billingWhatsappNeedsPhone =>
@@ -2642,4 +2638,235 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get itemsRecipeNoMaterials =>
       'Add raw materials first, then set the recipe.';
+
+  @override
+  String get purchasesTitle => 'Purchases';
+
+  @override
+  String get purchaseListFabShort => 'Purchase list';
+
+  @override
+  String get purchaseListFabLong => 'Create purchase list';
+
+  @override
+  String get purchaseFabShort => 'Purchase';
+
+  @override
+  String get purchaseFabLong => 'Add purchase';
+
+  @override
+  String get purchaseNoneThisMonth => 'No purchases recorded this month';
+
+  @override
+  String get purchaseStatusPaid => 'Paid';
+
+  @override
+  String get purchaseStatusUnpaid => 'Unpaid';
+
+  @override
+  String get purchaseStatusPartial => 'Partial';
+
+  @override
+  String get purchaseQuickAddRawMaterial => 'New raw material';
+
+  @override
+  String get purchaseQuickAddItem => 'New item';
+
+  @override
+  String get purchaseFieldName => 'Name';
+
+  @override
+  String get purchaseNameRequired => 'Name required';
+
+  @override
+  String get purchaseFieldUnit => 'Unit';
+
+  @override
+  String get purchaseFieldSalePrice => 'Sale price';
+
+  @override
+  String get purchaseSalePriceRequired => 'Sale price required';
+
+  @override
+  String get purchaseFieldGstOptional => 'GST % (optional)';
+
+  @override
+  String get purchaseFieldVendorName => 'Vendor name';
+
+  @override
+  String get purchaseVendorNameRequired => 'Vendor name is required';
+
+  @override
+  String get purchaseEditTitle => 'Edit purchase';
+
+  @override
+  String get purchaseAddTitle => 'Add purchase';
+
+  @override
+  String get purchaseImportPdfTooltip => 'Import from purchase list PDF';
+
+  @override
+  String get purchaseFieldInvoiceNumber => 'Invoice number';
+
+  @override
+  String get purchaseInvoiceNumberRequired => 'Invoice number is required';
+
+  @override
+  String get purchaseFieldVendorGstin => 'Vendor GSTIN (optional)';
+
+  @override
+  String get purchaseGstinInvalid => 'Not a valid GSTIN';
+
+  @override
+  String get purchaseGstinHelp =>
+      'Leave blank for an unregistered vendor — no input tax credit can be claimed on their bills.';
+
+  @override
+  String get purchaseInterstate => 'Inter-state purchase (IGST)';
+
+  @override
+  String get purchaseItcClaimable => 'Input tax credit claimable';
+
+  @override
+  String get purchaseItcBlockedHint => 'Turn off for blocked credit (s.17(5))';
+
+  @override
+  String get purchaseReverseCharge => 'Reverse charge';
+
+  @override
+  String get purchaseItemsSection => 'Items';
+
+  @override
+  String get purchaseInventoryOffHint =>
+      'Turn on inventory in Settings to update stock from purchases.';
+
+  @override
+  String get purchaseAddLine => 'Add line';
+
+  @override
+  String get purchaseFieldDiscountOptional => 'Discount (optional)';
+
+  @override
+  String get purchaseUpdateButton => 'Update purchase';
+
+  @override
+  String get purchaseSaveButton => 'Save purchase';
+
+  @override
+  String purchaseInvoiceDate(String date) {
+    return 'Invoice date: $date';
+  }
+
+  @override
+  String get purchaseFieldQty => 'Qty';
+
+  @override
+  String get purchaseInvalid => 'Invalid';
+
+  @override
+  String get purchaseFieldAmount => 'Amount';
+
+  @override
+  String get purchaseFieldHsnOptional => 'HSN/SAC (optional)';
+
+  @override
+  String get purchaseUpdatesStock => 'Updates stock';
+
+  @override
+  String purchaseUpdatesStockUnit(String unit) {
+    return 'Updates stock · $unit';
+  }
+
+  @override
+  String purchaseRatePerUnit(String rate, String unit) {
+    return 'Rs. $rate per $unit';
+  }
+
+  @override
+  String get purchaseUnitFallback => 'unit';
+
+  @override
+  String purchaseLineTotal(String amount) {
+    return 'Line total: Rs. $amount';
+  }
+
+  @override
+  String get purchaseFieldItemName => 'Item name';
+
+  @override
+  String get purchaseItemNameRequired => 'Item name required';
+
+  @override
+  String purchaseAddAsRawMaterial(String name) {
+    return 'Add \"$name\" as a new raw material';
+  }
+
+  @override
+  String purchaseAddAsItem(String name) {
+    return 'Add \"$name\" as a new item';
+  }
+
+  @override
+  String purchaseInStock(String qty, String unit) {
+    return 'In stock: $qty $unit';
+  }
+
+  @override
+  String get purchaseFieldPaymentMode => 'Payment mode';
+
+  @override
+  String get purchaseFieldStatus => 'Status';
+
+  @override
+  String get purchaseTaxableValue => 'Taxable value';
+
+  @override
+  String get purchaseDiscount => 'Discount';
+
+  @override
+  String get purchaseTotal => 'Total';
+
+  @override
+  String purchaseFilePickerFailed(String error) {
+    return 'Could not open file picker: $error';
+  }
+
+  @override
+  String get purchasePdfReadFailed =>
+      'Could not read that PDF — is it a purchase list export?';
+
+  @override
+  String get purchasePdfNoItems => 'No items found in that PDF.';
+
+  @override
+  String get purchaseDeleteTitle => 'Delete purchase?';
+
+  @override
+  String get purchaseDeleteBody =>
+      'Any stock this purchase added will be reversed. This cannot be undone.';
+
+  @override
+  String get purchaseReviewImportTitle => 'Review imported items';
+
+  @override
+  String get purchaseReviewImportHint =>
+      'Check each item and quantity before adding them to the purchase — you will fill in the amount next.';
+
+  @override
+  String get purchaseReviewItem => 'Item';
+
+  @override
+  String purchaseReviewConfirm(int count) {
+    return 'Add $count item(s) to purchase';
+  }
+
+  @override
+  String expensesPurchasesSection(int count) {
+    return 'Purchases ($count)';
+  }
+
+  @override
+  String expensesPurchaseInvoice(String number) {
+    return 'Purchase - Inv $number';
+  }
 }

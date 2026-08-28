@@ -209,7 +209,7 @@ class _ThisMonthTab extends ConsumerWidget {
                 const Icon(Icons.shopping_bag_outlined,
                     size: 16, color: AppColors.textSecondary),
                 const SizedBox(width: 6),
-                Text('Purchases (${purchases.length})',
+                Text(context.l10n.expensesPurchasesSection(purchases.length),
                     style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -1031,7 +1031,9 @@ class _PurchaseCard extends ConsumerWidget {
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary)),
-            Text('Purchase - Inv ${bill['invoice_number'] ?? ''}',
+            Text(
+                context.l10n.expensesPurchaseInvoice(
+                    (bill['invoice_number'] ?? '').toString()),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
