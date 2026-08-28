@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Menu, X } from 'lucide-react'
 import Logo from './Logo'
+import BookDemoModal from './BookDemoModal'
 
 const LINKS = [
   { label: 'Features',    href: '#features' },
@@ -13,6 +14,7 @@ const LINKS = [
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(false)
+  const [demoOpen, setDemoOpen] = useState(false)
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 24)
@@ -43,12 +45,12 @@ export default function Navbar() {
         </div>
 
         {/* Desktop CTA */}
-        <a
-          href="#download"
+        <button
+          onClick={() => setDemoOpen(true)}
           className="hidden md:inline-flex btn-navy text-sm font-semibold px-5 py-2.5 rounded-xl"
         >
-          Download Free
-        </a>
+          Book Demo
+        </button>
 
         {/* Mobile toggle — min-w/h-12 is 48px, the floor below which mobile
             usability audits flag a target as too small to tap reliably. */}
@@ -76,15 +78,16 @@ export default function Navbar() {
               {label}
             </a>
           ))}
-          <a
-            href="#download"
-            onClick={() => setOpen(false)}
-            className="block btn-teal text-center text-sm font-bold mt-2 px-4 py-3 rounded-xl"
+          <button
+            onClick={() => { setOpen(false); setDemoOpen(true) }}
+            className="block w-full btn-teal text-center text-sm font-bold mt-2 px-4 py-3 rounded-xl"
           >
-            Download Free
-          </a>
+            Book Demo
+          </button>
         </div>
       )}
+
+      <BookDemoModal open={demoOpen} onClose={() => setDemoOpen(false)} />
     </nav>
   )
 }
