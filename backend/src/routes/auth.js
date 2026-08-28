@@ -366,6 +366,7 @@ router.post('/login', loginLimiter, async (req, res) => {
                u.failed_attempts, u.locked_until,
                b.name AS business_name, b.business_type, b.is_verified,
                b.inventory_enabled, b.has_barcode_scanner, b.address,
+               b.phone AS business_phone,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
                b.round_off_enabled,
                s.allow_mobile, s.allow_desktop
@@ -484,6 +485,8 @@ router.post('/login', loginLimiter, async (req, res) => {
         name: row.business_name,
         business_type: row.business_type,
         address: row.address,
+        // The shop's own number, printed on receipts so a customer can call.
+        phone: row.business_phone ?? null,
         inventory_enabled: !!row.inventory_enabled,
         has_barcode_scanner: !!row.has_barcode_scanner,
         gst_enabled: !!row.gst_enabled,

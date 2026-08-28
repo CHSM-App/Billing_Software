@@ -174,14 +174,16 @@ class _CreditCustomerBillsScreenState
     }
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
-    // Address + FSSAI print whenever available; GSTIN only when GST is enabled
-    // (else gstin stays null → non-GST receipt is byte-for-byte as before).
+    // Address, phone + FSSAI print whenever available; GSTIN only when GST is
+    // enabled (else gstin stays null → non-GST receipt is as before).
     final profile = await getGstProfile();
     final addr = profile['business_address'] ?? '';
+    final ph = profile['business_phone'] ?? '';
     final fss = profile['fssai_number'] ?? '';
     final sac = profile['default_sac_code'] ?? '';
     final gstEnabled = ref.read(gstEnabledProvider);
     final String? address = addr.isNotEmpty ? addr : null;
+    final String? phone = ph.isNotEmpty ? ph : null;
     final String? fssai = fss.isNotEmpty ? fss : null;
     String? gstin;
     if (gstEnabled) {
@@ -196,6 +198,7 @@ class _CreditCustomerBillsScreenState
       await ReceiptOutput.emit(printables,
           businessName: businessName,
           businessAddress: address,
+          businessPhone: phone,
           businessGstin: gstin,
           businessFssai: fssai,
           defaultSacCode: sac.isNotEmpty ? sac : null,

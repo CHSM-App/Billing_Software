@@ -846,10 +846,66 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingGenerateBill => 'Generate Bill';
 
   @override
-  String get billingSaveDraft => 'Save Draft';
+  String get billingSaveDraft => 'Save Order';
+
+  @override
+  String get billingHoldBill => 'Hold Bill';
 
   @override
   String get billingFinalizeBill => 'Finalize Bill';
+
+  @override
+  String get billingHoldShort => 'Hold';
+
+  @override
+  String billingSettleAmount(String amount) {
+    return 'Settle $amount';
+  }
+
+  @override
+  String get billingWhatsappCaption => 'Settle';
+
+  @override
+  String get billingSettleAndPrint => 'and print';
+
+  @override
+  String get billingSettleNoReceipt => 'no receipt';
+
+  @override
+  String get billingSettleWhatsapp => 'Settle & send on WhatsApp';
+
+  @override
+  String get billingSettleOnly => 'Settle without a receipt';
+
+  @override
+  String get billingSettleOnlyDone => 'Settled without printing.';
+
+  @override
+  String get billingSettleOnlyHint =>
+      'Hold the button down to settle without printing';
+
+  @override
+  String get billingPreviewReceipt => 'Preview receipt';
+
+  @override
+  String get billingPrinterReady => 'Printer connected';
+
+  @override
+  String billingPrinterReadyNamed(String name) {
+    return 'Printer connected · $name';
+  }
+
+  @override
+  String get billingPrinterUnreachable => 'Printer off or out of range';
+
+  @override
+  String get billingPrinterRetry => 'Retry';
+
+  @override
+  String get billingPrinterNone => 'No printer';
+
+  @override
+  String get billingPrinterConnectOne => 'Connect one';
 
   @override
   String get billingClearCart => 'Clear selected items';
@@ -880,7 +936,19 @@ class AppLocalizationsEn extends AppLocalizations {
       'This order is still saving. Reconnect to edit or finalize it.';
 
   @override
-  String get billingDraftSaved => 'Draft saved.';
+  String get billingDraftSaved => 'Order sent to the kitchen.';
+
+  @override
+  String get billingBillHeld =>
+      'Bill kept on hold. Reopen it from Open Orders.';
+
+  @override
+  String get billingDraftSavedOffline =>
+      'Order saved. It reaches the kitchen once you\'re back online.';
+
+  @override
+  String get billingBillHeldOffline =>
+      'Bill kept on hold. It syncs once you\'re back online.';
 
   @override
   String get billingSaveFailed => 'Failed to save. Check your connection.';
@@ -917,7 +985,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get billingWhatsappSent => 'Receipt link sent to WhatsApp';
+  String get billingWhatsappSent => 'Receipt sent on WhatsApp.';
+
+  @override
+  String get billingWhatsappOpened =>
+      'Receipt ready in WhatsApp — tap Send to deliver it.';
 
   @override
   String get billingWhatsappNeedsPhone =>
@@ -1903,7 +1975,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get staffRoleWaiter => 'Waiter';
 
   @override
-  String get staffRoleServer => 'Server';
+  String get staffRoleServer => 'Captain';
 
   @override
   String get staffRoleKitchen => 'Kitchen Chef';

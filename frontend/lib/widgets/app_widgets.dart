@@ -116,6 +116,186 @@ class _PrimaryButtonState extends State<PrimaryButton>
   }
 }
 
+/// The footer's settle button: an amount on the first line and, under it, what
+/// pressing will actually DO — "and print" or "no receipt".
+///
+/// The caption is the point. The same tap prints or doesn't depending on whether
+/// a printer is reachable, and without saying so a dropped Bluetooth link
+/// finalizes a sale silently while the customer walks away. Naming the outcome
+/// on the control that causes it means the cashier can never be surprised by it.
+///
+/// [onLongPress] is the deliberate escape hatch: settle without printing even
+/// when a printer IS connected.
+class SettleButton extends StatelessWidget {
+  final String amountLabel;
+  final String outcomeLabel;
+  final VoidCallback? onPressed;
+  final VoidCallback? onLongPress;
+  final bool isLoading;
+  /// Surfaces the long-press, which is otherwise undiscoverable.
+  final String? longPressHint;
+
+  const SettleButton({
+    super.key,
+    required this.amountLabel,
+    required this.outcomeLabel,
+    required this.onPressed,
+    this.onLongPress,
+    this.longPressHint,
+    this.isLoading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isEnabled = onPressed != null && !isLoading;
+    final radius = BorderRadius.circular(AppRadius.medium);
+
+    final button = Container(
+      height: 56,
+      decoration: BoxDecoration(
+        gradient: isEnabled
+            ? AppColors.primaryGradient
+            : const LinearGradient(
+                colors: [AppColors.textDisabled, AppColors.textDisabled],
+              ),
+        borderRadius: radius,
+        boxShadow: isEnabled ? AppShadow.primary : [],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: isEnabled ? onPressed : null,
+          onLongPress: isEnabled ? onLongPress : null,
+          borderRadius: radius,
+          child: Center(
+            child: isLoading
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.5, color: Colors.white),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.check_circle_outline,
+                              size: 17, color: Colors.white),
+                          const SizedBox(width: AppSpacing.space8),
+                          Flexible(
+                            child: Text(
+                              amountLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppFont.style(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        outcomeLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppFont.style(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white.withValues(alpha: 0.88),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+
+    return (longPressHint == null || onLongPress == null)
+        ? button
+        : Tooltip(message: longPressHint!, child: button);
+  }
+}
+
+/// A square outlined icon action sized to sit flush beside [SettleButton], with
+/// a one-word caption underneath.
+///
+/// The caption is not decoration: an icon alone cannot say whether it takes the
+/// customer's money. WhatsApp finalizes the bill exactly like settling does, so
+/// its tile has to be readable as such rather than as a share.
+class IconAction extends StatelessWidget {
+  /// The glyph, when a Material icon says it. Mutually exclusive with
+  /// [glyphBuilder], which exists for marks Material has no icon for.
+  final IconData? icon;
+
+  /// Draws the glyph at the given size and colour. Used for the WhatsApp mark,
+  /// which Material omits because it is a trademark.
+  final Widget Function(double size, Color color)? glyphBuilder;
+
+  final String caption;
+  final Color color;
+  final VoidCallback? onPressed;
+  final String? tooltip;
+
+  const IconAction({
+    super.key,
+    this.icon,
+    this.glyphBuilder,
+    required this.caption,
+    required this.color,
+    required this.onPressed,
+    this.tooltip,
+  }) : assert(icon != null || glyphBuilder != null,
+            'IconAction needs either an icon or a glyphBuilder');
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    final c = enabled ? color : AppColors.textDisabled;
+    final button = SizedBox(
+      width: 56,
+      height: 56,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          padding: EdgeInsets.zero,
+          // The shared theme forces an infinite minimum width; this action is
+          // deliberately square, so it must be overridden here.
+          minimumSize: const Size(56, 56),
+          side: BorderSide(color: c, width: 1.4),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.medium),
+          ),
+        ),
+        child: glyphBuilder != null
+            ? glyphBuilder!(20, c)
+            : Icon(icon, size: 20, color: c),
+      ),
+    );
+
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      tooltip == null ? button : Tooltip(message: tooltip!, child: button),
+      const SizedBox(height: 3),
+      SizedBox(
+        width: 56,
+        child: Text(
+          caption,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppFont.style(
+              fontSize: 10, fontWeight: FontWeight.w600, color: c),
+        ),
+      ),
+    ]);
+  }
+}
+
 // Secondary button (outlined with primary color)
 class SecondaryButton extends StatelessWidget {
   final String text;
@@ -311,6 +491,47 @@ class AppTextField extends StatelessWidget {
       inputFormatters: [
         if (capitalizeWords) const CapitalizeWordsFormatter(),
         ...?inputFormatters,
+      ],
+    );
+  }
+}
+
+/// The unit-of-measure a quantity field is counted in, shown inside the field's
+/// trailing edge (e.g. a stock box reading "12" followed by a grey "kg").
+///
+/// A bare number leaves the user guessing whether they typed grams or kilos —
+/// especially on the low-stock alert, which is entered long after the unit was
+/// chosen. Pass it as [AppTextField.suffixIcon]; it tracks whatever the unit
+/// dropdown currently holds, so changing the unit relabels every field at once.
+class UnitSuffix extends StatelessWidget {
+  final String label;
+  const UnitSuffix(this.label, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // The suffix slot passes down unbounded height, so anything that expands to
+    // fill it (Align, Center, a stretching Column) drags the whole field to the
+    // viewport height. Keep every box here tightly sized: mainAxisSize.min on
+    // the Row plus a width-only SizedBox leaves the field exactly as tall as it
+    // is without a suffix.
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 52,
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.right,
+            style: AppFont.style(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
       ],
     );
   }

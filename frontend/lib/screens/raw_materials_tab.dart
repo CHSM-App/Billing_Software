@@ -871,6 +871,9 @@ class _RawMaterialFormDialogState extends State<RawMaterialFormDialog> {
                   controller: _stockCtrl,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  // Echoes the unit picked above, so "12" is unambiguously
+                  // 12 kg and not 12 pieces.
+                  suffixIcon: UnitSuffix(rawMaterialUnitLabel(context, _unit)),
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 AppTextField(
@@ -878,6 +881,7 @@ class _RawMaterialFormDialogState extends State<RawMaterialFormDialog> {
                   controller: _thresholdCtrl,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  suffixIcon: UnitSuffix(rawMaterialUnitLabel(context, _unit)),
                 ),
               ],
             ),

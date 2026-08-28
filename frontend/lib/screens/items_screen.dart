@@ -1859,6 +1859,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     controller: _stockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                    // Echoes the unit picked above, so "12" is unambiguously
+                    // 12 kg and not 12 pieces.
+                    suffixIcon: UnitSuffix(_unitLabel(context, _unit)),
                   ),
                   const SizedBox(height: AppSpacing.space12),
                   // Low-stock alert level. Until now this was hardcoded to 50
@@ -1869,6 +1872,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     controller: _lowStockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                    suffixIcon: UnitSuffix(_unitLabel(context, _unit)),
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return null;
                       final n = double.tryParse(v.trim());
@@ -2563,6 +2567,10 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                   controller: _stockCtrl,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  // A size has no unit of its own — it is counted in the parent
+                  // item's unit, which is what the stock rows below display.
+                  suffixIcon:
+                      UnitSuffix(itemUnitLabel(context, widget.item.unit)),
                 ),
               ],
               const SizedBox(height: AppSpacing.space8),

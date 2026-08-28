@@ -560,14 +560,16 @@ class _BillDetailDialog extends StatelessWidget {
             Navigator.pop(context);
             final labels = ReceiptLabels.from(
                 l10n, Localizations.localeOf(context).languageCode);
-            // Address + FSSAI print whenever available. GSTIN prints only when
-            // the bill carries tax; otherwise it stays null and the receipt is a
-            // plain (non-GST) receipt as before.
+            // Address, phone + FSSAI print whenever available. GSTIN prints only
+            // when the bill carries tax; otherwise it stays null and the receipt
+            // is a plain (non-GST) receipt as before.
             final profile = await getGstProfile();
             final addr = profile['business_address'] ?? '';
+            final ph = profile['business_phone'] ?? '';
             final fss = profile['fssai_number'] ?? '';
             final sac = profile['default_sac_code'] ?? '';
             final String? address = addr.isNotEmpty ? addr : null;
+            final String? phone = ph.isNotEmpty ? ph : null;
             final String? fssai = fss.isNotEmpty ? fss : null;
             // A bill that carries tax is a GST bill; gate GSTIN + the PDF's GST
             // columns on that (same signal the receipt already used).
@@ -581,6 +583,7 @@ class _BillDetailDialog extends StatelessWidget {
               await ReceiptOutput.emit([bill],
                   businessName: businessName,
                   businessAddress: address,
+                  businessPhone: phone,
                   businessGstin: gstin,
                   businessFssai: fssai,
                   defaultSacCode: sac.isNotEmpty ? sac : null,
