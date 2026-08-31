@@ -138,6 +138,10 @@ CREATE TABLE bills (
     customer_phone      NVARCHAR(20)     NULL,
     subtotal            DECIMAL(10,2)    NOT NULL,
     tax_amount          DECIMAL(10,2)    NOT NULL DEFAULT 0,
+    -- Additional charges (delivery, packaging, ...) — migration 035. Folded
+    -- into total (total = subtotal + tax_amount + charges_amount); no GST.
+    charges_amount      DECIMAL(10,2)    NOT NULL DEFAULT 0,
+    additional_charges  NVARCHAR(MAX)    NULL,     -- JSON [{"name","amount"}]
     total               DECIMAL(10,2)    NOT NULL,
     payment_mode        NVARCHAR(20)     NOT NULL, -- 'cash', 'upi', 'card', 'credit', 'other'
     status              NVARCHAR(20)     NOT NULL DEFAULT 'finalized', -- 'draft', 'finalized', 'voided'

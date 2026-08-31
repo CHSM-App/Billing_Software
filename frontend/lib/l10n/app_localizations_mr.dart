@@ -1108,6 +1108,32 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingRoundOff => 'राउंड ऑफ';
 
   @override
+  String get billingAdditionalCharges => 'अतिरिक्त शुल्क';
+
+  @override
+  String get billingAdditionalChargesHint =>
+      'बिलाच्या एकूण रकमेत जोडले जाणारे डिलिव्हरी, पॅकिंग किंवा सेवा शुल्क.';
+
+  @override
+  String get billingAddCharge => 'शुल्क जोडा';
+
+  @override
+  String get billingChargeDescription => 'शुल्काचे वर्णन';
+
+  @override
+  String get billingChargeDescriptionHint => 'उदा. डिलिव्हरी, पॅकिंग';
+
+  @override
+  String get billingChargeAmount => 'रक्कम ₹';
+
+  @override
+  String get billingRemoveCharge => 'शुल्क काढा';
+
+  @override
+  String get billingChargeIncomplete =>
+      'प्रत्येक अतिरिक्त शुल्कासाठी वर्णन आणि रक्कम दोन्ही भरा.';
+
+  @override
   String get billingPreview => 'बिल पूर्वावलोकन';
 
   @override

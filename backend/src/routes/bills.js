@@ -9,6 +9,7 @@ const { sendBillLink, normalisePhone } = require('../whatsapp');
 const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
+const { parseAdditionalCharges, serializeCharges, attachCharges } = require('../charges');
 
 // Base URL used in receipt links — no trailing slash
 const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
@@ -401,7 +402,8 @@ async function fetchBill(billId, businessId) {
     .input('business_id', sql.UniqueIdentifier, businessId)
     .query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
-             b.subtotal, b.tax_amount, b.discount_amount, b.total, b.round_off, b.payment_mode, b.status,
+             b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+             b.total, b.round_off, b.payment_mode, b.status,
              b.payment_status, b.settled_at, b.settled_payment_mode,
              b.created_by_user_id, b.created_at, b.receipt_token,
              t.table_number
@@ -411,7 +413,7 @@ async function fetchBill(billId, businessId) {
     `);
 
   if (billResult.recordset.length === 0) return null;
-  const bill = billResult.recordset[0];
+  const bill = attachCharges(billResult.recordset[0]);
 
   const itemsResult = await pool.request()
     .input('bill_id', sql.UniqueIdentifier, billId)
@@ -428,7 +430,7 @@ async function fetchBill(billId, businessId) {
 
 // POST /api/bills
 router.post('/', requireAuth, async (req, res) => {
-  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off } = req.body;
+  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
@@ -479,6 +481,13 @@ router.post('/', requireAuth, async (req, res) => {
        round_off <= -1 || round_off >= 1)) {
     return res.status(400).json({ error: 'round_off must be a number in (-1, 1)' });
   }
+  // Additional charges (delivery, packaging, ...): [{ name, amount }]. Folded
+  // into total below; never taxed, never reduced by the discount.
+  const parsedCharges = parseAdditionalCharges(additional_charges);
+  if (parsedCharges.error) {
+    return res.status(400).json({ error: parsedCharges.error });
+  }
+  const { charges: chargeList, chargesAmount } = parsedCharges;
 
   try {
     await poolConnect;
@@ -602,7 +611,10 @@ router.post('/', requireAuth, async (req, res) => {
         taxAmount = parseFloat(
           (taxAmount * (subtotal - discountAmount) / subtotal).toFixed(2));
       }
-      const total = parseFloat((subtotal + taxAmount).toFixed(2));
+      // Additional charges sit on top of the taxed items: they are part of the
+      // total (so payable = total − discount + round_off still holds) but are
+      // outside the taxable base and untouched by the discount.
+      const total = parseFloat((subtotal + taxAmount + chargesAmount).toFixed(2));
 
       // Invoice-level round-off. subtotal/tax/discount/total above are NEVER
       // modified; round_off is a separate signed adjustment on the final payable
@@ -660,6 +672,8 @@ router.post('/', requireAuth, async (req, res) => {
         .input('subtotal',        sql.Decimal(10, 2),   subtotal)
         .input('tax_amount',      sql.Decimal(10, 2),   taxAmount)
         .input('discount_amount', sql.Decimal(10, 2),   discountAmount)
+        .input('charges_amount',  sql.Decimal(10, 2),   chargesAmount)
+        .input('additional_charges', sql.NVarChar(sql.MAX), serializeCharges(chargeList))
         .input('total',           sql.Decimal(10, 2),   total)
         .input('round_off',       sql.Decimal(10, 2),   roundOff)
         .input('payment_mode',    sql.NVarChar(20),     payment_mode)
@@ -670,11 +684,13 @@ router.post('/', requireAuth, async (req, res) => {
         .input('receipt_token',   sql.NVarChar(16),     receiptToken)
         .query(`
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
-                             subtotal, tax_amount, discount_amount, total, round_off, payment_mode, payment_status, status,
+                             subtotal, tax_amount, discount_amount, charges_amount, additional_charges,
+                             total, round_off, payment_mode, payment_status, status,
                              created_by_user_id, client_bill_id, receipt_token)
           OUTPUT INSERTED.id
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
-                  @subtotal, @tax_amount, @discount_amount, @total, @round_off, @payment_mode, @payment_status, @status,
+                  @subtotal, @tax_amount, @discount_amount, @charges_amount, @additional_charges,
+                  @total, @round_off, @payment_mode, @payment_status, @status,
                   @created_by_user_id, @client_bill_id, @receipt_token)
         `);
 
@@ -828,7 +844,8 @@ router.get('/', requireAuth, async (req, res) => {
 
     const billsResult = await request.query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
-             b.subtotal, b.tax_amount, b.discount_amount, b.total, b.round_off, b.payment_mode, b.status,
+             b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+             b.total, b.round_off, b.payment_mode, b.status,
              b.created_by_user_id, b.created_at, b.receipt_token
       FROM bills b
       WHERE ${where}
@@ -852,7 +869,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const bills = billsResult.recordset.map((b) => ({
-      ...b,
+      ...attachCharges(b),
       items: itemsByBill[b.id] || [],
     }));
 
@@ -875,7 +892,8 @@ router.get('/drafts', requireAuth, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
-               b.subtotal, b.tax_amount, b.discount_amount, b.total, b.round_off, b.payment_mode, b.status,
+               b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+               b.total, b.round_off, b.payment_mode, b.status,
                b.created_by_user_id, b.created_at, b.receipt_token
         FROM bills b
         WHERE b.business_id = @business_id
@@ -901,7 +919,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
     }
 
     const bills = billsResult.recordset.map((b) => ({
-      ...b,
+      ...attachCharges(b),
       items: itemsByBill[b.id] || [],
     }));
 
@@ -912,7 +930,65 @@ router.get('/drafts', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/bills/:id
+// ---------------------------------------------------------------------------
+// GET /api/bills/charges/suggestions?limit=20
+//
+// Charge descriptions this business has used before (Delivery, Packaging,
+// Service, ...) for the billing screen's autocomplete — most-used first.
+// Descriptions only: the amount is entered afresh on every bill.
+//
+// Aggregated in Node from the JSON on the most recent bills that carry charges
+// (no OPENJSON, so it works on any SQL Server compatibility level). Names are
+// grouped case-insensitively; the most recent spelling wins.
+//
+// Declared before '/:id' so the literal path wins the route match.
+// ---------------------------------------------------------------------------
+router.get('/charges/suggestions', requireAuth, async (req, res) => {
+  try {
+    await poolConnect;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .query(`
+        SELECT TOP (500) additional_charges, created_at
+        FROM bills
+        WHERE business_id = @business_id
+          AND status <> 'voided'
+          AND additional_charges IS NOT NULL
+        ORDER BY created_at DESC
+      `);
+
+    // Rows arrive newest first, so the first sighting of a name carries its
+    // latest spelling and date; later sightings only bump the count.
+    const agg = new Map();
+    for (const row of result.recordset) {
+      for (const c of attachCharges(row).additional_charges) {
+        const name = String(c.name || '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        const cur = agg.get(key);
+        if (cur) {
+          cur.uses += 1;
+        } else {
+          agg.set(key, { name, uses: 1, last_used_at: row.created_at });
+        }
+      }
+    }
+
+    const out = [...agg.values()]
+      .sort((a, b) =>
+        b.uses - a.uses ||
+        new Date(b.last_used_at) - new Date(a.last_used_at))
+      .slice(0, limit);
+
+    return res.json(out);
+  } catch (err) {
+    logger.error({ err }, 'charge suggestions error');
+    return res.status(500).json({ error: 'Failed to load charge suggestions' });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // GET /api/bills/customers/search?q=<name or phone>&limit=8
 //
@@ -1217,7 +1293,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       // raw line tax scaled by discountedNet/subtotal (clamped so a discount can
       // never exceed the subtotal). total = subtotal + discounted tax, keeping
       // payable = total − discount reconciled. Uses the already-persisted
-      // discount_amount (this path edits items, not the discount).
+      // discount_amount and charges_amount (this path edits items only).
       await transaction.request()
         .input('id', sql.UniqueIdentifier, req.params.id)
         .query(`
@@ -1225,6 +1301,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
             subtotal   = agg.sub,
             tax_amount = ROUND(agg.raw_tax * (agg.sub - agg.disc) / NULLIF(agg.sub, 0), 2),
             total      = agg.sub + ROUND(agg.raw_tax * (agg.sub - agg.disc) / NULLIF(agg.sub, 0), 2)
+                         + b.charges_amount
           FROM bills b
           CROSS APPLY (
             SELECT
@@ -1309,7 +1386,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
 // PUT /api/bills/:id/update-items — replace all items on a draft bill
 router.put('/:id/update-items', requireAuth, async (req, res) => {
-  const { items, customer_name, customer_phone, discount_amount } = req.body;
+  const { items, customer_name, customer_phone, discount_amount, additional_charges } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required' });
@@ -1319,6 +1396,13 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
   const setCustomerName = Object.prototype.hasOwnProperty.call(req.body, 'customer_name');
   const setCustomerPhone = Object.prototype.hasOwnProperty.call(req.body, 'customer_phone');
   const setDiscount = Object.prototype.hasOwnProperty.call(req.body, 'discount_amount');
+  // additional_charges: sending the key replaces the whole list (an empty array
+  // clears it); omitting it keeps whatever the draft already carries.
+  const setCharges = Object.prototype.hasOwnProperty.call(req.body, 'additional_charges');
+  const parsedCharges = setCharges ? parseAdditionalCharges(additional_charges) : null;
+  if (parsedCharges && parsedCharges.error) {
+    return res.status(400).json({ error: parsedCharges.error });
+  }
 
   let previousLineItems = [];
   let replacementLineItems = [];
@@ -1519,16 +1603,27 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           'discount_amount = (SELECT CASE WHEN @discount_amount > SUM(quantity * unit_price) THEN SUM(quantity * unit_price) ELSE @discount_amount END FROM bill_items WHERE bill_id = @id)',
         );
       }
+      if (setCharges) {
+        totalsReq.input('charges_amount', sql.Decimal(10, 2), parsedCharges.chargesAmount);
+        totalsReq.input('additional_charges', sql.NVarChar(sql.MAX),
+          serializeCharges(parsedCharges.charges));
+        extraSets.push('charges_amount = @charges_amount');
+        extraSets.push('additional_charges = @additional_charges');
+      }
       // `disc` for the tax scaling: the new clamped discount when setting it,
       // otherwise the bill's current discount_amount. Both are clamped to net.
       const discExpr = setDiscount
         ? 'CASE WHEN @discount_amount > agg.sub THEN agg.sub ELSE @discount_amount END'
         : 'CASE WHEN b.discount_amount > agg.sub THEN agg.sub ELSE b.discount_amount END';
+      // Charges are added on top of the taxed items (never taxed, never
+      // discounted): the incoming sum when replacing them, else the stored one.
+      const chargesExpr = setCharges ? '@charges_amount' : 'b.charges_amount';
       await totalsReq.query(`
           UPDATE b SET
             subtotal   = agg.sub,
             tax_amount = ROUND(agg.raw_tax * (agg.sub - (${discExpr})) / NULLIF(agg.sub, 0), 2),
-            total      = agg.sub + ROUND(agg.raw_tax * (agg.sub - (${discExpr})) / NULLIF(agg.sub, 0), 2)${extraSets.length ? ',\n            ' + extraSets.join(',\n            ') : ''}
+            total      = agg.sub + ROUND(agg.raw_tax * (agg.sub - (${discExpr})) / NULLIF(agg.sub, 0), 2)
+                         + ${chargesExpr}${extraSets.length ? ',\n            ' + extraSets.join(',\n            ') : ''}
           FROM bills b
           CROSS APPLY (
             SELECT

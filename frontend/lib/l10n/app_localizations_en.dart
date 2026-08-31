@@ -1104,6 +1104,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingRoundOff => 'Round Off';
 
   @override
+  String get billingAdditionalCharges => 'Additional Charges';
+
+  @override
+  String get billingAdditionalChargesHint =>
+      'Delivery, packaging or service charges added to the bill total.';
+
+  @override
+  String get billingAddCharge => 'Add charge';
+
+  @override
+  String get billingChargeDescription => 'Charge description';
+
+  @override
+  String get billingChargeDescriptionHint => 'e.g. Delivery, Packaging';
+
+  @override
+  String get billingChargeAmount => 'Amount ₹';
+
+  @override
+  String get billingRemoveCharge => 'Remove charge';
+
+  @override
+  String get billingChargeIncomplete =>
+      'Enter both a description and an amount for each additional charge.';
+
+  @override
   String get billingPreview => 'Preview bill';
 
   @override

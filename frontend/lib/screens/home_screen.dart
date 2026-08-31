@@ -131,6 +131,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final _discountPctKey = GlobalKey();
   final _discountAmtKey = GlobalKey();
 
+  // Additional charges (delivery, packaging, service, ...) — one editable row
+  // per charge. Mirrors the server cap in backend/src/charges.js.
+  final List<_ChargeRow> _charges = [];
+  static const _maxAdditionalCharges = 10;
+  // Charge descriptions used on past bills, most-used first (server list,
+  // cached on-device). Offered under whichever description field is focused.
+  List<ChargeSuggestion> _chargeSuggestions = const [];
+  _ChargeRow? _chargeSuggestRow;
+  static const _maxChargeSuggestionsShown = 6;
+  static const _maxChargeSuggestionsKept = 30;
+
   final _barcodeBuffer = StringBuffer();
   DateTime? _lastKeyTime;
 
@@ -181,6 +192,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       if (mounted) ref.read(itemsProvider.notifier).refreshInBackground();
     });
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
+    _loadChargeSuggestions();
   }
 
   @override
@@ -225,6 +237,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _customerPhoneFocus.dispose();
     _discountPctFocus.dispose();
     _discountAmtFocus.dispose();
+    for (final r in _charges) {
+      r.dispose();
+    }
     _prevCreditDebounce?.cancel();
     super.dispose();
   }
@@ -319,6 +334,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           if (bill.discountAmount > 0) {
             _discountAmtController.text = bill.discountAmount.toStringAsFixed(2);
           }
+          // Restore any additional charges saved on the draft.
+          _restoreCharges(bill.additionalCharges);
         });
       }
     } catch (_) {}
@@ -336,6 +353,274 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }).toList();
   }
 
+  // ── Additional charges ─────────────────────────────────────────────────────
+  //
+  // Delivery, packaging, service charges and the like. They ride on top of the
+  // taxed items: part of the bill total, outside the taxable base (no GST) and
+  // never reduced by the discount — the same model the backend applies
+  // (backend/src/charges.js), so on-device and server figures agree.
+
+  /// A fresh row wired to rebuild the panel as it is typed into and to scroll
+  /// itself above the keyboard when focused.
+  _ChargeRow _newChargeRow() {
+    final row = _ChargeRow();
+    row.nameController.addListener(_onChargesChanged);
+    row.amountController.addListener(_onChargesChanged);
+    row.nameFocus.addListener(() {
+      if (row.nameFocus.hasFocus) {
+        _ensureVisible(row.key);
+        _chargeSuggestRow = row;
+      } else if (_chargeSuggestRow == row) {
+        _chargeSuggestRow = null;
+      }
+      if (mounted) setState(() {});
+      _sheetSetState?.call(() {});
+    });
+    row.amountFocus.addListener(() {
+      if (row.amountFocus.hasFocus) _ensureVisible(row.key);
+    });
+    return row;
+  }
+
+  // ── Charge-description suggestions ─────────────────────────────────────────
+
+  /// Show the cached list straight away, then refresh it from the server in
+  /// the background (merging, so a name remembered on this device from an
+  /// offline bill that hasn't synced yet is not lost).
+  Future<void> _loadChargeSuggestions() async {
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty) return;
+    try {
+      final cached = await getCachedChargeSuggestions(businessId);
+      if (cached != null && cached.isNotEmpty) {
+        final list = (jsonDecode(cached) as List)
+            .whereType<Map>()
+            .map((m) => ChargeSuggestion.fromJson(Map<String, dynamic>.from(m)))
+            .where((s) => s.name.isNotEmpty)
+            .toList();
+        if (mounted) setState(() => _chargeSuggestions = list);
+      }
+    } catch (_) {}
+    try {
+      final remote = await getChargeSuggestions();
+      if (!mounted) return;
+      _mergeChargeSuggestions(remote, businessId: businessId, persist: true);
+    } catch (_) {
+      // Offline / failed fetch: the cached list (if any) stays in force.
+    }
+  }
+
+  /// Upserts [incoming] into the in-memory list (case-insensitive on name; the
+  /// higher use count wins), re-sorts most-used first, caps the list and
+  /// optionally writes it back to the device cache.
+  void _mergeChargeSuggestions(List<ChargeSuggestion> incoming,
+      {required String businessId, bool persist = false}) {
+    final byKey = <String, ChargeSuggestion>{
+      for (final s in _chargeSuggestions) s.name.toLowerCase(): s,
+    };
+    for (final s in incoming) {
+      if (s.name.isEmpty) continue;
+      final key = s.name.toLowerCase();
+      final cur = byKey[key];
+      byKey[key] = cur == null
+          ? s
+          : s.copyWith(uses: s.uses > cur.uses ? s.uses : cur.uses);
+    }
+    final merged = byKey.values.toList()
+      ..sort((a, b) => b.uses.compareTo(a.uses));
+    final capped = merged.take(_maxChargeSuggestionsKept).toList();
+    if (mounted) setState(() => _chargeSuggestions = capped);
+    _sheetSetState?.call(() {});
+    if (persist) {
+      unawaited(saveCachedChargeSuggestions(
+          businessId, jsonEncode(capped.map((s) => s.toJson()).toList())));
+    }
+  }
+
+  /// Remember the charges on the bill being held/settled right now, so the
+  /// very next bill can offer them even before the server list refreshes
+  /// (and while offline).
+  Future<void> _rememberUsedCharges() async {
+    final entries = _chargeEntries();
+    if (entries.isEmpty) return;
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty || !mounted) return;
+    final used = <String, ChargeSuggestion>{
+      for (final s in _chargeSuggestions) s.name.toLowerCase(): s,
+    };
+    _mergeChargeSuggestions(
+      [
+        for (final c in entries)
+          ChargeSuggestion(
+            name: c.name,
+            uses: (used[c.name.toLowerCase()]?.uses ?? 0) + 1,
+          ),
+      ],
+      businessId: businessId,
+      persist: true,
+    );
+  }
+
+  /// Suggestions for [row]: those containing what has been typed so far (all
+  /// of them when the field is still empty), minus the exact current text and
+  /// anything already used on another row of this bill.
+  List<ChargeSuggestion> _chargeSuggestionsFor(_ChargeRow row) {
+    if (_chargeSuggestRow != row || _chargeSuggestions.isEmpty) return const [];
+    final q = row.name.toLowerCase();
+    final taken = {
+      for (final r in _charges)
+        if (r != row && r.name.isNotEmpty) r.name.toLowerCase(),
+    };
+    return _chargeSuggestions
+        .where((s) {
+          final n = s.name.toLowerCase();
+          return n != q && !taken.contains(n) && (q.isEmpty || n.contains(q));
+        })
+        .take(_maxChargeSuggestionsShown)
+        .toList();
+  }
+
+  /// Fill the description from a picked suggestion and move the cursor to the
+  /// amount field. Only the description is suggested — the amount is always
+  /// typed fresh for this bill.
+  void _applyChargeSuggestion(_ChargeRow row, ChargeSuggestion s) {
+    // Assign via `value` so the caret lands after the text (a bare `.text =`
+    // leaves the selection at offset 0).
+    row.nameController.value = TextEditingValue(
+      text: s.name,
+      selection: TextSelection.collapsed(offset: s.name.length),
+    );
+    _chargeSuggestRow = null;
+    if (mounted) setState(() {});
+    _sheetSetState?.call(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) row.amountFocus.requestFocus();
+    });
+  }
+
+  /// Dropdown of past charge descriptions under the focused description field.
+  Widget _chargeSuggestionList(_ChargeRow row) {
+    final items = _chargeSuggestionsFor(row);
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      constraints: const BoxConstraints(maxHeight: 190),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadow.small,
+      ),
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: items.length,
+        separatorBuilder: (_, __) =>
+            const Divider(height: 1, color: AppColors.border),
+        itemBuilder: (_, i) {
+          final s = items[i];
+          return InkWell(
+            // onTapDown, not onTap: the field losing focus would otherwise
+            // dismiss the list before the tap completed.
+            onTapDown: (_) => _applyChargeSuggestion(row, s),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(children: [
+                const Icon(Icons.history,
+                    size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(s.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _addChargeRow() {
+    if (_charges.length >= _maxAdditionalCharges) return;
+    final row = _newChargeRow();
+    setState(() => _charges.add(row));
+    _sheetSetState?.call(() {});
+    // Land the cursor in the new description field so the cashier can type
+    // straight away.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) row.nameFocus.requestFocus();
+    });
+  }
+
+  void _removeChargeRow(_ChargeRow row) {
+    setState(() => _charges.remove(row));
+    _sheetSetState?.call(() {});
+    // Dispose only after the frame that drops its fields from the tree.
+    WidgetsBinding.instance.addPostFrameCallback((_) => row.dispose());
+  }
+
+  /// Drops every charge row (bill settled / cart cleared / draft reopened).
+  void _clearCharges() {
+    if (_charges.isEmpty) return;
+    final rows = List<_ChargeRow>.from(_charges);
+    _charges.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final r in rows) {
+        r.dispose();
+      }
+    });
+  }
+
+  void _onChargesChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _sheetSetState?.call(() {});
+  }
+
+  /// Rebuilds the rows from a saved bill (reopening a draft).
+  void _restoreCharges(List<BillCharge> charges) {
+    _clearCharges();
+    for (final c in charges.take(_maxAdditionalCharges)) {
+      final row = _newChargeRow();
+      row.nameController.text = c.name;
+      row.amountController.text = c.amount.toStringAsFixed(2);
+      _charges.add(row);
+    }
+  }
+
+  /// The charges that count: a description AND a positive amount. A row still
+  /// being typed into stays out of the totals until both parts are there.
+  List<BillCharge> _chargeEntries() => [
+        for (final r in _charges)
+          if (r.name.isNotEmpty && r.amount > 0)
+            BillCharge(name: r.name, amount: r.amount),
+      ];
+
+  double _chargesTotal() => BillCharge.sum(_chargeEntries());
+
+  List<Map<String, dynamic>> _chargesPayload() =>
+      _chargeEntries().map((c) => c.toJson()).toList();
+
+  /// A half-filled row (description without an amount, or the reverse) would
+  /// silently drop off the bill — stop and ask the cashier to complete it.
+  bool _validateCharges() {
+    final incomplete = _charges.any((r) =>
+        (r.name.isNotEmpty || r.amountController.text.trim().isNotEmpty) &&
+        (r.name.isEmpty || r.amount <= 0));
+    if (incomplete) {
+      _showSnack(context.l10n.billingChargeIncomplete, isError: true);
+      return false;
+    }
+    return true;
+  }
+
   void _onDiscountPctChanged() {
     if (_updatingDiscount) return;
     // Discount is applied to the NET (pre-tax) subtotal — tax is then charged on
@@ -347,6 +632,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _discountAmtController.text = amt > 0 ? amt.toStringAsFixed(2) : '';
     _updatingDiscount = false;
     setState(() {});
+    _sheetSetState?.call(() {});
   }
 
   void _onDiscountAmtChanged() {
@@ -359,6 +645,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _discountPctController.text = pct > 0 ? pct.toStringAsFixed(2) : '';
     _updatingDiscount = false;
     setState(() {});
+    _sheetSetState?.call(() {});
   }
 
   Future<void> _handleBarcodeScan(String barcode) async {
@@ -449,6 +736,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(cartProvider.notifier).clear();
         _discountPctController.clear();
         _discountAmtController.clear();
+        _clearCharges();
         // Optimistically free the table so the Tables screen updates instantly,
         // then reconcile with the server in the background.
         if (tableId != null) {
@@ -470,6 +758,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      _clearCharges();
     }
   }
 
@@ -510,7 +799,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         .clamp(0.0, subtotal);
     final effectiveTax =
         subtotal > 0 ? tax * (subtotal - discountAmt) / subtotal : 0.0;
-    final total = subtotal + effectiveTax;
+    // Additional charges are part of the total (untaxed, undiscounted).
+    final total = subtotal + effectiveTax + _chargesTotal();
     final roundOff =
         computeRoundOff(total - discountAmt, ref.read(roundOffEnabledProvider));
     final prevDue = _settlePrevCredit ? _prevCreditDue : 0.0;
@@ -568,7 +858,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         taxAmount = double.parse(
             (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
       }
-      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+      // Additional charges sit on top of the taxed items: in the total, but
+      // outside the tax base and untouched by the discount (same as the server).
+      final charges = _chargeEntries();
+      final chargesTotal = BillCharge.sum(charges);
+      final total = double.parse(
+          (subtotal + taxAmount + chargesTotal).toStringAsFixed(2));
       final customerName = _customerNameController.text.trim().nullIfEmpty;
       final customerPhone = _customerPhoneController.text.trim().nullIfEmpty;
       final tableId = widget.tableId;
@@ -583,6 +878,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'subtotal': subtotal,
         'tax_amount': taxAmount,
         'discount_amount': discountAmt,
+        'charges_amount': chargesTotal,
+        'additional_charges':
+            charges.isEmpty ? null : BillCharge.encode(charges),
         'total': total,
         'payment_mode': _paymentMode,
         'items_json': jsonEncode(lineItems),
@@ -603,6 +901,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         subtotal: subtotal,
         taxAmount: taxAmount,
         discountAmount: discountAmt,
+        chargesAmount: chargesTotal,
+        additionalCharges: charges,
         total: total,
         paymentMode: _paymentMode,
         status: 'draft',
@@ -641,6 +941,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _customerPhoneController.clear();
         _discountPctController.clear();
         _discountAmtController.clear();
+        _clearCharges();
         if (mounted) setState(() => _savingDraft = false);
       }
     } catch (e) {
@@ -659,6 +960,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     if (!_validateCustomerPhone()) return;
+    if (!_validateCharges()) return;
+    // Remember these descriptions for next time's suggestions (best-effort).
+    unawaited(_rememberUsedCharges());
 
     // Offline: a brand-new draft is queued locally and synced on reconnect.
     // Editing an existing (already-synced) draft still needs the server, since
@@ -687,6 +991,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // dropped — the draft saved with no discount).
     final discountAmount =
         double.tryParse(_discountAmtController.text.trim()) ?? 0.0;
+    // Additional charges likewise — always sent on an edit so that removing
+    // every charge clears them on the draft rather than leaving stale ones.
+    final additionalCharges = _chargesPayload();
     // Capture the notifiers NOW. After Navigator.pop this ConsumerState is
     // disposed and its `ref` becomes defunct — using it for the background
     // reconcile would silently no-op (this was why the table never updated).
@@ -714,6 +1021,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      _clearCharges();
       // This screen stays alive (nothing was popped), so reset the saving flag
       // ourselves — otherwise the park-order FAB spins forever.
       if (mounted) setState(() => _savingDraft = false);
@@ -732,6 +1040,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             customerName: customerName,
             customerPhone: customerPhone,
             discountAmount: discountAmount,
+            additionalCharges: additionalCharges,
           );
         } else {
           result = await createBill({
@@ -742,6 +1051,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             if (customerName != null) 'customer_name': customerName,
             if (customerPhone != null) 'customer_phone': customerPhone,
             if (discountAmount > 0) 'discount_amount': discountAmount,
+            if (additionalCharges.isNotEmpty)
+              'additional_charges': additionalCharges,
           });
         }
         // The draft is now on the server — nudge the Kitchen screen to refresh
@@ -795,6 +1106,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     if (!_validateCustomerPhone()) return;
+    if (!_validateCharges()) return;
+    // Remember these descriptions for next time's suggestions (best-effort).
+    unawaited(_rememberUsedCharges());
     if (!_validateCreditCustomer()) return;
 
     // Finalizing an OFFLINE draft ('LOCAL-…'): the draft only exists in this
@@ -1352,8 +1666,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     setState(() => _generatingBill = true);
     try {
       Map<String, dynamic> result;
+      final additionalCharges = _chargesPayload();
       if (widget.activeBillId != null) {
-        await updateBillItems(widget.activeBillId!, _cartPayload);
+        // Push the cart together with the current discount and charges, so
+        // anything changed after reopening the draft reaches the bill before
+        // it is finalized (the finalize step itself recomputes nothing).
+        await updateBillItems(
+          widget.activeBillId!,
+          _cartPayload,
+          discountAmount:
+              double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
+          additionalCharges: additionalCharges,
+        );
         result = await finalizeBill(widget.activeBillId!);
       } else {
         final draft = await createBill({
@@ -1367,6 +1691,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           'status': 'draft',
           if (_discountAmtController.text.trim().isNotEmpty)
             'discount_amount': double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
+          if (additionalCharges.isNotEmpty)
+            'additional_charges': additionalCharges,
         });
         result = await finalizeBill(draft['id']);
       }
@@ -1423,6 +1749,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _customerPhoneController.clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      _clearCharges();
       setState(() => _paymentMode = 'cash');
       ref.invalidate(reportProvider);
       ref.invalidate(billsProvider);
@@ -1605,7 +1932,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         taxAmount = double.parse(
             (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
       }
-      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+      // Additional charges sit on top of the taxed items: in the total, but
+      // outside the tax base and untouched by the discount (same as the server).
+      final charges = _chargeEntries();
+      final chargesTotal = BillCharge.sum(charges);
+      final total = double.parse(
+          (subtotal + taxAmount + chargesTotal).toStringAsFixed(2));
       // Round-off is computed on-device and kept UNCHANGED when the bill syncs
       // (it's already printed on the customer's receipt), same as bill_number.
       final roundOff = computeRoundOff(
@@ -1621,6 +1953,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'subtotal': subtotal,
         'tax_amount': taxAmount,
         'discount_amount': discountAmt,
+        'charges_amount': chargesTotal,
+        'additional_charges':
+            charges.isEmpty ? null : BillCharge.encode(charges),
         'total': total,
         'round_off': roundOff,
         'payment_mode': _paymentMode,
@@ -1640,6 +1975,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         subtotal: subtotal,
         taxAmount: taxAmount,
         discountAmount: discountAmt,
+        chargesAmount: chargesTotal,
+        additionalCharges: charges,
         total: total,
         roundOff: roundOff,
         paymentMode: _paymentMode,
@@ -1666,6 +2003,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _customerPhoneController.clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      _clearCharges();
       setState(() => _paymentMode = 'cash');
       // Deduct the sold quantities from the LOCAL item cache. The server does
       // this on sync, but until then the cached stock is the only figure the
@@ -1745,7 +2083,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       taxAmount = double.parse(
           (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
     }
-    final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+    // Additional charges are in the total, untaxed and undiscounted.
+    final charges = _chargeEntries();
+    final chargesTotal = BillCharge.sum(charges);
+    final total = double.parse(
+        (subtotal + taxAmount + chargesTotal).toStringAsFixed(2));
     return Bill(
       id: 'preview',
       businessId: '',
@@ -1759,6 +2101,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       subtotal: subtotal,
       taxAmount: taxAmount,
       discountAmount: discountAmt,
+      chargesAmount: chargesTotal,
+      additionalCharges: charges,
       total: total,
       roundOff: computeRoundOff(
           total - discountAmt, ref.read(roundOffEnabledProvider)),
@@ -3075,6 +3419,108 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
+            // Additional charges — delivery, packaging, service, etc. Added on
+            // top of the taxed items (no GST on them, never discounted). Same
+            // cashier/owner gate as the discount above.
+            if (canFinalize)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
+                    AppSpacing.space12, AppSpacing.space16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            l10n.billingAdditionalCharges,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textSecondary,
+                                ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed:
+                              _charges.length >= _maxAdditionalCharges
+                                  ? null
+                                  : _addChargeRow,
+                          icon: const Icon(Icons.add, size: 16),
+                          label: Text(l10n.billingAddCharge),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space8),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_charges.isEmpty)
+                      Text(
+                        l10n.billingAdditionalChargesHint,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.textSecondary),
+                      ),
+                    for (final row in _charges)
+                      Padding(
+                        key: row.key,
+                        padding:
+                            const EdgeInsets.only(top: AppSpacing.space8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: AppTextField(
+                                label: l10n.billingChargeDescription,
+                                hint: l10n.billingChargeDescriptionHint,
+                                controller: row.nameController,
+                                focusNode: row.nameFocus,
+                                capitalizeWords: true,
+                                maxLength: 100,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.space8),
+                            Expanded(
+                              flex: 2,
+                              child: AppTextField(
+                                label: l10n.billingChargeAmount,
+                                controller: row.amountController,
+                                focusNode: row.amountFocus,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                prefixIcon: const Icon(Icons.currency_rupee,
+                                    size: 16, color: AppColors.textSecondary),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: l10n.billingRemoveCharge,
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.close,
+                                  size: 18, color: AppColors.textSecondary),
+                              onPressed: () => _removeChargeRow(row),
+                            ),
+                          ],
+                        ),
+                        // Past descriptions, under the focused field.
+                        _chargeSuggestionList(row),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
             // Bill summary
             if (cart.isNotEmpty)
               Padding(
@@ -3096,7 +3542,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   // total − discount (+ round-off / prev due), which equals
                   // discountedNet + effectiveTax. The identity holds because the
                   // tax already reflects the discount.
-                  final total = subtotal + effectiveTax;
+                  // Additional charges ride on top of the taxed items — never
+                  // taxed, never discounted — and are part of the total.
+                  final charges = _chargeEntries();
+                  final chargesTotal = BillCharge.sum(charges);
+                  final total = subtotal + effectiveTax + chargesTotal;
                   // Invoice round-off applies to THIS bill's payable
                   // (total - discount), independent of any previous-due amount,
                   // matching the backend. 0 when the business has it disabled.
@@ -3243,6 +3693,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ),
                           ),
                         ],
+                        // Additional charges — one row per charge, after tax
+                        // since they are added on top of the taxed amount.
+                        if (charges.isNotEmpty) ...[
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space12, vertical: 6),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (final c in charges)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 4),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            c.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(ctx)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color:
+                                                      AppColors.textSecondary,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(
+                                            width: AppSpacing.space8),
+                                        Text(
+                                          '+ ₹${c.amount.toStringAsFixed(2)}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.right,
+                                          style: Theme.of(ctx)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                                fontFeatures: const [
+                                                  FontFeature.tabularFigures()
+                                                ],
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
                         // Round Off row — only when a non-zero adjustment.
                         if (roundOff != 0) ...[
                           const Divider(height: 1),
@@ -3325,10 +3829,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   Radius.circular(AppRadius.small - 1),
                               bottomRight:
                                   Radius.circular(AppRadius.small - 1),
-                              topLeft: (discountAmt > 0 || roundOff != 0 || prevDue > 0)
+                              topLeft: (discountAmt > 0 || charges.isNotEmpty || roundOff != 0 || prevDue > 0)
                                   ? Radius.zero
                                   : Radius.circular(AppRadius.small - 1),
-                              topRight: (discountAmt > 0 || roundOff != 0 || prevDue > 0)
+                              topRight: (discountAmt > 0 || charges.isNotEmpty || roundOff != 0 || prevDue > 0)
                                   ? Radius.zero
                                   : Radius.circular(AppRadius.small - 1),
                             ),
@@ -4346,8 +4850,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                         widget.rowName,
                         style: TextStyle(
                           fontSize: 13,
-                          fontWeight:
-                              inCart ? FontWeight.w600 : FontWeight.w400,
+                          fontWeight: FontWeight.w400,
                           color: inCart
                               ? AppColors.primaryDark
                               : AppColors.textPrimary,
@@ -4537,3 +5040,25 @@ class _GridBtn extends StatelessWidget {
   }
 }
 
+
+/// One additional-charge row in the cart panel: a description ("Delivery")
+/// and an amount. Owns its own controllers and focus nodes so rows can be
+/// added and removed independently; [key] lets the panel scroll the row above
+/// the keyboard when either field is focused.
+class _ChargeRow {
+  final nameController = TextEditingController();
+  final amountController = TextEditingController();
+  final nameFocus = FocusNode();
+  final amountFocus = FocusNode();
+  final key = GlobalKey();
+
+  String get name => nameController.text.trim();
+  double get amount => double.tryParse(amountController.text.trim()) ?? 0.0;
+
+  void dispose() {
+    nameController.dispose();
+    amountController.dispose();
+    nameFocus.dispose();
+    amountFocus.dispose();
+  }
+}

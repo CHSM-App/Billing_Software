@@ -616,7 +616,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                         item.name,
                         style: const TextStyle(
                           fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w400,
                           color: AppColors.textPrimary,
                           height: 1.15,
                         ),

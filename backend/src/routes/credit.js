@@ -3,6 +3,7 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
+const { attachCharges } = require('../charges');
 
 const router = express.Router();
 
@@ -62,7 +63,8 @@ router.get('/customers/:phone/bills', requireAuth, async (req, res) => {
       .input('phone',       sql.NVarChar(20),     phone)
       .query(`
         SELECT b.id, b.bill_number, b.customer_name, b.customer_phone,
-               b.subtotal, b.tax_amount, b.discount_amount, b.total,
+               b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount,
+               b.additional_charges, b.total, b.round_off,
                b.payment_mode, b.payment_status, b.status,
                b.created_at, b.receipt_token
         FROM bills b
@@ -90,7 +92,7 @@ router.get('/customers/:phone/bills', requireAuth, async (req, res) => {
     for (const it of itemsResult.recordset) {
       (byBill[it.bill_id] ||= []).push(it);
     }
-    for (const b of bills) b.items = byBill[b.id] || [];
+    for (const b of bills) attachCharges(b).items = byBill[b.id] || [];
 
     return res.json(bills);
   } catch (err) {
@@ -200,7 +202,8 @@ router.post('/settle', requireAuth, cashierOrOwner, async (req, res) => {
     bill_ids.forEach((id, i) => billsReq.input(`id${i}`, sql.UniqueIdentifier, id));
     const billsResult = await billsReq.query(`
       SELECT b.id, b.bill_number, b.customer_name, b.customer_phone,
-             b.subtotal, b.tax_amount, b.discount_amount, b.total,
+             b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount,
+             b.additional_charges, b.total, b.round_off,
              b.payment_mode, b.payment_status, b.settled_at, b.settled_payment_mode,
              b.created_at, b.receipt_token
       FROM bills b
@@ -217,7 +220,7 @@ router.post('/settle', requireAuth, cashierOrOwner, async (req, res) => {
     `);
     const byBill = {};
     for (const it of itemsResult.recordset) (byBill[it.bill_id] ||= []).push(it);
-    for (const b of billsResult.recordset) b.items = byBill[b.id] || [];
+    for (const b of billsResult.recordset) attachCharges(b).items = byBill[b.id] || [];
 
     // Nudge other devices to refresh the Credit tab.
     broadcast(req.user.business_id, { type: 'credit' });

@@ -517,11 +517,16 @@ class _BillDetailDialog extends StatelessWidget {
                     ),
                   )),
               const Divider(height: AppSpacing.space24),
-              if (bill.taxAmount > 0) ...[
+              // Total Amount already includes tax and any additional charges,
+              // so break those out above it whenever either is present.
+              if (bill.taxAmount > 0 || bill.additionalCharges.isNotEmpty) ...[
                 _row(context, l10n.billingSubtotal,
                     '₹${bill.subtotal.toStringAsFixed(2)}'),
-                _row(context, l10n.billingTax,
-                    '₹${bill.taxAmount.toStringAsFixed(2)}'),
+                if (bill.taxAmount > 0)
+                  _row(context, l10n.billingTax,
+                      '₹${bill.taxAmount.toStringAsFixed(2)}'),
+                for (final c in bill.additionalCharges)
+                  _row(context, c.name, '+ ₹${c.amount.toStringAsFixed(2)}'),
                 const SizedBox(height: AppSpacing.space4),
               ],
               _row(context, l10n.billingTotalAmount,

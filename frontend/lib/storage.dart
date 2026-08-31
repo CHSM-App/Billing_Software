@@ -198,6 +198,23 @@ class AuthStorage {
     return (p == null || p.isEmpty) ? 'INV' : p;
   }
 
+  // Charge-description suggestions (Delivery, Packaging, ...) cached per
+  // business as a JSON list, so the billing screen can offer them instantly
+  // and while offline. Keyed by business so a different login on the same
+  // device never sees another shop's charges.
+  static String _keyChargeSuggestions(String businessId) =>
+      'charge_suggestions_$businessId';
+
+  Future<void> saveChargeSuggestions(String businessId, String json) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyChargeSuggestions(businessId), json);
+  }
+
+  Future<String?> getChargeSuggestions(String businessId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyChargeSuggestions(businessId));
+  }
+
   /// A stable 4-char UPPERCASE alphanumeric tag unique to THIS install,
   /// generated once and reused. Embedded in offline bill numbers so two devices
   /// billing offline never produce the same number. Existing installs that saved
@@ -350,6 +367,10 @@ Future<String?> getUserId()                    => AuthStorage.instance.getUserId
 Future<void>    clearSession()                 => AuthStorage.instance.clearSession();
 Future<void>    saveBillPrefix(String prefix)  => AuthStorage.instance.saveBillPrefix(prefix);
 Future<String>  getBillPrefix()                => AuthStorage.instance.getBillPrefix();
+Future<void>    saveCachedChargeSuggestions(String businessId, String json) =>
+    AuthStorage.instance.saveChargeSuggestions(businessId, json);
+Future<String?> getCachedChargeSuggestions(String businessId) =>
+    AuthStorage.instance.getChargeSuggestions(businessId);
 Future<String>  nextOfflineBillNumber()        => AuthStorage.instance.nextOfflineBillNumber();
 Future<String>  getDeviceTag()                 => AuthStorage.instance.getDeviceTag();
 Future<void>    savePaperSize(String size)     => AuthStorage.instance.savePaperSize(size);

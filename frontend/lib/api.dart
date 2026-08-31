@@ -4,6 +4,7 @@ import 'dart:developer' as dev;
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:http/http.dart' as http;
 import 'storage.dart';
+import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
 // const String baseUrl = 'http://192.168.1.8:8000/api';
@@ -790,6 +791,9 @@ Future<Map<String, dynamic>> updateBillItems(
   String? customerName,
   String? customerPhone,
   double? discountAmount,
+  /// Replaces the draft's additional charges when non-null (an empty list
+  /// clears them); null leaves whatever the draft already carries.
+  List<Map<String, dynamic>>? additionalCharges,
 }) async {
   return _parse(await _authPut(
     Uri.parse('$baseUrl/bills/$id/update-items'),
@@ -798,6 +802,7 @@ Future<Map<String, dynamic>> updateBillItems(
       if (customerName != null) 'customer_name': customerName,
       if (customerPhone != null) 'customer_phone': customerPhone,
       if (discountAmount != null) 'discount_amount': discountAmount,
+      if (additionalCharges != null) 'additional_charges': additionalCharges,
     }),
   ));
 }
@@ -895,6 +900,17 @@ Future<List<Map<String, dynamic>>> searchCustomers(String q,
       .replace(queryParameters: {'q': q, 'limit': '$limit'});
   final rows = _parse(await _authGet(uri)) as List;
   return rows.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+}
+
+/// Charge descriptions this business has used on past bills (Delivery,
+/// Packaging, ...), most-used first.
+Future<List<ChargeSuggestion>> getChargeSuggestions({int limit = 20}) async {
+  final uri = Uri.parse('$baseUrl/bills/charges/suggestions')
+      .replace(queryParameters: {'limit': '$limit'});
+  final rows = _parse(await _authGet(uri)) as List;
+  return rows
+      .map((e) => ChargeSuggestion.fromJson(Map<String, dynamic>.from(e as Map)))
+      .toList();
 }
 
 // ---------------------------------------------------------------------------
