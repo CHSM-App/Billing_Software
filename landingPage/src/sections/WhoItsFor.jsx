@@ -49,7 +49,7 @@ export default function WhoItsFor() {
               className="btn-teal inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl
                          text-sm font-bold"
             >
-              Get Started Free
+              Try Free for 1 Month
               <ArrowRight size={15} />
             </a>
           </div>

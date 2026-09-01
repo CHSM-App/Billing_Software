@@ -213,6 +213,17 @@ void main() {
       'items': [],
     };
 
+    test('displayNumber drops the bill prefix', () {
+      expect(Bill.fromJson(billJson).displayNumber, '0001');
+      expect(
+        Bill.fromJson({...billJson, 'bill_number': 'INV-a7f4-0001'})
+            .displayNumber,
+        'a7f4-0001',
+      );
+      expect(Bill.fromJson({...billJson, 'bill_number': 'PREVIEW'})
+          .displayNumber, 'PREVIEW');
+    });
+
     test('parses all fields', () {
       final bill = Bill.fromJson(billJson);
       expect(bill.id, 'bill-1');

@@ -34,7 +34,7 @@ export const ROUTES = [
     priority: '1.0',
     title: 'Vittam – GST Billing Software for Indian Small Business',
     description:
-      'Offline-first GST billing software for Indian kirana stores, cafes and restaurants. Fast billing, inventory, thermal printing and WhatsApp bills. Free download.',
+      'Offline-first GST billing software for kirana stores, cafes and restaurants. Fast billing, inventory, thermal printing and WhatsApp bills. Free for 1 month.',
     keywords:
       'billing software, GST billing software India, kirana store billing, restaurant billing software, inventory management software, offline billing app, POS software for small business, thermal printer billing, WhatsApp bill sharing, retail billing software',
   },
@@ -106,17 +106,11 @@ export function structuredData() {
       description:
         'Offline-first billing, inventory, table-order and expense management software for Indian kirana stores, supermarkets, cafes and restaurants.',
       inLanguage: 'en-IN',
-      offers: {
-        '@type': 'Offer',
-        price: '0',
-        priceCurrency: 'INR',
-        availability: 'https://schema.org/InStock',
-      },
       featureList: [
         'Fast counter billing',
         'GST-ready invoices',
         'Inventory management with barcode support',
-        'Restaurant table billing and split bills',
+        'QR code table ordering',
         'Reports and analytics',
         'Expense and recurring-expense tracking',
         'Staff accounts and role-based access',

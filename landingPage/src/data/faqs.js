@@ -19,7 +19,7 @@ export const FAQS = [
   },
   {
     q: 'How much does Vittam cost?',
-    a: 'You can download Vittam and get started free on both Windows and Android. Setup takes under five minutes and needs no training or technical help.',
+    a: 'Vittam is free for your first month — full features, no card needed to start. After the trial you move to a paid plan to keep using it. Your data stays yours and nothing is deleted while you decide. For current pricing, message us on WhatsApp at +91 94222 29951 and we will share the plan that fits your shop size.',
   },
   {
     q: 'Can I print bills on a thermal printer?',

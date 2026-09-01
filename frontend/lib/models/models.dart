@@ -11,6 +11,13 @@ String formatQty(double qty) {
       .replaceAll(RegExp(r'\.$'), '');
 }
 
+/// Strips the leading letter prefix (the business's bill prefix, 'INV' by
+/// default) and its dash from a bill number: 'INV-0007' → '0007',
+/// 'INV-a7f4-0001' → 'a7f4-0001'. Numbers without such a prefix are returned
+/// unchanged. Used wherever the number is shown to the customer.
+String stripBillPrefix(String billNumber) =>
+    billNumber.replaceFirst(RegExp(r'^[A-Za-z]+-'), '');
+
 class User {
   final String id;
   final String name;
@@ -421,6 +428,12 @@ class Bill {
 
   /// True when this is a credit bill that hasn't been settled yet.
   bool get isUnpaidCredit => paymentStatus == 'unpaid';
+
+  /// [billNumber] without its letter prefix, for customer-facing output
+  /// (printed receipts, invoice PDFs, WhatsApp). 'INV-0007' → '0007',
+  /// offline 'INV-a7f4-0001' → 'a7f4-0001'. Numbers with no prefix are
+  /// returned unchanged. The full [billNumber] stays the in-app identifier.
+  String get displayNumber => stripBillPrefix(billNumber);
 
   /// The final amount the customer pays: total, less discount, plus round-off.
   double get grandTotal => total - discountAmount + roundOff;

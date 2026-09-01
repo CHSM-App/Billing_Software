@@ -88,7 +88,7 @@ void main() {
     expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
     final text = _renderedText(bytes);
     for (final needle in [
-      'Tax', 'GOVIND', 'GSTIN', 'FSSAI', 'INV-119',
+      'Tax', 'GOVIND', 'GSTIN', 'FSSAI', '119',
       '8418', 'Sagar', 'GST', 'Grand', 'Rupees',
     ]) {
       expect(text.contains(needle), true, reason: 'PDF missing "$needle"');

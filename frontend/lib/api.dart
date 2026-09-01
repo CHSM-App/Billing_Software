@@ -8,7 +8,7 @@ import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
 // const String baseUrl = 'http://192.168.1.8:8000/api';
-const String baseUrl = 'http://192.168.1.5:5000/api';
+const String baseUrl = 'https://vittam.vengurlatech.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
           
@@ -23,7 +23,7 @@ String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiError
     if (error.message.trim().isNotEmpty &&
         error.message.trim() != _genericApiErrorMessage) {
       return error.message.trim();
-    }
+    } 
   }
   return fallback;
 }

@@ -7,48 +7,48 @@ import {
 const FEATURES = [
   {
     icon: <Zap size={20} />,
-    title: 'Fast Billing',
-    desc: 'Generate bills in seconds with a clean counter workflow optimised for speed during busy hours.',
+    title: 'Fast GST Billing',
+    desc: 'Create GST invoices in seconds. Search an item, set the quantity, pick the payment mode, and the bill is ready — built for busy counters.',
   },
   {
     icon: <Package size={20} />,
     title: 'Inventory Management',
-    desc: 'Add, categorise, and manage all your items with barcode-ready product handling across departments.',
+    desc: 'Add items, set categories and prices, and scan barcodes to find products instantly. Know what is running low before your customer asks for it.',
   },
   {
     icon: <Coffee size={20} />,
-    title: 'Table Billing',
-    desc: 'Full restaurant table management — open per-table orders, split bills, and check out flexibly.',
+    title: 'Restaurant Table Billing',
+    desc: 'Let customers scan a QR code, browse the menu, and order from their table. Orders go straight to the kitchen and sync with the cashier’s billing system for seamless restaurant billing.',
   },
   {
     icon: <BarChart2 size={20} />,
-    title: 'Reports & Analytics',
-    desc: 'Daily breakdowns, revenue by payment mode, and expense category summaries at a glance.',
+    title: 'Sales & Business Reports',
+    desc: "See today's sales, payment-mode splits and expense summaries in one screen. Know your daily numbers without opening a single register.",
   },
   {
     icon: <TrendingUp size={20} />,
-    title: 'Expense Tracking',
-    desc: 'Log regular and recurring expenses. Know exactly where every rupee is going every month.',
+    title: 'Expense Management',
+    desc: 'Log one-off and recurring expenses by category — rent, salary, electricity, supplies. At month end you know exactly where the money went.',
   },
   {
     icon: <Users size={20} />,
-    title: 'Staff Management',
-    desc: 'Add cashiers, assign roles, and control team access — all managed from the owner account.',
+    title: 'Staff & Cashier Roles',
+    desc: 'Add cashiers and give them billing access only. Sales, expenses and reports stay visible to the owner alone.',
   },
   {
     icon: <WifiOff size={20} />,
-    title: 'Offline First',
-    desc: 'Keep billing running without internet. Data syncs automatically the moment you are back online.',
+    title: 'Offline Billing',
+    desc: 'Network gone? Billing, item search and printing keep working. Every bill is saved on the device and syncs on its own the moment you are back online.',
   },
   {
     icon: <Printer size={20} />,
-    title: 'Thermal Printing',
-    desc: 'Connect your thermal printer and generate professional printed receipts instantly on every bill.',
+    title: 'Thermal Printer Receipts',
+    desc: 'Connect a standard thermal printer and print a clean receipt with every bill. Reprint any old bill whenever a customer asks.',
   },
   {
     icon: <MessageCircle size={20} />,
-    title: 'WhatsApp Sharing',
-    desc: 'Send digital bills directly to customers via WhatsApp — fast, paperless, and professional.',
+    title: 'WhatsApp Bill Sharing',
+    desc: 'Send the bill straight to the customer on WhatsApp. No paper, no lost receipts, and the customer keeps a permanent copy.',
   },
 ]
 
