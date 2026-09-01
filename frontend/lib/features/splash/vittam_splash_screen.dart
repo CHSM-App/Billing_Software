@@ -94,9 +94,11 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
   /// Reads the RC-driven update decision and shows [VittamUpdateDialog].
   /// Returns true if the app may proceed, false if a FORCED update blocks it.
   Future<bool> _remoteConfigGate() async {
-    // The update dialog's "Update now" opens the Play Store, so this gate only
-    // makes sense on Android. On iOS/web/desktop, skip it and open the app.
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    // Android updates via the Play Store, Windows via the release installer.
+    // iOS/web/other desktop have no update path — skip the gate and open.
+    if (kIsWeb ||
+        (defaultTargetPlatform != TargetPlatform.android &&
+            defaultTargetPlatform != TargetPlatform.windows)) {
       return true;
     }
     try {

@@ -1,15 +1,24 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../services/remote_config_service.dart';
 import '../utils/semver.dart';
 import 'update_state.dart';
+import 'windows_update_stub.dart'
+    if (dart.library.io) 'windows_update_io.dart' as win;
 
 final updateCheckProvider = FutureProvider<UpdateState>((ref) async {
   final info = await PackageInfo.fromPlatform();
-  final rc = VittamRemoteConfig.instance;
   final currentVersion = info.version;
 
+  // Firebase Remote Config has no Windows plugin — desktop reads the release
+  // manifest instead (see windows_update_io.dart).
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+    return win.checkWindowsUpdate(currentVersion);
+  }
+
+  final rc = VittamRemoteConfig.instance;
   final current = SemVer.tryParse(currentVersion);
   final latest = SemVer.tryParse(rc.latestVersion);
 
