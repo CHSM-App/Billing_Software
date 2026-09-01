@@ -1,0 +1,159 @@
+name: Windows Release
+
+# Two ways in, one build:
+#   • called by ci.yml on a v* tag push (workflow_call)
+#   • run by hand from the Actions tab (workflow_dispatch) — the Windows twin of
+#     the "Deploy to Play Store" button, for shipping a desktop update without
+#     cutting a tag first.
+#
+# Either way the version comes from frontend/pubspec.yaml. package_info_plus
+# reports that same value on Windows, and the update manifest is what clients
+# compare against — so pubspec is the single source of truth and the tag path
+# only verifies the tag agrees with it.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag that triggered the release (e.g. v1.1.11).'
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force the update — clients cannot dismiss the prompt.'
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Publish as pre-release. Installed clients keep ignoring it (releases/latest skips pre-releases), so you can test the installer before it goes out.'
+        type: boolean
+        default: true
+      dry_run:
+        description: 'Dry run — build the installer as an artifact but publish no release.'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  # 3.38.5 (Dart 3.9) — keep in sync with FLUTTER_VERSION in ci.yml.
+  FLUTTER_VERSION: '3.38.5'
+
+jobs:
+  build:
+    name: Build installer + publish release
+    runs-on: windows-2022
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # cache: false on purpose. A cached build tree from an older runner image
+      # carries a CMakeCache.txt that pins "Visual Studio 16 2019", which no
+      # longer exists on windows-latest (VS 2022 only). Restoring it makes the
+      # CMake project() call fail before any of our steps run.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: false
+
+      # Extra safety: wipe any local CMake cache so CMake re-detects Visual Studio.
+      # Runs before pub get since flutter clean also removes .dart_tool.
+      - name: Clean previous build cache
+        working-directory: frontend
+        run: flutter clean
+
+      - name: Get Flutter dependencies
+        working-directory: frontend
+        run: flutter pub get
+
+      # A tag that disagrees with pubspec would ship an installer whose exe
+      # still reports the old version — clients would update, still read as
+      # outdated, and be prompted forever. Fail loudly instead.
+      - name: Resolve version
+        id: v
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          version=$(grep -m1 '^version:' frontend/pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)
+          if [ -n "$TAG" ] && [ "${TAG#v}" != "$version" ]; then
+            echo "::error::tag $TAG does not match pubspec version $version — bump pubspec before tagging"
+            exit 1
+          fi
+          echo "version=$version"    >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG:-v$version}" >> "$GITHUB_OUTPUT"
+
+      # Pin the generator to the Visual Studio that actually ships on
+      # windows-latest (VS 2022 = "Visual Studio 17 2022"). This forces CMake
+      # off the stale "Visual Studio 16 2019" default even if a cache slips in.
+      - name: Build Windows release
+        working-directory: frontend
+        env:
+          CMAKE_GENERATOR: 'Visual Studio 17 2022'
+        run: flutter build windows --release
+
+      # Inno Setup 6 (ISCC) ships preinstalled on the windows runner image.
+      # PrivilegesRequired=lowest in installer.iss means the produced setup
+      # installs per-user, so the in-app updater can run it without a UAC prompt.
+      - name: Build installer (VittamSetup.exe)
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=${{ steps.v.outputs.version }}" frontend\windows\installer.iss
+
+      # Manifest the Windows app polls on launch (see windows_update_io.dart).
+      # Published as a release asset, so releases/latest/download/ always
+      # redirects to the newest stable release's copy.
+      - name: Write update manifest
+        shell: bash
+        run: |
+          cat > frontend/build/windows/dist/windows-latest.json <<JSON
+          {
+            "version": "${{ steps.v.outputs.version }}",
+            "url": "https://github.com/${{ github.repository }}/releases/download/${{ steps.v.outputs.tag }}/VittamSetup.exe",
+            "force": ${{ inputs.force || false }}
+          }
+          JSON
+          cat frontend/build/windows/dist/windows-latest.json
+
+      # Portable zip, kept alongside the installer for anyone who wants to run
+      # the app without installing it.
+      - name: Zip portable build
+        shell: pwsh
+        run: |
+          $name = "billing-${{ steps.v.outputs.tag }}-windows"
+          Copy-Item -Recurse "frontend/build/windows/x64/runner/Release" `
+            "frontend/build/windows/dist/$name"
+          Compress-Archive -Path "frontend/build/windows/dist/$name" `
+            -DestinationPath "frontend/build/windows/dist/$name.zip"
+
+      - name: Upload build as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-windows-${{ steps.v.outputs.tag }}
+          path: |
+            frontend/build/windows/dist/billing-*.zip
+            frontend/build/windows/dist/VittamSetup.exe
+            frontend/build/windows/dist/windows-latest.json
+          retention-days: 30
+
+      - name: Dry run — nothing published
+        if: ${{ inputs.dry_run }}
+        run: echo "::notice::Dry run. Installer is on the artifact above; no release was created."
+
+      # The landing page's download button and the in-app updater both read
+      # these assets through releases/latest/download/ — nothing to commit,
+      # nothing to redeploy, the newest stable release wins automatically.
+      # On the dispatch path this creates the tag at the current commit.
+      - name: Publish GitHub Release
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          prerelease: ${{ inputs.prerelease || false }}
+          files: |
+            frontend/build/windows/dist/billing-*.zip
+            frontend/build/windows/dist/VittamSetup.exe
+            frontend/build/windows/dist/windows-latest.json
