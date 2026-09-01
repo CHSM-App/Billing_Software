@@ -34,7 +34,7 @@ const express    = require('express');
 const cors       = require('cors');
 const bodyParser = require('body-parser');
 const { pool, poolConnect, sql } = require('./db');
-const { globalLimiter } = require('./middleware/rateLimiter');
+const { globalLimiter, healthLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
@@ -164,11 +164,24 @@ app.use(pinoHttp({
 
 app.use(bodyParser.json());
 
+// Health check — registered BEFORE the global rate limiter, deliberately, and
+// with its own budget instead (healthLimiter).
+//
+// Every client hits this to decide whether it is online. Sharing the app's
+// budget let the app deadlock itself: once a shop tripped the limit /health
+// answered 429, checkReachable() read that as "offline", and every device then
+// probed /health — re-spending the budget as fast as the window refilled it.
+// The shop stayed both rate-limited and offline with nobody doing any work.
+// Its own bucket breaks that loop while still capping an unauthenticated
+// endpoint that runs a `SELECT 1` on every call.
+app.get('/health', healthLimiter, healthHandler);
+app.get('/api/health', healthLimiter, healthHandler);
+
 // Global rate limit — see middleware/rateLimiter.js for why it is keyed
 // per signed-in user rather than per IP.
 app.use(globalLimiter);
 
-// Health check
+// Hoisted — the routes above are registered before this declaration.
 async function healthHandler(req, res) {
   try {
     await poolConnect;
@@ -179,8 +192,6 @@ async function healthHandler(req, res) {
     res.status(500).json({ ok: false, db: 'error', error: err.message });
   }
 }
-app.get('/health', healthHandler);
-app.get('/api/health', healthHandler);
 
 // Routes
 app.use('/api', require('./routes/auth'));

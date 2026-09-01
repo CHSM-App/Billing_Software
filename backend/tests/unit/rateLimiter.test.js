@@ -1,4 +1,4 @@
-const { globalKey } = require('../../src/middleware/rateLimiter');
+const { globalKey, globalMax } = require('../../src/middleware/rateLimiter');
 const { signAccessToken } = require('../../src/auth');
 
 // The whole point of globalKey: several tills in one shop share a public IP,
@@ -37,5 +37,19 @@ describe('globalKey', () => {
     const one = globalKey(req(null, '2001:db8:abcd:0012::1'));
     const two = globalKey(req(null, '2001:db8:abcd:0012::99'));
     expect(one).toBe(two);
+  });
+
+  // Billing must never 429 mid-service. The signed-in ceiling is a runaway-loop
+  // backstop, so it has to sit far above anything a cashier can do by hand.
+  describe('globalMax', () => {
+    test('a signed-in till is never throttled by realistic use', () => {
+      const perWindow = globalMax(req(tokenFor('user-a')));
+      const busiestPlausibleShift = 60 * 15; // one request a second for 15 min
+      expect(perWindow).toBeGreaterThan(busiestPlausibleShift * 10);
+    });
+
+    test('anonymous traffic keeps a much tighter budget', () => {
+      expect(globalMax(req(null))).toBeLessThan(globalMax(req(tokenFor('u'))));
+    });
   });
 });

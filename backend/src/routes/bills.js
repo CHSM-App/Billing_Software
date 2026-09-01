@@ -2,6 +2,7 @@ const express = require('express');
 const crypto  = require('crypto');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
+const { whatsappLimiter } = require('../middleware/rateLimiter');
 const logger = require('../logger');
 const audit = require('../audit');
 const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUtils');
@@ -1788,7 +1789,7 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
 // POST /api/bills/send-whatsapp
 // Sends a receipt link to the customer's WhatsApp.
 // Body: { bill_id } — looks up the bill, builds the receipt URL, sends it.
-router.post('/send-whatsapp', requireAuth, async (req, res) => {
+router.post('/send-whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
   const { bill_id } = req.body;
 
   if (!bill_id) {
@@ -1897,7 +1898,7 @@ router.get('/:id/whatsapp-text', requireAuth, async (req, res) => {
 //                       reports the error (NO fallback — paid tier is API-only).
 //   'deeplink' (free) — returns { mode:'deeplink', phone, message } so the app
 //                       opens the cashier's own WhatsApp with a prefilled text.
-router.post('/:id/whatsapp', requireAuth, async (req, res) => {
+router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
   try {
     await poolConnect;
     const row = await pool.request()

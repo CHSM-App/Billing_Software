@@ -8,7 +8,7 @@ import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
 // const String baseUrl = 'http://192.168.1.8:8000/api';
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.5:5000/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
           
@@ -91,13 +91,45 @@ Future<http.Response> _delete(Uri uri, {Map<String, String>? headers}) async {
 /// UI can show a "No internet" message instead of "Something went wrong". Any
 /// other error (a real HTTP response, an ApiException) passes through untouched.
 ///
-/// FAST-FAIL: once the app already knows it's offline, we throw immediately
-/// instead of attempting a request that would block for the full 15s timeout.
-/// Re-probing the server is the connectivity recovery poll's job (it uses the
-/// raw client, so it bypasses this guard); app requests shouldn't each stall for
-/// 15s while the server is down.
+/// FAST-FAIL: while the app knows it's offline EVERY request throws immediately.
+/// That is what keeps offline billing instant — home_screen catches the
+/// [NetworkException] and saves the sale locally. A cashier must never wait on
+/// a dead network to ring up a customer.
+///
+/// Recovery rides alongside it: at most once per [_offlineProbeInterval], a
+/// request arriving while offline also kicks off a cheap /health probe in the
+/// BACKGROUND. The user's own request is never used as the probe — it would
+/// stall them for the full 15s request timeout before falling back to the
+/// offline path. The probe has its own 5s cap and, if the server answers, flips
+/// the app back online so the next action goes through normally.
+///
+/// This exists because the WebSocket isn't always there to tell us: before
+/// login there's no token and so no socket. Nothing here runs on a timer — an
+/// idle app makes no requests at all, which is the point. The old /health poll
+/// generated traffic around the clock and burned the server's rate limit.
+DateTime? _lastOfflineProbe;
+const Duration _offlineProbeInterval = Duration(seconds: 3);
+
+/// Whether an offline request should also kick off a background probe.
+/// Must return true when [last] is null, otherwise the first request after
+/// going offline never probes and — with no timer anywhere — nothing ever
+/// reopens the circuit.
+bool shouldProbeWhileOffline(DateTime now, DateTime? last) =>
+    last == null || now.difference(last) >= _offlineProbeInterval;
+
+void _probeInBackground() {
+  final now = DateTime.now();
+  if (!shouldProbeWhileOffline(now, _lastOfflineProbe)) return;
+  _lastOfflineProbe = now;
+  // Fire-and-forget: never awaited, so the caller fails fast regardless.
+  unawaited(checkReachable().then((ok) {
+    if (ok) _connectivityNotifier?.markOnline();
+  }).catchError((_) {}));
+}
+
 Future<http.Response> _safeSend(Future<http.Response> Function() send) async {
   if (_connectivityNotifier?.isOffline ?? false) {
+    _probeInBackground();
     throw const NetworkException();
   }
   try {
@@ -1034,11 +1066,16 @@ Future<bool> checkHealth() async {
 /// with a 5xx (up, but its database is down) keeps the app OFFLINE and the user
 /// keeps billing offline instead of hitting failures. A socket error/timeout
 /// (no internet, or server unreachable) also returns false.
+///
+/// A 429 is the exception: it is proof the server answered, so the network is
+/// fine and we are online. Treating it as "offline" used to start the recovery
+/// poll, which hammered /health and kept the limit exhausted — the app rate-
+/// limiting itself into a permanent offline state.
 Future<bool> checkReachable() async {
   try {
     final response = await _get(Uri.parse('$baseUrl/health'))
         .timeout(const Duration(seconds: 5));
-    return response.statusCode == 200;
+    return response.statusCode == 200 || response.statusCode == 429;
   } catch (_) {
     return false;
   }

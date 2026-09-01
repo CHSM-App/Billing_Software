@@ -21,36 +21,100 @@ function onLimitReached(req, res, next, options) {
   });
 }
 
-// Every request — 600 per signed-in user per 15 minutes.
+// Returns the user_id from a valid access token, or null when the request is
+// anonymous / the token is expired or forged.
 //
-// Keyed on the access token's user_id, NOT the IP. A shop is one public IP with
-// several tills behind it, so an IP-only key hands the whole floor a single
-// budget: the busier the shop, the sooner every device is locked out at once —
-// exactly when it hurts most. Anonymous requests (login, QR ordering, receipts,
-// landing page) still share the shop's IP bucket, but those are low-volume per
-// device. Same reasoning as loginLimiter below; this limiter runs ahead of it,
-// so leaving it on IP alone undid that fix.
-function globalKey(req) {
+// Memoised on the request: express-rate-limit calls keyGenerator AND max for
+// every request, and requireAuth verifies again downstream — three HMAC checks
+// of the same token otherwise.
+function tokenUserId(req) {
+  if (req._rlUserId !== undefined) return req._rlUserId;
   const header = req.headers['authorization'];
+  let userId = null;
   if (header && header.startsWith('Bearer ')) {
     try {
-      return `u:${verifyAccessToken(header.slice(7)).user_id}`;
+      userId = verifyAccessToken(header.slice(7)).user_id;
     } catch (_) {
-      // Expired or forged token — falls through to the shared IP bucket.
+      userId = null;
     }
   }
+  req._rlUserId = userId;
+  return userId;
+}
+
+// Global limiter. Deliberately NOT a throttle on normal app use.
+//
+// Rate limiting belongs on the endpoints that cost something or are attack
+// surfaces — login, registration, WhatsApp sends. Billing is not one of them:
+// a till mid-service that gets a 429 cannot settle the customer in front of it,
+// which is a far worse outcome than whatever the limit was guarding against.
+// Two earlier versions of this got that wrong: an IP-only key meant every till
+// in a shop shared one budget, so the busier the shop the sooner the whole
+// floor locked up at once.
+//
+// So: signed-in requests are keyed per user with a ceiling set far above any
+// human workflow (~55/sec sustained). It exists only to stop a runaway retry
+// loop or a stolen token hammering the database — a real cashier will never
+// come near it. Anonymous traffic (login page, QR ordering, receipts, landing
+// page) keeps a normal per-IP budget, since that is the part strangers can
+// reach.
+const AUTHED_MAX = 50000;   // per user per 15 min — a backstop, not a throttle
+const ANON_MAX   = 1000;    // per IP per 15 min — shared by a shop's guests
+
+function globalKey(req) {
+  const userId = tokenUserId(req);
+  if (userId) return `u:${userId}`;
   // ipKeyGenerator normalises IPv6 to a /56 subnet, so a client holding a whole
   // IPv6 range can't sidestep the limit by rotating addresses.
   return `ip:${ipKeyGenerator(req.ip)}`;
 }
 
+function globalMax(req) {
+  return tokenUserId(req) ? AUTHED_MAX : ANON_MAX;
+}
+
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 600,
+  max: globalMax,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: globalKey,
   message: 'Too many requests. Please slow down.',
+  handler: onLimitReached,
+});
+
+// GET /health + /api/health — 600 per IP per minute.
+//
+// Health sits AHEAD of globalLimiter (see server.js) so a shop that exhausts
+// its app budget can still find out it is online — sharing one bucket let the
+// app rate-limit itself into a permanent offline state. Ahead of it, though, is
+// not the same as unlimited: this endpoint is unauthenticated and runs a
+// `SELECT 1`, so without a ceiling anyone could hammer the database through it.
+// Its own generous per-IP bucket gives it both properties. 600/min is ~10/sec,
+// far above real clients (each device probes at most once per 3s, and only
+// while offline), so it never fires in normal use.
+const healthLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many requests. Please slow down.',
+  handler: onLimitReached,
+});
+
+// POST /api/bills/send-whatsapp + /bills/:id/whatsapp — 300 per user per hour.
+//
+// These actually send a WhatsApp message, so they cost money and burn provider
+// quota; unlike billing, they DO deserve a limit. 300/hour is ~5 a minute
+// sustained, well above a busy shop messaging a receipt to every customer, so
+// it only catches a runaway loop or a stolen token.
+const whatsappLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: globalKey,
+  message: 'Too many WhatsApp messages. Please try again later.',
   handler: onLimitReached,
 });
 
@@ -112,4 +176,4 @@ const deletionLimiter = rateLimit({
   skipSuccessfulRequests: false,
 });
 
-module.exports = { globalLimiter, globalKey, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter };
+module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter };

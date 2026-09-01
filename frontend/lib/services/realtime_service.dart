@@ -23,9 +23,24 @@ class RealtimeService {
   bool _disposed = false;
 
   final _controller = StreamController<String>.broadcast();
+  final _connection = StreamController<bool>.broadcast();
+  bool _connected = false;
 
   /// Stream of event type strings ('kitchen' | 'tables' | 'drafts').
   Stream<String> get events => _controller.stream;
+
+  /// Connection state: true the moment the socket handshake succeeds, false
+  /// when it closes or fails. [ConnectivityNotifier] treats this as the app's
+  /// online/offline signal — a socket that is open is proof the server is
+  /// reachable, delivered as a push instead of an HTTP poll. Emits only on
+  /// change, so listeners don't see repeats from the 3s reconnect loop.
+  Stream<bool> get connection => _connection.stream;
+
+  void _setConnected(bool value) {
+    if (_connected == value) return;
+    _connected = value;
+    if (!_connection.isClosed) _connection.add(value);
+  }
 
   /// Derive ws(s)://host/ws from the http(s) API base URL.
   String _wsBase() {
@@ -65,8 +80,10 @@ class RealtimeService {
       // logged instead of vanishing; the stream listener drives reconnects.
       channel.ready.then((_) {
         debugPrint('[realtime] connected');
+        _setConnected(true);
       }).catchError((e) {
         debugPrint('[realtime] handshake failed: $e');
+        _setConnected(false);
       });
       _sub = channel.stream.listen(
         _onMessage,
@@ -102,6 +119,7 @@ class RealtimeService {
     _sub?.cancel();
     _sub = null;
     _channel = null;
+    _setConnected(false);
     _scheduleReconnect();
   }
 
@@ -116,6 +134,10 @@ class RealtimeService {
   Future<void> stop() async {
     _disposed = true;
     _started = false;
+    // Reset the latch without emitting — a logout is not a network event, but
+    // leaving it `true` would swallow the `true` from the next login's connect
+    // and strand the app offline.
+    _connected = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     await _sub?.cancel();
