@@ -224,6 +224,8 @@ class _CreditCustomerBillsScreenState
         subtotal: bill.subtotal,
         taxAmount: bill.taxAmount,
         discountAmount: bill.discountAmount,
+        chargesAmount: bill.chargesAmount,
+        additionalCharges: bill.additionalCharges,
         total: bill.total,
         roundOff: bill.roundOff,
         paymentMode: settledMode,

@@ -12,6 +12,7 @@ jest.mock('../../src/db', () => mockPool);
 
 // Also mock rate-limiters so they never block test requests
 jest.mock('../../src/middleware/rateLimiter', () => ({
+  globalLimiter: (req, res, next) => next(),
   loginLimiter: (req, res, next) => next(),
   registerLimiter: (req, res, next) => next(),
   refreshLimiter: (req, res, next) => next(),

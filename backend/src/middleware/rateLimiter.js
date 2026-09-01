@@ -1,4 +1,5 @@
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { verifyAccessToken } = require('../auth');
 
 // Shared handler — adds Retry-After and a consistent JSON body.
 //
@@ -20,6 +21,39 @@ function onLimitReached(req, res, next, options) {
   });
 }
 
+// Every request — 600 per signed-in user per 15 minutes.
+//
+// Keyed on the access token's user_id, NOT the IP. A shop is one public IP with
+// several tills behind it, so an IP-only key hands the whole floor a single
+// budget: the busier the shop, the sooner every device is locked out at once —
+// exactly when it hurts most. Anonymous requests (login, QR ordering, receipts,
+// landing page) still share the shop's IP bucket, but those are low-volume per
+// device. Same reasoning as loginLimiter below; this limiter runs ahead of it,
+// so leaving it on IP alone undid that fix.
+function globalKey(req) {
+  const header = req.headers['authorization'];
+  if (header && header.startsWith('Bearer ')) {
+    try {
+      return `u:${verifyAccessToken(header.slice(7)).user_id}`;
+    } catch (_) {
+      // Expired or forged token — falls through to the shared IP bucket.
+    }
+  }
+  // ipKeyGenerator normalises IPv6 to a /56 subnet, so a client holding a whole
+  // IPv6 range can't sidestep the limit by rotating addresses.
+  return `ip:${ipKeyGenerator(req.ip)}`;
+}
+
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: globalKey,
+  message: 'Too many requests. Please slow down.',
+  handler: onLimitReached,
+});
+
 // POST /api/login — 20 failed attempts per (IP + phone) per 15 minutes.
 //
 // Keyed on IP *and* the phone being logged in, not IP alone. On shared/NAT'd
@@ -33,7 +67,10 @@ const loginLimiter = rateLimit({
   max: 20,
   standardHeaders: true,  // RateLimit-* headers (RFC 6585)
   legacyHeaders: false,
-  keyGenerator: (req) => `${req.ip}:${req.body && req.body.phone ? req.body.phone : ''}`,
+  // ipKeyGenerator, not raw req.ip: an IPv6 client owns a whole subnet and
+  // could otherwise rotate addresses to reset its login budget at will.
+  keyGenerator: (req) =>
+    `${ipKeyGenerator(req.ip)}:${req.body && req.body.phone ? req.body.phone : ''}`,
   message: 'Too many login attempts. Please try again in 15 minutes.',
   handler: onLimitReached,
   skipSuccessfulRequests: true, // only count failures toward the limit
@@ -75,4 +112,4 @@ const deletionLimiter = rateLimit({
   skipSuccessfulRequests: false,
 });
 
-module.exports = { loginLimiter, registerLimiter, refreshLimiter, deletionLimiter };
+module.exports = { globalLimiter, globalKey, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter };

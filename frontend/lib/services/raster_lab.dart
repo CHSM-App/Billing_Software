@@ -405,6 +405,96 @@ class RasterLab {
   /// the cell text on either side of it, so glyphs never touch the line.
   static const double _cellPadX = 4.0;
 
+  /// Extra slack (unscaled px) added to a content-fitted numeric column on top
+  /// of its measured text width, so sub-pixel rounding after the 2× downscale
+  /// can never push the last digit onto a second line.
+  static const double _cellSlackX = 6.0;
+
+  /// Never let content-fitting shrink the first (item name) column of a ruled
+  /// table below this share of the content width — past that point names wrap
+  /// so aggressively the table stops being readable.
+  static const double _minNameShare = 0.30;
+
+  /// Pixel widths for the columns of every ruled (item-table) row, keyed by
+  /// column count.
+  ///
+  /// The caller's [ReceiptCell.widthFraction]s are derived from CHARACTER
+  /// counts, but the text is drawn in a proportional font, so a 7-character
+  /// "1100.00" can be wider than the 9-character box reserved for it and wrap
+  /// onto a second line — while a "230.00" row leaves the same box half empty.
+  /// Instead, every column after the first is sized to the widest text it
+  /// actually holds (measured in the real font, header included) plus padding,
+  /// and ALL remaining width goes to the name column, which is the only one
+  /// that benefits from extra room. Grouping by column count keeps a table
+  /// fitted as one unit (its rows must share boundaries for the vertical rules
+  /// to line up).
+  ///
+  /// [scale] multiplies every ruled row's font size (see [_tableScales]);
+  /// [fits] in the result is false when the name column had to be pinned at
+  /// its minimum share and the numeric columns squeezed, i.e. values may wrap.
+  static ({Map<int, List<double>> widths, bool fits}) _fitRuledColumns(
+    List<ReceiptRow> rows,
+    double contentW,
+    double ss,
+    ui.Paragraph Function(String, double, TextAlign, bool, double) mk,
+    double scale,
+  ) {
+    final need = <int, List<double>>{};
+    for (final r in rows) {
+      if (r.isRule || r.isCenter || !r.verticalRules) continue;
+      final n = r.cells.length;
+      if (n < 2) continue;
+      final list = need.putIfAbsent(n, () => List<double>.filled(n, 0.0));
+      for (var i = 1; i < n; i++) {
+        final c = r.cells[i];
+        if (c.text.isEmpty) continue;
+        // Lay out unconstrained to get the single-line width of the text.
+        final p =
+            mk(c.text, r.size * scale, c.align, r.bold, double.infinity);
+        final w = p.maxIntrinsicWidth;
+        if (w > list[i]) list[i] = w;
+      }
+    }
+
+    var fits = true;
+    final fitted = <int, List<double>>{};
+    for (final e in need.entries) {
+      final n = e.key;
+      final w = List<double>.filled(n, 0.0);
+      double sum = 0;
+      for (var i = 1; i < n; i++) {
+        w[i] = e.value[i].ceilToDouble() +
+            _cellPadX * 2 * ss +
+            _cellSlackX * ss;
+        sum += w[i];
+      }
+      // Extreme values (huge totals on narrow paper) could swallow the name
+      // column entirely. Pin it at its minimum share and scale the numeric
+      // columns down proportionally — values may then wrap, but the table
+      // stays aligned and readable.
+      final minName = contentW * _minNameShare;
+      if (contentW - sum < minName && sum > 0) {
+        fits = false;
+        final k = (contentW - minName) / sum;
+        sum = 0;
+        for (var i = 1; i < n; i++) {
+          w[i] *= k;
+          sum += w[i];
+        }
+      }
+      w[0] = contentW - sum;
+      fitted[n] = w;
+    }
+    return (widths: fitted, fits: fits);
+  }
+
+  /// Font-size multipliers tried, in order, for the item table when its
+  /// content-fitted columns don't fit the paper at full size (narrow 58mm
+  /// rolls, or very large amounts). The first scale at which every numeric
+  /// column fits on one line without squeezing the name column wins; the last
+  /// is used regardless, so the table is never left unrendered.
+  static const List<double> _tableScales = [1.0, 0.9, 0.8, 0.7];
+
   /// Render structured [rows] with true fractional-column alignment.
   static Future<ui.Image> _renderRows(
     List<ReceiptRow> rows, {
@@ -450,6 +540,19 @@ class RasterLab {
       return b.build()..layout(ui.ParagraphConstraints(width: maxW));
     }
 
+    // Item-table columns are sized in pixels from their real rendered content
+    // (see _fitRuledColumns); every other multi-column row keeps the caller's
+    // width fractions. If the table can't fit at full size, step the table's
+    // font down until it does.
+    var tableScale = 1.0;
+    var fitted = const <int, List<double>>{};
+    for (final s in _tableScales) {
+      tableScale = s;
+      final fit = _fitRuledColumns(rows, contentW, ss, mk, s);
+      fitted = fit.widths;
+      if (fit.fits) break;
+    }
+
     // Measure.
     final measured = <_MRow>[];
     double totalH = gapY;
@@ -466,20 +569,24 @@ class RasterLab {
         measured.add(_MRow.center(p, p.height));
         totalH += p.height + gapY;
       } else {
-        // Multi-column: each cell gets widthFraction*contentW.
+        // Multi-column: content-fitted pixel widths for ruled rows, otherwise
+        // each cell gets widthFraction*contentW.
+        final widths = (r.verticalRules ? fitted[r.cells.length] : null) ??
+            [for (final c in r.cells) contentW * c.widthFraction];
         final ps = <ui.Paragraph>[];
         double maxH = 0;
-        for (final c in r.cells) {
+        for (var i = 0; i < r.cells.length; i++) {
+          final c = r.cells[i];
           // On a ruled row the text is laid out inside a slightly narrower box
           // so glyphs never touch the vertical separators drawn on the
           // boundaries (padding on both sides of each cell).
-          final w = contentW * c.widthFraction -
-              (r.verticalRules ? _cellPadX * 2 * ss : 0);
-          final p = mk(c.text, r.size, c.align, r.bold, w);
+          final w = widths[i] - (r.verticalRules ? _cellPadX * 2 * ss : 0);
+          final size = r.verticalRules ? r.size * tableScale : r.size;
+          final p = mk(c.text, size, c.align, r.bold, w < 1 ? 1 : w);
           ps.add(p);
           if (p.height > maxH) maxH = p.height;
         }
-        measured.add(_MRow.cols(ps, r.cells, maxH,
+        measured.add(_MRow.cols(ps, widths, maxH,
             verticalRules: r.verticalRules));
         totalH += maxH + gapY;
       }
@@ -513,10 +620,8 @@ class RasterLab {
         final pad = m.verticalRules ? _cellPadX * ss : 0.0;
         double x = padX;
         for (var i = 0; i < m.paras.length; i++) {
-          final cell = m.cells![i];
-          final w = contentW * cell.widthFraction;
           canvas.drawParagraph(m.paras[i], Offset(x + pad, y));
-          x += w;
+          x += m.colWidths![i];
         }
         if (m.verticalRules) {
           // Separators on every interior column boundary. The row extends its
@@ -553,7 +658,7 @@ class RasterLab {
           final paint = Paint()..color = const Color(0xFF000000);
           double bx = padX;
           for (var i = 0; i < m.paras.length - 1; i++) {
-            bx += contentW * m.cells![i].widthFraction;
+            bx += m.colWidths![i];
             canvas.drawRect(
                 Rect.fromLTWH(bx - lineW / 2, top, lineW, bottom - top), paint);
           }
@@ -1063,22 +1168,24 @@ class ReceiptRow {
 /// Measured multi-column row (internal to _renderRows).
 class _MRow {
   final List<ui.Paragraph> paras;
-  final List<ReceiptCell>? cells;
+
+  /// Resolved pixel width (supersampled) of each column; one per paragraph.
+  final List<double>? colWidths;
   final double height;
   final bool isCenter;
   final bool isRule;
   final bool verticalRules;
   final bool light;
-  const _MRow._(this.paras, this.cells, this.height,
+  const _MRow._(this.paras, this.colWidths, this.height,
       {this.isCenter = false,
       this.isRule = false,
       this.verticalRules = false,
       this.light = false});
   factory _MRow.center(ui.Paragraph p, double h) =>
       _MRow._([p], null, h, isCenter: true);
-  factory _MRow.cols(List<ui.Paragraph> ps, List<ReceiptCell> cells, double h,
+  factory _MRow.cols(List<ui.Paragraph> ps, List<double> colWidths, double h,
           {bool verticalRules = false}) =>
-      _MRow._(ps, cells, h, verticalRules: verticalRules);
+      _MRow._(ps, colWidths, h, verticalRules: verticalRules);
   factory _MRow.rule(double h, {bool light = false}) =>
       _MRow._(const [], null, h, isRule: true, light: light);
 }

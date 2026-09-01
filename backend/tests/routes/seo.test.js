@@ -7,6 +7,7 @@ jest.mock('../../src/db', () => mockPool);
 
 // Rate limiters would otherwise warn about IPv6 key generation under supertest.
 jest.mock('../../src/middleware/rateLimiter', () => ({
+  globalLimiter: (req, res, next) => next(),
   loginLimiter: (req, res, next) => next(),
   registerLimiter: (req, res, next) => next(),
   refreshLimiter: (req, res, next) => next(),

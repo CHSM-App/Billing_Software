@@ -1,7 +1,8 @@
 name: Vittam
 description: "Billing app for small Indian businesses."
 publish_to: 'none'
-version: 1.1.10+22
+version: 1.1.1+23
+
   
 environment:
   sdk: ^3.5.0

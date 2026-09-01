@@ -50,6 +50,13 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
     });
 
     try {
+      // Clear a stale "offline" verdict FIRST. api.dart fast-fails every request
+      // while the connectivity state says offline, so without this the Retry
+      // button never reaches the network and can only ever fail — the one thing
+      // the user has to escape this screen was a no-op. recheck() probes /health
+      // with the raw client, bypassing that guard.
+      await ref.read(connectivityProvider.notifier).recheck();
+
       // Always attempt online check — don't rely on cached connectivity state
       final status = await LicenseService.instance.check(isOnline: true);
 

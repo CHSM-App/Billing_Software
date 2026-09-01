@@ -909,7 +909,7 @@ class _ItemSheetRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: AppFont.style(
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w400,
                         color: AppColors.textPrimary,
                         height: 1.15,
                       ),

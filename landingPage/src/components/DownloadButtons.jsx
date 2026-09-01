@@ -1,11 +1,10 @@
 import React from 'react'
 import { Monitor } from 'lucide-react'
 
-/**
- * Drop your installer files into the `public/downloads/` folder:
- *   public/downloads/Vittam-Setup.exe   → Windows installer
- */
-const WIN_URL = '/downloads/Vittam-windows.zip'
+// Always the newest release's installer — CI attaches VittamSetup.exe to every
+// v* tag, so this URL never has to change.
+const WIN_URL =
+  'https://github.com/CHSM-App/Billing_Software/releases/latest/download/VittamSetup.exe'
 const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.vengurlatech.Vittam'
 
 export function DownloadButtons({ size = 'md', row = false }) {
@@ -21,7 +20,6 @@ export function DownloadButtons({ size = 'md', row = false }) {
       {/* Windows */}
       <a
         href={WIN_URL}
-        download
         className={`${base} ${pad} btn-navy`}
       >
         <Monitor size={size === 'lg' ? 20 : 18} className="flex-shrink-0" />

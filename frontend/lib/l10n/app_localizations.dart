@@ -2060,6 +2060,54 @@ abstract class AppLocalizations {
   /// **'Round Off'**
   String get billingRoundOff;
 
+  /// No description provided for @billingAdditionalCharges.
+  ///
+  /// In en, this message translates to:
+  /// **'Additional Charges'**
+  String get billingAdditionalCharges;
+
+  /// No description provided for @billingAdditionalChargesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery, packaging or service charges added to the bill total.'**
+  String get billingAdditionalChargesHint;
+
+  /// No description provided for @billingAddCharge.
+  ///
+  /// In en, this message translates to:
+  /// **'Add charge'**
+  String get billingAddCharge;
+
+  /// No description provided for @billingChargeDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Charge description'**
+  String get billingChargeDescription;
+
+  /// No description provided for @billingChargeDescriptionHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Delivery, Packaging'**
+  String get billingChargeDescriptionHint;
+
+  /// No description provided for @billingChargeAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount ₹'**
+  String get billingChargeAmount;
+
+  /// No description provided for @billingRemoveCharge.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove charge'**
+  String get billingRemoveCharge;
+
+  /// No description provided for @billingChargeIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter both a description and an amount for each additional charge.'**
+  String get billingChargeIncomplete;
+
   /// No description provided for @billingPreview.
   ///
   /// In en, this message translates to:

@@ -33,8 +33,8 @@ logger.info({ node_env: process.env.NODE_ENV }, 'startup');
 const express    = require('express');
 const cors       = require('cors');
 const bodyParser = require('body-parser');
-const rateLimit  = require('express-rate-limit');
 const { pool, poolConnect, sql } = require('./db');
+const { globalLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
@@ -164,20 +164,9 @@ app.use(pinoHttp({
 
 app.use(bodyParser.json());
 
-// Global rate limit
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res, next, options) => {
-    res.set('Retry-After', Math.ceil(options.windowMs / 1000));
-    res.status(429).json({
-      error: 'Too many requests. Please slow down.',
-      retry_after_seconds: Math.ceil(options.windowMs / 1000),
-    });
-  },
-}));
+// Global rate limit — see middleware/rateLimiter.js for why it is keyed
+// per signed-in user rather than per IP.
+app.use(globalLimiter);
 
 // Health check
 async function healthHandler(req, res) {

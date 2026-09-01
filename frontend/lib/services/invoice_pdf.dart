@@ -417,6 +417,10 @@ class InvoicePdf {
                   _totRow('SGST',
                       money(((bill.taxAmount * 100).round() ~/ 2) / 100)),
                 ],
+                // Additional charges — after tax (added on top of the taxed
+                // amount; no GST on them).
+                for (final c in bill.additionalCharges)
+                  _totRow(c.name, '+ ${money(c.amount)}'),
                 if (bill.roundOff != 0)
                   _totRow('Round Off',
                       '${bill.roundOff < 0 ? '- ' : '+ '}${money(bill.roundOff.abs())}'),

@@ -29,8 +29,7 @@ export default function CTA() {
         <div className="flex flex-wrap justify-center gap-3">
           {/* Windows */}
           <a
-            href="/downloads/Vittam-windows.zip"
-            download
+            href="https://github.com/CHSM-App/Billing_Software/releases/latest/download/VittamSetup.exe"
             className="btn-teal inline-flex items-center gap-3 px-6 py-4 rounded-2xl text-sm font-bold"
           >
             <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">

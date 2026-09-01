@@ -255,102 +255,29 @@ jobs:
             frontend/build/app/outputs/bundle/release/billing-*.aab
           generate_release_notes: true
 
-  # Job 5: Build Flutter Windows release on tag push (v*)
+  # Job 5: Build the Windows installer + publish it to the release on a v* tag.
+  # The steps live in windows-release.yml so the manual "Windows Release" button
+  # in the Actions tab runs exactly the same build.
   build-windows:
     name: Build Flutter Windows
-    runs-on: windows-2022
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    uses: ./.github/workflows/windows-release.yml
+    with:
+      tag: ${{ github.ref_name }}
 
-      # cache: false on purpose. A cached build tree from an older runner image
-      # carries a CMakeCache.txt that pins "Visual Studio 16 2019", which no
-      # longer exists on windows-latest (VS 2022 only). Restoring it makes the
-      # CMake project() call fail before any of our steps run.
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: false
-
-      # Extra safety: wipe any local CMake cache so CMake re-detects Visual Studio.
-      # Runs before pub get since flutter clean also removes .dart_tool.
-      - name: Clean previous build cache
-        working-directory: frontend
-        run: flutter clean
-
-      - name: Get Flutter dependencies
-        working-directory: frontend
-        run: flutter pub get
-
-      # Pin the generator to the Visual Studio that actually ships on
-      # windows-latest (VS 2022 = "Visual Studio 17 2022"). This forces CMake
-      # off the stale "Visual Studio 16 2019" default even if a cache slips in.
-      - name: Build Windows release
-        working-directory: frontend
-        env:
-          CMAKE_GENERATOR: 'Visual Studio 17 2022'
-        run: flutter build windows --release
-
-      - name: Copy output with tag version
-        shell: bash
-        run: |
-          mkdir -p frontend/build/windows/dist
-          cp -r "frontend/build/windows/x64/runner/Release/." \
-            "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows"
-
-      - name: Zip Windows build
-        shell: pwsh
-        run: |
-          # Versioned zip for the GitHub Release asset.
-          Compress-Archive `
-            -Path "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows" `
-            -DestinationPath "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows.zip"
-          # Stable-named copy for the landing page download button
-          # (landingPage/public/downloads/Vittam-windows.zip). Same inner folder
-          # structure as the versioned zip, just a fixed filename so the site's
-          # /downloads/Vittam-windows.zip link never has to change per release.
-          Copy-Item `
-            "frontend/build/windows/dist/billing-${{ github.ref_name }}-windows.zip" `
-            "frontend/build/windows/dist/Vittam-windows.zip"
-
-      - name: Upload Windows build as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: billing-windows-${{ github.ref_name }}
-          path: frontend/build/windows/dist/billing-*.zip
-          retention-days: 30
-
-      # Stable-named zip, handed to the sync-backend-tag job so it can drop it
-      # into the landing page's public/downloads/ before building the site.
-      - name: Upload Vittam-windows.zip for landing page
-        uses: actions/upload-artifact@v4
-        with:
-          name: vittam-windows-download
-          path: frontend/build/windows/dist/Vittam-windows.zip
-          retention-days: 1
-
-      - name: Add Windows build to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: frontend/build/windows/dist/billing-${{ github.ref_name }}-windows.zip
-
-  # Job 5b: On tag push, rebuild the landing page bundling the FRESH Windows
-  # build as the download, then sync the backend folder to the backend branch.
+  # Job 5b: On tag push, rebuild the landing page and sync the backend folder to
+  # the backend branch. The Windows download button points at the GitHub Release
+  # asset, so nothing has to be bundled into the site any more.
   #
-  # Order (enforced via `needs`): build-windows must finish first so this job can
-  # download the just-built Vittam-windows.zip and drop it into
-  # landingPage/public/downloads/ (replacing the committed copy) BEFORE the Vite
-  # build copies public/ into backend/public/. build-apk / build-ios then wait on
-  # THIS job so the whole release goes out in the requested sequence.
+  # Order (enforced via `needs`): build-windows first so the release assets exist
+  # before the site that links to them goes live; build-apk / build-ios then wait
+  # on THIS job so the whole release goes out in the requested sequence.
   #
   # This is the tag-only twin of `sync-backend` (which still runs on branch
   # pushes for fast backend deploys). The two never run together: this one is
   # gated on tags, that one on non-tags.
   sync-backend-tag:
-    name: Bundle Windows build + sync backend branch (tag)
+    name: Sync backend branch (tag)
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     needs: build-windows
@@ -364,15 +291,6 @@ jobs:
           node-version: '20'
           cache: npm
           cache-dependency-path: landingPage/package-lock.json
-
-      - name: Download fresh Windows build (Vittam-windows.zip)
-        uses: actions/download-artifact@v4
-        with:
-          name: vittam-windows-download
-          path: landingPage/public/downloads
-
-      - name: Verify the download replaced the committed zip
-        run: ls -la landingPage/public/downloads/Vittam-windows.zip
 
       - name: Install landing page dependencies
         working-directory: landingPage

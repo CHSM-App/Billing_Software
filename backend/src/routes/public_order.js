@@ -560,7 +560,7 @@ router.post('/:qrToken', orderLimiter, async (req, res) => {
       .input('bill_id', sql.UniqueIdentifier, draft.id)
       .query(`
         UPDATE bills
-        SET subtotal = agg.sub, total = agg.sub, tax_amount = 0
+        SET subtotal = agg.sub, total = agg.sub + b.charges_amount, tax_amount = 0
         FROM bills b
         CROSS APPLY (
           SELECT ISNULL(SUM(line_total), 0) AS sub FROM bill_items WHERE bill_id = @bill_id
