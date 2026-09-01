@@ -1,7 +1,6 @@
 import 'dart:async' show Timer, unawaited;
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart' show TapGestureRecognizer;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,6 +14,8 @@ import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/whatsapp_mark.dart';
+import '../widgets/stock_target_picker.dart' show isRestaurantBusiness;
 import '../widgets/skeletons.dart';
 import '../services/printer_service.dart';
 import '../services/receipt_output.dart';
@@ -130,6 +131,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final _discountPctKey = GlobalKey();
   final _discountAmtKey = GlobalKey();
 
+  // Additional charges (delivery, packaging, service, ...) — one editable row
+  // per charge. Mirrors the server cap in backend/src/charges.js.
+  final List<_ChargeRow> _charges = [];
+  static const _maxAdditionalCharges = 10;
+  // Charge descriptions used on past bills, most-used first (server list,
+  // cached on-device). Offered under whichever description field is focused.
+  List<ChargeSuggestion> _chargeSuggestions = const [];
+  _ChargeRow? _chargeSuggestRow;
+  static const _maxChargeSuggestionsShown = 6;
+  static const _maxChargeSuggestionsKept = 30;
+
   final _barcodeBuffer = StringBuffer();
   DateTime? _lastKeyTime;
 
@@ -180,6 +192,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       if (mounted) ref.read(itemsProvider.notifier).refreshInBackground();
     });
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
+    _loadChargeSuggestions();
   }
 
   @override
@@ -224,6 +237,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _customerPhoneFocus.dispose();
     _discountPctFocus.dispose();
     _discountAmtFocus.dispose();
+    for (final r in _charges) {
+      r.dispose();
+    }
     _prevCreditDebounce?.cancel();
     super.dispose();
   }
@@ -318,6 +334,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           if (bill.discountAmount > 0) {
             _discountAmtController.text = bill.discountAmount.toStringAsFixed(2);
           }
+          // Restore any additional charges saved on the draft.
+          _restoreCharges(bill.additionalCharges);
         });
       }
     } catch (_) {}
@@ -335,6 +353,274 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }).toList();
   }
 
+  // ── Additional charges ─────────────────────────────────────────────────────
+  //
+  // Delivery, packaging, service charges and the like. They ride on top of the
+  // taxed items: part of the bill total, outside the taxable base (no GST) and
+  // never reduced by the discount — the same model the backend applies
+  // (backend/src/charges.js), so on-device and server figures agree.
+
+  /// A fresh row wired to rebuild the panel as it is typed into and to scroll
+  /// itself above the keyboard when focused.
+  _ChargeRow _newChargeRow() {
+    final row = _ChargeRow();
+    row.nameController.addListener(_onChargesChanged);
+    row.amountController.addListener(_onChargesChanged);
+    row.nameFocus.addListener(() {
+      if (row.nameFocus.hasFocus) {
+        _ensureVisible(row.key);
+        _chargeSuggestRow = row;
+      } else if (_chargeSuggestRow == row) {
+        _chargeSuggestRow = null;
+      }
+      if (mounted) setState(() {});
+      _sheetSetState?.call(() {});
+    });
+    row.amountFocus.addListener(() {
+      if (row.amountFocus.hasFocus) _ensureVisible(row.key);
+    });
+    return row;
+  }
+
+  // ── Charge-description suggestions ─────────────────────────────────────────
+
+  /// Show the cached list straight away, then refresh it from the server in
+  /// the background (merging, so a name remembered on this device from an
+  /// offline bill that hasn't synced yet is not lost).
+  Future<void> _loadChargeSuggestions() async {
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty) return;
+    try {
+      final cached = await getCachedChargeSuggestions(businessId);
+      if (cached != null && cached.isNotEmpty) {
+        final list = (jsonDecode(cached) as List)
+            .whereType<Map>()
+            .map((m) => ChargeSuggestion.fromJson(Map<String, dynamic>.from(m)))
+            .where((s) => s.name.isNotEmpty)
+            .toList();
+        if (mounted) setState(() => _chargeSuggestions = list);
+      }
+    } catch (_) {}
+    try {
+      final remote = await getChargeSuggestions();
+      if (!mounted) return;
+      _mergeChargeSuggestions(remote, businessId: businessId, persist: true);
+    } catch (_) {
+      // Offline / failed fetch: the cached list (if any) stays in force.
+    }
+  }
+
+  /// Upserts [incoming] into the in-memory list (case-insensitive on name; the
+  /// higher use count wins), re-sorts most-used first, caps the list and
+  /// optionally writes it back to the device cache.
+  void _mergeChargeSuggestions(List<ChargeSuggestion> incoming,
+      {required String businessId, bool persist = false}) {
+    final byKey = <String, ChargeSuggestion>{
+      for (final s in _chargeSuggestions) s.name.toLowerCase(): s,
+    };
+    for (final s in incoming) {
+      if (s.name.isEmpty) continue;
+      final key = s.name.toLowerCase();
+      final cur = byKey[key];
+      byKey[key] = cur == null
+          ? s
+          : s.copyWith(uses: s.uses > cur.uses ? s.uses : cur.uses);
+    }
+    final merged = byKey.values.toList()
+      ..sort((a, b) => b.uses.compareTo(a.uses));
+    final capped = merged.take(_maxChargeSuggestionsKept).toList();
+    if (mounted) setState(() => _chargeSuggestions = capped);
+    _sheetSetState?.call(() {});
+    if (persist) {
+      unawaited(saveCachedChargeSuggestions(
+          businessId, jsonEncode(capped.map((s) => s.toJson()).toList())));
+    }
+  }
+
+  /// Remember the charges on the bill being held/settled right now, so the
+  /// very next bill can offer them even before the server list refreshes
+  /// (and while offline).
+  Future<void> _rememberUsedCharges() async {
+    final entries = _chargeEntries();
+    if (entries.isEmpty) return;
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty || !mounted) return;
+    final used = <String, ChargeSuggestion>{
+      for (final s in _chargeSuggestions) s.name.toLowerCase(): s,
+    };
+    _mergeChargeSuggestions(
+      [
+        for (final c in entries)
+          ChargeSuggestion(
+            name: c.name,
+            uses: (used[c.name.toLowerCase()]?.uses ?? 0) + 1,
+          ),
+      ],
+      businessId: businessId,
+      persist: true,
+    );
+  }
+
+  /// Suggestions for [row]: those containing what has been typed so far (all
+  /// of them when the field is still empty), minus the exact current text and
+  /// anything already used on another row of this bill.
+  List<ChargeSuggestion> _chargeSuggestionsFor(_ChargeRow row) {
+    if (_chargeSuggestRow != row || _chargeSuggestions.isEmpty) return const [];
+    final q = row.name.toLowerCase();
+    final taken = {
+      for (final r in _charges)
+        if (r != row && r.name.isNotEmpty) r.name.toLowerCase(),
+    };
+    return _chargeSuggestions
+        .where((s) {
+          final n = s.name.toLowerCase();
+          return n != q && !taken.contains(n) && (q.isEmpty || n.contains(q));
+        })
+        .take(_maxChargeSuggestionsShown)
+        .toList();
+  }
+
+  /// Fill the description from a picked suggestion and move the cursor to the
+  /// amount field. Only the description is suggested — the amount is always
+  /// typed fresh for this bill.
+  void _applyChargeSuggestion(_ChargeRow row, ChargeSuggestion s) {
+    // Assign via `value` so the caret lands after the text (a bare `.text =`
+    // leaves the selection at offset 0).
+    row.nameController.value = TextEditingValue(
+      text: s.name,
+      selection: TextSelection.collapsed(offset: s.name.length),
+    );
+    _chargeSuggestRow = null;
+    if (mounted) setState(() {});
+    _sheetSetState?.call(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) row.amountFocus.requestFocus();
+    });
+  }
+
+  /// Dropdown of past charge descriptions under the focused description field.
+  Widget _chargeSuggestionList(_ChargeRow row) {
+    final items = _chargeSuggestionsFor(row);
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      constraints: const BoxConstraints(maxHeight: 190),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadow.small,
+      ),
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: items.length,
+        separatorBuilder: (_, __) =>
+            const Divider(height: 1, color: AppColors.border),
+        itemBuilder: (_, i) {
+          final s = items[i];
+          return InkWell(
+            // onTapDown, not onTap: the field losing focus would otherwise
+            // dismiss the list before the tap completed.
+            onTapDown: (_) => _applyChargeSuggestion(row, s),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(children: [
+                const Icon(Icons.history,
+                    size: 16, color: AppColors.textSecondary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(s.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _addChargeRow() {
+    if (_charges.length >= _maxAdditionalCharges) return;
+    final row = _newChargeRow();
+    setState(() => _charges.add(row));
+    _sheetSetState?.call(() {});
+    // Land the cursor in the new description field so the cashier can type
+    // straight away.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) row.nameFocus.requestFocus();
+    });
+  }
+
+  void _removeChargeRow(_ChargeRow row) {
+    setState(() => _charges.remove(row));
+    _sheetSetState?.call(() {});
+    // Dispose only after the frame that drops its fields from the tree.
+    WidgetsBinding.instance.addPostFrameCallback((_) => row.dispose());
+  }
+
+  /// Drops every charge row (bill settled / cart cleared / draft reopened).
+  void _clearCharges() {
+    if (_charges.isEmpty) return;
+    final rows = List<_ChargeRow>.from(_charges);
+    _charges.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final r in rows) {
+        r.dispose();
+      }
+    });
+  }
+
+  void _onChargesChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _sheetSetState?.call(() {});
+  }
+
+  /// Rebuilds the rows from a saved bill (reopening a draft).
+  void _restoreCharges(List<BillCharge> charges) {
+    _clearCharges();
+    for (final c in charges.take(_maxAdditionalCharges)) {
+      final row = _newChargeRow();
+      row.nameController.text = c.name;
+      row.amountController.text = c.amount.toStringAsFixed(2);
+      _charges.add(row);
+    }
+  }
+
+  /// The charges that count: a description AND a positive amount. A row still
+  /// being typed into stays out of the totals until both parts are there.
+  List<BillCharge> _chargeEntries() => [
+        for (final r in _charges)
+          if (r.name.isNotEmpty && r.amount > 0)
+            BillCharge(name: r.name, amount: r.amount),
+      ];
+
+  double _chargesTotal() => BillCharge.sum(_chargeEntries());
+
+  List<Map<String, dynamic>> _chargesPayload() =>
+      _chargeEntries().map((c) => c.toJson()).toList();
+
+  /// A half-filled row (description without an amount, or the reverse) would
+  /// silently drop off the bill — stop and ask the cashier to complete it.
+  bool _validateCharges() {
+    final incomplete = _charges.any((r) =>
+        (r.name.isNotEmpty || r.amountController.text.trim().isNotEmpty) &&
+        (r.name.isEmpty || r.amount <= 0));
+    if (incomplete) {
+      _showSnack(context.l10n.billingChargeIncomplete, isError: true);
+      return false;
+    }
+    return true;
+  }
+
   void _onDiscountPctChanged() {
     if (_updatingDiscount) return;
     // Discount is applied to the NET (pre-tax) subtotal — tax is then charged on
@@ -346,6 +632,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _discountAmtController.text = amt > 0 ? amt.toStringAsFixed(2) : '';
     _updatingDiscount = false;
     setState(() {});
+    _sheetSetState?.call(() {});
   }
 
   void _onDiscountAmtChanged() {
@@ -358,6 +645,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _discountPctController.text = pct > 0 ? pct.toStringAsFixed(2) : '';
     _updatingDiscount = false;
     setState(() {});
+    _sheetSetState?.call(() {});
   }
 
   Future<void> _handleBarcodeScan(String barcode) async {
@@ -448,6 +736,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(cartProvider.notifier).clear();
         _discountPctController.clear();
         _discountAmtController.clear();
+        _clearCharges();
         // Optimistically free the table so the Tables screen updates instantly,
         // then reconcile with the server in the background.
         if (tableId != null) {
@@ -469,7 +758,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      _clearCharges();
     }
+  }
+
+  /// Parking an unfinished cart means different things in the two trades, so
+  /// the button says what the user would say. A restaurant is holding a live
+  /// order for a table; a shop is setting a bill aside while the customer
+  /// fetches one more thing. "Draft" fit neither.
+  String _parkLabel(AppLocalizations l10n) =>
+      isRestaurantBusiness(ref.read(businessTypeProvider))
+          ? l10n.billingSaveDraft
+          : l10n.billingHoldBill;
+
+  /// Confirms what parking actually achieved, which differs by trade AND by
+  /// connectivity.
+  ///
+  /// A restaurant draft is broadcast to the kitchen queue the moment the server
+  /// accepts it, so "sent to the kitchen" is the outcome the user cares about —
+  /// but only once it has reached the server. Offline the bill is still sitting
+  /// in the local queue, so promising the kitchen has it would be a lie the
+  /// cook would discover before the cashier did.
+  String _parkedMessage(AppLocalizations l10n, {required bool online}) {
+    final restaurant = isRestaurantBusiness(ref.read(businessTypeProvider));
+    if (restaurant) {
+      return online ? l10n.billingDraftSaved : l10n.billingDraftSavedOffline;
+    }
+    return online ? l10n.billingBillHeld : l10n.billingBillHeldOffline;
+  }
+
+  /// What the customer actually hands over: the same figure the totals box
+  /// shows as Net Payable. The settle button prints it, so it must be derived
+  /// exactly as the summary derives it — discount reduces the taxable base,
+  /// round-off applies to this bill alone, and a previous due is folded in only
+  /// when the cashier chose to clear it here.
+  double _netPayable() {
+    final subtotal = ref.read(cartSubtotalProvider);
+    final tax = ref.read(cartTaxProvider);
+    final discountAmt = (double.tryParse(_discountAmtController.text) ?? 0.0)
+        .clamp(0.0, subtotal);
+    final effectiveTax =
+        subtotal > 0 ? tax * (subtotal - discountAmt) / subtotal : 0.0;
+    // Additional charges are part of the total (untaxed, undiscounted).
+    final total = subtotal + effectiveTax + _chargesTotal();
+    final roundOff =
+        computeRoundOff(total - discountAmt, ref.read(roundOffEnabledProvider));
+    final prevDue = _settlePrevCredit ? _prevCreditDue : 0.0;
+    return total - discountAmt + roundOff + prevDue;
   }
 
   /// Queues a brand-new draft locally while offline and shows it optimistically.
@@ -523,7 +858,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         taxAmount = double.parse(
             (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
       }
-      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+      // Additional charges sit on top of the taxed items: in the total, but
+      // outside the tax base and untouched by the discount (same as the server).
+      final charges = _chargeEntries();
+      final chargesTotal = BillCharge.sum(charges);
+      final total = double.parse(
+          (subtotal + taxAmount + chargesTotal).toStringAsFixed(2));
       final customerName = _customerNameController.text.trim().nullIfEmpty;
       final customerPhone = _customerPhoneController.text.trim().nullIfEmpty;
       final tableId = widget.tableId;
@@ -538,6 +878,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'subtotal': subtotal,
         'tax_amount': taxAmount,
         'discount_amount': discountAmt,
+        'charges_amount': chargesTotal,
+        'additional_charges':
+            charges.isEmpty ? null : BillCharge.encode(charges),
         'total': total,
         'payment_mode': _paymentMode,
         'items_json': jsonEncode(lineItems),
@@ -558,6 +901,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         subtotal: subtotal,
         taxAmount: taxAmount,
         discountAmount: discountAmt,
+        chargesAmount: chargesTotal,
+        additionalCharges: charges,
         total: total,
         paymentMode: _paymentMode,
         status: 'draft',
@@ -584,7 +929,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(openDraftsProvider.notifier).addLocalDraft(localBill);
       }
       if (!mounted) return;
-      _showSnack(l10n.billingDraftSaved);
+      _showSnack(_parkedMessage(l10n, online: false));
 
       if (widget.onBillDone != null) {
         widget.onBillDone!();
@@ -596,6 +941,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _customerPhoneController.clear();
         _discountPctController.clear();
         _discountAmtController.clear();
+        _clearCharges();
         if (mounted) setState(() => _savingDraft = false);
       }
     } catch (e) {
@@ -614,6 +960,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     if (!_validateCustomerPhone()) return;
+    if (!_validateCharges()) return;
+    // Remember these descriptions for next time's suggestions (best-effort).
+    unawaited(_rememberUsedCharges());
 
     // Offline: a brand-new draft is queued locally and synced on reconnect.
     // Editing an existing (already-synced) draft still needs the server, since
@@ -642,6 +991,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // dropped — the draft saved with no discount).
     final discountAmount =
         double.tryParse(_discountAmtController.text.trim()) ?? 0.0;
+    // Additional charges likewise — always sent on an edit so that removing
+    // every charge clears them on the draft rather than leaving stale ones.
+    final additionalCharges = _chargesPayload();
     // Capture the notifiers NOW. After Navigator.pop this ConsumerState is
     // disposed and its `ref` becomes defunct — using it for the background
     // reconcile would silently no-op (this was why the table never updated).
@@ -656,7 +1008,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (tableId != null) {
       tablesNotifier.applyDraftSaved(tableId, billId: activeBillId);
     }
-    _showSnack(l10n.billingDraftSaved);
+    _showSnack(_parkedMessage(l10n, online: true));
     if (widget.onBillDone != null) {
       widget.onBillDone!();
     } else if (Navigator.canPop(context)) {
@@ -669,8 +1021,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      _clearCharges();
       // This screen stays alive (nothing was popped), so reset the saving flag
-      // ourselves — otherwise the Save Draft FAB spins forever.
+      // ourselves — otherwise the park-order FAB spins forever.
       if (mounted) setState(() => _savingDraft = false);
     }
 
@@ -687,6 +1040,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             customerName: customerName,
             customerPhone: customerPhone,
             discountAmount: discountAmount,
+            additionalCharges: additionalCharges,
           );
         } else {
           result = await createBill({
@@ -697,6 +1051,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             if (customerName != null) 'customer_name': customerName,
             if (customerPhone != null) 'customer_phone': customerPhone,
             if (discountAmount > 0) 'discount_amount': discountAmount,
+            if (additionalCharges.isNotEmpty)
+              'additional_charges': additionalCharges,
           });
         }
         // The draft is now on the server — nudge the Kitchen screen to refresh
@@ -750,6 +1106,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     if (!_validateCustomerPhone()) return;
+    if (!_validateCharges()) return;
+    // Remember these descriptions for next time's suggestions (best-effort).
+    unawaited(_rememberUsedCharges());
     if (!_validateCreditCustomer()) return;
 
     // Finalizing an OFFLINE draft ('LOCAL-…'): the draft only exists in this
@@ -894,6 +1253,53 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
+  /// Park the unfinished cart. Wrapped so the row and the wide layout share one
+  /// call: the sheet must close FIRST, or _saveDraft's own Navigator.pop closes
+  /// the sheet instead of the billing screen and the user lands in the wrong
+  /// place.
+  void _park({required bool inSheet}) {
+    if (inSheet) Navigator.pop(context);
+    _saveDraft();
+  }
+
+  /// Settle the bill. [print] defaults to whatever the printer can do; passing
+  /// false is the long-press escape hatch — settle deliberately without a slip
+  /// even though a printer is connected.
+  ///
+  /// Every settle path runs the credit guard first, so no finish can bypass the
+  /// name/phone a credit bill requires.
+  void _settle({required bool inSheet, bool? withReceipt}) {
+    if (!_validateCreditCustomer()) return;
+    final canPrint = ref.read(printReadyProvider);
+    final wantsPrint = (withReceipt ?? true) && canPrint;
+    if (inSheet) Navigator.pop(context);
+    if (wantsPrint) {
+      _generateBillAndPrint();
+    } else {
+      _generateBill(onBillReady: (_) {
+        _navigateAfterBill();
+        // Say it out loud: a deliberate skip and a failed print look identical
+        // otherwise, and the cashier needs to know no slip is coming.
+        if (withReceipt == false && canPrint) {
+          _showSnack(context.l10n.billingSettleOnlyDone);
+        }
+      });
+    }
+  }
+
+  /// Settle, then hand the bill to WhatsApp. Not a share — this finalizes the
+  /// sale exactly as [_settle] does, which is why its tile is captioned and
+  /// coloured as a money action rather than as a share icon.
+  void _settleWhatsApp({required bool inSheet}) {
+    // Both guards run BEFORE anything is finalized: a missing phone must not
+    // leave a settled bill with nowhere to send it.
+    if (!_validateCreditCustomer()) return;
+    if (!_ensureCustomerPhoneForWhatsApp()) return;
+    if (inSheet) Navigator.pop(context);
+    _generateBillAndWhatsApp();
+  }
+
+
   /// True when a customer phone is present. Otherwise it reveals and focuses the
   /// customer-phone field (and warns) so the user can add it — WhatsApp needs a
   /// number and we must NOT finalize/clear the bill without one.
@@ -999,24 +1405,48 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
-  /// Fill both fields from a picked suggestion.
+  /// Fill BOTH fields from a picked suggestion, whichever field was typed in.
+  ///
+  /// Picking "Ramesh" from the name list must bring his number along, and
+  /// picking a number must bring the name — the whole point of the list is to
+  /// recover a customer you already have, not just to complete one field.
   void _applyCustomerSuggestion(Map<String, dynamic> c) {
+    // Kill the in-flight search first: it was started by the keystrokes that
+    // opened this list, and letting it land would reopen the dropdown over the
+    // values we are about to write.
     _customerSearchDebounce?.cancel();
-    _applyingSuggestion = true;
-    final name = (c['customer_name'] ?? '').toString();
+
+    final name = (c['customer_name'] ?? '').toString().trim();
     final phone = (c['customer_phone'] ?? '').toString();
-    _customerNameController.text = name;
     // Strip any country prefix: the field accepts 10 digits only, and a stored
     // "918262878298" would otherwise be cut to the wrong number.
     final digits = phone.replaceAll(RegExp(r'\D'), '');
-    _customerPhoneController.text =
+    final localPhone =
         digits.length > 10 ? digits.substring(digits.length - 10) : digits;
+
+    _applyingSuggestion = true;
+    // Assign via `value` so the caret lands after the text; a bare `.text =`
+    // leaves the selection at offset 0, and the next keystroke would insert
+    // in front of the name.
+    if (name.isNotEmpty) {
+      _customerNameController.value = TextEditingValue(
+        text: name,
+        selection: TextSelection.collapsed(offset: name.length),
+      );
+    }
+    if (localPhone.isNotEmpty) {
+      _customerPhoneController.value = TextEditingValue(
+        text: localPhone,
+        selection: TextSelection.collapsed(offset: localPhone.length),
+      );
+    }
     _applyingSuggestion = false;
 
-    setState(() {
-      _customerSuggestions = const [];
-      _suggestFor = null;
-    });
+    _customerSuggestions = const [];
+    _suggestFor = null;
+    // Both hosts must repaint: the panel owns the fields in the wide layout,
+    // while in the bottom sheet they are rebuilt by the sheet's own builder.
+    if (mounted) setState(() {});
     _sheetSetState?.call(() {});
 
     // A complete number means the previous-credit lookup should run for it.
@@ -1236,8 +1666,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     setState(() => _generatingBill = true);
     try {
       Map<String, dynamic> result;
+      final additionalCharges = _chargesPayload();
       if (widget.activeBillId != null) {
-        await updateBillItems(widget.activeBillId!, _cartPayload);
+        // Push the cart together with the current discount and charges, so
+        // anything changed after reopening the draft reaches the bill before
+        // it is finalized (the finalize step itself recomputes nothing).
+        await updateBillItems(
+          widget.activeBillId!,
+          _cartPayload,
+          discountAmount:
+              double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
+          additionalCharges: additionalCharges,
+        );
         result = await finalizeBill(widget.activeBillId!);
       } else {
         final draft = await createBill({
@@ -1251,6 +1691,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           'status': 'draft',
           if (_discountAmtController.text.trim().isNotEmpty)
             'discount_amount': double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
+          if (additionalCharges.isNotEmpty)
+            'additional_charges': additionalCharges,
         });
         result = await finalizeBill(draft['id']);
       }
@@ -1307,6 +1749,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _customerPhoneController.clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      _clearCharges();
       setState(() => _paymentMode = 'cash');
       ref.invalidate(reportProvider);
       ref.invalidate(billsProvider);
@@ -1489,7 +1932,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         taxAmount = double.parse(
             (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
       }
-      final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+      // Additional charges sit on top of the taxed items: in the total, but
+      // outside the tax base and untouched by the discount (same as the server).
+      final charges = _chargeEntries();
+      final chargesTotal = BillCharge.sum(charges);
+      final total = double.parse(
+          (subtotal + taxAmount + chargesTotal).toStringAsFixed(2));
       // Round-off is computed on-device and kept UNCHANGED when the bill syncs
       // (it's already printed on the customer's receipt), same as bill_number.
       final roundOff = computeRoundOff(
@@ -1505,6 +1953,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'subtotal': subtotal,
         'tax_amount': taxAmount,
         'discount_amount': discountAmt,
+        'charges_amount': chargesTotal,
+        'additional_charges':
+            charges.isEmpty ? null : BillCharge.encode(charges),
         'total': total,
         'round_off': roundOff,
         'payment_mode': _paymentMode,
@@ -1524,6 +1975,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         subtotal: subtotal,
         taxAmount: taxAmount,
         discountAmount: discountAmt,
+        chargesAmount: chargesTotal,
+        additionalCharges: charges,
         total: total,
         roundOff: roundOff,
         paymentMode: _paymentMode,
@@ -1550,6 +2003,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _customerPhoneController.clear();
       _discountPctController.clear();
       _discountAmtController.clear();
+      _clearCharges();
       setState(() => _paymentMode = 'cash');
       // Deduct the sold quantities from the LOCAL item cache. The server does
       // this on sync, but until then the cached stock is the only figure the
@@ -1629,7 +2083,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       taxAmount = double.parse(
           (taxAmount * (subtotal - discountAmt) / subtotal).toStringAsFixed(2));
     }
-    final total = double.parse((subtotal + taxAmount).toStringAsFixed(2));
+    // Additional charges are in the total, untaxed and undiscounted.
+    final charges = _chargeEntries();
+    final chargesTotal = BillCharge.sum(charges);
+    final total = double.parse(
+        (subtotal + taxAmount + chargesTotal).toStringAsFixed(2));
     return Bill(
       id: 'preview',
       businessId: '',
@@ -1643,6 +2101,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       subtotal: subtotal,
       taxAmount: taxAmount,
       discountAmount: discountAmt,
+      chargesAmount: chargesTotal,
+      additionalCharges: charges,
       total: total,
       roundOff: computeRoundOff(
           total - discountAmt, ref.read(roundOffEnabledProvider)),
@@ -1669,6 +2129,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
     final profile = await getGstProfile();
     final addr = profile['business_address'] ?? '';
+    final phone = profile['business_phone'] ?? '';
     final fss = profile['fssai_number'] ?? '';
     final sac = profile['default_sac_code'] ?? '';
     final gstEnabled = ref.read(gstEnabledProvider);
@@ -1684,6 +2145,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         bill,
         businessName: businessName,
         businessAddress: addr.isNotEmpty ? addr : null,
+        businessPhone: phone.isNotEmpty ? phone : null,
         businessGstin: gstin,
         businessFssai: fss.isNotEmpty ? fss : null,
         defaultSacCode: sac.isNotEmpty ? sac : null,
@@ -1708,13 +2170,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final l10n = context.l10n;
     final businessName = ref.read(businessNameProvider);
     final labels = ReceiptLabels.from(l10n, ref.read(localeProvider).code);
-    // Address and FSSAI print whenever available, regardless of GST. GSTIN
-    // remains gated on GST being enabled (gstin stays null when off, so a
+    // Address, phone and FSSAI print whenever available, regardless of GST.
+    // GSTIN remains gated on GST being enabled (gstin stays null when off, so a
     // non-GST receipt is byte-for-byte as before).
     final profile = await getGstProfile();
     final addr = profile['business_address'] ?? '';
+    final ph = profile['business_phone'] ?? '';
     final fss = profile['fssai_number'] ?? '';
     final String? address = addr.isNotEmpty ? addr : null;
+    final String? phone = ph.isNotEmpty ? ph : null;
     final String? fssai = fss.isNotEmpty ? fss : null;
     final sac = profile['default_sac_code'] ?? '';
     final gstEnabled = ref.read(gstEnabledProvider);
@@ -1733,6 +2197,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       await ReceiptOutput.emit([bill, ...prevBills],
           businessName: businessName,
           businessAddress: address,
+          businessPhone: phone,
           businessGstin: gstin,
           businessFssai: fssai,
           defaultSacCode: sac.isNotEmpty ? sac : null,
@@ -2117,7 +2582,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return Stack(
         children: [
           _buildItemsPanel(),
-          // Save Draft + Cart row. Shown whenever the cart has items — for
+          // Park-order + Cart row. Shown whenever the cart has items — for
           // tables it saves a table draft; on the standalone billing page it
           // saves a table-less "open order" everyone can create.
           if (count > 0)
@@ -2142,7 +2607,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             )
                           : const Icon(Icons.save_outlined, size: 20),
                       label: Text(
-                        _savingDraft ? l10n.commonSaving : l10n.billingSaveDraft,
+                        _savingDraft ? l10n.commonSaving : _parkLabel(l10n),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppFont.style(
@@ -2529,10 +2994,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // A server takes/builds orders and sends them to the kitchen but cannot
       // finalize or take payment — hide the finalize (WhatsApp/Print) actions.
       final canFinalize = ref.watch(userRoleProvider) != 'server';
-      // Can we actually print right now (printer configured AND Bluetooth on)?
-      // If not, the primary action becomes "Save" (finalize without printing)
-      // and a compact hint offers a link to connect. Re-checked on app resume.
-      final hasPrinter = ref.watch(printReadyProvider);
+      // Printer reachability no longer changes any label here — it only picks
+      // which finish the default settle runs, read at that moment in _settle.
+      // Still watched so the settle menu's print row reflects a printer that
+      // connects or drops while the cart is open.
+      ref.watch(printReadyProvider);
 
       return Container(
         color: AppColors.surface,
@@ -2552,7 +3018,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ),
               ),
-            // Header — always visible
+            // Header — always visible. Same 16px gutter as the payment mode,
+            // customer and discount fields below, so the trailing icons line up
+            // with the right edge of those inputs rather than floating past it.
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                   AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
@@ -2569,50 +3037,78 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         size: 18, color: Colors.white),
                   ),
                   const SizedBox(width: AppSpacing.space12),
-                  Flexible(
-                    child: Text(l10n.billingOrder,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge),
-                  ),
-                  // Item count beside the title — distinct LINES, not summed
-                  // quantity, so a 1.5 kg line still reads as one item (matches
-                  // the cart badge). Hidden on an empty cart: the placeholder
-                  // below already says there's nothing in it.
-                  if (cart.isNotEmpty) ...[
-                    const SizedBox(width: AppSpacing.space8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.primaryLight,
-                        borderRadius: BorderRadius.circular(AppRadius.large),
-                      ),
-                      child: Text(
-                        l10n.billingOrderItemCount(cart.length),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppColors.primaryDark,
-                              fontWeight: FontWeight.w600,
+                  // Title + count share ONE Expanded, which absorbs all the
+                  // free width. A Spacer here instead would get nothing —
+                  // Flexible and Spacer compete for the same slack, and the
+                  // Flexible wins, which left the trailing icons stranded in
+                  // the middle of the row instead of at its edge.
+                  Expanded(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(l10n.billingOrder,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge),
+                        ),
+                        // Item count beside the title — distinct LINES, not
+                        // summed quantity, so a 1.5 kg line still reads as one
+                        // item (matches the cart badge). Hidden on an empty
+                        // cart: the placeholder below already says so.
+                        if (cart.isNotEmpty) ...[
+                          const SizedBox(width: AppSpacing.space8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.primaryLight,
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.large),
                             ),
-                      ),
+                            child: Text(
+                              l10n.billingOrderItemCount(cart.length),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: AppColors.primaryDark,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                  ],
-                  const Spacer(),
+                  ),
+                  // Preview lives up here with the other order-level actions
+                  // because it is the one control that touches no money — it
+                  // must not sit in the footer row where everything settles.
+                  if (cart.isNotEmpty)
+                    _HeaderIconAction(
+                      icon: Icons.visibility_outlined,
+                      color: AppColors.primary,
+                      tooltip: l10n.billingPreviewReceipt,
+                      onPressed: _savingDraft ? null : _previewBill,
+                    ),
                   // Clearing a cart / releasing a table is a cashier/owner
                   // action — hidden for servers, who only build orders.
-                  if (cart.isNotEmpty && canFinalize)
-                    TextButton.icon(
+                  //
+                  // The word is dropped: a red bin next to a blue eye reads
+                  // faster than a labelled button, and the label was the only
+                  // thing making this header row crowd on a narrow phone. The
+                  // tooltip and the confirm dialog carry the meaning.
+                  if (cart.isNotEmpty && canFinalize) ...[
+                    const SizedBox(width: 6),
+                    _HeaderIconAction(
+                      icon: Icons.delete_outline,
+                      color: AppColors.error,
+                      tooltip: l10n.commonClear,
                       onPressed: () => _clearCart(inSheet: inSheet),
-                      icon: const Icon(Icons.delete_outline, size: 14),
-                      label: Text(l10n.commonClear,
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppColors.error,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -2923,6 +3419,108 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
+            // Additional charges — delivery, packaging, service, etc. Added on
+            // top of the taxed items (no GST on them, never discounted). Same
+            // cashier/owner gate as the discount above.
+            if (canFinalize)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
+                    AppSpacing.space12, AppSpacing.space16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            l10n.billingAdditionalCharges,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textSecondary,
+                                ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed:
+                              _charges.length >= _maxAdditionalCharges
+                                  ? null
+                                  : _addChargeRow,
+                          icon: const Icon(Icons.add, size: 16),
+                          label: Text(l10n.billingAddCharge),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space8),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_charges.isEmpty)
+                      Text(
+                        l10n.billingAdditionalChargesHint,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: AppColors.textSecondary),
+                      ),
+                    for (final row in _charges)
+                      Padding(
+                        key: row.key,
+                        padding:
+                            const EdgeInsets.only(top: AppSpacing.space8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: AppTextField(
+                                label: l10n.billingChargeDescription,
+                                hint: l10n.billingChargeDescriptionHint,
+                                controller: row.nameController,
+                                focusNode: row.nameFocus,
+                                capitalizeWords: true,
+                                maxLength: 100,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.space8),
+                            Expanded(
+                              flex: 2,
+                              child: AppTextField(
+                                label: l10n.billingChargeAmount,
+                                controller: row.amountController,
+                                focusNode: row.amountFocus,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                        decimal: true),
+                                prefixIcon: const Icon(Icons.currency_rupee,
+                                    size: 16, color: AppColors.textSecondary),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: l10n.billingRemoveCharge,
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.close,
+                                  size: 18, color: AppColors.textSecondary),
+                              onPressed: () => _removeChargeRow(row),
+                            ),
+                          ],
+                        ),
+                        // Past descriptions, under the focused field.
+                        _chargeSuggestionList(row),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
             // Bill summary
             if (cart.isNotEmpty)
               Padding(
@@ -2944,7 +3542,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   // total − discount (+ round-off / prev due), which equals
                   // discountedNet + effectiveTax. The identity holds because the
                   // tax already reflects the discount.
-                  final total = subtotal + effectiveTax;
+                  // Additional charges ride on top of the taxed items — never
+                  // taxed, never discounted — and are part of the total.
+                  final charges = _chargeEntries();
+                  final chargesTotal = BillCharge.sum(charges);
+                  final total = subtotal + effectiveTax + chargesTotal;
                   // Invoice round-off applies to THIS bill's payable
                   // (total - discount), independent of any previous-due amount,
                   // matching the backend. 0 when the business has it disabled.
@@ -3091,6 +3693,60 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ),
                           ),
                         ],
+                        // Additional charges — one row per charge, after tax
+                        // since they are added on top of the taxed amount.
+                        if (charges.isNotEmpty) ...[
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space12, vertical: 6),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (final c in charges)
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 4),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            c.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(ctx)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  color:
+                                                      AppColors.textSecondary,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(
+                                            width: AppSpacing.space8),
+                                        Text(
+                                          '+ ₹${c.amount.toStringAsFixed(2)}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.right,
+                                          style: Theme.of(ctx)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                                fontFeatures: const [
+                                                  FontFeature.tabularFigures()
+                                                ],
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
                         // Round Off row — only when a non-zero adjustment.
                         if (roundOff != 0) ...[
                           const Divider(height: 1),
@@ -3173,10 +3829,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   Radius.circular(AppRadius.small - 1),
                               bottomRight:
                                   Radius.circular(AppRadius.small - 1),
-                              topLeft: (discountAmt > 0 || roundOff != 0 || prevDue > 0)
+                              topLeft: (discountAmt > 0 || charges.isNotEmpty || roundOff != 0 || prevDue > 0)
                                   ? Radius.zero
                                   : Radius.circular(AppRadius.small - 1),
-                              topRight: (discountAmt > 0 || roundOff != 0 || prevDue > 0)
+                              topRight: (discountAmt > 0 || charges.isNotEmpty || roundOff != 0 || prevDue > 0)
                                   ? Radius.zero
                                   : Radius.circular(AppRadius.small - 1),
                             ),
@@ -3223,188 +3879,100 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 }),
               ),
 
-            // Save Draft is available to everyone — for tables and for
-            // table-less "open orders" on the standalone billing page.
+            // ONE action row: Hold · WhatsApp · Settle, then the printer's
+            // state on the line below.
+            //
+            // Every action is visible — nothing hidden behind a dropdown the
+            // cashier would have to open to learn what the main button does.
+            // The two icons carry one-word captions because an icon alone
+            // cannot say whether it takes the customer's money: WhatsApp
+            // finalizes the bill exactly as settling does, so it is captioned
+            // "Settle" and coloured as a money action, not as a share.
+            //
+            // A captain cannot settle, so only Hold renders and it takes the
+            // whole row.
             Padding(
-                padding: EdgeInsets.fromLTRB(
-                    AppSpacing.space16,
-                    AppSpacing.space12,
-                    AppSpacing.space16,
-                    // When this is the only action (a server with no finalize
-                    // row), add the bottom safe-area inset here instead.
-                    canFinalize ? 0 : AppSpacing.space16 + MediaQuery.of(context).padding.bottom),
-                child: Row(
-                  children: [
-                    // Preview the bill exactly as it will print (thermal receipt
-                    // or A5/A4 PDF), read-only — sits just left of Save Draft.
-                    _PreviewButton(
-                      tooltip: l10n.billingPreview,
-                      onPressed:
-                          (cart.isEmpty || _savingDraft) ? null : _previewBill,
-                    ),
-                    const SizedBox(width: AppSpacing.space8),
-                    Expanded(
-                      child: SecondaryButton(
-                        text: _savingDraft
-                            ? l10n.commonSaving
-                            : l10n.billingSaveDraft,
-                        icon: Icons.save_outlined,
-                        onPressed: (cart.isEmpty || _savingDraft)
-                            ? null
-                            : () {
-                                // This button lives inside the cart bottom sheet.
-                                // Close the sheet first so _saveDraft's
-                                // Navigator.pop pops the billing screen (not the
-                                // sheet) and the Tables list is what the user
-                                // returns to.
-                                if (inSheet) Navigator.pop(context);
-                                _saveDraft();
-                              },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            if (canFinalize)
-              Padding(
               padding: EdgeInsets.fromLTRB(
                 AppSpacing.space16,
-                AppSpacing.space16,
+                AppSpacing.space12,
                 AppSpacing.space16,
                 AppSpacing.space16 + MediaQuery.of(context).padding.bottom,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Compact printer hint — shown only when no printer is set up.
-                  // Kept to a single small red line so it never crowds the UI;
-                  // "Connect" links straight to printer setup.
-                  if (!hasPrinter)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.print_disabled_outlined,
-                              size: 13, color: AppColors.error),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text.rich(
-                              TextSpan(
-                                text: l10n.billingPrinterNotConnected,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.error,
-                                ),
-                                children: [
-                                  const TextSpan(text: ' '),
-                                  TextSpan(
-                                    text: l10n.billingPrinterConnect,
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppColors.error,
-                                      fontWeight: FontWeight.w700,
-                                      decoration: TextDecoration.underline,
-                                    ),
-                                    recognizer: TapGestureRecognizer()
-                                      ..onTap = _openPrinterSetup,
-                                  ),
-                                ],
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: Icon(
-                        Icons.message_outlined,
-                        size: 16,
-                        color: (cart.isEmpty || _generatingBill)
-                            ? AppColors.textSecondary
-                            : const Color(0xFF25D366),
-                      ),
-                      label: Text(
-                        l10n.billingWhatsapp,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppFont.style(
-                          color: (cart.isEmpty || _generatingBill)
-                              ? AppColors.textSecondary
-                              : const Color(0xFF25D366),
-                          fontWeight: FontWeight.w600,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (canFinalize) ...[
+                        // Reversible, and the only control in the row that is.
+                        IconAction(
+                          icon: Icons.pause_circle_outline,
+                          caption: l10n.billingHoldShort,
+                          color: AppColors.warning,
+                          tooltip: _parkLabel(l10n),
+                          onPressed: (cart.isEmpty || _savingDraft)
+                              ? null
+                              : () => _park(inSheet: inSheet),
                         ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(
-                          color: (cart.isEmpty || _generatingBill)
-                              ? AppColors.textSecondary
-                              : const Color(0xFF25D366),
+                        const SizedBox(width: AppSpacing.space8),
+                        IconAction(
+                          // The real mark, so the destination is unmistakable —
+                          // a generic speech bubble could be SMS or a note.
+                          glyphBuilder: (size, color) =>
+                              WhatsAppMark(size: size, color: color),
+                          // Captioned for what it DOES, not for the app it
+                          // opens — it settles first and shares second.
+                          caption: l10n.billingWhatsappCaption,
+                          color: whatsAppGreen,
+                          tooltip: l10n.billingSettleWhatsapp,
+                          onPressed: (cart.isEmpty || _generatingBill)
+                              ? null
+                              : () => _settleWhatsApp(inSheet: inSheet),
                         ),
-                        padding: const EdgeInsets.symmetric(
-                            vertical: AppSpacing.space12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppRadius.small),
+                        const SizedBox(width: AppSpacing.space8),
+                        Expanded(
+                          child: SettleButton(
+                            // The amount IS the label: the cashier reads the
+                            // figure at the instant of committing to it.
+                            amountLabel: l10n.billingSettleAmount(
+                                '₹${_netPayable().toStringAsFixed(2)}'),
+                            // ...and the second line says how it ends, so a
+                            // printer that dropped is visible BEFORE the tap.
+                            outcomeLabel: ref.watch(printReadyProvider)
+                                ? l10n.billingSettleAndPrint
+                                : l10n.billingSettleNoReceipt,
+                            isLoading: _generatingBill,
+                            longPressHint: l10n.billingSettleOnlyHint,
+                            onPressed: (cart.isEmpty || _generatingBill)
+                                ? null
+                                : () => _settle(inSheet: inSheet),
+                            // The deliberate skip, for when a printer is
+                            // connected but this one sale needs no slip.
+                            onLongPress: (cart.isEmpty || _generatingBill)
+                                ? null
+                                : () => _settle(inSheet: inSheet, withReceipt: false),
+                          ),
                         ),
-                      ),
-                      onPressed: (cart.isEmpty || _generatingBill)
-                          ? null
-                          : () {
-                              // Credit needs name + phone. Validate BEFORE
-                              // popping so the card stays open with the inline
-                              // message (same pattern as the phone guard below).
-                              if (!_validateCreditCustomer()) return;
-                              // WhatsApp needs a phone. Without one, don't
-                              // finalize/clear the bill — prompt for the number.
-                              if (!_ensureCustomerPhoneForWhatsApp()) return;
-                              if (inSheet) Navigator.pop(context);
-                              _generateBillAndWhatsApp();
-                            },
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.space12),
-                  Expanded(
-                    child: PrimaryButton(
-                      // With a printer set up the primary action prints the
-                      // receipt; without one it finalizes the bill without
-                      // printing, so the sale is never blocked on printer setup.
-                      // Labeled distinctly from "Save Draft" (billingFinalizeBill,
-                      // not commonSave) since this one closes the order for good.
-                      text: hasPrinter
-                          ? l10n.commonPrint
-                          : l10n.billingFinalizeBill,
-                      icon: hasPrinter
-                          ? Icons.print_outlined
-                          : Icons.receipt_long_outlined,
-                      onPressed: (cart.isEmpty || _generatingBill)
-                          ? null
-                          : () {
-                              // Credit needs name + phone. Validate BEFORE
-                              // popping so the card stays open with the inline
-                              // message instead of closing then failing.
-                              if (!_validateCreditCustomer()) return;
-                              if (inSheet) Navigator.pop(context);
-                              if (hasPrinter) {
-                                _generateBillAndPrint();
-                              } else {
-                                // No printer — finalize without printing.
-                                _generateBill(onBillReady: (_) {
-                                  _navigateAfterBill();
-                                });
-                              }
-                            },
-                      isLoading: _generatingBill,
-                    ),
-                  ),
+                      ] else
+                        // Captain: parking is the only thing they can do, so it
+                        // gets its full label and the whole width.
+                        Expanded(
+                          child: SecondaryButton(
+                            text: _savingDraft
+                                ? l10n.commonSaving
+                                : _parkLabel(l10n),
+                            icon: Icons.pause_circle_outline,
+                            onPressed: (cart.isEmpty || _savingDraft)
+                                ? null
+                                : () => _park(inSheet: inSheet),
+                          ),
+                        ),
                     ],
                   ),
+                  if (canFinalize)
+                    _PrinterStatusLine(onConnect: _openPrinterSetup),
                 ],
               ),
             ),
@@ -3906,36 +4474,119 @@ class _ExcelItemTable extends StatelessWidget {
   }
 }
 
-/// Compact square outlined button for previewing the bill, sized (52×52) to
-/// line up with the full-height [SecondaryButton] (Save Draft) beside it.
-/// Disabled (greyed) when [onPressed] is null (empty cart or a save in progress).
-class _PreviewButton extends StatelessWidget {
+/// A header action rendered as a tinted tile: preview (blue) and clear (red).
+///
+/// Without the tint these read as flat grey glyphs and get missed — the header
+/// is a dense row of title, count and controls. The tint is what makes them
+/// look pressable, and it separates the two by consequence: blue looks at the
+/// bill, red throws it away.
+class _HeaderIconAction extends StatelessWidget {
+  final IconData icon;
+  final Color color;
   final String tooltip;
   final VoidCallback? onPressed;
 
-  const _PreviewButton({required this.tooltip, this.onPressed});
+  const _HeaderIconAction({
+    required this.icon,
+    required this.color,
+    required this.tooltip,
+    required this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
-    final color = enabled ? AppColors.primary : AppColors.textSecondary;
+    final c = enabled ? color : AppColors.textDisabled;
     return Tooltip(
       message: tooltip,
-      child: SizedBox(
-        height: 52,
-        width: 52,
-        child: OutlinedButton(
-          onPressed: onPressed,
-          style: OutlinedButton.styleFrom(
-            padding: EdgeInsets.zero,
-            side: BorderSide(color: color),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadius.medium),
-            ),
+      child: Material(
+        color: c.withValues(alpha: enabled ? 0.10 : 0.06),
+        // A rounded square, not a circle: its straight right edge meets the
+        // row's boundary, so the icon reads as aligned to it. A circle only
+        // touches at one point and leaves the glyph looking inset. It also
+        // echoes the cart tile at the other end of the same row.
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox(
+            width: 36,
+            height: 36,
+            child: Icon(icon, size: 19, color: c),
           ),
-          child: Icon(Icons.receipt_long_outlined, size: 22, color: color),
         ),
       ),
+    );
+  }
+}
+
+/// The line under the settle button: whether a receipt can actually print, and
+/// what to do about it when it can't.
+///
+/// This is shown ALWAYS, not only when something is wrong. A warning that only
+/// appears on failure teaches nobody what the normal state looks like, and the
+/// cashier needs to know before pressing — afterwards the customer has gone.
+class _PrinterStatusLine extends ConsumerWidget {
+  final VoidCallback onConnect;
+  const _PrinterStatusLine({required this.onConnect});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    // A5/A4 output goes through the OS print dialog and needs no paired thermal
+    // printer, so there is nothing useful to report about one.
+    if (ref.watch(pdfPaperSelectedProvider)) return const SizedBox.shrink();
+
+    final printer = ref.watch(activePrinterProvider).valueOrNull;
+    final reachable = ref.watch(canPrintProvider).valueOrNull ?? false;
+
+    final (String text, String? action, Color color) = switch ((printer, reachable)) {
+      (null, _) => (l10n.billingPrinterNone, l10n.billingPrinterConnectOne,
+          AppColors.warning),
+      // Set up but not answering: Bluetooth off, out of range, powered down.
+      (_, false) => (l10n.billingPrinterUnreachable, l10n.billingPrinterRetry,
+          AppColors.warning),
+      (final p, true) => (
+          (p?.name?.trim().isNotEmpty ?? false)
+              ? l10n.billingPrinterReadyNamed(p!.name!.trim())
+              : l10n.billingPrinterReady,
+          null,
+          AppColors.success
+        ),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 7),
+      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppFont.style(fontSize: 11, color: color),
+          ),
+        ),
+        if (action != null) ...[
+          const SizedBox(width: 5),
+          InkWell(
+            onTap: onConnect,
+            child: Text(
+              action,
+              style: AppFont.style(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ).copyWith(decoration: TextDecoration.underline),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 }
@@ -4199,8 +4850,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                         widget.rowName,
                         style: TextStyle(
                           fontSize: 13,
-                          fontWeight:
-                              inCart ? FontWeight.w600 : FontWeight.w400,
+                          fontWeight: FontWeight.w400,
                           color: inCart
                               ? AppColors.primaryDark
                               : AppColors.textPrimary,
@@ -4390,3 +5040,25 @@ class _GridBtn extends StatelessWidget {
   }
 }
 
+
+/// One additional-charge row in the cart panel: a description ("Delivery")
+/// and an amount. Owns its own controllers and focus nodes so rows can be
+/// added and removed independently; [key] lets the panel scroll the row above
+/// the keyboard when either field is focused.
+class _ChargeRow {
+  final nameController = TextEditingController();
+  final amountController = TextEditingController();
+  final nameFocus = FocusNode();
+  final amountFocus = FocusNode();
+  final key = GlobalKey();
+
+  String get name => nameController.text.trim();
+  double get amount => double.tryParse(amountController.text.trim()) ?? 0.0;
+
+  void dispose() {
+    nameController.dispose();
+    amountController.dispose();
+    nameFocus.dispose();
+    amountFocus.dispose();
+  }
+}

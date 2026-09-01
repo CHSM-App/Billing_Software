@@ -64,6 +64,9 @@ class AuthStorage {
   // fetched — used so the thermal receipt can print GSTIN even offline.
   static const _keyGstNumber        = 'gst_number';
   static const _keyBusinessAddress  = 'business_address';
+  // Shop's contact number, printed under the address so a customer holding the
+  // receipt can call about an order or a return.
+  static const _keyBusinessPhone    = 'business_phone';
   static const _keyDefaultSacCode   = 'default_sac_code';
   // FSSAI license number — printed on the receipt for food businesses when set.
   static const _keyFssaiNumber      = 'fssai_number';
@@ -158,6 +161,7 @@ class AuthStorage {
   Future<void> saveGstProfile({
     String? gstNumber,
     String? businessAddress,
+    String? businessPhone,
     String? defaultSacCode,
     String? fssaiNumber,
   }) async {
@@ -165,6 +169,7 @@ class AuthStorage {
     await Future.wait([
       prefs.setString(_keyGstNumber, gstNumber ?? ''),
       prefs.setString(_keyBusinessAddress, businessAddress ?? ''),
+      prefs.setString(_keyBusinessPhone, businessPhone ?? ''),
       prefs.setString(_keyDefaultSacCode, defaultSacCode ?? ''),
       prefs.setString(_keyFssaiNumber, fssaiNumber ?? ''),
     ]);
@@ -175,6 +180,7 @@ class AuthStorage {
     return {
       'gst_number': prefs.getString(_keyGstNumber) ?? '',
       'business_address': prefs.getString(_keyBusinessAddress) ?? '',
+      'business_phone': prefs.getString(_keyBusinessPhone) ?? '',
       'default_sac_code': prefs.getString(_keyDefaultSacCode) ?? '',
       'fssai_number': prefs.getString(_keyFssaiNumber) ?? '',
     };
@@ -190,6 +196,23 @@ class AuthStorage {
     final prefs = await SharedPreferences.getInstance();
     final p = prefs.getString(_keyBillPrefix)?.trim();
     return (p == null || p.isEmpty) ? 'INV' : p;
+  }
+
+  // Charge-description suggestions (Delivery, Packaging, ...) cached per
+  // business as a JSON list, so the billing screen can offer them instantly
+  // and while offline. Keyed by business so a different login on the same
+  // device never sees another shop's charges.
+  static String _keyChargeSuggestions(String businessId) =>
+      'charge_suggestions_$businessId';
+
+  Future<void> saveChargeSuggestions(String businessId, String json) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyChargeSuggestions(businessId), json);
+  }
+
+  Future<String?> getChargeSuggestions(String businessId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyChargeSuggestions(businessId));
   }
 
   /// A stable 4-char UPPERCASE alphanumeric tag unique to THIS install,
@@ -344,6 +367,10 @@ Future<String?> getUserId()                    => AuthStorage.instance.getUserId
 Future<void>    clearSession()                 => AuthStorage.instance.clearSession();
 Future<void>    saveBillPrefix(String prefix)  => AuthStorage.instance.saveBillPrefix(prefix);
 Future<String>  getBillPrefix()                => AuthStorage.instance.getBillPrefix();
+Future<void>    saveCachedChargeSuggestions(String businessId, String json) =>
+    AuthStorage.instance.saveChargeSuggestions(businessId, json);
+Future<String?> getCachedChargeSuggestions(String businessId) =>
+    AuthStorage.instance.getChargeSuggestions(businessId);
 Future<String>  nextOfflineBillNumber()        => AuthStorage.instance.nextOfflineBillNumber();
 Future<String>  getDeviceTag()                 => AuthStorage.instance.getDeviceTag();
 Future<void>    savePaperSize(String size)     => AuthStorage.instance.savePaperSize(size);
@@ -352,6 +379,6 @@ Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInv
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);
 Future<void>    updateRoundOffEnabled(bool e)  => AuthStorage.instance.updateRoundOffEnabled(e);
-Future<void>    saveGstProfile({String? gstNumber, String? businessAddress, String? defaultSacCode, String? fssaiNumber}) =>
-    AuthStorage.instance.saveGstProfile(gstNumber: gstNumber, businessAddress: businessAddress, defaultSacCode: defaultSacCode, fssaiNumber: fssaiNumber);
+Future<void>    saveGstProfile({String? gstNumber, String? businessAddress, String? businessPhone, String? defaultSacCode, String? fssaiNumber}) =>
+    AuthStorage.instance.saveGstProfile(gstNumber: gstNumber, businessAddress: businessAddress, businessPhone: businessPhone, defaultSacCode: defaultSacCode, fssaiNumber: fssaiNumber);
 Future<Map<String, String>> getGstProfile()    => AuthStorage.instance.getGstProfile();

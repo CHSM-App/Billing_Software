@@ -849,10 +849,66 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingGenerateBill => 'बिल तयार करा';
 
   @override
-  String get billingSaveDraft => 'ड्राफ्ट जतन करा';
+  String get billingSaveDraft => 'ऑर्डर नोंदवा';
+
+  @override
+  String get billingHoldBill => 'बिल होल्ड करा';
 
   @override
   String get billingFinalizeBill => 'बिल अंतिम करा';
+
+  @override
+  String get billingHoldShort => 'होल्ड';
+
+  @override
+  String billingSettleAmount(String amount) {
+    return '$amount घ्या';
+  }
+
+  @override
+  String get billingWhatsappCaption => 'पाठवा';
+
+  @override
+  String get billingSettleAndPrint => 'आणि प्रिंट';
+
+  @override
+  String get billingSettleNoReceipt => 'पावती नाही';
+
+  @override
+  String get billingSettleWhatsapp => 'पैसे घ्या आणि व्हॉट्सॲपवर पाठवा';
+
+  @override
+  String get billingSettleOnly => 'पावतीशिवाय पैसे घ्या';
+
+  @override
+  String get billingSettleOnlyDone => 'प्रिंटशिवाय पैसे घेतले.';
+
+  @override
+  String get billingSettleOnlyHint =>
+      'प्रिंटशिवाय पैसे घेण्यासाठी बटण दाबून धरा';
+
+  @override
+  String get billingPreviewReceipt => 'पावती पहा';
+
+  @override
+  String get billingPrinterReady => 'प्रिंटर जोडलेला आहे';
+
+  @override
+  String billingPrinterReadyNamed(String name) {
+    return 'प्रिंटर जोडलेला · $name';
+  }
+
+  @override
+  String get billingPrinterUnreachable => 'प्रिंटर बंद किंवा रेंजबाहेर';
+
+  @override
+  String get billingPrinterRetry => 'पुन्हा प्रयत्न';
+
+  @override
+  String get billingPrinterNone => 'प्रिंटर नाही';
+
+  @override
+  String get billingPrinterConnectOne => 'जोडा';
 
   @override
   String get billingClearCart => 'निवडलेल्या वस्तू काढा';
@@ -884,7 +940,19 @@ class AppLocalizationsMr extends AppLocalizations {
       'ही ऑर्डर अजून जतन होत आहे. संपादित किंवा अंतिम करण्यासाठी पुन्हा कनेक्ट करा.';
 
   @override
-  String get billingDraftSaved => 'ड्राफ्ट जतन झाला.';
+  String get billingDraftSaved => 'ऑर्डर किचनला पाठवली.';
+
+  @override
+  String get billingBillHeld =>
+      'बिल होल्डवर ठेवले. खुल्या ऑर्डरमधून पुन्हा उघडा.';
+
+  @override
+  String get billingDraftSavedOffline =>
+      'ऑर्डर जतन केली. पुन्हा ऑनलाइन झाल्यावर किचनला पोहोचेल.';
+
+  @override
+  String get billingBillHeldOffline =>
+      'बिल होल्डवर ठेवले. पुन्हा ऑनलाइन झाल्यावर सिंक होईल.';
 
   @override
   String get billingSaveFailed => 'जतन करता आले नाही. तुमचे कनेक्शन तपासा.';
@@ -1038,6 +1106,32 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingRoundOff => 'राउंड ऑफ';
+
+  @override
+  String get billingAdditionalCharges => 'अतिरिक्त शुल्क';
+
+  @override
+  String get billingAdditionalChargesHint =>
+      'बिलाच्या एकूण रकमेत जोडले जाणारे डिलिव्हरी, पॅकिंग किंवा सेवा शुल्क.';
+
+  @override
+  String get billingAddCharge => 'शुल्क जोडा';
+
+  @override
+  String get billingChargeDescription => 'शुल्काचे वर्णन';
+
+  @override
+  String get billingChargeDescriptionHint => 'उदा. डिलिव्हरी, पॅकिंग';
+
+  @override
+  String get billingChargeAmount => 'रक्कम ₹';
+
+  @override
+  String get billingRemoveCharge => 'शुल्क काढा';
+
+  @override
+  String get billingChargeIncomplete =>
+      'प्रत्येक अतिरिक्त शुल्कासाठी वर्णन आणि रक्कम दोन्ही भरा.';
 
   @override
   String get billingPreview => 'बिल पूर्वावलोकन';
@@ -1911,7 +2005,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get staffRoleWaiter => 'वेटर';
 
   @override
-  String get staffRoleServer => 'सर्व्हर';
+  String get staffRoleServer => 'कॅप्टन';
 
   @override
   String get staffRoleKitchen => 'किचन शेफ';
@@ -2579,4 +2673,238 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get itemsRecipeNoMaterials =>
       'आधी कच्चा माल जोडा, नंतर पाककृती पाककृती सेट करा.';
+
+  @override
+  String get purchasesTitle => 'खरेदी';
+
+  @override
+  String get purchaseListFabShort => 'खरेदी यादी';
+
+  @override
+  String get purchaseListFabLong => 'खरेदी यादी तयार करा';
+
+  @override
+  String get purchaseFabShort => 'खरेदी';
+
+  @override
+  String get purchaseFabLong => 'खरेदी जोडा';
+
+  @override
+  String get purchaseNoneThisMonth =>
+      'या महिन्यात कोणतीही खरेदी नोंदवलेली नाही';
+
+  @override
+  String get purchaseStatusPaid => 'भरले';
+
+  @override
+  String get purchaseStatusUnpaid => 'बाकी';
+
+  @override
+  String get purchaseStatusPartial => 'अंशतः भरले';
+
+  @override
+  String get purchaseQuickAddRawMaterial => 'नवीन कच्चा माल';
+
+  @override
+  String get purchaseQuickAddItem => 'नवीन वस्तू';
+
+  @override
+  String get purchaseFieldName => 'नाव';
+
+  @override
+  String get purchaseNameRequired => 'नाव आवश्यक आहे';
+
+  @override
+  String get purchaseFieldUnit => 'एकक';
+
+  @override
+  String get purchaseFieldSalePrice => 'विक्री किंमत';
+
+  @override
+  String get purchaseSalePriceRequired => 'विक्री किंमत आवश्यक आहे';
+
+  @override
+  String get purchaseFieldGstOptional => 'जीएसटी % (ऐच्छिक)';
+
+  @override
+  String get purchaseFieldVendorName => 'विक्रेत्याचे नाव';
+
+  @override
+  String get purchaseVendorNameRequired => 'विक्रेत्याचे नाव आवश्यक आहे';
+
+  @override
+  String get purchaseEditTitle => 'खरेदी बदला';
+
+  @override
+  String get purchaseAddTitle => 'खरेदी जोडा';
+
+  @override
+  String get purchaseImportPdfTooltip => 'खरेदी यादी PDF मधून आयात करा';
+
+  @override
+  String get purchaseFieldInvoiceNumber => 'बिल क्रमांक';
+
+  @override
+  String get purchaseInvoiceNumberRequired => 'बिल क्रमांक आवश्यक आहे';
+
+  @override
+  String get purchaseFieldVendorGstin => 'विक्रेत्याचा GSTIN (ऐच्छिक)';
+
+  @override
+  String get purchaseGstinInvalid => 'GSTIN वैध नाही';
+
+  @override
+  String get purchaseGstinHelp =>
+      'नोंदणी नसलेल्या विक्रेत्यासाठी रिकामे ठेवा — त्यांच्या बिलांवर इनपुट टॅक्स क्रेडिट मिळत नाही.';
+
+  @override
+  String get purchaseInterstate => 'परराज्य खरेदी (IGST)';
+
+  @override
+  String get purchaseItcClaimable => 'इनपुट टॅक्स क्रेडिट मिळू शकते';
+
+  @override
+  String get purchaseItcBlockedHint =>
+      'ब्लॉक्ड क्रेडिटसाठी बंद करा (कलम 17(5))';
+
+  @override
+  String get purchaseReverseCharge => 'रिव्हर्स चार्ज';
+
+  @override
+  String get purchaseItemsSection => 'वस्तू';
+
+  @override
+  String get purchaseInventoryOffHint =>
+      'खरेदीतून स्टॉक अपडेट करण्यासाठी सेटिंग्जमध्ये इन्व्हेंटरी चालू करा.';
+
+  @override
+  String get purchaseAddLine => 'ओळ जोडा';
+
+  @override
+  String get purchaseFieldDiscountOptional => 'सूट (ऐच्छिक)';
+
+  @override
+  String get purchaseUpdateButton => 'खरेदी अपडेट करा';
+
+  @override
+  String get purchaseSaveButton => 'खरेदी जतन करा';
+
+  @override
+  String purchaseInvoiceDate(String date) {
+    return 'बिल दिनांक: $date';
+  }
+
+  @override
+  String get purchaseFieldQty => 'नग';
+
+  @override
+  String get purchaseInvalid => 'अवैध';
+
+  @override
+  String get purchaseFieldAmount => 'रक्कम';
+
+  @override
+  String get purchaseFieldHsnOptional => 'HSN/SAC (ऐच्छिक)';
+
+  @override
+  String get purchaseUpdatesStock => 'स्टॉक अपडेट होईल';
+
+  @override
+  String purchaseUpdatesStockUnit(String unit) {
+    return 'स्टॉक अपडेट होईल · $unit';
+  }
+
+  @override
+  String purchaseRatePerUnit(String rate, String unit) {
+    return 'रु. $rate प्रति $unit';
+  }
+
+  @override
+  String get purchaseUnitFallback => 'एकक';
+
+  @override
+  String purchaseLineTotal(String amount) {
+    return 'ओळ एकूण: रु. $amount';
+  }
+
+  @override
+  String get purchaseFieldItemName => 'वस्तूचे नाव';
+
+  @override
+  String get purchaseItemNameRequired => 'वस्तूचे नाव आवश्यक आहे';
+
+  @override
+  String purchaseAddAsRawMaterial(String name) {
+    return '\"$name\" नवीन कच्चा माल म्हणून जोडा';
+  }
+
+  @override
+  String purchaseAddAsItem(String name) {
+    return '\"$name\" नवीन वस्तू म्हणून जोडा';
+  }
+
+  @override
+  String purchaseInStock(String qty, String unit) {
+    return 'स्टॉकमध्ये: $qty $unit';
+  }
+
+  @override
+  String get purchaseFieldPaymentMode => 'पेमेंट पद्धत';
+
+  @override
+  String get purchaseFieldStatus => 'स्थिती';
+
+  @override
+  String get purchaseTaxableValue => 'करपात्र मूल्य';
+
+  @override
+  String get purchaseDiscount => 'सूट';
+
+  @override
+  String get purchaseTotal => 'एकूण';
+
+  @override
+  String purchaseFilePickerFailed(String error) {
+    return 'फाईल निवडक उघडता आला नाही: $error';
+  }
+
+  @override
+  String get purchasePdfReadFailed =>
+      'ती PDF वाचता आली नाही — ती खरेदी यादीची निर्यात आहे का?';
+
+  @override
+  String get purchasePdfNoItems =>
+      'त्या PDF मध्ये कोणत्याही वस्तू आढळल्या नाहीत.';
+
+  @override
+  String get purchaseDeleteTitle => 'खरेदी हटवायची?';
+
+  @override
+  String get purchaseDeleteBody =>
+      'या खरेदीने जोडलेला स्टॉक परत काढला जाईल. हे पूर्ववत करता येणार नाही.';
+
+  @override
+  String get purchaseReviewImportTitle => 'आयात केलेल्या वस्तू तपासा';
+
+  @override
+  String get purchaseReviewImportHint =>
+      'खरेदीत जोडण्यापूर्वी प्रत्येक वस्तू व नग तपासा — रक्कम पुढे भरायची आहे.';
+
+  @override
+  String get purchaseReviewItem => 'वस्तू';
+
+  @override
+  String purchaseReviewConfirm(int count) {
+    return '$count वस्तू खरेदीत जोडा';
+  }
+
+  @override
+  String expensesPurchasesSection(int count) {
+    return 'खरेदी ($count)';
+  }
+
+  @override
+  String expensesPurchaseInvoice(String number) {
+    return 'खरेदी - बिल $number';
+  }
 }

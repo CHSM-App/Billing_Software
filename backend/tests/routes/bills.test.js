@@ -146,6 +146,38 @@ describe('GET /api/bills', () => {
 // ------------------------------------------------------------------
 // GET /api/bills/:id
 // ------------------------------------------------------------------
+describe('GET /api/bills/charges/suggestions', () => {
+  test('aggregates past charge names, most used first (descriptions only)', async () => {
+    // Newest first, as the query orders them. "Delivery" appears twice (in two
+    // spellings) → uses 2, latest spelling from the newest bill. Amounts are
+    // never returned. A row with corrupt JSON is skipped rather than failing.
+    mockRequest.recordset = [
+      { additional_charges: JSON.stringify([{ name: 'Delivery', amount: 40 }]), created_at: '2026-08-03T00:00:00.000Z' },
+      { additional_charges: JSON.stringify([{ name: 'delivery', amount: 30 }, { name: 'Packaging', amount: 10 }]), created_at: '2026-08-02T00:00:00.000Z' },
+      { additional_charges: '{not json', created_at: '2026-08-01T00:00:00.000Z' },
+    ];
+
+    const res = await request(app)
+      .get('/api/bills/charges/suggestions')
+      .set(authHeader());
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([
+      { name: 'Delivery', uses: 2, last_used_at: '2026-08-03T00:00:00.000Z' },
+      { name: 'Packaging', uses: 1, last_used_at: '2026-08-02T00:00:00.000Z' },
+    ]);
+  });
+
+  test('returns an empty list when no bill has carried a charge', async () => {
+    mockRequest.recordset = [];
+    const res = await request(app)
+      .get('/api/bills/charges/suggestions')
+      .set(authHeader());
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+});
+
 describe('GET /api/bills/:id', () => {
   test('returns bill by id', async () => {
     mockRequest.query
@@ -438,6 +470,80 @@ describe('POST /api/bills', () => {
     expect(billInsert.tax_amount).toBe(4);   // 5 × 80/100
     expect(billInsert.total).toBe(104);      // subtotal 100 + discounted tax 4
     // Payable is total − discount = 84 (discounted net 80 + tax 4).
+  });
+
+  test('adds additional charges to the total without taxing or discounting them', async () => {
+    // Same 5% item, GST on, discount 20: net 100, discounted net 80, tax 4.
+    // Charges Delivery 30 + Packaging 10 = 40 ride on top, untaxed and not
+    // reduced by the discount: total = 100 + 4 + 40 = 144, payable = 124.
+    const taxedItem = { ...sampleItem, tax_rate: 5, hsn_code: '9963' };
+    const capturedInputs = [];
+    const txQueryMock = jest.fn()
+      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false, gst_enabled: true }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [taxedItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
+      .mockResolvedValue({ recordset: [], rowsAffected: [1] });
+
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      capturedInputs.push(inputs);
+      return {
+        inputs,
+        input: jest.fn(function (name, _type, value) { inputs[name] = value; return this; }),
+        query: txQueryMock,
+      };
+    });
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({
+        items: [{ item_id: ITEM_ID, quantity: 2 }],
+        payment_mode: 'cash',
+        discount_amount: 20,
+        additional_charges: [
+          { name: '  Delivery ', amount: 30 },
+          { name: 'Packaging', amount: '10' },
+        ],
+      });
+    expect(res.status).toBe(201);
+
+    const billInsert = capturedInputs.find((i) => 'subtotal' in i);
+    expect(billInsert.subtotal).toBe(100);
+    expect(billInsert.discount_amount).toBe(20);
+    expect(billInsert.tax_amount).toBe(4);        // charges never enter the tax base
+    expect(billInsert.charges_amount).toBe(40);
+    expect(billInsert.total).toBe(144);           // 100 + 4 + 40
+    // Stored detail is normalised: names trimmed, amounts numeric.
+    expect(JSON.parse(billInsert.additional_charges)).toEqual([
+      { name: 'Delivery', amount: 30 },
+      { name: 'Packaging', amount: 10 },
+    ]);
+  });
+
+  test('rejects malformed additional charges', async () => {
+    const base = { items: [{ item_id: ITEM_ID, quantity: 1 }], payment_mode: 'cash' };
+    const bad = [
+      'delivery',                                  // not an array
+      [{ name: '', amount: 10 }],                  // no name
+      [{ name: 'Delivery', amount: 0 }],           // non-positive amount
+      [{ name: 'Delivery', amount: 'ten' }],       // non-numeric amount
+    ];
+    for (const additional_charges of bad) {
+      const res = await request(app)
+        .post('/api/bills')
+        .set(authHeader())
+        .send({ ...base, additional_charges });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/additional[ _]charge/i);
+    }
   });
 
   test('returns 200 for duplicate client_bill_id (idempotent)', async () => {

@@ -90,7 +90,7 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
     );
@@ -135,6 +135,8 @@ class OfflineService {
         subtotal        REAL    NOT NULL,
         tax_amount      REAL    NOT NULL,
         discount_amount REAL    NOT NULL DEFAULT 0,
+        charges_amount  REAL    NOT NULL DEFAULT 0,
+        additional_charges TEXT,
         total           REAL    NOT NULL,
         round_off       REAL    NOT NULL DEFAULT 0,
         payment_mode    TEXT    NOT NULL,
@@ -171,6 +173,8 @@ class OfflineService {
         subtotal        REAL    NOT NULL,
         tax_amount      REAL    NOT NULL,
         discount_amount REAL    NOT NULL DEFAULT 0,
+        charges_amount  REAL    NOT NULL DEFAULT 0,
+        additional_charges TEXT,
         total           REAL    NOT NULL,
         payment_mode    TEXT    NOT NULL,
         items_json      TEXT    NOT NULL,
@@ -269,6 +273,17 @@ class OfflineService {
       await db.execute(
         'ALTER TABLE cached_items ADD COLUMN price_inclusive_tax INTEGER NOT NULL DEFAULT 0',
       );
+    }
+    if (oldVersion < 10) {
+      // v9 → v10: offline bills/drafts gain additional charges (delivery,
+      // packaging, ...): the summed charges_amount plus the itemised JSON, so a
+      // queued bill prints and syncs with exactly the charges the cashier added.
+      for (final table in ['offline_bills', 'offline_drafts']) {
+        await db.execute(
+          'ALTER TABLE $table ADD COLUMN charges_amount REAL NOT NULL DEFAULT 0',
+        );
+        await db.execute('ALTER TABLE $table ADD COLUMN additional_charges TEXT');
+      }
     }
   }
 
@@ -696,6 +711,8 @@ class OfflineService {
       'subtotal':        data['subtotal'],
       'tax_amount':      data['tax_amount'],
       'discount_amount': data['discount_amount'] ?? 0,
+      'charges_amount':  data['charges_amount'] ?? 0,
+      'additional_charges': data['additional_charges'],
       'total':           data['total'],
       'round_off':       data['round_off'] ?? 0,
       'payment_mode':    data['payment_mode'],
@@ -886,6 +903,8 @@ class OfflineService {
       subtotal: (row['subtotal'] as num).toDouble(),
       taxAmount: (row['tax_amount'] as num).toDouble(),
       discountAmount: (row['discount_amount'] as num?)?.toDouble() ?? 0,
+      chargesAmount: (row['charges_amount'] as num?)?.toDouble() ?? 0,
+      additionalCharges: BillCharge.listFrom(row['additional_charges']),
       total: (row['total'] as num).toDouble(),
       roundOff: (row['round_off'] as num?)?.toDouble() ?? 0,
       paymentMode: row['payment_mode'] as String,
@@ -922,6 +941,8 @@ class OfflineService {
       'subtotal':        data['subtotal'],
       'tax_amount':      data['tax_amount'],
       'discount_amount': data['discount_amount'] ?? 0,
+      'charges_amount':  data['charges_amount'] ?? 0,
+      'additional_charges': data['additional_charges'],
       'total':           data['total'],
       'payment_mode':    data['payment_mode'],
       'items_json':      data['items_json'],

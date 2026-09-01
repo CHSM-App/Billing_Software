@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// Formats a quantity for display: whole numbers show without a decimal
 /// (`2`), fractional weights show up to three trimmed decimals (`1.5`,
 /// `0.25`). Used for cart rows, receipts, and history.
@@ -316,6 +318,75 @@ class BillItem {
       );
 }
 
+/// A bill-level additional charge — delivery, packaging, service, etc.
+///
+/// Charges are added on top of the taxed items: they are part of [Bill.total]
+/// (total = subtotal + tax + charges), sit outside the taxable base (no GST)
+/// and are never reduced by the discount. Mirrors backend/src/charges.js.
+class BillCharge {
+  final String name;
+  final double amount;
+
+  const BillCharge({required this.name, required this.amount});
+
+  factory BillCharge.fromJson(Map<String, dynamic> j) => BillCharge(
+        name: (j['name'] ?? '').toString().trim(),
+        amount: double.tryParse((j['amount'] ?? 0).toString()) ?? 0.0,
+      );
+
+  Map<String, dynamic> toJson() => {'name': name, 'amount': amount};
+
+  /// Parses whatever a charge list arrives as: the server's JSON array, an
+  /// offline row's encoded string, or null. Incomplete entries are dropped.
+  static List<BillCharge> listFrom(dynamic raw) {
+    dynamic list = raw;
+    if (raw is String) {
+      if (raw.trim().isEmpty) return const [];
+      try {
+        list = jsonDecode(raw);
+      } catch (_) {
+        return const [];
+      }
+    }
+    if (list is! List) return const [];
+    return list
+        .whereType<Map>()
+        .map((m) => BillCharge.fromJson(Map<String, dynamic>.from(m)))
+        .where((c) => c.name.isNotEmpty && c.amount > 0)
+        .toList();
+  }
+
+  /// JSON text for the offline queue / sync payloads.
+  static String encode(List<BillCharge> charges) =>
+      jsonEncode(charges.map((c) => c.toJson()).toList());
+
+  static double sum(List<BillCharge> charges) =>
+      charges.fold(0.0, (s, c) => s + c.amount);
+}
+
+/// A charge description the business has used before, offered as an
+/// autocomplete suggestion while adding charges to a bill. Only the
+/// description is suggested — the amount is always entered per bill.
+class ChargeSuggestion {
+  final String name;
+  /// How many bills have carried it — drives the ordering.
+  final int uses;
+
+  const ChargeSuggestion({required this.name, this.uses = 1});
+
+  factory ChargeSuggestion.fromJson(Map<String, dynamic> j) => ChargeSuggestion(
+        name: (j['name'] ?? '').toString().trim(),
+        uses: int.tryParse((j['uses'] ?? 1).toString()) ?? 1,
+      );
+
+  Map<String, dynamic> toJson() => {'name': name, 'uses': uses};
+
+  ChargeSuggestion copyWith({String? name, int? uses}) => ChargeSuggestion(
+        name: name ?? this.name,
+        uses: uses ?? this.uses,
+      );
+}
+
 class Bill {
   final String id;
   final String businessId;
@@ -329,6 +400,11 @@ class Bill {
   final double subtotal;
   final double taxAmount;
   final double discountAmount;
+  /// Sum of [additionalCharges]. Already INCLUDED in [total]
+  /// (total = subtotal + tax + charges), so [grandTotal] needs no extra term.
+  final double chargesAmount;
+  /// Itemised additional charges (delivery, packaging, ...) for display.
+  final List<BillCharge> additionalCharges;
   final double total;
   /// Signed invoice-level round-off adjustment (e.g. -0.22, +0.40). 0 when the
   /// business has rounding disabled. NEVER folded into subtotal/tax/total — the
@@ -360,6 +436,8 @@ class Bill {
     required this.subtotal,
     required this.taxAmount,
     this.discountAmount = 0.0,
+    this.chargesAmount = 0.0,
+    this.additionalCharges = const [],
     required this.total,
     this.roundOff = 0.0,
     required this.paymentMode,
@@ -385,6 +463,10 @@ class Bill {
         discountAmount: j['discount_amount'] != null
             ? double.parse(j['discount_amount'].toString())
             : 0.0,
+        chargesAmount: j['charges_amount'] != null
+            ? double.parse(j['charges_amount'].toString())
+            : 0.0,
+        additionalCharges: BillCharge.listFrom(j['additional_charges']),
         total: double.parse(j['total'].toString()),
         roundOff: j['round_off'] != null
             ? double.parse(j['round_off'].toString())

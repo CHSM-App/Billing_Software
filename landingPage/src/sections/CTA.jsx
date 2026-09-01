@@ -21,15 +21,10 @@ export default function CTA() {
 
       <div className="max-w-3xl mx-auto text-center relative z-10">
         <h2
-          className="font-display text-4xl lg:text-5xl font-extrabold text-white mb-5 leading-tight"
+          className="font-display text-4xl lg:text-5xl font-extrabold text-white mb-10 leading-tight"
         >
           Ready to simplify<br />your billing?
         </h2>
-        <p className="text-lg text-white/50 mb-10 leading-relaxed">
-          Join hundreds of shop owners who replaced paper registers with Vittam.
-          Setup takes under 5 minutes.
-        </p>
-
         {/* Buttons – centred */}
         <div className="flex flex-wrap justify-center gap-3">
           {/* Windows */}

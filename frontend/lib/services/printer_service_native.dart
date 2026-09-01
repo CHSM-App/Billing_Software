@@ -582,6 +582,17 @@ class PrinterService {
       }
     }
 
+    // Additional charges (delivery, packaging, ...) — after tax, since they are
+    // added on top of the taxed amount and carry no GST themselves. The label
+    // is clipped so a long description can't push the amount off the paper.
+    for (final c in bill.additionalCharges) {
+      final maxLabel = p.cols - 14;
+      final label = c.name.length > maxLabel
+          ? c.name.substring(0, maxLabel)
+          : c.name;
+      lines.add(_twoCol(p, '$label:', '+Rs.${c.amount.toStringAsFixed(2)}'));
+    }
+
     if (bill.roundOff != 0) {
       final sign = bill.roundOff < 0 ? '-' : '+';
       lines.add(_twoCol(p, labels?.roundOff ?? 'Round Off:',
@@ -627,31 +638,43 @@ class PrinterService {
     final fssai = businessFssai != null && businessFssai.isNotEmpty;
     final rows = <ReceiptRow>[];
 
+    // Font sizes below are tuned for an 80mm roll (576 dots). A 58mm roll has
+    // a third less width, so everything is scaled down together — otherwise
+    // the date line, "Grand Total" and the item table all wrap on the narrow
+    // paper. (RasterLab additionally auto-shrinks the item table if its
+    // content still doesn't fit.)
+    final fs = basep.cols <= _cols58.cols ? 0.85 : 1.0;
+    final sizeTitle = 34 * fs;
+    final sizeBody = 26 * fs;
+    final sizeTotal = 22 * fs;
+    final sizeGrand = 32 * fs;
+    final sizeBrand = 18 * fs;
+
     // Header — order: name, address, phone, GSTIN, FSSAI. Only the business
     // name is always shown; every other line prints only when available.
     rows.add(ReceiptRow.center(
         businessName ?? labels?.defaultBusiness ?? 'BUSINESS',
-        size: 34, bold: true));
+        size: sizeTitle, bold: true));
     if (businessAddress != null && businessAddress.isNotEmpty) {
       // Split a multi-line/CRLF address into separate centred rows so each
       // physical line is centred (a single row with an embedded newline would
       // left-align the wrapped part). Raw (unpadded) lines — ReceiptRow.center
       // handles the centring for the raster path.
       for (final l in _wrapLines(businessAddress, p.cols)) {
-        rows.add(ReceiptRow.center(l, size: 26));
+        rows.add(ReceiptRow.center(l, size: sizeBody));
       }
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
       rows.add(ReceiptRow.center(
-          '${labels?.phonePrefix ?? 'Ph:'} $businessPhone', size: 26));
+          '${labels?.phonePrefix ?? 'Ph:'} $businessPhone', size: sizeBody));
     }
     if (gst) {
       rows.add(ReceiptRow.center(
-          '${labels?.gstin ?? 'GSTIN:'} $businessGstin', size: 26));
+          '${labels?.gstin ?? 'GSTIN:'} $businessGstin', size: sizeBody));
     }
     if (fssai) {
       rows.add(ReceiptRow.center(
-          '${labels?.fssai ?? 'FSSAI:'} $businessFssai', size: 26));
+          '${labels?.fssai ?? 'FSSAI:'} $businessFssai', size: sizeBody));
     }
     rows.add(ReceiptRow.rule());
 
@@ -659,37 +682,40 @@ class PrinterService {
     rows.add(ReceiptRow.cols([
       ReceiptCell('${labels?.billNo ?? 'Bill#:'} ${bill.billNumber}',
           widthFraction: 1.0),
-    ], size: 26));
+    ], size: sizeBody));
     if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty) {
       rows.add(ReceiptRow.cols([
         ReceiptCell('${labels?.table ?? 'Table:'} ${bill.tableNumber}',
             widthFraction: 1.0),
-      ], size: 26));
+      ], size: sizeBody));
     }
     rows.add(ReceiptRow.cols([
       ReceiptCell(
           '${labels?.date ?? 'Date:'} ${_formatDate(bill.createdAt.toLocal())}',
           widthFraction: 1.0),
-    ], size: 26));
+    ], size: sizeBody));
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
       rows.add(ReceiptRow.cols([
         ReceiptCell('${labels?.customer ?? 'Cust:'} ${bill.customerName}',
             widthFraction: 1.0),
-      ], size: 26));
+      ], size: sizeBody));
     }
     if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty) {
       rows.add(ReceiptRow.cols([
         ReceiptCell('${labels?.customerPhone ?? 'Ph:'} ${bill.customerPhone}',
             widthFraction: 1.0),
-      ], size: 26));
+      ], size: sizeBody));
     }
     rows.add(ReceiptRow.rule());
 
     // Item table:
     // Column fractions are derived from the content-fitted character widths
-    // above, so a bill of small numbers gives its spare width to the item name
-    // instead of padding the numeric columns. The separators consume no
-    // fraction of their own (they are drawn ON the boundaries), so the
+    // above. They are only a hint for the raster path: the text is drawn in a
+    // proportional font, so RasterLab re-fits every ruled (verticalRules) row
+    // in PIXELS — each numeric column is sized to its widest rendered value and
+    // the remainder goes to the name column — which is what guarantees an
+    // amount like "1100.00" never wraps inside its cell. The separators consume
+    // no fraction of their own (they are drawn ON the boundaries), so the
     // character counts are scaled by the data columns only.
     final showGstCol = p.gstCols > 0;
     final dataCols =
@@ -715,7 +741,7 @@ class PrinterService {
           ReceiptCell(t,
               align: heading ? TextAlign.center : TextAlign.right,
               widthFraction: fr(p.totalCols)),
-        ], size: 26, bold: bold, verticalRules: true);
+        ], size: sizeBody, bold: bold, verticalRules: true);
 
     rows.add(itemRow(
         labels?.colItem ?? 'Item',
@@ -752,11 +778,11 @@ class PrinterService {
     rows.add(ReceiptRow.rule());
 
     // Totals (label left, amount right)
-    ReceiptRow total(String l, String r, {bool bold = false, double size = 22}) =>
+    ReceiptRow total(String l, String r, {bool bold = false, double? size}) =>
         ReceiptRow.cols([
           ReceiptCell(l, widthFraction: 0.55),
           ReceiptCell(r, align: TextAlign.right, widthFraction: 0.45),
-        ], size: size, bold: bold);
+        ], size: size ?? sizeTotal, bold: bold);
 
     // Order: Sub Total, Discount, then tax (CGST/SGST when GST on), Round Off,
     // Grand Total. Discount precedes tax because tax is charged on the discounted
@@ -779,6 +805,10 @@ class PrinterService {
             'Rs.${bill.taxAmount.toStringAsFixed(2)}'));
       }
     }
+    // Additional charges — after tax (added on top of the taxed amount, no GST).
+    for (final c in bill.additionalCharges) {
+      rows.add(total('${c.name}:', '+Rs.${c.amount.toStringAsFixed(2)}'));
+    }
     if (bill.roundOff != 0) {
       final sign = bill.roundOff < 0 ? '-' : '+';
       rows.add(total(labels?.roundOff ?? 'Round Off:',
@@ -786,15 +816,15 @@ class PrinterService {
     }
     rows.add(total(labels?.total ?? 'Grand Total:',
         'Rs.${grandTotal.toStringAsFixed(2)}',
-        bold: true, size: 32));
+        bold: true, size: sizeGrand));
     rows.add(total(labels?.payment ?? 'Payment:',
         bill.paymentMode.toUpperCase()));
     rows.add(ReceiptRow.rule());
     rows.add(ReceiptRow.center(
-        labels?.thankYou ?? 'Thank you, visit again!', size: 26));
+        labels?.thankYou ?? 'Thank you, visit again!', size: sizeBody));
     // Small italic brand line under the thank-you note.
     rows.add(ReceiptRow.center(labels?.poweredBy ?? 'Powered by Vengurlatech',
-        size: 18, italic: true));
+        size: sizeBrand, italic: true));
 
     return rows;
   }

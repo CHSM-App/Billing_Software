@@ -1643,14 +1643,116 @@ abstract class AppLocalizations {
   /// No description provided for @billingSaveDraft.
   ///
   /// In en, this message translates to:
-  /// **'Save Draft'**
+  /// **'Save Order'**
   String get billingSaveDraft;
+
+  /// No description provided for @billingHoldBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold Bill'**
+  String get billingHoldBill;
 
   /// No description provided for @billingFinalizeBill.
   ///
   /// In en, this message translates to:
   /// **'Finalize Bill'**
   String get billingFinalizeBill;
+
+  /// No description provided for @billingHoldShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold'**
+  String get billingHoldShort;
+
+  /// No description provided for @billingSettleAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle {amount}'**
+  String billingSettleAmount(String amount);
+
+  /// No description provided for @billingWhatsappCaption.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle'**
+  String get billingWhatsappCaption;
+
+  /// No description provided for @billingSettleAndPrint.
+  ///
+  /// In en, this message translates to:
+  /// **'and print'**
+  String get billingSettleAndPrint;
+
+  /// No description provided for @billingSettleNoReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'no receipt'**
+  String get billingSettleNoReceipt;
+
+  /// No description provided for @billingSettleWhatsapp.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle & send on WhatsApp'**
+  String get billingSettleWhatsapp;
+
+  /// No description provided for @billingSettleOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle without a receipt'**
+  String get billingSettleOnly;
+
+  /// No description provided for @billingSettleOnlyDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Settled without printing.'**
+  String get billingSettleOnlyDone;
+
+  /// No description provided for @billingSettleOnlyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Hold the button down to settle without printing'**
+  String get billingSettleOnlyHint;
+
+  /// No description provided for @billingPreviewReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview receipt'**
+  String get billingPreviewReceipt;
+
+  /// No description provided for @billingPrinterReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer connected'**
+  String get billingPrinterReady;
+
+  /// No description provided for @billingPrinterReadyNamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer connected · {name}'**
+  String billingPrinterReadyNamed(String name);
+
+  /// No description provided for @billingPrinterUnreachable.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer off or out of range'**
+  String get billingPrinterUnreachable;
+
+  /// No description provided for @billingPrinterRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get billingPrinterRetry;
+
+  /// No description provided for @billingPrinterNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No printer'**
+  String get billingPrinterNone;
+
+  /// No description provided for @billingPrinterConnectOne.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect one'**
+  String get billingPrinterConnectOne;
 
   /// No description provided for @billingClearCart.
   ///
@@ -1703,8 +1805,26 @@ abstract class AppLocalizations {
   /// No description provided for @billingDraftSaved.
   ///
   /// In en, this message translates to:
-  /// **'Draft saved.'**
+  /// **'Order sent to the kitchen.'**
   String get billingDraftSaved;
+
+  /// No description provided for @billingBillHeld.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill kept on hold. Reopen it from Open Orders.'**
+  String get billingBillHeld;
+
+  /// No description provided for @billingDraftSavedOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Order saved. It reaches the kitchen once you\'re back online.'**
+  String get billingDraftSavedOffline;
+
+  /// No description provided for @billingBillHeldOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill kept on hold. It syncs once you\'re back online.'**
+  String get billingBillHeldOffline;
 
   /// No description provided for @billingSaveFailed.
   ///
@@ -1939,6 +2059,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Round Off'**
   String get billingRoundOff;
+
+  /// No description provided for @billingAdditionalCharges.
+  ///
+  /// In en, this message translates to:
+  /// **'Additional Charges'**
+  String get billingAdditionalCharges;
+
+  /// No description provided for @billingAdditionalChargesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery, packaging or service charges added to the bill total.'**
+  String get billingAdditionalChargesHint;
+
+  /// No description provided for @billingAddCharge.
+  ///
+  /// In en, this message translates to:
+  /// **'Add charge'**
+  String get billingAddCharge;
+
+  /// No description provided for @billingChargeDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Charge description'**
+  String get billingChargeDescription;
+
+  /// No description provided for @billingChargeDescriptionHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Delivery, Packaging'**
+  String get billingChargeDescriptionHint;
+
+  /// No description provided for @billingChargeAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount ₹'**
+  String get billingChargeAmount;
+
+  /// No description provided for @billingRemoveCharge.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove charge'**
+  String get billingRemoveCharge;
+
+  /// No description provided for @billingChargeIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter both a description and an amount for each additional charge.'**
+  String get billingChargeIncomplete;
 
   /// No description provided for @billingPreview.
   ///
@@ -3457,7 +3625,7 @@ abstract class AppLocalizations {
   /// No description provided for @staffRoleServer.
   ///
   /// In en, this message translates to:
-  /// **'Server'**
+  /// **'Captain'**
   String get staffRoleServer;
 
   /// No description provided for @staffRoleKitchen.
@@ -4581,6 +4749,414 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Add raw materials first, then set the recipe.'**
   String get itemsRecipeNoMaterials;
+
+  /// No description provided for @purchasesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchases'**
+  String get purchasesTitle;
+
+  /// No description provided for @purchaseListFabShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase list'**
+  String get purchaseListFabShort;
+
+  /// No description provided for @purchaseListFabLong.
+  ///
+  /// In en, this message translates to:
+  /// **'Create purchase list'**
+  String get purchaseListFabLong;
+
+  /// No description provided for @purchaseFabShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase'**
+  String get purchaseFabShort;
+
+  /// No description provided for @purchaseFabLong.
+  ///
+  /// In en, this message translates to:
+  /// **'Add purchase'**
+  String get purchaseFabLong;
+
+  /// No description provided for @purchaseNoneThisMonth.
+  ///
+  /// In en, this message translates to:
+  /// **'No purchases recorded this month'**
+  String get purchaseNoneThisMonth;
+
+  /// No description provided for @purchaseStatusPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid'**
+  String get purchaseStatusPaid;
+
+  /// No description provided for @purchaseStatusUnpaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpaid'**
+  String get purchaseStatusUnpaid;
+
+  /// No description provided for @purchaseStatusPartial.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial'**
+  String get purchaseStatusPartial;
+
+  /// No description provided for @purchaseQuickAddRawMaterial.
+  ///
+  /// In en, this message translates to:
+  /// **'New raw material'**
+  String get purchaseQuickAddRawMaterial;
+
+  /// No description provided for @purchaseQuickAddItem.
+  ///
+  /// In en, this message translates to:
+  /// **'New item'**
+  String get purchaseQuickAddItem;
+
+  /// No description provided for @purchaseFieldName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get purchaseFieldName;
+
+  /// No description provided for @purchaseNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Name required'**
+  String get purchaseNameRequired;
+
+  /// No description provided for @purchaseFieldUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'Unit'**
+  String get purchaseFieldUnit;
+
+  /// No description provided for @purchaseFieldSalePrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Sale price'**
+  String get purchaseFieldSalePrice;
+
+  /// No description provided for @purchaseSalePriceRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Sale price required'**
+  String get purchaseSalePriceRequired;
+
+  /// No description provided for @purchaseFieldGstOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'GST % (optional)'**
+  String get purchaseFieldGstOptional;
+
+  /// No description provided for @purchaseFieldVendorName.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor name'**
+  String get purchaseFieldVendorName;
+
+  /// No description provided for @purchaseVendorNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor name is required'**
+  String get purchaseVendorNameRequired;
+
+  /// No description provided for @purchaseEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit purchase'**
+  String get purchaseEditTitle;
+
+  /// No description provided for @purchaseAddTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add purchase'**
+  String get purchaseAddTitle;
+
+  /// No description provided for @purchaseImportPdfTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Import from purchase list PDF'**
+  String get purchaseImportPdfTooltip;
+
+  /// No description provided for @purchaseFieldInvoiceNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice number'**
+  String get purchaseFieldInvoiceNumber;
+
+  /// No description provided for @purchaseInvoiceNumberRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice number is required'**
+  String get purchaseInvoiceNumberRequired;
+
+  /// No description provided for @purchaseFieldVendorGstin.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor GSTIN (optional)'**
+  String get purchaseFieldVendorGstin;
+
+  /// No description provided for @purchaseGstinInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Not a valid GSTIN'**
+  String get purchaseGstinInvalid;
+
+  /// No description provided for @purchaseGstinHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave blank for an unregistered vendor — no input tax credit can be claimed on their bills.'**
+  String get purchaseGstinHelp;
+
+  /// No description provided for @purchaseInterstate.
+  ///
+  /// In en, this message translates to:
+  /// **'Inter-state purchase (IGST)'**
+  String get purchaseInterstate;
+
+  /// No description provided for @purchaseItcClaimable.
+  ///
+  /// In en, this message translates to:
+  /// **'Input tax credit claimable'**
+  String get purchaseItcClaimable;
+
+  /// No description provided for @purchaseItcBlockedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn off for blocked credit (s.17(5))'**
+  String get purchaseItcBlockedHint;
+
+  /// No description provided for @purchaseReverseCharge.
+  ///
+  /// In en, this message translates to:
+  /// **'Reverse charge'**
+  String get purchaseReverseCharge;
+
+  /// No description provided for @purchaseItemsSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Items'**
+  String get purchaseItemsSection;
+
+  /// No description provided for @purchaseInventoryOffHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on inventory in Settings to update stock from purchases.'**
+  String get purchaseInventoryOffHint;
+
+  /// No description provided for @purchaseAddLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Add line'**
+  String get purchaseAddLine;
+
+  /// No description provided for @purchaseFieldDiscountOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Discount (optional)'**
+  String get purchaseFieldDiscountOptional;
+
+  /// No description provided for @purchaseUpdateButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Update purchase'**
+  String get purchaseUpdateButton;
+
+  /// No description provided for @purchaseSaveButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Save purchase'**
+  String get purchaseSaveButton;
+
+  /// No description provided for @purchaseInvoiceDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice date: {date}'**
+  String purchaseInvoiceDate(String date);
+
+  /// No description provided for @purchaseFieldQty.
+  ///
+  /// In en, this message translates to:
+  /// **'Qty'**
+  String get purchaseFieldQty;
+
+  /// No description provided for @purchaseInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid'**
+  String get purchaseInvalid;
+
+  /// No description provided for @purchaseFieldAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount'**
+  String get purchaseFieldAmount;
+
+  /// No description provided for @purchaseFieldHsnOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'HSN/SAC (optional)'**
+  String get purchaseFieldHsnOptional;
+
+  /// No description provided for @purchaseUpdatesStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Updates stock'**
+  String get purchaseUpdatesStock;
+
+  /// No description provided for @purchaseUpdatesStockUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'Updates stock · {unit}'**
+  String purchaseUpdatesStockUnit(String unit);
+
+  /// No description provided for @purchaseRatePerUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'Rs. {rate} per {unit}'**
+  String purchaseRatePerUnit(String rate, String unit);
+
+  /// No description provided for @purchaseUnitFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'unit'**
+  String get purchaseUnitFallback;
+
+  /// No description provided for @purchaseLineTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Line total: Rs. {amount}'**
+  String purchaseLineTotal(String amount);
+
+  /// No description provided for @purchaseFieldItemName.
+  ///
+  /// In en, this message translates to:
+  /// **'Item name'**
+  String get purchaseFieldItemName;
+
+  /// No description provided for @purchaseItemNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Item name required'**
+  String get purchaseItemNameRequired;
+
+  /// No description provided for @purchaseAddAsRawMaterial.
+  ///
+  /// In en, this message translates to:
+  /// **'Add \"{name}\" as a new raw material'**
+  String purchaseAddAsRawMaterial(String name);
+
+  /// No description provided for @purchaseAddAsItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Add \"{name}\" as a new item'**
+  String purchaseAddAsItem(String name);
+
+  /// No description provided for @purchaseInStock.
+  ///
+  /// In en, this message translates to:
+  /// **'In stock: {qty} {unit}'**
+  String purchaseInStock(String qty, String unit);
+
+  /// No description provided for @purchaseFieldPaymentMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment mode'**
+  String get purchaseFieldPaymentMode;
+
+  /// No description provided for @purchaseFieldStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Status'**
+  String get purchaseFieldStatus;
+
+  /// No description provided for @purchaseTaxableValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Taxable value'**
+  String get purchaseTaxableValue;
+
+  /// No description provided for @purchaseDiscount.
+  ///
+  /// In en, this message translates to:
+  /// **'Discount'**
+  String get purchaseDiscount;
+
+  /// No description provided for @purchaseTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get purchaseTotal;
+
+  /// No description provided for @purchaseFilePickerFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open file picker: {error}'**
+  String purchaseFilePickerFailed(String error);
+
+  /// No description provided for @purchasePdfReadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not read that PDF — is it a purchase list export?'**
+  String get purchasePdfReadFailed;
+
+  /// No description provided for @purchasePdfNoItems.
+  ///
+  /// In en, this message translates to:
+  /// **'No items found in that PDF.'**
+  String get purchasePdfNoItems;
+
+  /// No description provided for @purchaseDeleteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete purchase?'**
+  String get purchaseDeleteTitle;
+
+  /// No description provided for @purchaseDeleteBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Any stock this purchase added will be reversed. This cannot be undone.'**
+  String get purchaseDeleteBody;
+
+  /// No description provided for @purchaseReviewImportTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Review imported items'**
+  String get purchaseReviewImportTitle;
+
+  /// No description provided for @purchaseReviewImportHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Check each item and quantity before adding them to the purchase — you will fill in the amount next.'**
+  String get purchaseReviewImportHint;
+
+  /// No description provided for @purchaseReviewItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Item'**
+  String get purchaseReviewItem;
+
+  /// No description provided for @purchaseReviewConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Add {count} item(s) to purchase'**
+  String purchaseReviewConfirm(int count);
+
+  /// No description provided for @expensesPurchasesSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchases ({count})'**
+  String expensesPurchasesSection(int count);
+
+  /// No description provided for @expensesPurchaseInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase - Inv {number}'**
+  String expensesPurchaseInvoice(String number);
 }
 
 class _AppLocalizationsDelegate

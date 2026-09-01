@@ -846,10 +846,66 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingGenerateBill => 'Generate Bill';
 
   @override
-  String get billingSaveDraft => 'Save Draft';
+  String get billingSaveDraft => 'Save Order';
+
+  @override
+  String get billingHoldBill => 'Hold Bill';
 
   @override
   String get billingFinalizeBill => 'Finalize Bill';
+
+  @override
+  String get billingHoldShort => 'Hold';
+
+  @override
+  String billingSettleAmount(String amount) {
+    return 'Settle $amount';
+  }
+
+  @override
+  String get billingWhatsappCaption => 'Settle';
+
+  @override
+  String get billingSettleAndPrint => 'and print';
+
+  @override
+  String get billingSettleNoReceipt => 'no receipt';
+
+  @override
+  String get billingSettleWhatsapp => 'Settle & send on WhatsApp';
+
+  @override
+  String get billingSettleOnly => 'Settle without a receipt';
+
+  @override
+  String get billingSettleOnlyDone => 'Settled without printing.';
+
+  @override
+  String get billingSettleOnlyHint =>
+      'Hold the button down to settle without printing';
+
+  @override
+  String get billingPreviewReceipt => 'Preview receipt';
+
+  @override
+  String get billingPrinterReady => 'Printer connected';
+
+  @override
+  String billingPrinterReadyNamed(String name) {
+    return 'Printer connected · $name';
+  }
+
+  @override
+  String get billingPrinterUnreachable => 'Printer off or out of range';
+
+  @override
+  String get billingPrinterRetry => 'Retry';
+
+  @override
+  String get billingPrinterNone => 'No printer';
+
+  @override
+  String get billingPrinterConnectOne => 'Connect one';
 
   @override
   String get billingClearCart => 'Clear selected items';
@@ -880,7 +936,19 @@ class AppLocalizationsEn extends AppLocalizations {
       'This order is still saving. Reconnect to edit or finalize it.';
 
   @override
-  String get billingDraftSaved => 'Draft saved.';
+  String get billingDraftSaved => 'Order sent to the kitchen.';
+
+  @override
+  String get billingBillHeld =>
+      'Bill kept on hold. Reopen it from Open Orders.';
+
+  @override
+  String get billingDraftSavedOffline =>
+      'Order saved. It reaches the kitchen once you\'re back online.';
+
+  @override
+  String get billingBillHeldOffline =>
+      'Bill kept on hold. It syncs once you\'re back online.';
 
   @override
   String get billingSaveFailed => 'Failed to save. Check your connection.';
@@ -1034,6 +1102,32 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingRoundOff => 'Round Off';
+
+  @override
+  String get billingAdditionalCharges => 'Additional Charges';
+
+  @override
+  String get billingAdditionalChargesHint =>
+      'Delivery, packaging or service charges added to the bill total.';
+
+  @override
+  String get billingAddCharge => 'Add charge';
+
+  @override
+  String get billingChargeDescription => 'Charge description';
+
+  @override
+  String get billingChargeDescriptionHint => 'e.g. Delivery, Packaging';
+
+  @override
+  String get billingChargeAmount => 'Amount ₹';
+
+  @override
+  String get billingRemoveCharge => 'Remove charge';
+
+  @override
+  String get billingChargeIncomplete =>
+      'Enter both a description and an amount for each additional charge.';
 
   @override
   String get billingPreview => 'Preview bill';
@@ -1903,7 +1997,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get staffRoleWaiter => 'Waiter';
 
   @override
-  String get staffRoleServer => 'Server';
+  String get staffRoleServer => 'Captain';
 
   @override
   String get staffRoleKitchen => 'Kitchen Chef';
@@ -2570,4 +2664,235 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get itemsRecipeNoMaterials =>
       'Add raw materials first, then set the recipe.';
+
+  @override
+  String get purchasesTitle => 'Purchases';
+
+  @override
+  String get purchaseListFabShort => 'Purchase list';
+
+  @override
+  String get purchaseListFabLong => 'Create purchase list';
+
+  @override
+  String get purchaseFabShort => 'Purchase';
+
+  @override
+  String get purchaseFabLong => 'Add purchase';
+
+  @override
+  String get purchaseNoneThisMonth => 'No purchases recorded this month';
+
+  @override
+  String get purchaseStatusPaid => 'Paid';
+
+  @override
+  String get purchaseStatusUnpaid => 'Unpaid';
+
+  @override
+  String get purchaseStatusPartial => 'Partial';
+
+  @override
+  String get purchaseQuickAddRawMaterial => 'New raw material';
+
+  @override
+  String get purchaseQuickAddItem => 'New item';
+
+  @override
+  String get purchaseFieldName => 'Name';
+
+  @override
+  String get purchaseNameRequired => 'Name required';
+
+  @override
+  String get purchaseFieldUnit => 'Unit';
+
+  @override
+  String get purchaseFieldSalePrice => 'Sale price';
+
+  @override
+  String get purchaseSalePriceRequired => 'Sale price required';
+
+  @override
+  String get purchaseFieldGstOptional => 'GST % (optional)';
+
+  @override
+  String get purchaseFieldVendorName => 'Vendor name';
+
+  @override
+  String get purchaseVendorNameRequired => 'Vendor name is required';
+
+  @override
+  String get purchaseEditTitle => 'Edit purchase';
+
+  @override
+  String get purchaseAddTitle => 'Add purchase';
+
+  @override
+  String get purchaseImportPdfTooltip => 'Import from purchase list PDF';
+
+  @override
+  String get purchaseFieldInvoiceNumber => 'Invoice number';
+
+  @override
+  String get purchaseInvoiceNumberRequired => 'Invoice number is required';
+
+  @override
+  String get purchaseFieldVendorGstin => 'Vendor GSTIN (optional)';
+
+  @override
+  String get purchaseGstinInvalid => 'Not a valid GSTIN';
+
+  @override
+  String get purchaseGstinHelp =>
+      'Leave blank for an unregistered vendor — no input tax credit can be claimed on their bills.';
+
+  @override
+  String get purchaseInterstate => 'Inter-state purchase (IGST)';
+
+  @override
+  String get purchaseItcClaimable => 'Input tax credit claimable';
+
+  @override
+  String get purchaseItcBlockedHint => 'Turn off for blocked credit (s.17(5))';
+
+  @override
+  String get purchaseReverseCharge => 'Reverse charge';
+
+  @override
+  String get purchaseItemsSection => 'Items';
+
+  @override
+  String get purchaseInventoryOffHint =>
+      'Turn on inventory in Settings to update stock from purchases.';
+
+  @override
+  String get purchaseAddLine => 'Add line';
+
+  @override
+  String get purchaseFieldDiscountOptional => 'Discount (optional)';
+
+  @override
+  String get purchaseUpdateButton => 'Update purchase';
+
+  @override
+  String get purchaseSaveButton => 'Save purchase';
+
+  @override
+  String purchaseInvoiceDate(String date) {
+    return 'Invoice date: $date';
+  }
+
+  @override
+  String get purchaseFieldQty => 'Qty';
+
+  @override
+  String get purchaseInvalid => 'Invalid';
+
+  @override
+  String get purchaseFieldAmount => 'Amount';
+
+  @override
+  String get purchaseFieldHsnOptional => 'HSN/SAC (optional)';
+
+  @override
+  String get purchaseUpdatesStock => 'Updates stock';
+
+  @override
+  String purchaseUpdatesStockUnit(String unit) {
+    return 'Updates stock · $unit';
+  }
+
+  @override
+  String purchaseRatePerUnit(String rate, String unit) {
+    return 'Rs. $rate per $unit';
+  }
+
+  @override
+  String get purchaseUnitFallback => 'unit';
+
+  @override
+  String purchaseLineTotal(String amount) {
+    return 'Line total: Rs. $amount';
+  }
+
+  @override
+  String get purchaseFieldItemName => 'Item name';
+
+  @override
+  String get purchaseItemNameRequired => 'Item name required';
+
+  @override
+  String purchaseAddAsRawMaterial(String name) {
+    return 'Add \"$name\" as a new raw material';
+  }
+
+  @override
+  String purchaseAddAsItem(String name) {
+    return 'Add \"$name\" as a new item';
+  }
+
+  @override
+  String purchaseInStock(String qty, String unit) {
+    return 'In stock: $qty $unit';
+  }
+
+  @override
+  String get purchaseFieldPaymentMode => 'Payment mode';
+
+  @override
+  String get purchaseFieldStatus => 'Status';
+
+  @override
+  String get purchaseTaxableValue => 'Taxable value';
+
+  @override
+  String get purchaseDiscount => 'Discount';
+
+  @override
+  String get purchaseTotal => 'Total';
+
+  @override
+  String purchaseFilePickerFailed(String error) {
+    return 'Could not open file picker: $error';
+  }
+
+  @override
+  String get purchasePdfReadFailed =>
+      'Could not read that PDF — is it a purchase list export?';
+
+  @override
+  String get purchasePdfNoItems => 'No items found in that PDF.';
+
+  @override
+  String get purchaseDeleteTitle => 'Delete purchase?';
+
+  @override
+  String get purchaseDeleteBody =>
+      'Any stock this purchase added will be reversed. This cannot be undone.';
+
+  @override
+  String get purchaseReviewImportTitle => 'Review imported items';
+
+  @override
+  String get purchaseReviewImportHint =>
+      'Check each item and quantity before adding them to the purchase — you will fill in the amount next.';
+
+  @override
+  String get purchaseReviewItem => 'Item';
+
+  @override
+  String purchaseReviewConfirm(int count) {
+    return 'Add $count item(s) to purchase';
+  }
+
+  @override
+  String expensesPurchasesSection(int count) {
+    return 'Purchases ($count)';
+  }
+
+  @override
+  String expensesPurchaseInvoice(String number) {
+    return 'Purchase - Inv $number';
+  }
 }

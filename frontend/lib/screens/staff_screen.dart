@@ -26,7 +26,8 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
       final phone = (m['phone'] as String? ?? '').toLowerCase();
       final role = (m['role'] as String? ?? 'cashier');
       // Match both the raw role value and its localized label so users can
-      // search "cashier", "server", "kitchen" or "Kitchen Chef", "कॅशियर", etc.
+      // search "cashier", "server", "kitchen" or "Captain", "कॅशियर", etc.
+      // The stored value stays 'server' — only the label users see is Captain.
       final roleLabel = _roleLabel(l10n, role).toLowerCase();
       return name.contains(q) ||
           phone.contains(q) ||
@@ -258,7 +259,8 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
   }
 }
 
-/// Small colored pill showing a staff member's role (Cashier / Server / Kitchen).
+/// Small colored pill showing a staff member's role (Cashier / Captain /
+/// Kitchen).
 class _RoleBadge extends StatelessWidget {
   final String role;
   const _RoleBadge({required this.role});
@@ -428,8 +430,8 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
                 const SizedBox(height: AppSpacing.space12),
               ],
               // Role picker. Retail shops only need cashiers, so the picker
-              // shows for restaurants: Cashier (bills + payment), Server (takes
-              // orders), Kitchen (Kitchen Display).
+              // shows for restaurants: Cashier (bills + payment), Captain
+              // (takes orders), Kitchen (Kitchen Display).
               if (widget.allowKitchen) ...[
                 Align(
                   alignment: Alignment.centerLeft,

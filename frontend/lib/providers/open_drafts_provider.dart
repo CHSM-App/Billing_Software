@@ -128,6 +128,8 @@ class OpenDraftsNotifier extends AsyncNotifier<List<Bill>> {
       subtotal: (row['subtotal'] as num).toDouble(),
       taxAmount: (row['tax_amount'] as num).toDouble(),
       discountAmount: (row['discount_amount'] as num?)?.toDouble() ?? 0.0,
+      chargesAmount: (row['charges_amount'] as num?)?.toDouble() ?? 0.0,
+      additionalCharges: BillCharge.listFrom(row['additional_charges']),
       total: (row['total'] as num).toDouble(),
       paymentMode: row['payment_mode'] as String,
       status: 'draft',

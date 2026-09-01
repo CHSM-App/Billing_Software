@@ -173,6 +173,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
       await saveGstProfile(
         gstNumber: updated['gst_number'] as String?,
         businessAddress: updated['address'] as String?,
+        businessPhone: updated['phone'] as String?,
         defaultSacCode: updated['default_sac_code'] as String?,
         fssaiNumber: updated['fssai_number'] as String?,
       );

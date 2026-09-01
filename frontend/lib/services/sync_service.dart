@@ -194,9 +194,25 @@ class SyncService {
         'discount_amount': (row['discount_amount'] as num).toDouble(),
       if (((row['round_off'] as num?)?.toDouble() ?? 0.0) != 0.0)
         'round_off': (row['round_off'] as num).toDouble(),
+      // Additional charges exactly as printed; the server re-sums them.
+      ..._chargesPayload(row),
       'payment_mode': row['payment_mode'],
       'status': 'finalized',
     };
+  }
+
+  /// `additional_charges` entry for a sync payload, decoded from the JSON the
+  /// offline row stores. Omitted entirely when the bill carries none.
+  Map<String, dynamic> _chargesPayload(Map<String, dynamic> row) {
+    final raw = row['additional_charges'];
+    if (raw is! String || raw.trim().isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List && decoded.isNotEmpty) {
+        return {'additional_charges': decoded};
+      }
+    } catch (_) {}
+    return const {};
   }
 
   /// Converts a stored offline_drafts row into a POST /api/bills draft payload.
@@ -221,6 +237,7 @@ class SyncService {
       if (row['customer_name']  != null) 'customer_name':  row['customer_name'],
       if (row['customer_phone'] != null) 'customer_phone': row['customer_phone'],
       if (discount > 0)                  'discount_amount': discount,
+      ..._chargesPayload(row),
       'payment_mode': row['payment_mode'],
       'status': 'draft',
     };
