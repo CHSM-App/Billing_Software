@@ -498,7 +498,7 @@ class PrinterService {
     lines.add('-' * p.cols);
 
     // Bill info
-    lines.add('${labels?.billNo ?? 'Bill#:'} ${bill.billNumber}');
+    lines.add('${labels?.billNo ?? 'Bill#:'} ${bill.displayNumber}');
     // Table orders print their table number so the receipt is identifiable.
     if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty) {
       lines.add('${labels?.table ?? 'Table:'} ${bill.tableNumber}');
@@ -657,7 +657,7 @@ class PrinterService {
 
     // Bill info (label left, value right)
     rows.add(ReceiptRow.cols([
-      ReceiptCell('${labels?.billNo ?? 'Bill#:'} ${bill.billNumber}',
+      ReceiptCell('${labels?.billNo ?? 'Bill#:'} ${bill.displayNumber}',
           widthFraction: 1.0),
     ], size: 26));
     if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty) {

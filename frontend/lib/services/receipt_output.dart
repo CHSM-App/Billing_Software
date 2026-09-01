@@ -84,7 +84,7 @@ class ReceiptOutput {
 
     await Printing.layoutPdf(
       onLayout: (_) async => bytes,
-      name: 'Invoice-${bills.first.billNumber}',
+      name: 'Invoice-${bills.first.displayNumber}',
     );
   }
 

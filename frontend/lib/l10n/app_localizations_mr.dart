@@ -1129,6 +1129,31 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingColQty => 'संख्या';
 
   @override
+  String get billingCategoryOther => 'इतर';
+
+  @override
+  String billingSizesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count प्रकार',
+      one: '1 प्रकार',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String billingCategoryItemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count वस्तू',
+      one: '1 वस्तू',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String billingStalePricesFrom(String age) {
     return '$age च्या किमती';
   }

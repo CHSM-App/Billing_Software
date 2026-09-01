@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
+const { stripBillPrefix } = require('../billNumber');
 
 const router = express.Router();
 
@@ -153,7 +154,7 @@ router.get('/:token', async (req, res) => {
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Receipt &mdash; ${esc(bill.bill_number)}</title>
+<title>Receipt &mdash; ${esc(stripBillPrefix(bill.bill_number))}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
@@ -259,7 +260,7 @@ router.get('/:token', async (req, res) => {
   <div class="meta">
     <div class="meta-item">
       <div class="label">Bill No</div>
-      <div class="value">${esc(bill.bill_number)}</div>
+      <div class="value">${esc(stripBillPrefix(bill.bill_number))}</div>
     </div>
     ${bill.table_number ? `
     <div class="meta-item">
