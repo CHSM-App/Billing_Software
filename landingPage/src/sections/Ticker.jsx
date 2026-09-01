@@ -1,9 +1,9 @@
 import React from 'react'
 
 const ITEMS = [
-  'Fast Billing', 'Offline Support', 'Table Management', 'Thermal Printing',
-  'Inventory Control', 'Expense Tracking', 'WhatsApp Bills', 'Staff Roles',
-  'Daily Reports', 'Barcode Ready', 'GST Ready', 'Cloud Sync',
+  'Fast GST Billing', 'Offline Billing', 'Table Billing', 'QR Ordering',
+  'Thermal Printing', 'Stock Management', 'Expense Tracking', 'WhatsApp Bills',
+  'Staff Roles', 'Sales Reports', 'Barcode Scanning', 'Auto Sync When Online',
 ]
 
 export default function Ticker() {

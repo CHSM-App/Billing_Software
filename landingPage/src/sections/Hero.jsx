@@ -131,22 +131,23 @@ export default function Hero() {
           <div>
             <span className="badge mb-6 animate-fadeUp delay-100 anim-init">
               <Zap size={11} />
-              Built for Indian Small Businesses
+              No internet? Billing still works
             </span>
 
             <h1
-              className="font-display text-5xl lg:text-[3.6rem] font-extrabold leading-[1.08] mb-6
+              className="font-display text-4xl lg:text-[2.9rem] font-extrabold leading-[1.12] mb-6
                          animate-fadeUp delay-200 anim-init text-navy-900"
             >
-              Smart Billing,<br />
-              <span className="text-teal-dark">Zero Hassle</span>
+              GST Billing Software for{' '}
+              <span className="text-teal-dark">Small Businesses in India</span>
             </h1>
 
-            <p className="text-lg text-slate-500 leading-relaxed mb-8 max-w-lg
+            <p className="text-lg text-slate-500 leading-relaxed mb-8 max-w-xl
                           animate-fadeUp delay-300 anim-init">
-              Vittam brings fast billing, inventory management, table orders,
-              expense tracking, and offline sync — all in one lightweight app built for
-              Indian shopkeepers.
+              Vittam is a simple GST billing and inventory management software for
+              small businesses, shops, retail stores, and restaurants in India. Create
+              GST invoices, manage stock, track sales and expenses, and generate
+              business reports — even when you're offline.
             </p>
 
             <div className="animate-fadeUp delay-400 anim-init">

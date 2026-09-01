@@ -21,10 +21,14 @@ export default function CTA() {
 
       <div className="max-w-3xl mx-auto text-center relative z-10">
         <h2
-          className="font-display text-4xl lg:text-5xl font-extrabold text-white mb-10 leading-tight"
+          className="font-display text-4xl lg:text-5xl font-extrabold text-white mb-5 leading-tight"
         >
           Ready to simplify<br />your billing?
         </h2>
+        <p className="text-white/60 text-base lg:text-lg leading-relaxed max-w-xl mx-auto mb-10">
+          Billing software built for shopkeepers. Setup takes under 5 minutes, and
+          your billing keeps working even when the internet does not.
+        </p>
         {/* Buttons – centred */}
         <div className="flex flex-wrap justify-center gap-3">
           {/* Windows */}
@@ -59,7 +63,7 @@ export default function CTA() {
         </div>
 
         <p className="text-white/25 text-xs mt-8">
-          Available on Windows and Android (Google Play) · No credit card required
+          Windows and Android · Free for 1 month · No card needed to start
         </p>
       </div>
     </section>
