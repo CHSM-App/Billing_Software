@@ -5573,7 +5573,6 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                       ),
                     ),
                     ],
-                  ],
                 ),
               ),
             ),
