@@ -2150,6 +2150,24 @@ abstract class AppLocalizations {
   /// **'Qty'**
   String get billingColQty;
 
+  /// No description provided for @billingCategoryOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get billingCategoryOther;
+
+  /// No description provided for @billingSizesCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 variant} other{{count} variants}}'**
+  String billingSizesCount(int count);
+
+  /// No description provided for @billingCategoryItemCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item} other{{count} items}}'**
+  String billingCategoryItemCount(int count);
+
   /// No description provided for @billingStalePricesFrom.
   ///
   /// In en, this message translates to:

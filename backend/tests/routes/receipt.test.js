@@ -50,7 +50,9 @@ describe('GET /receipt/:token', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/text\/html/);
     expect(res.text).toContain('My Shop');
-    expect(res.text).toContain('INV-0001');
+    // The customer sees the number without the business's bill prefix.
+    expect(res.text).toContain('0001');
+    expect(res.text).not.toContain('INV-');
   });
 
   test('returns 404 for unknown token', async () => {

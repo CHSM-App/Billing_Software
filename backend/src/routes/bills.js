@@ -9,6 +9,7 @@ const { sendBillLink, normalisePhone } = require('../whatsapp');
 const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
+const { stripBillPrefix } = require('../billNumber');
 const { parseAdditionalCharges, serializeCharges, attachCharges } = require('../charges');
 
 // Base URL used in receipt links — no trailing slash
@@ -1825,7 +1826,7 @@ router.post('/send-whatsapp', requireAuth, async (req, res) => {
     const result = await sendBillLink({
       phone:      customer_phone,
       shopName:   shop_name,
-      billNumber: bill_number,
+      billNumber: stripBillPrefix(bill_number),
       receiptUrl,
     });
 
@@ -1878,7 +1879,7 @@ router.get('/:id/whatsapp-text', requireAuth, async (req, res) => {
     const receiptUrl = `${RECEIPT_BASE}/receipt/${receipt_token}`;
     const message =
       `Your bill from ${shop_name} is ready!\n\n` +
-      `Bill No: ${bill_number}\n` +
+      `Bill No: ${stripBillPrefix(bill_number)}\n` +
       `View your receipt here: ${receiptUrl}\n\n` +
       `Thank you for shopping with us!`;
 
@@ -1927,9 +1928,10 @@ router.post('/:id/whatsapp', requireAuth, async (req, res) => {
     }
 
     const receiptUrl = `${RECEIPT_BASE}/receipt/${receipt_token}`;
+    const displayNumber = stripBillPrefix(bill_number);
     const message =
       `Your bill from ${shop_name} is ready!\n\n` +
-      `Bill No: ${bill_number}\n` +
+      `Bill No: ${displayNumber}\n` +
       `View your receipt here: ${receiptUrl}\n\n` +
       `Thank you for shopping with us!`;
 
@@ -1938,7 +1940,7 @@ router.post('/:id/whatsapp', requireAuth, async (req, res) => {
       const result = await sendBillLink({
         phone: customer_phone,
         shopName: shop_name,
-        billNumber: bill_number,
+        billNumber: displayNumber,
         receiptUrl,
       });
       if (result.sent) {

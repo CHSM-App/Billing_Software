@@ -9,6 +9,7 @@ const { mockPool, mockRequest } = makeDbMock();
 jest.mock('../../src/db', () => mockPool);
 
 jest.mock('../../src/middleware/rateLimiter', () => ({
+  globalLimiter: (req, res, next) => next(),
   loginLimiter: (req, res, next) => next(),
   registerLimiter: (req, res, next) => next(),
   refreshLimiter: (req, res, next) => next(),

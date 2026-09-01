@@ -139,7 +139,7 @@ class InvoicePdf {
             ),
             pw.SizedBox(height: 8),
             _headerBox(businessName, address, phone, gstin, fssai,
-                bill.billNumber, dateStr),
+                bill.displayNumber, dateStr),
             _billToBox(bill),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money),
             pw.SizedBox(height: 10),

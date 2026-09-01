@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/category_sheet.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
 import '../api.dart';
@@ -75,11 +76,57 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   // stock) in place, instead of the normal cards.
   bool _showStock = false;
 
+  // The item list is ONE continuous sheet grouped by category — the same
+  // layout as the billing screen: a highlighted section bar, then that
+  // category's rows, then the next category.
+  final ScrollController _sheetCtrl = ScrollController();
+  // Categories whose rows are spread open. Everything starts collapsed so the
+  // owner first sees just the category bars; only one is open at a time.
+  final Set<String> _expandedCategories = {};
+
   @override
   void initState() {
     super.initState();
     _searchController.addListener(() => setState(() {}));
   }
+
+  /// Groups [items] into category sections in [cats] order (alphabetical, from
+  /// categoriesProvider). Items without a category go last under "Other".
+  /// While searching every matching section is spread open — otherwise the
+  /// matches would be hidden behind collapsed bars.
+  List<_ItemSection> _groupByCategory(List<Item> items, List<String> cats) {
+    final searching = _searchController.text.trim().isNotEmpty;
+    final byCat = <String, List<Item>>{};
+    for (final item in items) {
+      final cat = item.category?.trim() ?? '';
+      byCat.putIfAbsent(cat, () => []).add(item);
+    }
+    final ordered = <String>[
+      ...cats.where(byCat.containsKey),
+      // Categories present on items but missing from the provider (shouldn't
+      // happen, but never drop items on the floor).
+      ...byCat.keys.where((c) => c.isNotEmpty && !cats.contains(c)),
+      if (byCat.containsKey('')) '',
+    ];
+    return [
+      for (final cat in ordered)
+        _ItemSection(cat, byCat[cat]!,
+            expanded: searching || _expandedCategories.contains(cat)),
+    ];
+  }
+
+  /// Bar tap: spread open one category's rows (folding whichever category was
+  /// open) or fold it up if it was the open one — only one is ever open.
+  void _toggleCategory(String cat) {
+    setState(() {
+      final wasOpen = _expandedCategories.contains(cat);
+      _expandedCategories.clear();
+      if (!wasOpen) _expandedCategories.add(cat);
+    });
+  }
+
+  String _categoryLabel(String category) =>
+      category.isEmpty ? context.l10n.billingCategoryOther : category;
 
   /// Whether the Raw Materials tab should be offered — restaurant businesses
   /// with inventory enabled (only owners manage it).
@@ -106,6 +153,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   void dispose() {
     _searchController.dispose();
     _tabController?.dispose();
+    _sheetCtrl.dispose();
     super.dispose();
   }
 
@@ -201,6 +249,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
               ? await ref.read(itemsProvider.notifier).addItem(data)
               : await ref.read(itemsProvider.notifier).updateItem(item.id, data);
           await ref.read(categoriesProvider.notifier).reload();
+          // Spread open the saved item's category so the owner sees the new
+          // (or moved) row instead of a folded bar.
+          if (mounted) {
+            setState(() => _expandedCategories
+              ..clear()
+              ..add(saved.category?.trim() ?? ''));
+          }
           return saved;
         },
         onVariantsCreated: (itemId, variants) =>
@@ -369,40 +424,40 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     );
   }
 
-  Widget _searchBarSliver({bool inventoryEnabled = false}) =>
-      SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-              AppSpacing.space12, 6, AppSpacing.space12, AppSpacing.space4),
-          child: Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 40,
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: context.l10n.itemsSearch,
-                      isDense: true,
-                      prefixIcon: const Icon(Icons.search_outlined,
-                          size: 18, color: AppColors.textSecondary),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.space16, vertical: 0),
-                    ),
+  /// Search box (+ stock-overview toggle) that sits above the list. It is a
+  /// plain widget rather than a sliver so the sheet's scroll offsets stay
+  /// list-local — a chip tap can then compute its target exactly.
+  Widget _searchBar({bool inventoryEnabled = false}) => Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppSpacing.space12, 6, AppSpacing.space12, AppSpacing.space4),
+        child: Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 40,
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: context.l10n.itemsSearch,
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.search_outlined,
+                        size: 18, color: AppColors.textSecondary),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.space16, vertical: 0),
                   ),
                 ),
               ),
-              // Toggle the in-place stock overview (name + remaining stock).
-              if (inventoryEnabled) ...[
-                const SizedBox(width: AppSpacing.space8),
-                StockOverviewButton(
-                  tooltip: context.l10n.itemsStockOverview,
-                  active: _showStock,
-                  onTap: () => setState(() => _showStock = !_showStock),
-                ),
-              ],
+            ),
+            // Toggle the in-place stock overview (name + remaining stock).
+            if (inventoryEnabled) ...[
+              const SizedBox(width: AppSpacing.space8),
+              StockOverviewButton(
+                tooltip: context.l10n.itemsStockOverview,
+                active: _showStock,
+                onTap: () => setState(() => _showStock = !_showStock),
+              ),
             ],
-          ),
+          ],
         ),
       );
 
@@ -422,14 +477,17 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           );
         }
         final items = _filtered(allItems);
+        Future<void> refresh() async {
+          ref.invalidate(itemsProvider);
+          ref.invalidate(categoriesProvider);
+          await ref.read(itemsProvider.future);
+        }
+
+        final Widget list;
         if (items.isEmpty) {
-          return RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(itemsProvider);
-              await ref.read(itemsProvider.future);
-            },
-            child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-              _searchBarSliver(inventoryEnabled: inventoryEnabled),
+          list = CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
               SliverFillRemaining(
                 child: EmptyState(
                   icon: Icons.inventory_2_outlined,
@@ -440,105 +498,120 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                   onAction: userRole == 'owner' ? () => _showItemForm() : null,
                 ),
               ),
-            ]),
+            ],
           );
+        } else if (_showStock && inventoryEnabled) {
+          final isWide = MediaQuery.of(context).size.width >= 720;
+          list = CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              _buildStockSliver(items, crossAxisCount: isWide ? 3 : 1),
+            ],
+          );
+        } else {
+          list = _buildSheet(items, userRole, inventoryEnabled);
         }
 
-        final isWide = MediaQuery.of(context).size.width >= 720;
-        return RefreshIndicator(
-          onRefresh: () async {
-            ref.invalidate(itemsProvider);
-            await ref.read(itemsProvider.future);
-          },
-          child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
-            _searchBarSliver(inventoryEnabled: inventoryEnabled),
-            _buildGridSliver(items, userRole, inventoryEnabled,
-                crossAxisCount: isWide ? 3 : 1),
-          ]),
+        return Column(
+          children: [
+            _searchBar(inventoryEnabled: inventoryEnabled),
+            Expanded(
+              child: RefreshIndicator(onRefresh: refresh, child: list),
+            ),
+          ],
         );
       },
     );
   }
 
-  Widget _buildGridSliver(List<Item> items, String userRole, bool inventoryEnabled,
-      {int crossAxisCount = 1}) {
-    final stockMode = _showStock && inventoryEnabled;
+  /// The category-wise sheet: pinned column header, then one continuous list
+  /// of category bars and item rows — the billing layout.
+  Widget _buildSheet(List<Item> items, String userRole, bool inventoryEnabled) {
+    final cats = ref.watch(categoriesProvider).valueOrNull ?? const <String>[];
+    final sections = _groupByCategory(items, cats);
+    // Two columns only where the sheet is wide enough for two full rows.
+    final twoColumns = MediaQuery.of(context).size.width >= 900;
+
+    final isOwner = userRole == 'owner';
+    return _ItemSheet(
+      sections: sections,
+      controller: _sheetCtrl,
+      twoColumns: twoColumns,
+      actionsWidth: _ItemSheetRow.actionsWidth(isOwner),
+      labelOf: _categoryLabel,
+      onToggleSection: _toggleCategory,
+      rowBuilder: (item, index) => _ItemSheetRow(
+        index: index,
+        item: item,
+        inventoryEnabled: inventoryEnabled,
+        isOwner: isOwner,
+        onTap: () => _showStockPopup(item),
+        onBarcode: () => _showBarcodePrint(item),
+        onDelete: isOwner ? () => _deleteItem(item) : null,
+      ),
+    );
+  }
+
+  /// Stock-overview mode. Item cards with variants expand to a variable-height
+  /// list of their variants. A fixed-extent grid can't handle that, so use a
+  /// masonry column layout (same approach as the Kitchen screen): split cards
+  /// across N columns, each keeping its natural height, packed into the
+  /// shortest column so there are no big gaps.
+  Widget _buildStockSliver(List<Item> items, {int crossAxisCount = 1}) {
     const padding = EdgeInsets.fromLTRB(
         AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96);
 
-    // In stock mode, item cards with variants expand to a variable-height list
-    // of their variants. A fixed-extent grid can't handle that, so use a
-    // masonry column layout (same approach as the Kitchen screen): split cards
-    // across N columns, each keeping its natural height, packed into the
-    // shortest column so there are no big gaps.
-    if (stockMode) {
-      if (crossAxisCount <= 1) {
-        return SliverPadding(
-          padding: padding,
-          sliver: SliverList.builder(
-            itemCount: items.length,
-            itemBuilder: (_, i) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: animatedCardSwap(true, _buildStockCard(items[i])),
-            ),
-          ),
-        );
-      }
+    if (crossAxisCount <= 1) {
       return SliverPadding(
         padding: padding,
-        sliver: SliverToBoxAdapter(
-          child: LayoutBuilder(builder: (context, constraints) {
-            const spacing = AppSpacing.space8;
-            final cols = crossAxisCount;
-            final cardWidth =
-                (constraints.maxWidth - spacing * (cols - 1)) / cols;
-
-            // Masonry: place each card into the currently shortest column.
-            final columns = List.generate(cols, (_) => <Widget>[]);
-            final columnHeights = List.filled(cols, 0.0);
-            for (var i = 0; i < items.length; i++) {
-              var target = 0;
-              for (var c = 1; c < cols; c++) {
-                if (columnHeights[c] < columnHeights[target]) target = c;
-              }
-              // ~44px header + ~24px per variant row; only relative height matters.
-              final variantCount = items[i].variants.length;
-              columnHeights[target] += 44 + variantCount * 24 + spacing;
-              columns[target].add(Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: animatedCardSwap(true, _buildStockCard(items[i])),
-              ));
-            }
-
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var c = 0; c < cols; c++) ...[
-                  if (c > 0) const SizedBox(width: spacing),
-                  SizedBox(
-                    width: cardWidth,
-                    child: Column(children: columns[c]),
-                  ),
-                ],
-              ],
-            );
-          }),
+        sliver: SliverList.builder(
+          itemCount: items.length,
+          itemBuilder: (_, i) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: animatedCardSwap(true, _buildStockCard(items[i])),
+          ),
         ),
       );
     }
-
     return SliverPadding(
       padding: padding,
-      sliver: SliverGrid.builder(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: crossAxisCount,
-          crossAxisSpacing: AppSpacing.space8,
-          mainAxisSpacing: 6,
-          mainAxisExtent: 52,
-        ),
-        itemCount: items.length,
-        itemBuilder: (_, i) =>
-            animatedCardSwap(false, _buildItemCard(items[i], userRole, inventoryEnabled)),
+      sliver: SliverToBoxAdapter(
+        child: LayoutBuilder(builder: (context, constraints) {
+          const spacing = AppSpacing.space8;
+          final cols = crossAxisCount;
+          final cardWidth =
+              (constraints.maxWidth - spacing * (cols - 1)) / cols;
+
+          // Masonry: place each card into the currently shortest column.
+          final columns = List.generate(cols, (_) => <Widget>[]);
+          final columnHeights = List.filled(cols, 0.0);
+          for (var i = 0; i < items.length; i++) {
+            var target = 0;
+            for (var c = 1; c < cols; c++) {
+              if (columnHeights[c] < columnHeights[target]) target = c;
+            }
+            // ~44px header + ~24px per variant row; only relative height matters.
+            final variantCount = items[i].variants.length;
+            columnHeights[target] += 44 + variantCount * 24 + spacing;
+            columns[target].add(Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: animatedCardSwap(true, _buildStockCard(items[i])),
+            ));
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var c = 0; c < cols; c++) ...[
+                if (c > 0) const SizedBox(width: spacing),
+                SizedBox(
+                  width: cardWidth,
+                  child: Column(children: columns[c]),
+                ),
+              ],
+            ],
+          );
+        }),
       ),
     );
   }
@@ -572,139 +645,377 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     );
   }
 
-  Widget _buildItemCard(Item item, String userRole, bool inventoryEnabled) {
+}
+
+// ---------------------------------------------------------------------------
+// Category-wise sheet — the billing screen's item table, for managing items.
+// ---------------------------------------------------------------------------
+
+/// One category's worth of rows in the single grouped sheet.
+class _ItemSection {
+  /// Raw category string; empty for items that have no category ("Other").
+  final String category;
+  final List<Item> items;
+  /// Collapsed sections render only their bar; the rows appear once tapped.
+  final bool expanded;
+  const _ItemSection(this.category, this.items, {required this.expanded});
+}
+
+/// A row of the flattened list: a category section bar, or one row of item(s)
+/// — one per row on phones, two side by side on wide screens.
+class _SheetEntry {
+  final _ItemSection? section;
+  final List<Item> items;
+  final int firstIndex; // 1-based running number of items.first
+  const _SheetEntry.header(this.section)
+      : items = const [],
+        firstIndex = 0;
+  const _SheetEntry.rows(this.items, this.firstIndex) : section = null;
+  bool get isHeader => section != null;
+}
+
+class _ItemSheet extends StatelessWidget {
+  final List<_ItemSection> sections;
+  final ScrollController controller;
+  final bool twoColumns;
+  /// Width reserved for the per-row action icons, so the column header lines
+  /// up with the rows beneath it.
+  final double actionsWidth;
+  final String Function(String category) labelOf;
+  final void Function(String category) onToggleSection;
+  final Widget Function(Item item, int index) rowBuilder;
+
+  const _ItemSheet({
+    required this.sections,
+    required this.controller,
+    required this.twoColumns,
+    required this.actionsWidth,
+    required this.labelOf,
+    required this.onToggleSection,
+    required this.rowBuilder,
+  });
+
+  /// Items are numbered even while folded so a number never shifts when
+  /// another category opens.
+  List<_SheetEntry> _entries() {
+    final entries = <_SheetEntry>[];
+    var index = 1;
+    final step = twoColumns ? 2 : 1;
+    for (final s in sections) {
+      entries.add(_SheetEntry.header(s));
+      if (s.expanded) {
+        for (var i = 0; i < s.items.length; i += step) {
+          final end = i + step > s.items.length ? s.items.length : i + step;
+          entries.add(_SheetEntry.rows(s.items.sublist(i, end), index + i));
+        }
+      }
+      index += s.items.length;
+    }
+    return entries;
+  }
+
+  Widget _entry(_SheetEntry e, AppLocalizations l10n) {
+    if (e.isHeader) {
+      final s = e.section!;
+      return CategorySectionBar(
+        label: labelOf(s.category),
+        count: s.items.length,
+        open: s.expanded,
+        onTap: () => onToggleSection(s.category),
+      );
+    }
+    final cells = [
+      for (var i = 0; i < e.items.length; i++)
+        rowBuilder(e.items[i], e.firstIndex + i),
+    ];
+    final Widget row;
+    if (!twoColumns) {
+      row = cells.first;
+    } else {
+      row = Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: cells.first),
+          Container(width: 1, color: AppColors.border),
+          Expanded(child: cells.length > 1 ? cells[1] : const SizedBox()),
+        ],
+      );
+    }
+    return Column(
+      children: [
+        SizedBox(height: CategorySheetMetrics.rowExtent - 1, child: row),
+        const Divider(height: 1, indent: 12, endIndent: 12),
+      ],
+    );
+  }
+
+  Widget _header(AppLocalizations l10n) {
+    final style = AppFont.style(
+      fontSize: 11,
+      fontWeight: FontWeight.w600,
+      color: AppColors.textSecondary,
+    );
+    return Container(
+      height: 28,
+      color: AppColors.surfaceVariant,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: [
+          const SizedBox(width: _ItemSheetRow.indexWidth),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(l10n.billingColItem,
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+          ),
+          SizedBox(
+            width: _ItemSheetRow.priceWidth,
+            child: Text(l10n.billingColPrice,
+                textAlign: TextAlign.right,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(width: actionsWidth),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final subtitle = [
-      if (item.category != null) item.category!,
-      if (inventoryEnabled && item.stockQuantity != null)
+    final entries = _entries();
+
+    final columnHeader = !twoColumns
+        ? _header(l10n)
+        : Row(
+            children: [
+              Expanded(child: _header(l10n)),
+              Container(width: 1, color: AppColors.border),
+              Expanded(child: _header(l10n)),
+            ],
+          );
+
+    // The column header stays pinned while the rows scroll beneath it (the
+    // category jump-list sits above this whole sheet).
+    return CustomScrollView(
+      controller: controller,
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: PinnedHeaderDelegate(
+            height: CategorySheetMetrics.columnHeaderHeight,
+            child: ColoredBox(
+              color: AppColors.surface,
+              child: Column(
+                children: [
+                  columnHeader,
+                  const Divider(height: 1),
+                ],
+              ),
+            ),
+          ),
+        ),
+        SliverPadding(
+          // Room for the floating "Add item" button over the last rows.
+          padding: const EdgeInsets.only(bottom: 96),
+          sliver: SliverVariedExtentList(
+            itemExtentBuilder: (i, _) => i >= entries.length
+                ? null
+                : (entries[i].isHeader
+                    ? CategorySheetMetrics.sectionBarExtent
+                    : CategorySheetMetrics.rowExtent),
+            delegate: SliverChildBuilderDelegate(
+              (_, i) => _entry(entries[i], l10n),
+              childCount: entries.length,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One item row of the sheet: running number, name (+ stock / sizes line),
+/// price, and the barcode / delete actions. Tap opens the stock popup.
+class _ItemSheetRow extends StatelessWidget {
+  final int index;
+  final Item item;
+  final bool inventoryEnabled;
+  final bool isOwner;
+  final VoidCallback onTap;
+  final VoidCallback onBarcode;
+  final VoidCallback? onDelete;
+
+  const _ItemSheetRow({
+    required this.index,
+    required this.item,
+    required this.inventoryEnabled,
+    required this.isOwner,
+    required this.onTap,
+    required this.onBarcode,
+    required this.onDelete,
+  });
+
+  static const double indexWidth = 24;
+  static const double priceWidth = 72;
+  static const double _iconTap = 26;
+
+  /// Space the action icons take: barcode, plus delete for owners.
+  static double actionsWidth(bool isOwner) =>
+      isOwner ? _iconTap * 2 + 2 : _iconTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final hint = <String>[
+      if (item.hasVariants) l10n.billingSizesCount(item.variants.length),
+      if (inventoryEnabled && !item.hasVariants && item.stockQuantity != null)
         l10n.itemsStockLabel(formatQty(item.stockQuantity!)),
     ].join('  ·  ');
+    final lowStock = inventoryEnabled && item.isLowStock;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.medium),
-        border: Border.all(color: AppColors.border, width: 1),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(AppRadius.medium),
-        child: InkWell(
-          onTap: () => _showStockPopup(item),
-          borderRadius: BorderRadius.circular(AppRadius.medium),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            child: Row(
-              children: [
-                // Color dot
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.border,
+    return Material(
+      color: AppColors.surface,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: indexWidth,
+                child: Text(
+                  '$index',
+                  textAlign: TextAlign.right,
+                  style: AppFont.style(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textSecondary,
                   ),
                 ),
-                const SizedBox(width: 8),
-                // Name + subtitle
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        item.name,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w400,
-                          color: AppColors.textPrimary,
-                          height: 1.15,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppFont.style(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                        color: AppColors.textPrimary,
+                        height: 1.15,
                       ),
-                      if (subtitle.isNotEmpty || (inventoryEnabled && item.isLowStock))
-                        Row(
-                          children: [
-                            if (subtitle.isNotEmpty)
-                              Flexible(
-                                child: Text(
-                                  subtitle,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: AppColors.textSecondary,
-                                    height: 1.15,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                    ),
+                    if (hint.isNotEmpty || lowStock)
+                      Row(
+                        children: [
+                          if (hint.isNotEmpty)
+                            Flexible(
+                              child: Text(
+                                hint,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppFont.style(
+                                  fontSize: 11,
+                                  color: AppColors.textSecondary,
+                                  height: 1.15,
                                 ),
                               ),
-                            if (inventoryEnabled && item.isLowStock) ...[
-                              if (subtitle.isNotEmpty)
-                                const SizedBox(width: 6),
-                              Flexible(
-                                child: Text(
-                                  '· ${l10n.itemsLowStock}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: AppColors.warning,
-                                    fontWeight: FontWeight.w600,
-                                    height: 1.15,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                            ),
+                          if (lowStock) ...[
+                            if (hint.isNotEmpty) const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                hint.isNotEmpty
+                                    ? '· ${l10n.itemsLowStock}'
+                                    : l10n.itemsLowStock,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppFont.style(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.warning,
+                                  height: 1.15,
                                 ),
                               ),
-                            ],
+                            ),
                           ],
-                        ),
-                    ],
-                  ),
+                        ],
+                      ),
+                  ],
                 ),
-                // Price — a range for a sized item, whose own price is null.
-                Text(
+              ),
+              // Price — a range for a sized item, whose own price is null.
+              SizedBox(
+                width: priceWidth,
+                child: Text(
                   itemPriceLabel(item),
-                  style: const TextStyle(
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppFont.style(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textSecondary,
                   ),
                 ),
-                const SizedBox(width: AppSpacing.space8),
-                // Actions
-                InkWell(
-                  onTap: () => _showBarcodePrint(item),
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(
-                      Icons.qr_code_outlined,
-                      size: 16,
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: actionsWidth(isOwner),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    _RowIcon(
+                      icon: Icons.qr_code_outlined,
                       color: item.barcode != null
                           ? AppColors.accent
                           : AppColors.textSecondary,
+                      onTap: onBarcode,
                     ),
-                  ),
+                    if (onDelete != null) ...[
+                      const SizedBox(width: 2),
+                      _RowIcon(
+                        icon: Icons.delete_outline,
+                        color: AppColors.error,
+                        onTap: onDelete!,
+                      ),
+                    ],
+                  ],
                 ),
-                if (userRole == 'owner') ...[
-                  const SizedBox(width: 2),
-                  InkWell(
-                    onTap: () => _deleteItem(item),
-                    borderRadius: BorderRadius.circular(4),
-                    child: const Padding(
-                      padding: EdgeInsets.all(4),
-                      child: Icon(Icons.delete_outline,
-                          size: 16, color: AppColors.error),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+}
+
+class _RowIcon extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  const _RowIcon({required this.icon, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: SizedBox(
+          width: _ItemSheetRow._iconTap,
+          height: _ItemSheetRow._iconTap,
+          child: Icon(icon, size: 16, color: color),
+        ),
+      );
 }
 
 // ---------------------------------------------------------------------------

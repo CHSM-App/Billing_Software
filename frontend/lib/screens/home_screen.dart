@@ -1,4 +1,4 @@
-import 'dart:async' show Timer, unawaited;
+import 'dart:async' show Completer, Timer, unawaited;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +28,7 @@ import '../main.dart' show rootMessengerKey;
 import 'bill_preview_screen.dart';
 import 'login_screen.dart';
 import 'printer_setup_screen.dart';
+import '../widgets/category_sheet.dart' show CategoryChipStrip;
 
 extension _StringEx on String {
   String? get nullIfEmpty => isEmpty ? null : this;
@@ -68,7 +69,31 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
     with TickerProviderStateMixin, WidgetsBindingObserver {
-  String _selectedCategory = '';
+  // The item list is ONE continuous scroll grouped by category (a highlighted
+  // section bar, then that category's items, then the next category…). The
+  // chip strip above it is a jump-list: tapping a chip scrolls to that section,
+  // and scrolling keeps the chip of the section under the header highlighted.
+  // A ValueNotifier drives the chip highlight so scroll ticks don't rebuild
+  // this whole (large) screen.
+  final ValueNotifier<String> _activeCategory = ValueNotifier('');
+  final ScrollController _itemsScrollCtrl = ScrollController();
+  final ScrollController _catStripCtrl = ScrollController();
+  final Map<String, GlobalKey> _catChipKeys = {};
+  // Snapshot of the sections currently rendered — the scroll listener needs
+  // them (and the column mode) to map a scroll offset back to a category.
+  List<_CategorySection> _sections = const [];
+  bool _twoColumns = false;
+  bool _jumpingToCategory = false;
+  // Categories whose items are spread open in the list. The first category
+  // is spread open automatically the first time items land (see
+  // _autoOpenedFirstCategory) so the cashier can start tapping right away;
+  // everything else starts collapsed.
+  final Set<String> _expandedCategories = {};
+  // Set once the first category has been auto-opened on initial load so a
+  // cashier who deliberately folds it shut is not fought on every rebuild.
+  bool _autoOpenedFirstCategory = false;
+  // Variant items (by id) whose size rows are unfolded beneath them in place.
+  final Set<String> _expandedVariantItems = {};
   bool _showCustomerFields = true;
   String _paymentMode = 'cash';
   // Inline error shown inside the billing card when a credit bill is missing
@@ -158,6 +183,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
     _searchAnim = CurvedAnimation(parent: _searchAnimCtrl, curve: Curves.easeInOut);
     _searchController.addListener(() => setState(() {}));
+    _itemsScrollCtrl.addListener(_syncActiveCategoryToScroll);
     _discountPctController.addListener(_onDiscountPctChanged);
     _discountAmtController.addListener(_onDiscountAmtChanged);
     // Clear the inline credit error as soon as both name + phone are present.
@@ -228,6 +254,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _searchAnimCtrl.dispose();
     _searchFocus.dispose();
     _searchController.dispose();
+    _itemsScrollCtrl.dispose();
+    _catStripCtrl.dispose();
+    _activeCategory.dispose();
     _customerSearchDebounce?.cancel();
     _customerNameController.dispose();
     _customerPhoneController.dispose();
@@ -345,12 +374,213 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final query = _searchController.text.toLowerCase();
     return allItems.where((item) {
       if (!item.isActive) return false;
-      final matchesSearch =
-          query.isEmpty || item.name.toLowerCase().contains(query);
-      final matchesCategory =
-          _selectedCategory.isEmpty || item.category == _selectedCategory;
-      return matchesSearch && matchesCategory;
+      return query.isEmpty || item.name.toLowerCase().contains(query);
     }).toList();
+  }
+
+  /// Groups [items] into category sections in [cats] order (alphabetical, from
+  /// categoriesProvider). Items without a category go last under "Other".
+  /// Order within a section is preserved (top-sold ranking, then name).
+  List<_CategorySection> _groupByCategory(List<Item> items, List<String> cats) {
+    // While searching, every matching section is spread open — otherwise the
+    // matches would be hidden behind collapsed bars.
+    final searching = _searchController.text.trim().isNotEmpty;
+    final byCat = <String, List<Item>>{};
+    for (final item in items) {
+      final cat = item.category?.trim() ?? '';
+      byCat.putIfAbsent(cat, () => []).add(item);
+    }
+    final ordered = <String>[
+      ...cats.where(byCat.containsKey),
+      // Categories present on items but missing from the provider (shouldn't
+      // happen, but never drop items on the floor).
+      ...byCat.keys.where((c) => c.isNotEmpty && !cats.contains(c)),
+      if (byCat.containsKey('')) '',
+    ];
+    return [
+      for (final cat in ordered)
+        _CategorySection(
+          cat,
+          byCat[cat]!,
+          expanded: searching || _expandedCategories.contains(cat),
+          openItems: {
+            for (final it in byCat[cat]!)
+              if (it.hasVariants && _expandedVariantItems.contains(it.id))
+                it.id,
+          },
+        ),
+    ];
+  }
+
+  /// Bar tap: spread open one category's items (folding whichever category
+  /// was open) or fold it up if it was the open one — only one is ever open.
+  void _toggleCategory(String cat) {
+    final wasOpen = _expandedCategories.contains(cat);
+    setState(() {
+      _expandedCategories.clear();
+      if (!wasOpen) _expandedCategories.add(cat);
+    });
+    if (wasOpen) {
+      // Folded shut: fall back to whichever section sits under the header
+      // once the list has re-laid out.
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _syncActiveCategoryToScroll());
+    } else {
+      // The chip strip follows the bar the cashier just opened.
+      _setActiveCategory(cat);
+    }
+  }
+
+  /// Any tap on a variant parent row: unfold its size rows in place (folding
+  /// whichever parent was unfolded) or fold it — only one is ever unfolded.
+  void _toggleVariantItem(Item item) {
+    setState(() {
+      final wasOpen = _expandedVariantItems.contains(item.id);
+      _expandedVariantItems.clear();
+      if (!wasOpen) _expandedVariantItems.add(item.id);
+    });
+  }
+
+  /// Waits for the frame after a setState so cached [_sections] are current.
+  Future<void> _nextFrame() {
+    final done = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) => done.complete());
+    return done.future;
+  }
+
+  Future<void> _animateListTo(double offset) async {
+    if (!_itemsScrollCtrl.hasClients) return;
+    final pos = _itemsScrollCtrl.position;
+    // A jump usually follows a toggle, and the rows it just opened are still
+    // unfolding — the live max extent is short of where the list will settle,
+    // so clamp against the settled extent. The scroll physics clamp any
+    // transient overshoot per frame.
+    final settledMax = _ExcelItemTable.settledMaxScroll(
+      _sections,
+      _twoColumns,
+      viewportHeight: pos.viewportDimension,
+    );
+    final target = offset.clamp(
+        0.0, settledMax > pos.maxScrollExtent ? settledMax : pos.maxScrollExtent);
+    _jumpingToCategory = true;
+    try {
+      await _itemsScrollCtrl.animateTo(target,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic);
+    } finally {
+      _jumpingToCategory = false;
+    }
+  }
+
+  /// A scan resolved to a variant item but not to a size: open its category
+  /// and unfold its sizes right in the list, then scroll it under the header
+  /// so the cashier can pick the plate.
+  Future<void> _revealVariantItem(Item item) async {
+    final cat = item.category?.trim() ?? '';
+    setState(() {
+      _expandedCategories
+        ..clear()
+        ..add(cat);
+      _expandedVariantItems
+        ..clear()
+        ..add(item.id);
+    });
+    await _nextFrame();
+    if (!mounted) return;
+    final offset =
+        _ExcelItemTable.itemOffset(_sections, item.id, _twoColumns);
+    if (offset == null) return; // filtered out by the search box
+    _setActiveCategory(cat);
+    await _animateListTo(offset);
+  }
+
+  /// Which category the chip strip should point at for scroll [offset] with
+  /// a viewport [viewportHeight] tall: the (single) open section while any
+  /// of it is on screen — so a bar tap keeps its chip lit — and otherwise the
+  /// section whose bar sits under the pinned header.
+  String _categoryAtOffset(double offset, double viewportHeight) {
+    // Rows under the pinned column header don't count as visible.
+    final bottom =
+        offset + viewportHeight - _ExcelItemTable.columnHeaderHeight;
+    for (var k = 0; k < _sections.length; k++) {
+      if (!_sections[k].expanded) continue;
+      final start = _ExcelItemTable.sectionOffset(_sections, k, _twoColumns);
+      final end = _ExcelItemTable.sectionOffset(_sections, k + 1, _twoColumns);
+      if (start < bottom && end > offset) return _sections[k].category;
+    }
+    var active = _sections.first.category;
+    for (var k = 1; k < _sections.length; k++) {
+      if (_ExcelItemTable.sectionOffset(_sections, k, _twoColumns) <= offset + 1) {
+        active = _sections[k].category;
+      } else {
+        break;
+      }
+    }
+    return active;
+  }
+
+  /// Scroll-spy: keep the chip strip pointing at the section being viewed.
+  void _syncActiveCategoryToScroll() {
+    if (!mounted || _jumpingToCategory || _sections.isEmpty) return;
+    if (!_itemsScrollCtrl.hasClients) return;
+    final pos = _itemsScrollCtrl.position;
+    _setActiveCategory(_categoryAtOffset(pos.pixels, pos.viewportDimension));
+  }
+
+  void _setActiveCategory(String cat) {
+    if (_activeCategory.value == cat) return;
+    _activeCategory.value = cat;
+    _revealCategoryChip(cat);
+  }
+
+  /// Horizontally scroll the chip strip so the active chip is centred.
+  void _revealCategoryChip(String cat) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_catStripCtrl.hasClients) return;
+      final chipCtx = _catChipKeys[cat]?.currentContext;
+      if (chipCtx == null) return;
+      Scrollable.ensureVisible(chipCtx,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut);
+    });
+  }
+
+  /// Chip tap: spread [cat] open (if folded) and scroll the single item list so
+  /// its section bar lands right under the pinned header.
+  Future<void> _jumpToCategory(String cat) async {
+    if (_sections.indexWhere((s) => s.category == cat) < 0) return;
+    if (!_expandedCategories.contains(cat)) {
+      setState(() => _expandedCategories
+        ..clear()
+        ..add(cat));
+      // Offsets depend on which sections are open — wait for the rebuild so
+      // _sections reflects the newly opened one before measuring.
+      await _nextFrame();
+      if (!mounted) return;
+    }
+    final k = _sections.indexWhere((s) => s.category == cat);
+    if (k < 0) return;
+    _setActiveCategory(cat);
+    await _animateListTo(
+        _ExcelItemTable.sectionOffset(_sections, k, _twoColumns));
+  }
+
+  /// The category jump-list shown above the item table: one row of chips, or
+  /// two rows (scrolling sideways as one block) once they stop fitting.
+  Widget _buildCategoryStrip(List<String> categories) {
+    final l10n = context.l10n;
+    return ValueListenableBuilder<String>(
+      valueListenable: _activeCategory,
+      builder: (context, active, _) => CategoryChipStrip(
+        categories: categories,
+        active: active,
+        labelOf: (cat) => _categoryLabel(cat, l10n),
+        onTap: _jumpToCategory,
+        controller: _catStripCtrl,
+        chipKeys: _catChipKeys,
+      ),
+    );
   }
 
   // ── Additional charges ─────────────────────────────────────────────────────
@@ -688,7 +918,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// base price when the real sizes are half 180 / Full 280.
   void _addScannedItem(Item item, ItemVariant? variant) {
     if (variant == null && item.hasVariants) {
-      _showVariantPicker(item);
+      _revealVariantItem(item);
       return;
     }
     ref.read(cartProvider.notifier).addItem(item, variant: variant);
@@ -2644,98 +2874,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // Size picker — shown when a variant item is tapped or swiped. Each size has
   // its own − / + stepper and stays open so multiple sizes and quantities can
   // be set in one go. Each size is a separate cart line (independent stock).
-  void _showVariantPicker(Item item) {
-    final l10n = context.l10n;
-    showModalBottomSheet(
-      context: context,
-      // Let the sheet grow and — crucially — sit above the keyboard, so the
-      // editable quantity field on each size row stays visible while typing.
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
-      ),
-      builder: (sheetCtx) {
-        // Watch the cart so per-size quantities update live. Each size is
-        // rendered with the SAME _ExcelItemRow used on the billing page, so it
-        // gets the identical − / + stepper and left/right swipe gestures.
-        return Consumer(builder: (context, ref, _) {
-          final cart = ref.watch(cartProvider);
-          final notifier = ref.read(cartProvider.notifier);
-          double qtyOf(ItemVariant v) => cart
-              .where((e) => e.key == '${item.id}:${v.id}')
-              .fold(0.0, (s, e) => s + e.quantity);
-
-          // Pad the sheet up by the keyboard height so its content (including
-          // the editable quantity field) is never hidden behind the keyboard.
-          final keyboardHeight = MediaQuery.of(sheetCtx).viewInsets.bottom;
-          return AnimatedPadding(
-            padding: EdgeInsets.only(bottom: keyboardHeight),
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.decelerate,
-            child: SafeArea(
-            child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    margin: const EdgeInsets.only(top: 10, bottom: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.border,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-                  child: Text(
-                    l10n.billingChooseSize(item.name),
-                    style: Theme.of(sheetCtx).textTheme.titleMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Divider(height: 1),
-                for (int idx = 0; idx < item.variants.length; idx++) ...[
-                  if (idx > 0)
-                    const Divider(height: 1, indent: 12, endIndent: 12),
-                  Builder(builder: (_) {
-                    final v = item.variants[idx];
-                    final key = '${item.id}:${v.id}';
-                    return _ExcelItemRow(
-                      index: idx + 1,
-                      item: item,
-                      variant: v,
-                      qty: qtyOf(v),
-                      onAdd: () => notifier.addItem(item, variant: v),
-                      onIncrement: () => notifier.addItem(item, variant: v),
-                      onDecrement: () => notifier.changeQty(key, -1),
-                      onSetQty: (q) => notifier.setQty(key, q),
-                    );
-                  }),
-                ],
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: PrimaryButton(
-                    text: l10n.commonDone,
-                    onPressed: () => Navigator.pop(sheetCtx),
-                  ),
-                ),
-              ],
-            ),
-            ),
-            ),
-          );
-        });
-      },
-    );
-  }
-
   void _openCartSheet() {
     showModalBottomSheet(
       context: context,
@@ -2787,51 +2925,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final cart = ref.watch(cartProvider);
       final cats = ref.watch(categoriesProvider).valueOrNull ?? [];
 
-      // Search + category header slivers — always scrollable.
-      // (Stale-cache banner removed: items auto-refresh on app open instead.)
-      List<Widget> headerSlivers() => [
-        if (cats.isNotEmpty)
-          SliverToBoxAdapter(
-            child: SizedBox(
-              height: 44,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                primary: false,
-                physics: const ClampingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.space12),
-                itemCount: cats.length,
-                separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.space8),
-                itemBuilder: (_, i) {
-                  final cat = cats[i];
-                  final selected = _selectedCategory == cat;
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    child: FilterChip(
-                      label: Text(cat),
-                      selected: selected,
-                      onSelected: (_) => setState(() {
-                        _selectedCategory = _selectedCategory == cat ? '' : cat;
-                      }),
-                      backgroundColor: AppColors.surfaceVariant,
-                      selectedColor: AppColors.primaryLight,
-                      checkmarkColor: AppColors.primary,
-                      labelStyle: TextStyle(
-                        color: selected ? AppColors.primary : AppColors.textSecondary,
-                        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                        fontSize: 13,
-                      ),
-                      side: BorderSide(color: selected ? AppColors.primary : AppColors.border),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.small)),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        const SliverToBoxAdapter(child: SizedBox(height: 4)),
-      ];
-
       return itemsAsync.when(
         loading: () => const BillingSkeleton(),
         error: (e, _) => NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider)),
@@ -2840,17 +2933,65 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             return NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider));
           }
           final items = _filteredItems(allItems);
+          var sections = _groupByCategory(items, cats);
+
+          // First load (fresh login / opening the billing screen): spread the
+          // first category open by default. Only once, and never while a
+          // search is active (search already opens every matching section).
+          if (!_autoOpenedFirstCategory &&
+              sections.isNotEmpty &&
+              _searchController.text.trim().isEmpty) {
+            _autoOpenedFirstCategory = true;
+            final first = sections.first.category;
+            _expandedCategories
+              ..clear()
+              ..add(first);
+            sections = _groupByCategory(items, cats);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _setActiveCategory(first);
+            });
+          }
+
+          // Cache what the scroll listener needs, and re-point the chip strip
+          // whenever the set of sections changes (search typed, items synced).
+          final sectionsChanged = sections.length != _sections.length ||
+              Iterable.generate(sections.length).any(
+                  (k) => sections[k].category != _sections[k].category);
+          _sections = sections;
+          _twoColumns = MediaQuery.of(context).size.width >= 1200;
+          if (sectionsChanged) {
+            WidgetsBinding.instance
+                .addPostFrameCallback((_) => _syncActiveCategoryToScroll());
+          }
+
+          // The chip strip lists the sections actually on screen; when nothing
+          // matches the search it falls back to every category (as a hint).
+          final stripCats = sections.isNotEmpty
+              ? [for (final s in sections) s.category]
+              : cats;
+          final strip =
+              stripCats.isEmpty ? null : _buildCategoryStrip(stripCats);
+
+          Future<void> refresh() async {
+            ref.invalidate(itemsProvider);
+            ref.invalidate(categoriesProvider);
+            await ref.read(itemsProvider.future);
+          }
+
+          // The strip sits above the scrolling table (not in its pinned
+          // header) because it is one or two rows tall depending on how many
+          // categories fit the width.
+          Widget withStrip(Widget list) => strip == null
+              ? list
+              : Column(children: [strip, Expanded(child: list)]);
+
           if (items.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: () async {
-                ref.invalidate(itemsProvider);
-                ref.invalidate(categoriesProvider);
-                await ref.read(itemsProvider.future);
-              },
+            return withStrip(RefreshIndicator(
+              onRefresh: refresh,
               child: CustomScrollView(
+                controller: _itemsScrollCtrl,
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
-                  ...headerSlivers(),
                   SliverFillRemaining(
                     child: EmptyState(
                         icon: Icons.search_off_outlined,
@@ -2858,31 +2999,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ],
               ),
-            );
+            ));
           }
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(itemsProvider);
-              ref.invalidate(categoriesProvider);
-              await ref.read(itemsProvider.future);
-            },
+          return withStrip(RefreshIndicator(
+            onRefresh: refresh,
             child: _ExcelItemTable(
-              items: items,
+              sections: sections,
               cart: cart,
-              headerSlivers: headerSlivers(),
-              // Variant items can't map a single stepper to one of several
-              // sizes, so every qty action (+/-/set) opens the size picker.
+              controller: _itemsScrollCtrl,
+              twoColumns: _twoColumns,
+              onToggleSection: _toggleCategory,
+              // A variant parent can't map one stepper to several sizes, so
+              // every qty action on it (+/−/set/tap) unfolds its size rows in
+              // place instead; the size rows carry the real steppers.
               onAdd: (item) {
                 if (item.hasVariants) {
-                  _showVariantPicker(item);
+                  _toggleVariantItem(item);
                 } else {
                   ref.read(cartProvider.notifier).addItem(item);
                 }
               },
               onDecrement: (item) {
                 if (item.hasVariants) {
-                  _showVariantPicker(item);
+                  _toggleVariantItem(item);
                 } else {
                   ref
                       .read(cartProvider.notifier)
@@ -2891,7 +3031,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               },
               onIncrement: (item) {
                 if (item.hasVariants) {
-                  _showVariantPicker(item);
+                  _toggleVariantItem(item);
                 } else {
                   ref
                       .read(cartProvider.notifier)
@@ -2900,15 +3040,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               },
               onSetQty: (item, qty) {
                 if (item.hasVariants) {
-                  _showVariantPicker(item);
+                  _toggleVariantItem(item);
                 } else {
                   ref
                       .read(cartProvider.notifier)
                       .setQty(CartNotifier.keyFor(item.id), qty);
                 }
               },
+              onVariantAdd: (item, v) =>
+                  ref.read(cartProvider.notifier).addItem(item, variant: v),
+              onVariantDelta: (item, v, delta) => ref
+                  .read(cartProvider.notifier)
+                  .changeQty(CartNotifier.keyFor(item.id, v.id), delta),
+              onVariantSetQty: (item, v, qty) => ref
+                  .read(cartProvider.notifier)
+                  .setQty(CartNotifier.keyFor(item.id, v.id), qty),
             ),
-          );
+          ));
         },
       );
     });
@@ -4277,24 +4425,497 @@ class _CartQtyFieldState extends State<_CartQtyField> {
 // NEW: Excel-style table — one item per row, minimal height
 // ---------------------------------------------------------------------------
 
-class _ExcelItemTable extends StatelessWidget {
+/// One category's worth of rows in the single grouped item list.
+class _CategorySection {
+  /// Raw category string; empty for items that have no category ("Other").
+  final String category;
   final List<Item> items;
+  /// Collapsed sections render only their bar; the item rows appear once the
+  /// cashier taps the bar (or its + button).
+  final bool expanded;
+  /// Ids of variant items in [items] whose size rows are unfolded beneath them.
+  final Set<String> openItems;
+  const _CategorySection(this.category, this.items,
+      {required this.expanded, this.openItems = const {}});
+}
+
+String _categoryLabel(String category, AppLocalizations l10n) =>
+    category.isEmpty ? l10n.billingCategoryOther : category;
+
+/// A row of the flattened list: a category section bar, one row of item(s) —
+/// one per row on phones, two side by side on wide screens — or one row of
+/// size(s) unfolded beneath a variant parent.
+class _ListEntry {
+  final _CategorySection? section;
+  final List<Item> items;
+  final int firstIndex; // 1-based running number of items.first
+  final Item? parent; // set → this row holds sizes of [parent]
+  final List<ItemVariant> variants;
+  const _ListEntry.header(this.section)
+      : items = const [],
+        firstIndex = 0,
+        parent = null,
+        variants = const [];
+  const _ListEntry.rows(this.items, this.firstIndex)
+      : section = null,
+        parent = null,
+        variants = const [];
+  const _ListEntry.sizes(this.parent, this.variants)
+      : section = null,
+        items = const [],
+        firstIndex = 0;
+  bool get isHeader => section != null;
+  bool get isSizes => parent != null;
+}
+
+class _ExcelItemTable extends StatefulWidget {
+  final List<_CategorySection> sections;
   final List<CartEntry> cart;
-  final List<Widget> headerSlivers;
+  final ScrollController controller;
+  final bool twoColumns;
+  final void Function(String category) onToggleSection;
   final void Function(Item) onAdd;
   final void Function(Item) onDecrement;
   final void Function(Item) onIncrement;
   final void Function(Item, double) onSetQty;
+  final void Function(Item, ItemVariant) onVariantAdd;
+  final void Function(Item, ItemVariant, double delta) onVariantDelta;
+  final void Function(Item, ItemVariant, double qty) onVariantSetQty;
 
   const _ExcelItemTable({
-    required this.items,
+    required this.sections,
     required this.cart,
-    required this.headerSlivers,
+    required this.controller,
+    required this.twoColumns,
+    required this.onToggleSection,
     required this.onAdd,
     required this.onDecrement,
     required this.onIncrement,
     required this.onSetQty,
+    required this.onVariantAdd,
+    required this.onVariantDelta,
+    required this.onVariantSetQty,
   });
+
+  // Every row has a fixed extent so a chip tap can compute its target scroll
+  // offset exactly (and the scroll-spy can invert it) without measuring.
+  static const double columnHeaderHeight = 29; // 28 header + 1 divider
+  static const double sectionHeaderExtent = 40;
+  static const double rowExtent = 41; // 40 row + 1 divider
+  static const double bottomPadding = 80;
+  /// How long a category / variant group takes to unfold or fold shut. The
+  /// bar's colours, rail and chevron run on the same clock so the whole group
+  /// moves as one.
+  static const Duration foldDuration = Duration(milliseconds: 300);
+  /// Ease-out in both directions: the group responds to the tap at once and
+  /// settles gently, which reads smoother than a symmetric ease-in-out.
+  static const Curve foldCurve = Curves.easeOutCubic;
+
+  /// Rows (without the bar) a section contributes to the list, plus the next
+  /// running item number. Items are numbered even while folded so a number
+  /// never shifts when another category opens.
+  ///
+  /// In two-column mode an unfolded variant parent takes a row on its own so
+  /// its size rows sit directly beneath it (sizes are paired two per row).
+  static (List<_ListEntry>, int) _sectionEntries(
+      _CategorySection s, bool twoColumns, int index) {
+    final out = <_ListEntry>[];
+    if (!s.expanded) return (out, index + s.items.length);
+    final step = twoColumns ? 2 : 1;
+    bool open(Item it) => it.hasVariants && s.openItems.contains(it.id);
+    var i = 0;
+    while (i < s.items.length) {
+      final item = s.items[i];
+      final next = i + 1 < s.items.length ? s.items[i + 1] : null;
+      if (step == 2 && !open(item) && next != null && !open(next)) {
+        out.add(_ListEntry.rows([item, next], index));
+        index += 2;
+        i += 2;
+        continue;
+      }
+      out.add(_ListEntry.rows([item], index));
+      index += 1;
+      i += 1;
+      if (open(item)) {
+        final vs = item.variants;
+        for (var j = 0; j < vs.length; j += step) {
+          final end = j + step > vs.length ? vs.length : j + step;
+          out.add(_ListEntry.sizes(item, vs.sublist(j, end)));
+        }
+      }
+    }
+    return (out, index);
+  }
+
+  /// Rows a section contributes to the list — none while collapsed.
+  static int _rowsIn(_CategorySection s, bool twoColumns) =>
+      _sectionEntries(s, twoColumns, 0).$1.length;
+
+  /// Scroll offset (list-local, i.e. what [controller] should be set to so the
+  /// section bar sits right under the pinned header) of section [k].
+  static double sectionOffset(
+      List<_CategorySection> sections, int k, bool twoColumns) {
+    var offset = 0.0;
+    for (var i = 0; i < k && i < sections.length; i++) {
+      offset += sectionHeaderExtent + _rowsIn(sections[i], twoColumns) * rowExtent;
+    }
+    return offset;
+  }
+
+  /// List-local offset that puts [itemId]'s row under the pinned header, or
+  /// null when the item isn't in the (filtered, unfolded) list.
+  static double? itemOffset(
+      List<_CategorySection> sections, String itemId, bool twoColumns) {
+    var offset = 0.0;
+    for (final s in sections) {
+      offset += sectionHeaderExtent;
+      for (final e in _sectionEntries(s, twoColumns, 0).$1) {
+        if (e.items.any((it) => it.id == itemId)) return offset;
+        offset += rowExtent;
+      }
+    }
+    return null;
+  }
+
+  /// The list's maxScrollExtent once every fold animation has settled. Right
+  /// after a toggle the live extent is still catching up (rows are mid-grow),
+  /// so a jump started in that frame must clamp against this instead.
+  static double settledMaxScroll(
+    List<_CategorySection> sections,
+    bool twoColumns, {
+    required double viewportHeight,
+  }) {
+    var content = columnHeaderHeight + bottomPadding;
+    for (final s in sections) {
+      content += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+    }
+    return (content - viewportHeight).clamp(0.0, double.infinity);
+  }
+
+  @override
+  State<_ExcelItemTable> createState() => _ExcelItemTableState();
+}
+
+/// One group's fold animation: the controller plus its eased view.
+class _Fold {
+  final AnimationController _ctrl;
+  late final CurvedAnimation _eased;
+
+  _Fold(TickerProvider vsync,
+      {required bool open, required VoidCallback onTick})
+      : _ctrl = AnimationController(
+          vsync: vsync,
+          duration: _ExcelItemTable.foldDuration,
+          value: open ? 1 : 0,
+        ) {
+    // Same curve as reverseCurve so folding shut also eases out (quick start,
+    // gentle settle) rather than replaying the opening curve backwards.
+    _eased = CurvedAnimation(
+      parent: _ctrl,
+      curve: _ExcelItemTable.foldCurve,
+      reverseCurve: _ExcelItemTable.foldCurve,
+    );
+    _ctrl.addListener(onTick);
+  }
+
+  /// Eased 0 (folded) → 1 (open).
+  double get value => _eased.value;
+
+  void animateTo({required bool open}) =>
+      open ? _ctrl.forward() : _ctrl.reverse();
+
+  void dispose() {
+    _eased.dispose();
+    _ctrl.dispose();
+  }
+}
+
+class _ExcelItemTableState extends State<_ExcelItemTable>
+    with TickerProviderStateMixin {
+  // Fold animations, keyed by category / variant item id. A fold only exists
+  // for a group that has been toggled since this widget mounted; for every
+  // other group the state is simply whatever [widget] says. Progress runs
+  // 0 (folded) → 1 (open) and scales every row of the group in unison
+  // (per-row squash + fade), so the rows below slide down/up instead of
+  // popping in and out.
+  final Map<String, _Fold> _sectionFold = {};
+  final Map<String, _Fold> _variantFold = {};
+
+  static Set<String> _openCategories(List<_CategorySection> sections) =>
+      {for (final s in sections) if (s.expanded) s.category};
+
+  static Set<String> _openVariantItems(List<_CategorySection> sections) =>
+      {for (final s in sections) ...s.openItems};
+
+  @override
+  void didUpdateWidget(_ExcelItemTable old) {
+    super.didUpdateWidget(old);
+    _diffFolds(_sectionFold, _openCategories(old.sections),
+        _openCategories(widget.sections));
+    _diffFolds(_variantFold, _openVariantItems(old.sections),
+        _openVariantItems(widget.sections));
+  }
+
+  /// Starts a fold/unfold for every key whose open state flipped.
+  void _diffFolds(Map<String, _Fold> folds, Set<String> was, Set<String> now) {
+    for (final key in {...was, ...now}) {
+      final open = now.contains(key);
+      if (was.contains(key) == open) continue;
+      folds
+          .putIfAbsent(key, () => _Fold(this, open: !open, onTick: _onFoldTick))
+          .animateTo(open: open);
+    }
+  }
+
+  void _onFoldTick() => setState(() {});
+
+  /// 0 = folded, 1 = fully open, eased in between.
+  double _progress(Map<String, _Fold> folds, String key, bool open) =>
+      folds[key]?.value ?? (open ? 1 : 0);
+
+  /// Whether [key] still has rows on screen — open, or mid-fold either way.
+  bool _showing(Map<String, _Fold> folds, String key, bool open) =>
+      _progress(folds, key, open) > 0;
+
+  @override
+  void dispose() {
+    for (final f in _sectionFold.values) {
+      f.dispose();
+    }
+    for (final f in _variantFold.values) {
+      f.dispose();
+    }
+    super.dispose();
+  }
+
+  /// Rows to show right now, each with its current extent. Per-row squash:
+  /// every row of a group scales its own height with the group's progress
+  /// (all rows in unison), so a group folding shut keeps its rows shrinking
+  /// until the animation lands on 0 and one unfolding grows them from 0. A
+  /// size row scales by section × variant progress so it folds with either.
+  /// Item numbering follows the final state so a number never shifts
+  /// mid-animation.
+  List<(_ListEntry, double)> _entries() {
+    final entries = <(_ListEntry, double)>[];
+    var index = 1;
+    for (final s in widget.sections) {
+      entries.add((_ListEntry.header(s), _ExcelItemTable.sectionHeaderExtent));
+      final sp = _progress(_sectionFold, s.category, s.expanded);
+      if (sp <= 0) {
+        index += s.items.length;
+        continue;
+      }
+      // Variant groups still folding shut stay unfolded for layout purposes.
+      final visible = _CategorySection(s.category, s.items,
+          expanded: true,
+          openItems: {
+            for (final it in s.items)
+              if (it.hasVariants &&
+                  _showing(_variantFold, it.id, s.openItems.contains(it.id)))
+                it.id,
+          });
+      final (rows, next) =
+          _ExcelItemTable._sectionEntries(visible, widget.twoColumns, index);
+      for (final e in rows) {
+        var p = sp;
+        if (e.isSizes) {
+          final id = e.parent!.id;
+          p *= _progress(_variantFold, id, s.openItems.contains(id));
+        }
+        if (p <= 0) continue;
+        entries.add((e, _ExcelItemTable.rowExtent * p));
+      }
+      index = next;
+    }
+    return entries;
+  }
+
+  /// Squash + fade: clips a partially open row to its current extent around
+  /// its own centre (the row appears to grow out of its midline) while fading
+  /// it in with the same progress.
+  Widget _folded(Widget row, double extent) {
+    if (extent >= _ExcelItemTable.rowExtent) return row;
+    return ClipRect(
+      child: OverflowBox(
+        alignment: Alignment.center,
+        minHeight: _ExcelItemTable.rowExtent,
+        maxHeight: _ExcelItemTable.rowExtent,
+        child: Opacity(
+          opacity: (extent / _ExcelItemTable.rowExtent).clamp(0.0, 1.0),
+          child: row,
+        ),
+      ),
+    );
+  }
+
+  /// Highlighted, tappable category bar. Shows "name (count)" and a + button
+  /// while collapsed; expanding it reveals the items and flips the button to −.
+  Widget _sectionHeader(_CategorySection s, AppLocalizations l10n) {
+    final open = s.expanded;
+    // Bar tint and accent rail cross-fade on the fold clock instead of
+    // hard-flipping the instant the rows start moving.
+    return AnimatedContainer(
+      duration: _ExcelItemTable.foldDuration,
+      curve: _ExcelItemTable.foldCurve,
+      color: open ? AppColors.primaryLight : AppColors.surfaceVariant,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: () => widget.onToggleSection(s.category),
+          child: AnimatedContainer(
+            duration: _ExcelItemTable.foldDuration,
+            curve: _ExcelItemTable.foldCurve,
+            height: _ExcelItemTable.sectionHeaderExtent,
+            decoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(
+                    color: open ? AppColors.primary : AppColors.border, width: 3),
+                bottom: const BorderSide(color: AppColors.border),
+              ),
+            ),
+            padding: const EdgeInsets.only(left: 9, right: 8),
+            child: Row(
+              children: [
+                // Name + count hug the left; the single Expanded takes ALL the
+                // free space so the button below lands flush on the right edge.
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          _categoryLabel(s.category, l10n),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppFont.style(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: open
+                                ? AppColors.primaryDark
+                                : AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Item count pill right next to the name.
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: open
+                              ? AppColors.primary.withValues(alpha: 0.12)
+                              : AppColors.border,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '${s.items.length}',
+                          style: AppFont.style(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: open
+                                ? AppColors.primary
+                                : AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Open/close chevron flush on the right edge. Round + chevron so
+                // it can't be confused with the square − / + qty steppers on the
+                // item rows below. Open state uses the emerald accent so it
+                // stands out against the indigo-tinted open bar.
+                AnimatedContainer(
+                  duration: _ExcelItemTable.foldDuration,
+                  curve: _ExcelItemTable.foldCurve,
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: open ? AppColors.accent : AppColors.surface,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: open ? AppColors.accent : AppColors.border),
+                  ),
+                  child: AnimatedRotation(
+                    turns: open ? 0.5 : 0,
+                    duration: _ExcelItemTable.foldDuration,
+                    curve: _ExcelItemTable.foldCurve,
+                    child: Icon(
+                      Icons.expand_more,
+                      size: 20,
+                      color: open ? Colors.white : AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _itemRow(Item item, int index) => _ExcelItemRow(
+        index: index,
+        item: item,
+        qty: _qtyFor(item.id),
+        onAdd: () => widget.onAdd(item),
+        onDecrement: () => widget.onDecrement(item),
+        onIncrement: () => widget.onIncrement(item),
+        onSetQty: (v) => widget.onSetQty(item, v),
+        expanded: widget.sections.any((s) => s.openItems.contains(item.id)),
+      );
+
+  /// A size row unfolded beneath its parent — same stepper/swipe as any row.
+  Widget _sizeRow(Item parent, ItemVariant v) {
+    final qty = widget.cart
+        .where((e) => e.key == CartNotifier.keyFor(parent.id, v.id))
+        .fold(0.0, (s, e) => s + e.quantity);
+    return _ExcelItemRow(
+      index: 0,
+      item: parent,
+      variant: v,
+      nested: true,
+      qty: qty,
+      onAdd: () => widget.onVariantAdd(parent, v),
+      onIncrement: () => widget.onVariantAdd(parent, v),
+      onDecrement: () => widget.onVariantDelta(parent, v, -1),
+      onSetQty: (q) => widget.onVariantSetQty(parent, v, q),
+    );
+  }
+
+  Widget _entry(_ListEntry e, double extent, AppLocalizations l10n) {
+    if (e.isHeader) return _sectionHeader(e.section!, l10n);
+    // Left/right cells of this row: items or sizes, one or two of them.
+    final cells = e.isSizes
+        ? [for (final v in e.variants) _sizeRow(e.parent!, v)]
+        : [
+            for (var i = 0; i < e.items.length; i++)
+              _itemRow(e.items[i], e.firstIndex + i),
+          ];
+    final Widget row;
+    if (!widget.twoColumns) {
+      row = cells.first;
+    } else {
+      row = Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: cells.first),
+          Container(width: 1, color: AppColors.border),
+          Expanded(child: cells.length > 1 ? cells[1] : const SizedBox()),
+        ],
+      );
+    }
+    return _folded(
+      Column(
+        children: [
+          SizedBox(height: _ExcelItemTable.rowExtent - 1, child: row),
+          const Divider(height: 1, indent: 12, endIndent: 12),
+        ],
+      ),
+      extent,
+    );
+  }
 
   Widget _header(AppLocalizations l10n) => Container(
         height: 28,
@@ -4344,129 +4965,60 @@ class _ExcelItemTable extends StatelessWidget {
       );
 
   // Total quantity for an item across all its cart lines (sums variants).
-  double _qtyFor(String itemId) =>
-      cart.where((e) => e.item.id == itemId).fold(0.0, (s, e) => s + e.quantity);
+  double _qtyFor(String itemId) => widget.cart
+      .where((e) => e.item.id == itemId)
+      .fold(0.0, (s, e) => s + e.quantity);
 
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final entries = _entries();
+
     // Two item columns only on large screens (≥1200px total) where the
     // items panel is wide enough to comfortably fit two side-by-side tables.
-    final screenWidth = MediaQuery.of(context).size.width;
-    final twoColumns = screenWidth >= 1200;
+    final columnHeader = !widget.twoColumns
+        ? _header(l10n)
+        : Row(
+            children: [
+              Expanded(child: _header(l10n)),
+              Container(width: 1, color: AppColors.border),
+              Expanded(child: _header(l10n)),
+            ],
+          );
 
-    if (!twoColumns) {
-      return CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          ...headerSlivers,
-          SliverPersistentHeader(
-            pinned: true,
-            delegate: _PinnedHeaderDelegate(
-              height: 29,
+    // The column header stays pinned while the rows scroll beneath it (the
+    // category jump-list sits above this whole table).
+    return CustomScrollView(
+      controller: widget.controller,
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _PinnedHeaderDelegate(
+            height: _ExcelItemTable.columnHeaderHeight,
+            child: ColoredBox(
+              color: AppColors.surface,
               child: Column(
                 children: [
-                  _header(l10n),
+                  columnHeader,
                   const Divider(height: 1),
                 ],
               ),
             ),
           ),
-          SliverPadding(
-            padding: const EdgeInsets.only(bottom: 80),
-            sliver: SliverList.separated(
-              itemCount: items.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 1, indent: 12, endIndent: 12),
-              itemBuilder: (_, i) {
-                final item = items[i];
-                final qty = _qtyFor(item.id);
-                return _ExcelItemRow(
-                  index: i + 1,
-                  item: item,
-                  qty: qty,
-                  onAdd: () => onAdd(item),
-                  onDecrement: () => onDecrement(item),
-                  onIncrement: () => onIncrement(item),
-                  onSetQty: (v) => onSetQty(item, v),
-                );
-              },
-            ),
-          ),
-        ],
-      );
-    }
-
-    final rowCount = (items.length / 2).ceil();
-
-    return CustomScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      slivers: [
-        ...headerSlivers,
-        SliverPersistentHeader(
-          pinned: true,
-          delegate: _PinnedHeaderDelegate(
-            height: 29,
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: _header(l10n)),
-                    Container(width: 1, color: AppColors.border),
-                    Expanded(child: _header(l10n)),
-                  ],
-                ),
-                const Divider(height: 1),
-              ],
-            ),
-          ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.only(bottom: 80),
-          sliver: SliverList.separated(
-            itemCount: rowCount,
-            separatorBuilder: (_, __) =>
-                const Divider(height: 1, indent: 12, endIndent: 12),
-            itemBuilder: (_, row) {
-              final leftIndex = row * 2;
-              final rightIndex = leftIndex + 1;
-              final leftItem = items[leftIndex];
-              final rightItem =
-                  rightIndex < items.length ? items[rightIndex] : null;
-
-              return IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _ExcelItemRow(
-                        index: leftIndex + 1,
-                        item: leftItem,
-                        qty: _qtyFor(leftItem.id),
-                        onAdd: () => onAdd(leftItem),
-                        onDecrement: () => onDecrement(leftItem),
-                        onIncrement: () => onIncrement(leftItem),
-                        onSetQty: (v) => onSetQty(leftItem, v),
-                      ),
-                    ),
-                    Container(width: 1, color: AppColors.border),
-                    Expanded(
-                      child: rightItem == null
-                          ? const SizedBox()
-                          : _ExcelItemRow(
-                              index: rightIndex + 1,
-                              item: rightItem,
-                              qty: _qtyFor(rightItem.id),
-                              onAdd: () => onAdd(rightItem),
-                              onDecrement: () => onDecrement(rightItem),
-                              onIncrement: () => onIncrement(rightItem),
-                              onSetQty: (v) => onSetQty(rightItem, v),
-                            ),
-                    ),
-                  ],
-                ),
-              );
-            },
+          padding:
+              const EdgeInsets.only(bottom: _ExcelItemTable.bottomPadding),
+          // Row extents shrink/grow while a group folds, so everything below
+          // slides along with it.
+          sliver: SliverVariedExtentList(
+            itemExtentBuilder: (i, _) =>
+                i >= entries.length ? null : entries[i].$2,
+            delegate: SliverChildBuilderDelegate(
+              (_, i) => _entry(entries[i].$1, entries[i].$2, l10n),
+              childCount: entries.length,
+            ),
           ),
         ),
       ],
@@ -4625,6 +5177,10 @@ class _ExcelItemRow extends StatefulWidget {
   // When set, the row represents a single size of [item]: it shows the size
   // label + price and uses the normal stepper/swipe (never the size picker).
   final ItemVariant? variant;
+  // A size row unfolded in place beneath its parent: indented with a rail.
+  final bool nested;
+  // Variant parent whose size rows are currently unfolded beneath it.
+  final bool expanded;
 
   const _ExcelItemRow({
     required this.index,
@@ -4635,6 +5191,8 @@ class _ExcelItemRow extends StatefulWidget {
     required this.onIncrement,
     required this.onSetQty,
     this.variant,
+    this.nested = false,
+    this.expanded = false,
   });
 
   // Effective flags/labels — a variant row behaves like a plain (non-variant)
@@ -4646,10 +5204,9 @@ class _ExcelItemRow extends StatefulWidget {
   /// so no single figure is correct — [rowPriceLabel] shows their range instead.
   double? get rowPrice => variant?.price ?? item.price;
 
-  /// What the price column renders. A size row and a plain item show their own
-  /// price. A variant parent shows NOTHING: it owns no price and its sizes
-  /// differ, so any single figure would be wrong — the price appears once the
-  /// cashier picks a size.
+  /// What the price column renders. A variant row and a plain item show their
+  /// own price. A variant PARENT shows nothing — it isn't billable itself and
+  /// each variant beneath it carries its own price.
   String get rowPriceLabel {
     if (treatAsVariantItem) return '';
     final p = rowPrice;
@@ -4823,25 +5380,47 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
             child: GestureDetector(
               onHorizontalDragUpdate: _onDragUpdate,
               onHorizontalDragEnd: _onDragEnd,
+              // Tapping anywhere on a variant parent unfolds/folds its sizes.
+              onTap: widget.treatAsVariantItem ? widget.onAdd : null,
               behavior: HitTestBehavior.opaque,
-              child: Container(
+              // Animated so a variant parent's tint, rail and padding ease in
+              // as its size rows unfold beneath it rather than snapping.
+              child: AnimatedContainer(
+                duration: _ExcelItemTable.foldDuration,
+                curve: _ExcelItemTable.foldCurve,
                 height: 40,
-                color: inCart
-                    ? const Color(0xFFEEF2FF) // solid indigo-50
-                    : AppColors.surface,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: inCart
+                      ? const Color(0xFFEEF2FF) // solid indigo-50
+                      : widget.expanded || widget.nested
+                          ? const Color(0xFFFAFBFF) // faint tint: open group
+                          : AppColors.surface,
+                  // An unfolded parent and its variant rows share one accent
+                  // rail on the left, so the open group reads as a block.
+                  border: widget.expanded || widget.nested
+                      ? const Border(
+                          left: BorderSide(color: AppColors.primary, width: 3))
+                      : null,
+                ),
+                padding: EdgeInsets.only(
+                    left: widget.expanded || widget.nested ? 9 : 12,
+                    right: 12),
                 child: Row(
                   children: [
-                    // Row number
+                    // Row number — a variant row shows a small tag icon
+                    // instead, marking it as one option of the item above.
                     SizedBox(
                       width: 24,
-                      child: Text(
-                        '${widget.index}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textDisabled,
-                        ),
-                      ),
+                      child: widget.nested
+                          ? const Icon(Icons.sell_outlined,
+                              size: 14, color: AppColors.primary)
+                          : Text(
+                              '${widget.index}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.textDisabled,
+                              ),
+                            ),
                     ),
                     const SizedBox(width: 8),
                     // Item name (or size label for a variant row)
@@ -4850,7 +5429,8 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                         widget.rowName,
                         style: TextStyle(
                           fontSize: 13,
-                          fontWeight: FontWeight.w400,
+                          fontWeight:
+                              inCart ? FontWeight.w600 : FontWeight.w400,
                           color: inCart
                               ? AppColors.primaryDark
                               : AppColors.textPrimary,
@@ -4873,9 +5453,8 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                       ),
                     ),
                     const SizedBox(width: 8),
-                    // Qty controls — same − / + stepper for all rows. A parent
-                    // variant item (not a size row) has a read-only qty and
-                    // opens the size picker; size rows and plain items edit inline.
+                    // Qty controls — same − / + stepper for plain items and
+                    // variant rows.
                     SizedBox(
                       width: 112,
                       child: Row(
@@ -4993,7 +5572,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                         ],
                       ),
                     ),
-                  ],
+                    ],
                 ),
               ),
             ),

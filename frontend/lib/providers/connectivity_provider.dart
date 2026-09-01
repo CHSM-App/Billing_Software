@@ -78,10 +78,17 @@ class ConnectivityNotifier extends Notifier<bool> {
   void _onOsConnectivity(List<ConnectivityResult> results) {
     final hasNetwork = results.any((r) => r != ConnectivityResult.none);
     if (!hasNetwork) {
-      // OS says there's no network at all — definitively offline. Stop polling
-      // the server; the next OS "connected" event will trigger a re-check.
-      _stopPolling();
-      markOffline(startPoll: false);
+      // "No network" is a HINT, never a verdict — keep the recovery poll running.
+      //
+      // On Windows connectivity_plus reports whatever the Network List Manager
+      // believes, and NLA decides "connected to the internet" by probing
+      // msftconnecttest.com. Plenty of shop routers and ISPs block or hijack
+      // that probe, so Windows shows the "no internet" globe while the
+      // connection works perfectly — and the app used to take that at face
+      // value, stop polling, and sit on "You are offline" forever with no way
+      // back. Only the server probe gets to decide; the OS event just makes us
+      // check sooner.
+      markOffline();
       return;
     }
     // OS says we have a network — but wifi could be captive/unreachable, so
@@ -112,13 +119,15 @@ class ConnectivityNotifier extends Notifier<bool> {
   /// re-probes the server and flips us back online.
   bool get isOffline => !state;
 
-  /// Called by api.dart when a request fails to reach the server.
-  void markOffline({bool startPoll = true}) {
+  /// Called by api.dart when a request fails to reach the server. Always starts
+  /// the recovery poll — nothing else re-probes the server, so skipping it is
+  /// how the app got stuck offline permanently.
+  void markOffline() {
     if (state) {
       state = false;
       ref.read(connectivityBannerProvider.notifier).showOffline();
     }
-    if (startPoll) _startPolling();
+    _startPolling();
   }
 
   /// Called by api.dart whenever any request completes with an HTTP response —
