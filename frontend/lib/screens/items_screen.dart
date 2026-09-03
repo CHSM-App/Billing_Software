@@ -167,15 +167,87 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     }).toList();
   }
 
-  void _showBarcodePrint(Item item) {
+  /// Barcode label for an item row.
+  ///
+  /// A sized item has no price of its own — each size carries one — so it must
+  /// be printed per size. Printing the parent produced a label reading
+  /// "Rs. 0.00" and saved a barcode onto the priceless parent, giving a
+  /// scannable code that resolves to nothing sellable. Ask which size first.
+  Future<void> _showBarcodePrint(Item item) async {
+    if (!item.hasVariants) {
+      _showBarcodePrintFor(item, null);
+      return;
+    }
+    final variant = await _pickVariantForBarcode(item);
+    if (variant == null || !mounted) return;
+    _showBarcodePrintFor(item, variant);
+  }
+
+  /// Size chooser shown before printing a sized item's label. Lists each size
+  /// with the price that will actually be printed on it.
+  Future<ItemVariant?> _pickVariantForBarcode(Item item) {
+    final l10n = context.l10n;
+    return showDialog<ItemVariant>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.itemsPickSizeForBarcode),
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        content: SizedBox(
+          width: 320,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final v in item.variants)
+                ListTile(
+                  dense: true,
+                  title: Text(v.label),
+                  // The price shown here is exactly what lands on the label.
+                  trailing: Text(
+                    '₹${(v.price ?? item.price ?? 0).toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  onTap: () => Navigator.pop(ctx, v),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l10n.commonCancel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Opens the print dialog and persists the generated barcode onto whichever
+  /// row actually owns it — the size when there is one, else the item. Saving a
+  /// size's barcode onto the parent is what made a scan resolve to the parent.
+  void _showBarcodePrintFor(Item item, ItemVariant? variant) {
     showDialog(
       context: context,
       builder: (_) => _BarcodePrintDialog(
         item: item,
+        variant: variant,
         onBarcodeGenerated: (newBarcode) async {
-          await ref
-              .read(itemsProvider.notifier)
-              .updateItem(item.id, {'barcode': newBarcode});
+          if (variant == null) {
+            await ref
+                .read(itemsProvider.notifier)
+                .updateItem(item.id, {'barcode': newBarcode});
+            return;
+          }
+          final result =
+              await updateVariant(item.id, variant.id, {'barcode': newBarcode});
+          final updated = ItemVariant.fromJson(result);
+          // Patch local state so a reprint uses the value just saved.
+          ref.read(itemsProvider.notifier).setItemVariants(
+                item.id,
+                [
+                  for (final v in item.variants)
+                    v.id == updated.id ? updated : v,
+                ],
+              );
         },
       ),
     );
@@ -237,6 +309,10 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         !item.hasVariants;
     // Existing categories for this business, to offer as dropdown suggestions.
     final categories = ref.read(categoriesProvider).valueOrNull ?? const [];
+    // …and the same, one level up, so the Major Category field can suggest the
+    // groups already in use and the Category field can scope to the one typed.
+    final categoryTree =
+        ref.read(categoryTreeProvider).valueOrNull ?? const <String, List<String>>{};
     showDialog(
       context: context,
       builder: (_) => _ItemFormDialog(
@@ -244,11 +320,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         inventoryEnabled: inventoryEnabled,
         gstEnabled: gstEnabled,
         categories: categories,
+        categoryTree: categoryTree,
         onSaved: (data, variants) async {
           final saved = item == null
               ? await ref.read(itemsProvider.notifier).addItem(data)
               : await ref.read(itemsProvider.notifier).updateItem(item.id, data);
           await ref.read(categoriesProvider.notifier).reload();
+          await ref.read(categoryTreeProvider.notifier).reload();
           // Spread open the saved item's category so the owner sees the new
           // (or moved) row instead of a folded bar.
           if (mounted) {
@@ -480,6 +558,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         Future<void> refresh() async {
           ref.invalidate(itemsProvider);
           ref.invalidate(categoriesProvider);
+          ref.invalidate(categoryTreeProvider);
           await ref.read(itemsProvider.future);
         }
 
@@ -1124,7 +1203,12 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                       style: TextStyle(color: AppColors.textSecondary)),
                   const SizedBox(width: 8),
                   Flexible(
-                    child: Text(item.category!,
+                    // Shown as "Major › Category" once the item is filed under
+                    // a group, so the row says where it actually lives.
+                    child: Text(
+                        item.majorCategory == null
+                            ? item.category!
+                            : '${item.majorCategory} › ${item.category}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context)
@@ -1293,6 +1377,10 @@ class _ItemFormDialog extends StatefulWidget {
   final bool gstEnabled;
   final List<String> categories;
 
+  /// Major category → its categories, for the two suggestion lists. Empty for a
+  /// business that has never filed anything under a major.
+  final Map<String, List<String>> categoryTree;
+
   /// Saves the item and returns it, so the variants can be created against the
   /// new id. [variants] is empty unless the "has variants" box was ticked.
   final Future<Item> Function(
@@ -1310,6 +1398,7 @@ class _ItemFormDialog extends StatefulWidget {
       required this.inventoryEnabled,
       this.gstEnabled = false,
       this.categories = const [],
+      this.categoryTree = const {},
       required this.onSaved,
       this.onVariantsCreated,
       this.onManageSizes,
@@ -1322,6 +1411,8 @@ class _ItemFormDialog extends StatefulWidget {
 class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
+  final _majorCtrl = TextEditingController();
+  final _majorFocus = FocusNode();
   final _categoryCtrl = TextEditingController();
   final _categoryFocus = FocusNode();
   final _priceCtrl = TextEditingController();
@@ -1352,8 +1443,17 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// Indexes (into the non-blank draft list) whose variant was already created.
   final Set<int> _createdDraftIndexes = {};
 
-  /// Shown as a banner when the item saved but some variants did not.
-  String? _partialFailure;
+  /// Anything that went wrong with this form, shown as a banner above the first
+  /// field: a validation failure, a rejected save (a duplicate name or barcode),
+  /// or an item that saved while some of its variants did not.
+  ///
+  /// Inline rather than a SnackBar because this dialog is a route ABOVE the
+  /// Scaffold, so a SnackBar renders behind its modal barrier.
+  String? _formError;
+
+  /// Scrolls the dialog body, so an error banner can be brought into view when
+  /// the form is long enough to have scrolled past it.
+  final _scrollCtrl = ScrollController();
 
   /// True whenever this item's prices live on its sizes — either the box was
   /// just ticked (create), or the item already has sizes (edit). Everything the
@@ -1381,6 +1481,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     final item = widget.item;
     if (item != null) {
       _nameCtrl.text = item.name;
+      _majorCtrl.text = item.majorCategory ?? '';
       _categoryCtrl.text = item.category ?? '';
       // ?? '' — a sized item has no price of its own, and `null.toString()`
       // would put the literal text "null" in the field.
@@ -1559,6 +1660,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _scrollCtrl.dispose();
+    _majorCtrl.dispose();
+    _majorFocus.dispose();
     _categoryCtrl.dispose();
     _categoryFocus.dispose();
     _priceCtrl.dispose();
@@ -1573,34 +1677,81 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     super.dispose();
   }
 
+  /// Major Category field — the coarse group ("Chinese") above the category
+  /// ("Chinese Starters"). Deliberately the SAME widget as the category field
+  /// below, so it behaves identically: free text you can type a brand-new
+  /// group into, plus a dropdown of the groups this business already uses.
+  Widget _buildMajorCategoryField(BuildContext context, AppLocalizations l10n) =>
+      _buildSuggestField(
+        context,
+        controller: _majorCtrl,
+        focusNode: _majorFocus,
+        label: l10n.itemsFieldMajorCategory,
+        hint: l10n.itemsFieldMajorCategoryHint,
+        // Real groups only — '' is the "no major set" bucket, not a suggestion.
+        options: widget.categoryTree.keys.where((m) => m.isNotEmpty).toList(),
+      );
+
   /// Category field: a text field you can type into freely, with a dropdown of
   /// this business's existing categories. Typing a new value keeps it — on save
   /// that category is added to the business (categories come from the items, so
   /// a new category exists as soon as an item uses it). Picking a suggestion
   /// fills the field.
+  ///
+  /// The suggestions narrow to the typed major's own categories when there are
+  /// any, so "Chinese" offers its starters rather than the whole menu. It never
+  /// restricts what you may type, and with no major typed the list is exactly
+  /// the full one it has always been.
   Widget _buildCategoryField(BuildContext context, AppLocalizations l10n) {
-    return RawAutocomplete<String>(
-      textEditingController: _categoryCtrl,
+    final major = _majorCtrl.text.trim();
+    final scoped = widget.categoryTree[major];
+    return _buildSuggestField(
+      context,
+      controller: _categoryCtrl,
       focusNode: _categoryFocus,
+      label: l10n.itemsFieldCategory,
+      hint: l10n.itemsFieldCategoryHint,
+      options: (scoped == null || scoped.isEmpty)
+          ? widget.categories
+          : scoped.where((c) => c.isNotEmpty).toList(),
+    );
+  }
+
+  /// The shared free-text-with-suggestions field behind both category levels.
+  ///
+  /// Factored out of the original category field rather than copied, so the two
+  /// levels cannot drift apart: same typing behaviour, same contains-match
+  /// filtering, same dropdown toggle, same overlay.
+  Widget _buildSuggestField(
+    BuildContext context, {
+    required TextEditingController controller,
+    required FocusNode focusNode,
+    required String label,
+    required String hint,
+    required List<String> options,
+  }) {
+    return RawAutocomplete<String>(
+      textEditingController: controller,
+      focusNode: focusNode,
       optionsBuilder: (value) {
         final q = value.text.trim().toLowerCase();
-        final all = [...widget.categories]..sort();
+        final all = [...options]..sort();
         if (q.isEmpty) return all;
         return all.where((c) => c.toLowerCase().contains(q));
       },
-      onSelected: (sel) => _categoryCtrl.text = sel,
+      onSelected: (sel) => controller.text = sel,
       fieldViewBuilder: (context, controller, focusNode, onSubmit) {
         return AppTextField(
-          label: l10n.itemsFieldCategory,
+          label: label,
           controller: controller,
           focusNode: focusNode,
-          hint: l10n.itemsFieldCategoryHint,
-          suffixIcon: widget.categories.isEmpty
+          hint: hint,
+          suffixIcon: options.isEmpty
               ? null
               : IconButton(
                   icon: const Icon(Icons.arrow_drop_down,
                       color: AppColors.textSecondary),
-                  tooltip: l10n.itemsFieldCategory,
+                  tooltip: label,
                   // Toggle the suggestion list by nudging focus + an empty edit
                   // so optionsBuilder re-runs and the overlay shows all options.
                   onPressed: () {
@@ -1715,7 +1866,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
 
     setState(() {
       _saving = true;
-      _partialFailure = null;
+      _formError = null;
     });
 
     // Items with sizes track stock per size — the server nulls the parent's
@@ -1725,6 +1876,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
 
     final data = {
       'name': _nameCtrl.text.trim(),
+      if (_majorCtrl.text.trim().isNotEmpty)
+        'major_category': _majorCtrl.text.trim(),
       if (_categoryCtrl.text.trim().isNotEmpty) 'category': _categoryCtrl.text.trim(),
       // A sized item has no price of its own — the sizes carry it. The server
       // only accepts a null price when has_variants says so.
@@ -1780,7 +1933,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         }
         if (failed.isNotEmpty) {
           if (!mounted) return;
-          setState(() => _partialFailure = context.l10n
+          setState(() => _formError = context.l10n
               .itemsVariantsPartialFail(failed.length, drafts.length));
           return;
         }
@@ -2016,11 +2169,21 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     );
   }
 
+  /// Report a problem with this form.
+  ///
+  /// Rendered as the banner at the top of the dialog, NOT a SnackBar. A
+  /// SnackBar belongs to the ScaffoldMessenger behind this route, so it painted
+  /// underneath the dialog's modal barrier — dimmed, unreadable and impossible
+  /// to dismiss without closing the form (losing the entry that caused it).
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(message),
-      backgroundColor: AppColors.error,
-    ));
+    setState(() => _formError = message);
+    // The banner sits above the first field; if the owner was editing further
+    // down a long form they would never see it appear.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      _scrollCtrl.animateTo(0,
+          duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+    });
   }
 
   @override
@@ -2040,6 +2203,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
               maxHeight: MediaQuery.of(context).size.height * 0.7,
             ),
             child: SingleChildScrollView(
+            controller: _scrollCtrl,
             // The first field's floating label sits a few pixels ABOVE the field
             // box, so with the content starting at y=0 it was clipped by the
             // dialog. A small top pad gives it room.
@@ -2047,7 +2211,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (_partialFailure != null) ...[
+                if (_formError != null) ...[
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
@@ -2060,7 +2224,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                           color: AppColors.error.withValues(alpha: 0.4)),
                     ),
                     child: Text(
-                      _partialFailure!,
+                      _formError!,
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -2076,7 +2240,15 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                       v == null || v.isEmpty ? l10n.commonRequired : null,
                 ),
                 const SizedBox(height: AppSpacing.space12),
-                _buildCategoryField(context, l10n),
+                _buildMajorCategoryField(context, l10n),
+                const SizedBox(height: AppSpacing.space12),
+                // Rebuilt as the major is typed so its suggestions re-scope —
+                // scoped to just this field rather than setState-ing the whole
+                // form on every keystroke.
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _majorCtrl,
+                  builder: (context, _, __) => _buildCategoryField(context, l10n),
+                ),
                 // The variants toggle sits here, before price/barcode/stock,
                 // because it decides whether those fields apply at all: a sized
                 // item owns none of them — each size carries its own.

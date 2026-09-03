@@ -36,6 +36,21 @@ class RealtimeService {
   /// change, so listeners don't see repeats from the 3s reconnect loop.
   Stream<bool> get connection => _connection.stream;
 
+  /// Whether the socket is up right now. [ConnectivityNotifier] reads this on
+  /// app resume: [connection] only emits on CHANGE, so a drop that happened
+  /// while the app was backgrounded has already been delivered (and ignored)
+  /// and will not re-fire when the user comes back.
+  bool get isConnected => _connected;
+
+  /// Drive [connection] without a real socket.
+  ///
+  /// Exists because the connectivity rules that matter — a socket drop while
+  /// backgrounded must NOT mark the app offline — are unreachable in a test
+  /// otherwise: nothing here emits unless a WebSocket actually opens, so a test
+  /// for that behaviour would pass no matter what the code did.
+  @visibleForTesting
+  void debugSetConnected(bool value) => _setConnected(value);
+
   void _setConnected(bool value) {
     if (_connected == value) return;
     _connected = value;

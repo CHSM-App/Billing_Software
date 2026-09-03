@@ -224,3 +224,46 @@ class CategoriesNotifier extends AsyncNotifier<List<String>> {
 final categoriesProvider =
     AsyncNotifierProvider<CategoriesNotifier, List<String>>(
         CategoriesNotifier.new);
+
+// ---------------------------------------------------------------------------
+// CategoryTreeNotifier — the same derivation one level up
+// ---------------------------------------------------------------------------
+
+/// Major category → the subcategories filed under it, both sorted.
+///
+/// Derived from the loaded items exactly the way [categoriesProvider] is:
+/// neither level is a stored entity, so a major exists precisely as long as
+/// some item carries that string. `''` is the unset bucket at both levels —
+/// items with no major land under `''`, which the billing strip labels "Other"
+/// and the item form treats as "no major typed".
+///
+/// A business that has never filled the field in yields a single `''` key,
+/// which is what the billing screen tests to hide the major strip entirely.
+class CategoryTreeNotifier extends AsyncNotifier<Map<String, List<String>>> {
+  @override
+  Future<Map<String, List<String>>> build() async {
+    return _tree(await ref.watch(itemsProvider.future));
+  }
+
+  Future<void> reload() async {
+    state = await AsyncValue.guard(
+        () async => _tree(await ref.read(itemsProvider.future)));
+  }
+
+  static Map<String, List<String>> _tree(List<Item> items) {
+    final byMajor = <String, Set<String>>{};
+    for (final i in items) {
+      final major = i.majorCategory?.trim() ?? '';
+      final sub = i.category?.trim() ?? '';
+      (byMajor[major] ??= <String>{}).add(sub);
+    }
+    return {
+      for (final major in byMajor.keys.toList()..sort())
+        major: byMajor[major]!.toList()..sort(),
+    };
+  }
+}
+
+final categoryTreeProvider =
+    AsyncNotifierProvider<CategoryTreeNotifier, Map<String, List<String>>>(
+        CategoryTreeNotifier.new);

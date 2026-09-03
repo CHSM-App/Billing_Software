@@ -111,6 +111,16 @@ class Item {
   final String businessId;
   final String name;
   final String? barcode;
+
+  /// Coarse grouping above [category] — "Chinese" to its "Chinese Starters".
+  /// Free text and optional, exactly like [category]: null on every item saved
+  /// before major categories existed, and on any item whose owner leaves the
+  /// field blank. Billing treats a null major as the unset bucket and never
+  /// hides the item.
+  final String? majorCategory;
+
+  /// The item's subcategory, and the level the item sheets group by. Free text;
+  /// a category exists only while some item carries that exact string.
   final String? category;
 
   /// The item's own price, or null when it is sold only through its variants —
@@ -146,6 +156,7 @@ class Item {
     required this.businessId,
     required this.name,
     this.barcode,
+    this.majorCategory,
     this.category,
     this.price,
     this.taxRate,
@@ -164,6 +175,7 @@ class Item {
         businessId: j['business_id'],
         name: j['name'],
         barcode: j['barcode'],
+        majorCategory: j['major_category'],
         category: j['category'],
         price: j['price'] != null ? double.parse(j['price'].toString()) : null,
         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
@@ -196,6 +208,7 @@ class Item {
         businessId: businessId,
         name: name,
         barcode: barcode,
+        majorCategory: majorCategory,
         category: category,
         price: price,
         taxRate: taxRate,
@@ -752,5 +765,142 @@ class TableModel {
         status: j['status'],
         activeBillId: j['active_bill_id'],
         qrToken: j['qr_token'] as String?,
+      );
+}
+
+/// One line of an [OnlineOrder]. Mirrors a `bill_items` row: [unitPrice] is
+/// already the NET rate, so accepting the order copies it across untouched.
+class OnlineOrderItem {
+  final String itemName;
+  final double quantity;
+  final double unitPrice;
+  final double lineTotal;
+
+  OnlineOrderItem({
+    required this.itemName,
+    required this.quantity,
+    required this.unitPrice,
+    required this.lineTotal,
+  });
+
+  factory OnlineOrderItem.fromJson(Map<String, dynamic> j) => OnlineOrderItem(
+        itemName: j['item_name'] ?? '',
+        quantity: double.parse((j['quantity'] ?? 0).toString()),
+        unitPrice: double.parse((j['unit_price'] ?? 0).toString()),
+        lineTotal: double.parse((j['line_total'] ?? 0).toString()),
+      );
+}
+
+/// An order placed from the public online store, waiting on (or already given)
+/// a decision. It is NOT a bill — accepting one is what creates the draft bill,
+/// and [billNumber] is only set from that point on.
+class OnlineOrder {
+  final String id;
+  final String orderNumber;
+  final String? customerName;
+  final String customerPhone;
+
+  /// 'pickup' | 'delivery'. [address] is only ever set for delivery.
+  final String fulfilment;
+  final String? address;
+  final String? note;
+
+  final double subtotal;
+  final double deliveryCharge;
+  final double total;
+
+  /// What the shop asked for up front (its advance % of [total]).
+  final double amountDue;
+
+  /// What the customer says they paid, with the UPI reference they typed.
+  /// Unverifiable server-side — see [paymentStatus].
+  final double paidAmount;
+  final String? paymentTxnId;
+
+  /// 'unpaid' | 'claimed' | 'verified'. 'claimed' means the customer entered a
+  /// transaction id; only a human confirming it in their UPI app makes it
+  /// 'verified'.
+  final String paymentStatus;
+
+  /// 'pending' | 'accepted' | 'rejected'.
+  final String status;
+  final String? rejectReason;
+  final String? billNumber;
+
+  /// Status of the draft bill this order became — 'draft' until staff settle it,
+  /// then 'finalized'/'voided'. Null while the order is still pending or was
+  /// rejected. This, not [status], is what says whether the shop is done.
+  final String? billStatus;
+
+  final DateTime createdAt;
+
+  final List<OnlineOrderItem> items;
+
+  OnlineOrder({
+    required this.id,
+    required this.orderNumber,
+    this.customerName,
+    required this.customerPhone,
+    required this.fulfilment,
+    this.address,
+    this.note,
+    required this.subtotal,
+    required this.deliveryCharge,
+    required this.total,
+    required this.amountDue,
+    required this.paidAmount,
+    this.paymentTxnId,
+    required this.paymentStatus,
+    required this.status,
+    this.rejectReason,
+    this.billNumber,
+    this.billStatus,
+    required this.createdAt,
+    required this.items,
+  });
+
+  bool get isPending => status == 'pending';
+  bool get isDelivery => fulfilment == 'delivery';
+
+  /// Whether the shop still has something to do with this order.
+  ///
+  /// Accepting is NOT finishing: it creates a draft bill that still has to be
+  /// settled at the counter. So an accepted order stays "open" until its bill
+  /// leaves draft. Rejected orders are done the moment they are rejected.
+  ///
+  /// Drives whether the Online sub-tab appears in Orders — hiding it the second
+  /// the last order was accepted would take the accepted order off screen while
+  /// the customer is still waiting for it.
+  bool get isOpen =>
+      isPending || (status == 'accepted' && billStatus == 'draft');
+
+  /// True when the customer submitted a payment reference nobody has confirmed
+  /// yet — the one thing the accept sheet must put in front of the owner.
+  bool get needsPaymentCheck =>
+      paymentStatus == 'claimed' && (paymentTxnId?.isNotEmpty ?? false);
+
+  factory OnlineOrder.fromJson(Map<String, dynamic> j) => OnlineOrder(
+        id: j['id'],
+        orderNumber: j['order_number'] ?? '',
+        customerName: j['customer_name'] as String?,
+        customerPhone: j['customer_phone'] ?? '',
+        fulfilment: j['fulfilment'] ?? 'pickup',
+        address: j['address'] as String?,
+        note: j['note'] as String?,
+        subtotal: double.parse((j['subtotal'] ?? 0).toString()),
+        deliveryCharge: double.parse((j['delivery_charge'] ?? 0).toString()),
+        total: double.parse((j['total'] ?? 0).toString()),
+        amountDue: double.parse((j['amount_due'] ?? 0).toString()),
+        paidAmount: double.parse((j['paid_amount'] ?? 0).toString()),
+        paymentTxnId: j['payment_txn_id'] as String?,
+        paymentStatus: j['payment_status'] ?? 'unpaid',
+        status: j['status'] ?? 'pending',
+        rejectReason: j['reject_reason'] as String?,
+        billNumber: j['bill_number'] as String?,
+        billStatus: j['bill_status'] as String?,
+        createdAt: DateTime.parse(j['created_at']),
+        items: ((j['items'] as List?) ?? const [])
+            .map((i) => OnlineOrderItem.fromJson(i as Map<String, dynamic>))
+            .toList(),
       );
 }

@@ -11,7 +11,7 @@
 const PRODUCTION_HOST = 'vittam.vengurlatech.com';
 
 /** Paths that must never be redirected — clients may be pinned to another host. */
-const NO_REDIRECT_PREFIXES = ['/api', '/uploads', '/order', '/receipt', '/admin', '/health'];
+const NO_REDIRECT_PREFIXES = ['/api', '/uploads', '/order', '/store', '/receipt', '/admin', '/health'];
 
 /** Hosts that are legitimately not the canonical one. */
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);

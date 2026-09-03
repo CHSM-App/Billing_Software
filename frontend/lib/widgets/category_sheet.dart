@@ -45,12 +45,16 @@ class PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
 /// sideways as one sheet.
 ///
 /// Tapping a chip calls [onTap]; the chip whose category equals [active] is
-/// filled. [chipKeys] lets the owner scroll a chip into view with
-/// `Scrollable.ensureVisible`. The strip sizes itself to its rows, so place it
-/// above the list rather than inside a fixed-height header.
+/// filled, and none is filled when [active] is null. [chipKeys] lets the owner
+/// scroll a chip into view with `Scrollable.ensureVisible`. The strip sizes
+/// itself to its rows, so place it above the list rather than inside a
+/// fixed-height header.
+///
+/// [active] is nullable rather than "" for no-selection: the uncategorised
+/// section's key IS the empty string, so "" would light up its "Other" chip.
 class CategoryChipStrip extends StatelessWidget {
   final List<String> categories;
-  final String active;
+  final String? active;
   final String Function(String category) labelOf;
   final void Function(String category) onTap;
   final ScrollController controller;

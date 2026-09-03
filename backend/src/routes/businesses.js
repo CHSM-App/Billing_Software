@@ -1,4 +1,6 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const audit = require('../audit');
@@ -23,6 +25,10 @@ const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
 const PIN_RE = /^[0-9]{6}$/;
 // FSSAI license number: exactly 14 digits
 const FSSAI_RE = /^[0-9]{14}$/;
+// UPI VPA: handle@psp, e.g. 9422229951@ybl or shop.name@okhdfcbank. Deliberately
+// loose on the handle (banks allow dots, dashes, underscores) and strict that a
+// PSP suffix exists — a VPA with no @ would build a payment link to nowhere.
+const UPI_RE = /^[a-zA-Z0-9._-]{2,64}@[a-zA-Z][a-zA-Z0-9.]{1,30}$/;
 
 // ---------------------------------------------------------------------------
 // GET /api/businesses/profile
@@ -44,6 +50,10 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
           b.bill_prefix, b.bill_footer_note,
           b.gst_enabled, b.default_sac_code,
           b.round_off_enabled,
+          b.store_enabled, b.store_token,
+          b.store_delivery_enabled, b.store_delivery_charge,
+          b.store_payment_qr_url, b.store_upi_id,
+          b.store_advance_percent, b.store_payment_required,
           b.created_at,
           u.name  AS owner_name,
           u.phone AS owner_phone
@@ -95,6 +105,12 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     gst_enabled,
     default_sac_code,
     round_off_enabled,
+    store_enabled,
+    store_delivery_enabled,
+    store_delivery_charge,
+    store_advance_percent,
+    store_payment_required,
+    store_upi_id,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -144,6 +160,30 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       bill_footer_note.length > 500) {
     return res.status(400).json({ error: 'Bill footer note must be 500 characters or less' });
   }
+  // Online store money knobs. Clamping is NOT enough here — a bad advance % or a
+  // negative delivery charge would be quoted to real customers on a public page.
+  if (store_advance_percent !== undefined && store_advance_percent !== null) {
+    const pct = Number(store_advance_percent);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+      return res.status(400).json({ error: 'Advance percent must be between 0 and 100' });
+    }
+  }
+  if (store_delivery_charge !== undefined && store_delivery_charge !== null) {
+    const amt = Number(store_delivery_charge);
+    if (!Number.isFinite(amt) || amt < 0 || amt > 99999.99) {
+      return res.status(400).json({ error: 'Delivery charge must be between 0 and 99999.99' });
+    }
+  }
+  // A malformed VPA is worse than none: checkout would show a "Pay" button that
+  // opens the customer's UPI app on an address that does not exist.
+  if (store_upi_id !== undefined && store_upi_id !== null && store_upi_id !== '') {
+    if (!UPI_RE.test(String(store_upi_id).trim())) {
+      return res.status(400).json({ error: 'Invalid UPI ID (e.g. shopname@okhdfcbank)' });
+    }
+  }
+  // No "at least one fulfilment mode" check is needed: pickup has no switch and
+  // is always available, so a store can never be left with no way to hand an
+  // order over.
 
   // ── Build dynamic SET clause ──────────────────────────────────────────────
 
@@ -169,6 +209,12 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     gst_enabled,
     default_sac_code,
     round_off_enabled,
+    store_enabled,
+    store_delivery_enabled,
+    store_delivery_charge,
+    store_advance_percent,
+    store_payment_required,
+    store_upi_id,
   };
 
   const fields = Object.entries(updatable).filter(([, v]) => v !== undefined);
@@ -187,7 +233,10 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           name, address, phone, email, website,
           city, state, pincode, gst_number, pan_number, fssai_number,
           logo_url, bill_prefix, bill_footer_note,
-          gst_enabled, default_sac_code, round_off_enabled
+          gst_enabled, default_sac_code, round_off_enabled,
+          store_enabled, store_delivery_enabled,
+          store_delivery_charge, store_advance_percent, store_payment_required,
+          store_upi_id
         FROM businesses WHERE id = @id
       `);
 
@@ -246,7 +295,9 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       // BIT columns take a normalised 0/1; text columns treat '' as NULL.
       const isBit = key === 'self_order_enabled' ||
           key === 'inventory_enabled' || key === 'has_barcode_scanner' ||
-          key === 'gst_enabled' || key === 'round_off_enabled';
+          key === 'gst_enabled' || key === 'round_off_enabled' ||
+          key === 'store_enabled' || key === 'store_delivery_enabled' ||
+          key === 'store_payment_required';
       const normalised = isBit
         ? (value ? 1 : 0)
         : (value === '' ? null : value);
@@ -272,6 +323,9 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           city, state, pincode, logo_url,
           bill_prefix, bill_footer_note,
           gst_enabled, default_sac_code, round_off_enabled,
+          store_enabled, store_token, store_delivery_enabled,
+          store_delivery_charge, store_payment_qr_url, store_upi_id,
+          store_advance_percent, store_payment_required,
           created_at
         FROM businesses WHERE id = @id
       `);
@@ -296,6 +350,66 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
   } catch (err) {
     logger.error({ err }, 'Update business profile error');
     return res.status(500).json({ error: 'Failed to update business profile' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Online-store payment QR. The shop uploads its OWN UPI QR image; the customer
+// page shows it at checkout and the customer pays into the shop's account
+// directly. We never touch the money, which is why there is no gateway here and
+// why the transaction reference the customer types can only ever be 'claimed'.
+//
+// Same shape as the item-photo route (routes/items.js): raw JPEG body, magic
+// bytes checked, filename is the id, cache-busting ?v= on the stored URL.
+// ---------------------------------------------------------------------------
+const STORE_QR_DIR = path.join(__dirname, '..', '..', 'uploads', 'store');
+try { fs.mkdirSync(STORE_QR_DIR, { recursive: true }); } catch (_) {}
+
+// A JPEG always starts with the SOI marker FF D8 FF. Anything else is rejected
+// so a client cannot drop arbitrary bytes onto disk.
+function isJpeg(buf) {
+  return Buffer.isBuffer(buf) && buf.length > 3 &&
+    buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+}
+
+// Scoped to this route only, so the global JSON parser is untouched.
+const jpegBody = express.raw({ type: 'image/jpeg', limit: '2mb' });
+
+// PUT /api/businesses/store-qr — replace the payment QR. Body is the JPEG bytes.
+router.put('/store-qr', requireAuth, ownerOnly, jpegBody, async (req, res) => {
+  if (!isJpeg(req.body)) {
+    return res.status(400).json({ error: 'A JPEG image body is required' });
+  }
+  try {
+    await poolConnect;
+    const fileName = `${req.user.business_id}.jpg`;
+    await fs.promises.writeFile(path.join(STORE_QR_DIR, fileName), req.body);
+    const qrUrl = `/uploads/store/${fileName}?v=${Date.now()}`;
+
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.user.business_id)
+      .input('url', sql.NVarChar(500), qrUrl)
+      .query('UPDATE businesses SET store_payment_qr_url = @url WHERE id = @id');
+
+    return res.json({ store_payment_qr_url: qrUrl });
+  } catch (err) {
+    logger.error({ err }, 'Upload store payment QR error');
+    return res.status(500).json({ error: 'Failed to save the payment QR' });
+  }
+});
+
+// DELETE /api/businesses/store-qr — remove it. The file is left on disk; the
+// URL is what the customer page reads, and clearing it is the whole effect.
+router.delete('/store-qr', requireAuth, ownerOnly, async (req, res) => {
+  try {
+    await poolConnect;
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.user.business_id)
+      .query('UPDATE businesses SET store_payment_qr_url = NULL WHERE id = @id');
+    return res.json({ store_payment_qr_url: null });
+  } catch (err) {
+    logger.error({ err }, 'Delete store payment QR error');
+    return res.status(500).json({ error: 'Failed to remove the payment QR' });
   }
 });
 
@@ -327,6 +441,16 @@ function _formatBusiness(row) {
     gst_enabled:         !!row.gst_enabled,
     default_sac_code:    row.default_sac_code ?? null,
     round_off_enabled:   !!row.round_off_enabled,
+    // Online store. store_token is read-only — it identifies the public link and
+    // is never settable from the profile payload.
+    store_enabled:          !!row.store_enabled,
+    store_token:            row.store_token ?? null,
+    store_delivery_enabled: !!row.store_delivery_enabled,
+    store_delivery_charge:  Number(row.store_delivery_charge) || 0,
+    store_payment_qr_url:   row.store_payment_qr_url ?? null,
+    store_upi_id:           row.store_upi_id ?? null,
+    store_advance_percent:  Number(row.store_advance_percent) || 0,
+    store_payment_required: !!row.store_payment_required,
     created_at:          row.created_at,
   };
 }
@@ -354,6 +478,12 @@ function _sqlTypeFor(key) {
     gst_enabled:       sql.Bit,
     default_sac_code:  sql.NVarChar(10),
     round_off_enabled: sql.Bit,
+    store_enabled:          sql.Bit,
+    store_delivery_enabled: sql.Bit,
+    store_delivery_charge:  sql.Decimal(10, 2),
+    store_advance_percent:  sql.Decimal(5, 2),
+    store_upi_id:           sql.NVarChar(100),
+    store_payment_required: sql.Bit,
   };
   return map[key] ?? sql.NVarChar(500);
 }

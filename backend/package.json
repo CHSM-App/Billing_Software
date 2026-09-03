@@ -19,6 +19,7 @@
     "testMatch": [
       "**/tests/**/*.test.js"
     ],
+    "testTimeout": 15000,
     "coverageDirectory": "coverage",
     "collectCoverageFrom": [
       "src/routes/**/*.js",

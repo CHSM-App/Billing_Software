@@ -34,6 +34,9 @@ class MainShell extends ConsumerStatefulWidget {
 class _MainShellState extends ConsumerState<MainShell>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _index = 0;
+
+  /// The nav items from the last build — see _openOnlineOrders.
+  List<NavItem> _navItems = const [];
   late final AnimationController _railAnimController;
   late final Animation<double> _railFadeAnim;
   StreamSubscription<String>? _realtimeSub;
@@ -58,6 +61,12 @@ class _MainShellState extends ConsumerState<MainShell>
     // Route real-time WebSocket events to the relevant providers so every
     // screen updates live across devices, without any notifications.
     _realtimeSub = RealtimeService.instance.events.listen(_onRealtimeEvent);
+
+    // A second path to the same refresh for online orders: the push arrives even
+    // when the WebSocket is down (backgrounded app, dropped socket), which is
+    // exactly when a shop is most likely to miss an order.
+    NotificationService.instance.onlineOrderPing.addListener(_onOnlineOrderPing);
+    NotificationService.instance.onlineOrderTap.addListener(_onOnlineOrderTapped);
 
     // Ensure the socket is live for this session. The app bootstrap starts it on
     // cold launch, but a re-login (login screen → new shell) mounts here without
@@ -86,6 +95,19 @@ class _MainShellState extends ConsumerState<MainShell>
         // Same reasoning for the Credit tab: fetch once so it appears right
         // away when credit is already outstanding on the server.
         ref.read(creditCustomersProvider.notifier).refreshSilently();
+        // And the online-order queue — but only for a shop that runs a store
+        // and a role that can decide one, so nobody else pays for the request.
+        final session = ref.read(sessionProvider).valueOrNull;
+        if (session != null &&
+            session.storeEnabled &&
+            _canDecideOnlineOrders(role)) {
+          ref.read(onlineOrdersProvider.notifier).refreshSilently();
+          // A COLD launch from tapping the notification: the tap was handled
+          // during startup, before this shell existed to hear it.
+          if (NotificationService.instance.consumeOnlineOrderTap()) {
+            _openOnlineOrders();
+          }
+        }
       }
     });
   }
@@ -102,9 +124,17 @@ class _MainShellState extends ConsumerState<MainShell>
         break;
       case 'drafts':
         ref.read(openDraftsProvider.notifier).refreshSilently();
+        // Settling the draft an online order became is what finishes that
+        // order, so the Online tab has to re-evaluate on the same signal —
+        // otherwise it lingers after the bill it was waiting on is paid.
+        ref.read(onlineOrdersProvider.notifier).refreshSilently();
         break;
       case 'credit':
         ref.read(creditCustomersProvider.notifier).refreshSilently();
+        break;
+      case 'store':
+        // A customer placed an order, or another device accepted/rejected one.
+        ref.read(onlineOrdersProvider.notifier).refreshSilently();
         break;
     }
   }
@@ -152,12 +182,53 @@ class _MainShellState extends ConsumerState<MainShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _realtimeSub?.cancel();
+    NotificationService.instance.onlineOrderPing
+        .removeListener(_onOnlineOrderPing);
+    NotificationService.instance.onlineOrderTap
+        .removeListener(_onOnlineOrderTapped);
     _railAnimController.dispose();
     super.dispose();
   }
 
+  void _onOnlineOrderPing() {
+    if (!mounted) return;
+    ref.read(onlineOrdersProvider.notifier).refreshSilently();
+  }
+
+  void _onOnlineOrderTapped() {
+    if (!mounted) return;
+    NotificationService.instance.consumeOnlineOrderTap();
+    _openOnlineOrders();
+  }
+
+  /// Bring the Online orders queue to the front.
+  ///
+  /// The queue is loaded FIRST: the Orders nav item and its Online sub-tab both
+  /// exist only while an order is open, so jumping before the fetch lands would
+  /// aim at a tab that is not there yet. The post-frame hop is what lets the
+  /// rebuilt nav list be read back.
+  Future<void> _openOnlineOrders() async {
+    await ref.read(onlineOrdersProvider.notifier).refreshSilently();
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final i = _navItems.indexWhere((n) => n.screen is OrdersScreen);
+      // No Orders tab means the order was already handled on another device.
+      // Drop the request rather than leave it primed to fire later.
+      if (i < 0) return;
+      ref.read(openOnlineOrdersRequestProvider.notifier).state = true;
+      if (i != _index) setState(() => _index = i);
+    });
+  }
+
+  /// Mirrors the server's guard in routes/online_orders.js: only an owner or a
+  /// cashier may accept or reject. Showing the tab to anyone else would offer
+  /// buttons that always 403.
+  static bool _canDecideOnlineOrders(String role) =>
+      role == 'owner' || role == 'cashier';
+
   List<NavItem> _buildNavItems(String userRole, String businessType,
-      bool hasOpenDrafts, bool hasCredit) {
+      bool hasOpenDrafts, bool hasCredit, bool hasOnlineOrders) {
     final l10n = context.l10n;
     final isRestaurant = businessType == 'restaurant_with_tables' ||
         businessType == 'restaurant_no_tables';
@@ -179,15 +250,16 @@ class _MainShellState extends ConsumerState<MainShell>
       if (userRole == 'owner')
         NavItem(Icons.inventory_2_outlined, Icons.inventory_2, l10n.navItems,
             const ItemsScreen()),
-      // Orders: one page hosting Tables (table restaurants only), Open Orders
-      // and Credit as sub-tabs. Table restaurants always show it (Tables is
-      // always relevant). Retail / no-table businesses get the SAME page — just
-      // without the Tables sub-tab — and only while there's something in it
-      // (open drafts or outstanding credit), so it doesn't sit empty.
+      // Orders: one page hosting Tables (table restaurants only), Open Orders,
+      // Credit and Online as sub-tabs — each shown only while it has something
+      // in it (OrdersScreen decides that). Table restaurants always show the
+      // page (Tables is always relevant). Retail / no-table businesses get the
+      // SAME page, minus the Tables sub-tab, and only while at least one queue
+      // has work in it, so it never sits empty.
       if (businessType == 'restaurant_with_tables')
         NavItem(Icons.table_restaurant_outlined, Icons.table_restaurant,
             l10n.navOrders, const OrdersScreen(showTables: true))
-      else if (hasOpenDrafts || hasCredit)
+      else if (hasOpenDrafts || hasCredit || hasOnlineOrders)
         NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
             l10n.navOrders, const OrdersScreen(showTables: false)),
       // Waiters and owners at a restaurant can watch the kitchen queue.
@@ -222,6 +294,7 @@ class _MainShellState extends ConsumerState<MainShell>
             SyncService.instance.syncAll().then((_) {
               ref.invalidate(itemsProvider);
               ref.invalidate(categoriesProvider);
+              ref.invalidate(categoryTreeProvider);
               ref.invalidate(tablesProvider);
               // Queued offline drafts were just pushed; refresh Open Orders so
               // their local copies are replaced by the authoritative server ones.
@@ -240,8 +313,16 @@ class _MainShellState extends ConsumerState<MainShell>
             ref.watch(hasOpenDraftsProvider);
         final hasCredit =
             session.userRole != 'kitchen' && ref.watch(hasCreditProvider);
-        final items = _buildNavItems(
-            session.userRole, session.businessType, hasOpenDrafts, hasCredit);
+        // Only a role that can decide an order needs the queue — and only when
+        // the shop actually runs a store.
+        final hasOnlineOrders =
+            session.storeEnabled && _canDecideOnlineOrders(session.userRole) &&
+                ref.watch(hasOpenOnlineOrdersProvider);
+        final items = _buildNavItems(session.userRole, session.businessType,
+            hasOpenDrafts, hasCredit, hasOnlineOrders);
+        // Kept so a notification tap can find the Orders tab's index without
+        // rebuilding the list outside build().
+        _navItems = items;
         final safeIndex = _index.clamp(0, items.length - 1);
         final isWide = MediaQuery.of(context).size.width >= 720;
 

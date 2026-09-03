@@ -11,6 +11,35 @@ class CartNotifier extends Notifier<List<CartEntry>> {
   static String keyFor(String itemId, [String? variantId]) =>
       variantId == null ? itemId : '$itemId:$variantId';
 
+  /// Stock available for a line — the variant's own count when the item is
+  /// sold by size, otherwise the item's. Null means "not tracked", which is
+  /// not the same as zero.
+  static double? _stockOf(Item item, ItemVariant? variant) =>
+      variant != null ? variant.stockQuantity : item.stockQuantity;
+
+  /// The available stock for [key] when the cart now holds MORE than that, or
+  /// null when there is nothing to warn about.
+  ///
+  /// Null when the business does not track inventory, when the item carries no
+  /// stock figure, or when the quantity still fits. Deliberately only REPORTS:
+  /// the cart accepts the quantity either way, because a counted stock figure
+  /// drifts from the shelf and refusing a sale the shop can actually serve is
+  /// worse than allowing it. The server still enforces the hard limit at settle
+  /// time (checkInsufficientStock in routes/bills.js).
+  ///
+  /// Lives here rather than on the `+` button because all four add paths — the
+  /// button, swipe-right, tapping the quantity box, and the barcode scanner —
+  /// route through this notifier; gating the widget would leave the other three
+  /// unguarded.
+  double? stockShortfall(String key) {
+    if (!ref.read(inventoryEnabledProvider)) return null;
+    final idx = state.indexWhere((e) => e.key == key);
+    if (idx < 0) return null;
+    final stock = _stockOf(state[idx].item, state[idx].variant);
+    if (stock == null || state[idx].quantity <= stock) return null;
+    return stock;
+  }
+
   /// Add one unit of an item (optionally a specific variant/size). Same
   /// item+variant stacks; a different variant of the same item is a new line.
   void addItem(Item item, {ItemVariant? variant}) {
@@ -55,8 +84,28 @@ class CartNotifier extends Notifier<List<CartEntry>> {
 
   void clear() => state = [];
 
+  /// Rebuild the cart from a saved bill/draft.
+  ///
+  /// Bill lines are merged by [CartEntry.key]: the server APPENDS a row per
+  /// order rather than merging (a QR self-order and `PUT /:id/add-items` both
+  /// insert), so one dish ordered twice arrives as two rows. Mapping those 1:1
+  /// used to produce two cart entries sharing a key, and every lookup here is
+  /// `indexWhere` — first match only — so the second was uneditable, while
+  /// deleting "one" of them removed both. Folding on the way in is the only
+  /// place a duplicate key can enter the cart, so it fixes every caller.
   void loadFromBill(Bill bill, List<Item> catalog) {
-    state = bill.items.map((bi) {
+    final merged = <String, CartEntry>{};
+    for (final entry in _entriesFromBill(bill, catalog)) {
+      final existing = merged[entry.key];
+      merged[entry.key] = existing == null
+          ? entry
+          : existing.copyWith(quantity: existing.quantity + entry.quantity);
+    }
+    state = merged.values.toList();
+  }
+
+  Iterable<CartEntry> _entriesFromBill(Bill bill, List<Item> catalog) {
+    return bill.items.map((bi) {
       final catalogItem = catalog.firstWhere(
         (i) => i.id == bi.itemId,
         orElse: () => Item(
@@ -85,7 +134,7 @@ class CartNotifier extends Notifier<List<CartEntry>> {
         );
       }
       return CartEntry(item: catalogItem, variant: variant, quantity: bi.quantity);
-    }).toList();
+    });
   }
 
   static String _labelFromName(String itemName) {

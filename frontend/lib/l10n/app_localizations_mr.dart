@@ -1158,6 +1158,11 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingCategoryOther => 'इतर';
 
   @override
+  String billingStockExceeded(String stock, String name) {
+    return '$name फक्त $stock शिल्लक आहे';
+  }
+
+  @override
   String billingSizesCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1296,6 +1301,12 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsFieldName => 'नाव';
+
+  @override
+  String get itemsFieldMajorCategory => 'मुख्य श्रेणी';
+
+  @override
+  String get itemsFieldMajorCategoryHint => 'उदा. चायनीज';
 
   @override
   String get itemsFieldCategory => 'श्रेणी';
@@ -1448,6 +1459,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsManageSizes => 'प्रकार जोडा';
+
+  @override
+  String get itemsPickSizeForBarcode => 'कोणता प्रकार?';
 
   @override
   String itemsManageSizesCount(int count) {
@@ -1827,9 +1841,6 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get reportsAvgBill => 'सरासरी बिल';
-
-  @override
-  String get reportsLast7Days => 'गेले ७ दिवस';
 
   @override
   String get reportsTopSellingItems => 'सर्वाधिक विकले जाणारे पदार्थ';
@@ -2706,6 +2717,17 @@ class AppLocalizationsMr extends AppLocalizations {
   String get purchaseListFabShort => 'खरेदी यादी';
 
   @override
+  String purchaseListQtyRequired(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count वस्तूंसाठी प्रमाण भरा',
+      one: '1 वस्तूसाठी प्रमाण भरा',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get purchaseListFabLong => 'खरेदी यादी तयार करा';
 
   @override
@@ -2931,5 +2953,222 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String expensesPurchaseInvoice(String number) {
     return 'खरेदी - बिल $number';
+  }
+
+  @override
+  String get settingsOnlineStore => 'ऑनलाइन दुकान';
+
+  @override
+  String get settingsOnlineStoreSubtitle =>
+      'एक लिंक शेअर करा — ग्राहक ऑर्डर करतात, तुम्ही मंजूर करता';
+
+  @override
+  String get storeTitle => 'ऑनलाइन दुकान';
+
+  @override
+  String get storeEnable => 'ऑनलाइन दुकान';
+
+  @override
+  String get storeEnableSubtitle =>
+      'ग्राहक लिंकवरून तुमच्या वस्तू पाहून ऑर्डर करू शकतात';
+
+  @override
+  String get storeLinkTitle => 'तुमची दुकान लिंक';
+
+  @override
+  String get storeLinkHint =>
+      'ही लिंक WhatsApp, Instagram किंवा छापील QR वर शेअर करा. लिंक असलेला कोणीही ऑर्डर करू शकतो.';
+
+  @override
+  String get storeCopyLink => 'लिंक कॉपी करा';
+
+  @override
+  String get storeLinkCopied => 'लिंक कॉपी झाली';
+
+  @override
+  String get storeShareLink => 'शेअर करा';
+
+  @override
+  String get storeShareQr => 'QR शेअर करा';
+
+  @override
+  String get storeOrdersLink => 'ऑनलाइन ऑर्डर';
+
+  @override
+  String get storeOrdersLinkSubtitle => 'ग्राहकांच्या ऑर्डर मंजूर किंवा नाकारा';
+
+  @override
+  String get storeFulfilmentSection => 'ऑर्डर ग्राहकाकडे कशी जाईल';
+
+  @override
+  String get storePickup => 'दुकानातून घेणे';
+
+  @override
+  String get storePickupAlways =>
+      'नेहमी चालू — ग्राहक दुकानात येऊन ऑर्डर घेऊ शकतो';
+
+  @override
+  String get storeDelivery => 'डिलिव्हरी';
+
+  @override
+  String get storeDeliverySubtitle =>
+      'डिलिव्हरीही द्यायची असल्यास चालू करा — ग्राहक पत्ता देतील';
+
+  @override
+  String get storeDeliveryCharge => 'डिलिव्हरी शुल्क';
+
+  @override
+  String get storeDeliveryChargeHint =>
+      'प्रत्येक डिलिव्हरी ऑर्डरच्या बिलात जोडले जाईल';
+
+  @override
+  String get storePaymentSection => 'पेमेंट';
+
+  @override
+  String get storeAdvancePercent => 'आगाऊ रक्कम';
+
+  @override
+  String get storeAdvancePercentHint =>
+      '0 = दुकानात पैसे. 100 = ऑर्डरपूर्वी पूर्ण पेमेंट.';
+
+  @override
+  String get storePaymentRequired => 'ऑर्डरसाठी पेमेंट आवश्यक';
+
+  @override
+  String get storePaymentRequiredSubtitle =>
+      'ऑर्डर पाठवण्यापूर्वी ग्राहकाने ट्रान्झॅक्शन आयडी टाकावा';
+
+  @override
+  String get storeUpiId => 'तुमचा UPI आयडी';
+
+  @override
+  String get storeUpiIdHint =>
+      'उदा. shopname@okhdfcbank. ग्राहक एक बटण दाबतील आणि त्यांचे UPI ॲप तुमचे नाव व रक्कम भरून उघडेल.';
+
+  @override
+  String get storeUpiIdInvalid =>
+      'योग्य UPI आयडी टाका, उदा. shopname@okhdfcbank';
+
+  @override
+  String get storePaymentQr => 'तुमचा पेमेंट QR';
+
+  @override
+  String get storePaymentQrHint =>
+      'तुमचा UPI QR अपलोड करा. ग्राहक तो स्कॅन करून थेट तुम्हाला पैसे देतील — पैसे या ॲपमधून जात नाहीत.';
+
+  @override
+  String get storeUploadQr => 'QR अपलोड करा';
+
+  @override
+  String get storeReplaceQr => 'बदला';
+
+  @override
+  String get storeRemoveQr => 'काढा';
+
+  @override
+  String get storeQrNeeded => 'आगाऊ रक्कम घेण्यासाठी पेमेंट QR अपलोड करा';
+
+  @override
+  String get storeSaved => 'जतन झाले';
+
+  @override
+  String get storeInvalidPercent => 'आगाऊ रक्कम 0 ते 100 दरम्यान असावी';
+
+  @override
+  String get onlineOrdersTitle => 'ऑनलाइन ऑर्डर';
+
+  @override
+  String get onlineOrdersTab => 'ऑनलाइन';
+
+  @override
+  String get onlineOrdersEmpty => 'ऑनलाइन ऑर्डर नाहीत';
+
+  @override
+  String get onlineOrdersEmptyHint =>
+      'तुमच्या दुकान लिंकवर ग्राहकांनी केलेल्या ऑर्डर मंजुरीसाठी इथे येतील.';
+
+  @override
+  String get onlineOrdersWaiting => 'तुमच्या मंजुरीसाठी';
+
+  @override
+  String get onlineOrdersInProgress => 'मंजूर — बिल अजून खुले';
+
+  @override
+  String get onlineOrdersDecided => 'आजचे निर्णय';
+
+  @override
+  String get onlineOrderPickup => 'दुकानातून';
+
+  @override
+  String get onlineOrderDelivery => 'डिलिव्हरी';
+
+  @override
+  String get onlineOrderPaidOnline => 'ऑनलाइन भरले';
+
+  @override
+  String get onlineOrderPaidFull => 'पूर्ण भरले';
+
+  @override
+  String onlineOrderBalanceDue(String amount) {
+    return '$amount काउंटरवर';
+  }
+
+  @override
+  String get onlineOrderUnpaid => 'अजून पैसे भरले नाहीत';
+
+  @override
+  String get onlineOrderTxnId => 'ट्रान्झॅक्शन आयडी';
+
+  @override
+  String get onlineOrderTxnCopied => 'ट्रान्झॅक्शन आयडी कॉपी झाला';
+
+  @override
+  String get onlineOrderPaymentReceived => 'मला हे पेमेंट मिळाले आहे';
+
+  @override
+  String get onlineOrderAccept => 'मंजूर करा';
+
+  @override
+  String get onlineOrderReject => 'नाकारा';
+
+  @override
+  String onlineOrderAccepted(String billNumber) {
+    return 'मंजूर — $billNumber आता खुल्या ऑर्डरमध्ये आहे';
+  }
+
+  @override
+  String get onlineOrderRejected => 'ऑर्डर नाकारली';
+
+  @override
+  String get onlineOrderRejectTitle => 'ही ऑर्डर नाकारायची?';
+
+  @override
+  String get onlineOrderRejectHint =>
+      'ग्राहकाला त्यांच्या ऑर्डर पानावर तुमचे कारण दिसेल. आगाऊ रक्कम तुम्ही स्वतः परत करा.';
+
+  @override
+  String get onlineOrderRejectReason => 'कारण (ऐच्छिक)';
+
+  @override
+  String get onlineOrderStatusPending => 'प्रतीक्षेत';
+
+  @override
+  String get onlineOrderStatusAccepted => 'मंजूर';
+
+  @override
+  String get onlineOrderStatusRejected => 'नाकारली';
+
+  @override
+  String get onlineOrderDeliveryFee => 'डिलिव्हरी';
+
+  @override
+  String get onlineOrderTotal => 'एकूण';
+
+  @override
+  String get onlineOrderNewTitle => 'नवीन ऑनलाइन ऑर्डर';
+
+  @override
+  String onlineOrderNewBody(String orderNumber, int count, String total) {
+    return '$orderNumber · $count वस्तू · $total';
   }
 }

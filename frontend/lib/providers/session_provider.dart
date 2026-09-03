@@ -13,6 +13,10 @@ class SessionData {
   final bool gstEnabled;
   final bool roundOffEnabled;
 
+  /// Online store master switch. Gates whether the shell polls the online-order
+  /// queue and shows its tab at all.
+  final bool storeEnabled;
+
   const SessionData({
     required this.userId,
     required this.userName,
@@ -24,6 +28,7 @@ class SessionData {
     required this.hasBarcodeScanner,
     required this.gstEnabled,
     required this.roundOffEnabled,
+    required this.storeEnabled,
   });
 
   static SessionData empty() => const SessionData(
@@ -37,6 +42,7 @@ class SessionData {
         hasBarcodeScanner: false,
         gstEnabled: false,
         roundOffEnabled: false,
+        storeEnabled: false,
       );
 
   static SessionData fromMap(Map<String, dynamic> m) => SessionData(
@@ -50,6 +56,7 @@ class SessionData {
         hasBarcodeScanner: m['has_barcode_scanner'] == true,
         gstEnabled: m['gst_enabled'] == true,
         roundOffEnabled: m['round_off_enabled'] == true,
+        storeEnabled: m['store_enabled'] == true,
       );
 }
 

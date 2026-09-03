@@ -203,6 +203,8 @@ app.use('/api/bills', require('./routes/bills'));
 app.use('/api/credit', require('./routes/credit'));
 app.use('/receipt',  require('./routes/receipt'));
 app.use('/order',    require('./routes/public_order'));
+app.use('/store',    require('./routes/public_store'));
+app.use('/api/online-orders', require('./routes/online_orders'));
 app.use('/api/tables', require('./routes/tables'));
 app.use('/api/kitchen', require('./routes/kitchen'));
 app.use('/api/reports', require('./routes/reports'));

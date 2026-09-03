@@ -39,6 +39,15 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Routes a TAPPED notification back into the Flutter app so
+                 FirebaseMessaging.onMessageOpenedApp fires. Without it, tapping
+                 a background online-order notification just opens the app on
+                 whatever tab it was on — the one thing the shop does not need.
+                 Paired with clickAction in backend/src/fcm.js. -->
+            <intent-filter>
+                <action android:name="FLUTTER_NOTIFICATION_CLICK"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

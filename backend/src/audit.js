@@ -205,6 +205,7 @@ async function logItemCreated(actor, item) {
       // Records whether `price` above is GST-inclusive — without it the logged
       // figure is ambiguous, since the same number bills differently either way.
       price_inclusive_tax: item.price_inclusive_tax,
+      major_category: item.major_category,
       category:       item.category,
       stock_quantity: item.stock_quantity,
       barcode:        item.barcode,
@@ -551,6 +552,48 @@ async function logVendorBillDeleted(actor, bill) {
   });
 }
 
+// ── Online store ───────────────────────────────────────────────────────────
+
+/**
+ * An online order was accepted and turned into a draft bill.
+ * @param {object} actor - { user_id, user_name, business_id }
+ * @param {object} order - { id, order_number, customer_name, customer_phone, total }
+ * @param {string} billNumber - the draft bill it became
+ */
+async function logOnlineOrderAccepted(actor, order, billNumber) {
+  await writeAudit({
+    business_id:  actor.business_id,
+    user_id:      actor.user_id,
+    user_name:    actor.user_name,
+    event_type:   'online_order_accepted',
+    entity_id:    order.id,
+    entity_label: order.order_number,
+    new_value:    {
+      bill_number: billNumber,
+      total: order.total,
+      customer_phone: order.customer_phone,
+    },
+    description:
+      `Online order ${order.order_number} accepted — Rs.${order.total} → bill ${billNumber}`,
+  });
+}
+
+/** An online order was rejected; no bill was created. */
+async function logOnlineOrderRejected(actor, order, reason) {
+  await writeAudit({
+    business_id:  actor.business_id,
+    user_id:      actor.user_id,
+    user_name:    actor.user_name,
+    event_type:   'online_order_rejected',
+    entity_id:    order.id,
+    entity_label: order.order_number,
+    old_value:    { total: order.total, customer_phone: order.customer_phone },
+    description:
+      `Online order ${order.order_number} rejected — Rs.${order.total}` +
+      (reason ? ` (${reason})` : ''),
+  });
+}
+
 module.exports = {
   writeAudit,
   // Bills
@@ -583,4 +626,7 @@ module.exports = {
   logVendorBillCreated,
   logVendorBillUpdated,
   logVendorBillDeleted,
+  // Online store
+  logOnlineOrderAccepted,
+  logOnlineOrderRejected,
 };

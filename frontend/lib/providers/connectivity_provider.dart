@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../services/realtime_service.dart';
@@ -25,6 +26,12 @@ import '../services/realtime_service.dart';
 // connectivity_plus reports whatever the Network List Manager believes and NLA
 // calls a working connection "no internet" whenever its msftconnecttest probe
 // is blocked. The socket answers both questions with zero HTTP traffic.
+//
+// The socket signal is gated on app lifecycle: while the app is backgrounded
+// the OS suspends the socket, so its drop carries no information about the
+// shop's internet and is ignored. Without that gate every return to the app
+// replayed the same false sequence — offline bar, then a green "Back online"
+// flash — even though nothing had ever gone down.
 //
 // [connectivityBannerProvider] is a separate UI-only signal that drives the
 // YouTube-style bar: offline / backOnline (a brief green flash) / online.
@@ -54,7 +61,12 @@ final connectivityBannerProvider =
 class ConnectivityNotifier extends Notifier<bool> {
   StreamSubscription<bool>? _socketSub;
   Timer? _offlineGraceTimer;
+  AppLifecycleListener? _lifecycle;
   bool _recheckInFlight = false;
+
+  /// Whether the app is in the foreground. A socket drop only counts as
+  /// evidence of an outage while it is.
+  bool _foreground = true;
 
   /// How long a socket drop must persist before the user is told they're
   /// offline. Longer than RealtimeService's 3s reconnect, so a drop that
@@ -66,7 +78,11 @@ class ConnectivityNotifier extends Notifier<bool> {
     ref.onDispose(() {
       _socketSub?.cancel();
       _offlineGraceTimer?.cancel();
+      _lifecycle?.dispose();
     });
+    _foreground = WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    _lifecycle = AppLifecycleListener(onStateChange: _onLifecycleState);
     _socketSub = RealtimeService.instance.connection.listen((connected) {
       _offlineGraceTimer?.cancel();
       if (connected) {
@@ -79,10 +95,35 @@ class ConnectivityNotifier extends Notifier<bool> {
         // neither means the shop lost internet. Reacting instantly would flash
         // "No connection" then "Back online" on every till, every deploy. The
         // socket retries in 3s; only if that fails do we say anything.
-        _offlineGraceTimer = Timer(_offlineGrace, markOffline);
+        //
+        // Backgrounding drops it too — the OS suspends the socket. That says
+        // nothing about the shop's internet, so it must not arm the timer:
+        // otherwise every return to the app replayed offline → "Back online".
+        if (_foreground) {
+          _offlineGraceTimer = Timer(_offlineGrace, markOffline);
+        }
       }
     });
     return true; // optimistic default
+  }
+
+  /// Foreground/background transitions.
+  ///
+  /// Leaving: cancel any pending offline verdict, because from here on a socket
+  /// drop is expected rather than informative.
+  ///
+  /// Returning: [RealtimeService.connection] only emits on CHANGE, so a socket
+  /// that went down while we were away will never re-announce itself. Read the
+  /// current state directly and start the grace period now, so a genuine outage
+  /// still surfaces a few seconds after the user comes back.
+  void _onLifecycleState(AppLifecycleState lifecycleState) {
+    final foreground = lifecycleState == AppLifecycleState.resumed;
+    if (foreground == _foreground) return;
+    _foreground = foreground;
+    _offlineGraceTimer?.cancel();
+    if (foreground && !RealtimeService.instance.isConnected) {
+      _offlineGraceTimer = Timer(_offlineGrace, markOffline);
+    }
   }
 
   /// Current known connectivity — true when the app has decided it's offline.

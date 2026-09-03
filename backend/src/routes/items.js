@@ -58,6 +58,35 @@ function isDuplicateKeyError(err) {
   return err && (err.number === 2627 || err.number === 2601);
 }
 
+/// Whether this business already has an active item called [name].
+///
+/// Two items with the same name are indistinguishable everywhere it matters —
+/// the billing list, a bill line, a report row — so the catalog rejects the
+/// second one rather than letting the owner build a menu they cannot read.
+///
+/// Compared trimmed and case-folded on BOTH sides: the database collation is
+/// case-insensitive by default, but that is a deployment detail rather than a
+/// guarantee, and without TRIM a trailing space would slip a duplicate through.
+///
+/// Only active items count — a soft-deleted item must not reserve its name
+/// forever. [excludeId] lets an edit keep its own name (renaming "Rice" to
+/// "Rice" is not a collision with itself).
+async function nameTaken(businessId, name, excludeId = null) {
+  const request = pool.request()
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .input('name', sql.NVarChar(200), String(name).trim());
+  let where = `business_id = @business_id
+      AND is_active = 1
+      AND LOWER(LTRIM(RTRIM(name))) = LOWER(@name)`;
+  if (excludeId) {
+    request.input('exclude_id', sql.UniqueIdentifier, excludeId);
+    where += ' AND id <> @exclude_id';
+  }
+  const result = await request.query(
+    `SELECT TOP 1 id FROM items WHERE ${where}`);
+  return result.recordset.length > 0;
+}
+
 
 async function attachVariants(businessId, itemRows) {
   if (itemRows.length === 0) return itemRows;
@@ -121,7 +150,7 @@ router.get('/with-images', requireAuth, ownerOnly, async (req, res) => {
     const result = await pool.request()
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, name, category, price, image_url
+        SELECT id, name, major_category, category, price, image_url
         FROM items
         WHERE business_id = @business_id AND is_active = 1
         ORDER BY category ASC, name ASC
@@ -188,7 +217,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT id, business_id, name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at
+      SELECT id, business_id, name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at
       FROM items
       WHERE ${where}
       ORDER BY name ASC
@@ -205,7 +234,7 @@ router.get('/', requireAuth, async (req, res) => {
           .input('business_id', sql.UniqueIdentifier, req.user.business_id)
           .input('barcode', sql.NVarChar(100), normalised);
         const variantMatch = await variantReq.query(`
-          SELECT TOP 1 i.id, i.business_id, i.name, i.barcode, i.category, i.price,
+          SELECT TOP 1 i.id, i.business_id, i.name, i.barcode, i.major_category, i.category, i.price,
                  i.tax_rate, i.price_inclusive_tax, i.hsn_code, i.stock_quantity, i.low_stock_threshold, i.unit,
                  i.is_active, i.created_at, v.id AS matched_variant_id
           FROM item_variants v
@@ -246,7 +275,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at, image_url
+        SELECT id, business_id, name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at, image_url
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -265,7 +294,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 // POST /api/items
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
   const {
-    name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code,
+    name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code,
     stock_quantity, unit, low_stock_threshold,
     // Set by the client when the item is being created with sizes. The variants
     // themselves are POSTed separately straight after, so at INSERT time this is
@@ -289,6 +318,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
     || validateNumber(tax_rate, 'Tax rate', { max: 100 })
     || validateText(barcode, 'Barcode', 100)
     || validateText(hsn_code, 'HSN/SAC code', 10)
+    || validateText(major_category, 'Major category', 100)
     || validateText(category, 'Category', 100)
     // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
     // recipe quantity is stored, so an unknown value would silently skip it.
@@ -297,6 +327,13 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
   try {
     await poolConnect;
+
+    if (await nameTaken(req.user.business_id, name)) {
+      return res.status(409).json({
+        error: `An item named "${String(name).trim()}" already exists`,
+      });
+    }
+
     const result = await pool.request()
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .input('name', sql.NVarChar(200), name)
@@ -304,6 +341,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       // and stock. Force them null so a leftover value can never be billed or
       // scanned in place of a size.
       .input('barcode', sql.NVarChar(100), sizedItem ? null : (barcode || null))
+      .input('major_category', sql.NVarChar(100), major_category || null)
       .input('category', sql.NVarChar(100), category || null)
       .input('price', sql.Decimal(10, 2),
         sizedItem || price == null ? null : parseFloat(price))
@@ -323,10 +361,10 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('low_stock_threshold', sql.Decimal(10, 2),
         low_stock_threshold != null ? parseFloat(low_stock_threshold) : 50)
       .query(`
-        INSERT INTO items (business_id, name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, low_stock_threshold)
-        OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
+        INSERT INTO items (business_id, name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, low_stock_threshold)
+        OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.major_category, INSERTED.category,
                INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @low_stock_threshold)
+        VALUES (@business_id, @name, @barcode, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @low_stock_threshold)
       `);
 
     const created = result.recordset[0];
@@ -356,11 +394,11 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 // PUT /api/items/:id
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   const {
-    name, barcode, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit,
+    name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit,
     low_stock_threshold,
   } = req.body;
 
-  if (!name && price === undefined && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined) {
+  if (!name && price === undefined && !major_category && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   const invalid = (name !== undefined
@@ -372,6 +410,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     || validateNumber(tax_rate, 'Tax rate', { max: 100 })
     || validateText(barcode, 'Barcode', 100)
     || validateText(hsn_code, 'HSN/SAC code', 10)
+    || validateText(major_category, 'Major category', 100)
     || validateText(category, 'Category', 100)
     // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
     // recipe quantity is stored, so an unknown value would silently skip it.
@@ -401,6 +440,15 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     const before = check.recordset[0];
     const sizedItem = before.variant_count > 0;
 
+    // Renaming onto another item's name is the same collision as creating one.
+    // Excludes this item, so re-saving without touching the name is fine.
+    if (name !== undefined &&
+        await nameTaken(req.user.business_id, name, req.params.id)) {
+      return res.status(409).json({
+        error: `An item named "${String(name).trim()}" already exists`,
+      });
+    }
+
     // Clearing the price is only meaningful for an item whose sizes carry their
     // own. On a plain item it would leave nothing to bill — and because billing
     // falls back to the item price when a size has none, a null here would
@@ -423,6 +471,10 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     if (barcode !== undefined) {
       sets.push('barcode = @barcode');
       request.input('barcode', sql.NVarChar(100), barcode || null);
+    }
+    if (major_category !== undefined) {
+      sets.push('major_category = @major_category');
+      request.input('major_category', sql.NVarChar(100), major_category || null);
     }
     if (category !== undefined) {
       sets.push('category = @category');
@@ -461,7 +513,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     const result = await request.query(`
       UPDATE items
       SET ${sets.join(', ')}
-      OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.category,
+      OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.major_category, INSERTED.category,
              INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);

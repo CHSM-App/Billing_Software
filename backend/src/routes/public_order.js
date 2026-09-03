@@ -35,7 +35,7 @@ const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
-const { netUnitPrice } = require('../money');
+const { cleanLines, priceLines } = require('../menuPricing');
 
 const router = express.Router();
 
@@ -52,8 +52,6 @@ try {
 
 const ORDER_SECRET = process.env.JWT_ACCESS_SECRET;
 const ORDER_TOKEN_TTL = '4h';            // roughly the length of a dine-in visit
-const MAX_LINE_QTY = 50;                  // per-line sanity cap
-const MAX_LINES_PER_ORDER = 40;           // per-order sanity cap
 
 // A brisk limiter so a leaked link can't be used to hammer the endpoints.
 const orderLimiter = rateLimit({
@@ -204,10 +202,10 @@ router.get('/:qrToken/menu', orderLimiter, async (req, res) => {
     const itemsResult = await pool.request()
       .input('business_id', sql.UniqueIdentifier, table.business_id)
       .query(`
-        SELECT id, name, category, price, tax_rate, image_url
+        SELECT id, name, major_category, category, price, tax_rate, image_url
         FROM items
         WHERE business_id = @business_id AND is_active = 1
-        ORDER BY category ASC, name ASC
+        ORDER BY major_category ASC, category ASC, name ASC
       `);
 
     const items = itemsResult.recordset;
@@ -346,12 +344,8 @@ router.post('/:qrToken/verify-otp', orderLimiter, async (req, res) => {
 // ---------------------------------------------------------------------------
 router.post('/:qrToken', orderLimiter, async (req, res) => {
   const { items, name } = req.body || {};
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'items array is required' });
-  }
-  if (items.length > MAX_LINES_PER_ORDER) {
-    return res.status(400).json({ error: 'Too many items in one order' });
-  }
+  const { lines: cleaned, error: lineError } = cleanLines(items);
+  if (lineError) return res.status(400).json({ error: lineError });
 
   let table;
   try {
@@ -371,83 +365,16 @@ router.post('/:qrToken', orderLimiter, async (req, res) => {
   try {
     await poolConnect;
 
-    // Validate + normalise requested lines up front (cheap, before the tx).
-    const cleaned = [];
-    for (const li of items) {
-      const qty = Number(li.quantity);
-      if (!li.item_id || !Number.isFinite(qty) || qty <= 0 || qty > MAX_LINE_QTY) {
-        return res.status(400).json({ error: 'Invalid item or quantity' });
-      }
-      cleaned.push({ item_id: li.item_id, variant_id: li.variant_id || null, quantity: qty });
-    }
-
     await transaction.begin();
 
-    // Price every line server-side from the current menu. Active items only,
-    // scoped to this business. A variant price (when set) overrides the item's.
-    const itemIds = [...new Set(cleaned.map((l) => l.item_id))];
-    const inNames = itemIds.map((_, i) => `@it${i}`);
-    const priceReq = transaction.request()
-      .input('business_id', sql.UniqueIdentifier, table.business_id);
-    itemIds.forEach((id, i) => priceReq.input(`it${i}`, sql.UniqueIdentifier, id));
-    const priceResult = await priceReq.query(`
-      SELECT id, name, price, tax_rate, price_inclusive_tax
-      FROM items
-      WHERE business_id = @business_id AND is_active = 1 AND id IN (${inNames.join(',')})
-    `);
-    const itemMap = {};
-    for (const r of priceResult.recordset) itemMap[r.id] = r;
-
-    const variantIds = [...new Set(cleaned.map((l) => l.variant_id).filter(Boolean))];
-    const variantMap = {};
-    if (variantIds.length > 0) {
-      const vNames = variantIds.map((_, i) => `@vr${i}`);
-      const vReq = transaction.request()
-        .input('business_id', sql.UniqueIdentifier, table.business_id);
-      variantIds.forEach((id, i) => vReq.input(`vr${i}`, sql.UniqueIdentifier, id));
-      const vResult = await vReq.query(`
-        SELECT v.id, v.item_id, v.label, v.price
-        FROM item_variants v
-        JOIN items i ON i.id = v.item_id
-        WHERE i.business_id = @business_id AND v.is_active = 1 AND v.id IN (${vNames.join(',')})
-      `);
-      for (const r of vResult.recordset) variantMap[r.id] = r;
-    }
-
-    // Build priced lines.
-    const priced = [];
-    for (const l of cleaned) {
-      const item = itemMap[l.item_id];
-      if (!item) throw { httpStatus: 400, message: 'An item is no longer available' };
-      let unitPrice = Number(item.price);
-      let itemName = item.name;
-      if (l.variant_id) {
-        const v = variantMap[l.variant_id];
-        if (!v || v.item_id !== item.id) throw { httpStatus: 400, message: 'A selected option is no longer available' };
-        if (v.price != null) unitPrice = Number(v.price);
-        itemName = `${item.name} (${v.label})`;
-      }
-      // An MRP-priced item quotes its price GST-inclusive, so strip the tax to
-      // get the net rate this draft line must store. bill_items.unit_price is
-      // net everywhere (see resolveNetPriceAndRate in routes/bills.js), and the
-      // draft's subtotal is summed straight from these lines — storing the gross
-      // rate here would show the diner a subtotal that grew again once staff
-      // finalized the bill and tax was added on top.
-      unitPrice = netUnitPrice(
-        unitPrice,
-        item.tax_rate,
-        item.price_inclusive_tax === true || item.price_inclusive_tax === 1,
-      );
-      priced.push({
-        item_id: l.item_id,
-        variant_id: l.variant_id,
-        item_name: itemName,
-        quantity: l.quantity,
-        unit_price: unitPrice,
-        tax_rate: item.tax_rate,
-        line_total: +(unitPrice * l.quantity).toFixed(2),
-      });
-    }
+    // Price every line server-side from the current menu — the browser's price
+    // is never trusted. Shared with the online store so both flows price the
+    // same way; see src/menuPricing.js.
+    const priced = await priceLines(
+      () => transaction.request(),
+      table.business_id,
+      cleaned,
+    );
 
     // Find or create the table's open draft bill. A new draft is stamped to the
     // business owner's user id (bills.created_by_user_id is NOT NULL) and marks

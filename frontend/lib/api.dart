@@ -7,8 +7,8 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-// const String baseUrl = 'http://192.168.1.8:8000/api';
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.5:5000/api';
+// const String baseUrl = 'https://vittam.vengurlatech.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
           
@@ -729,6 +729,58 @@ final String orderBaseUrl =
 
 /// Full customer-menu URL encoded into a table's QR sticker.
 String tableOrderUrl(String qrToken) => '$orderBaseUrl/$qrToken';
+
+// ---------------------------------------------------------------------------
+// Online store
+// ---------------------------------------------------------------------------
+
+/// Public online-store base URL (same host as the API, minus `/api`).
+final String storeBaseUrl =
+    '${baseUrl.endsWith('/api') ? baseUrl.substring(0, baseUrl.length - 4) : baseUrl}/store';
+
+/// The shareable shop link. One per business, from `businesses.store_token`.
+String storeUrl(String storeToken) => '$storeBaseUrl/$storeToken';
+
+/// Online orders awaiting a decision, plus anything decided in the last 24h.
+Future<List<dynamic>> getOnlineOrders() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/online-orders')));
+}
+
+/// Accept an order — this is what creates the draft bill. [paymentVerified] is
+/// the owner confirming the customer's UPI reference is real; nothing on the
+/// server can check that for them.
+Future<Map<String, dynamic>> acceptOnlineOrder(String id,
+    {bool paymentVerified = false}) async {
+  return _parse(await _authPost(
+    Uri.parse('$baseUrl/online-orders/$id/accept'),
+    body: jsonEncode({'payment_verified': paymentVerified}),
+  ));
+}
+
+/// Decline an order. No bill is created; any advance is refunded by the shop.
+Future<Map<String, dynamic>> rejectOnlineOrder(String id, String reason) async {
+  return _parse(await _authPost(
+    Uri.parse('$baseUrl/online-orders/$id/reject'),
+    body: jsonEncode({'reason': reason}),
+  ));
+}
+
+/// Upload the shop's own UPI QR image, shown to customers at checkout.
+/// Returns the stored public URL.
+Future<String> uploadStorePaymentQr(List<int> jpegBytes) async {
+  final uri = Uri.parse('$baseUrl/businesses/store-qr');
+  final response = await _withAutoRefresh((h) {
+    final headers = Map<String, String>.from(h)..['Content-Type'] = 'image/jpeg';
+    return _put(uri, headers: headers, body: jpegBytes);
+  });
+  final body = _parse(response) as Map<String, dynamic>;
+  return body['store_payment_qr_url'] as String;
+}
+
+/// Remove the payment QR, so checkout stops asking customers to pay up front.
+Future<void> deleteStorePaymentQr() async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/businesses/store-qr')));
+}
 
 // ---------------------------------------------------------------------------
 // Kitchen (restaurant Kitchen Display)

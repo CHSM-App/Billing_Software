@@ -29,6 +29,7 @@ import 'history_screen.dart';
 import 'reports_screen.dart';
 import 'vendor_bills_screen.dart';
 import 'expenses_screen.dart';
+import 'store_settings_screen.dart';
 import '../services/offline_service.dart';
 import '../services/realtime_service.dart';
 
@@ -246,6 +247,21 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const BusinessProfileScreen()),
                         ),
                       ),
+                      // Online store — every business type. A retail shop and a
+                      // restaurant doing takeaway both sell from one link.
+                      // const SizedBox(height: AppSpacing.space8),
+                      // _buildNavCard(
+                      //   context,
+                      //   icon: Icons.shopping_cart_outlined,
+                      //   iconColor: const Color(0xFF7C3AED),
+                      //   title: l10n.settingsOnlineStore,
+                      //   subtitle: l10n.settingsOnlineStoreSubtitle,
+                      //   onTap: () => Navigator.push(
+                      //     context,
+                      //     MaterialPageRoute(
+                      //         builder: (_) => const StoreSettingsScreen()),
+                      //   ),
+                      // ),
                       // Customer QR self-ordering — restaurants only.
                       if (session.businessType == 'restaurant_with_tables') ...[
                         const SizedBox(height: AppSpacing.space8),

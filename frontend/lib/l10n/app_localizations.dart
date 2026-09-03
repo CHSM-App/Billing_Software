@@ -2156,6 +2156,12 @@ abstract class AppLocalizations {
   /// **'Other'**
   String get billingCategoryOther;
 
+  /// No description provided for @billingStockExceeded.
+  ///
+  /// In en, this message translates to:
+  /// **'Only {stock} {name} in stock'**
+  String billingStockExceeded(String stock, String name);
+
   /// No description provided for @billingSizesCount.
   ///
   /// In en, this message translates to:
@@ -2389,6 +2395,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Name'**
   String get itemsFieldName;
+
+  /// No description provided for @itemsFieldMajorCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Major Category'**
+  String get itemsFieldMajorCategory;
+
+  /// No description provided for @itemsFieldMajorCategoryHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Chinese'**
+  String get itemsFieldMajorCategoryHint;
 
   /// No description provided for @itemsFieldCategory.
   ///
@@ -2649,6 +2667,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Add variants'**
   String get itemsManageSizes;
+
+  /// No description provided for @itemsPickSizeForBarcode.
+  ///
+  /// In en, this message translates to:
+  /// **'Which size?'**
+  String get itemsPickSizeForBarcode;
 
   /// No description provided for @itemsManageSizesCount.
   ///
@@ -3291,12 +3315,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Avg bill'**
   String get reportsAvgBill;
-
-  /// No description provided for @reportsLast7Days.
-  ///
-  /// In en, this message translates to:
-  /// **'Last 7 days'**
-  String get reportsLast7Days;
 
   /// No description provided for @reportsTopSellingItems.
   ///
@@ -4780,6 +4798,12 @@ abstract class AppLocalizations {
   /// **'Purchase list'**
   String get purchaseListFabShort;
 
+  /// No description provided for @purchaseListQtyRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Enter a quantity for 1 item} other{Enter a quantity for {count} items}}'**
+  String purchaseListQtyRequired(int count);
+
   /// No description provided for @purchaseListFabLong.
   ///
   /// In en, this message translates to:
@@ -5175,6 +5199,402 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Purchase - Inv {number}'**
   String expensesPurchaseInvoice(String number);
+
+  /// No description provided for @settingsOnlineStore.
+  ///
+  /// In en, this message translates to:
+  /// **'Online Store'**
+  String get settingsOnlineStore;
+
+  /// No description provided for @settingsOnlineStoreSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Share one link — customers browse and order, you approve'**
+  String get settingsOnlineStoreSubtitle;
+
+  /// No description provided for @storeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Online Store'**
+  String get storeTitle;
+
+  /// No description provided for @storeEnable.
+  ///
+  /// In en, this message translates to:
+  /// **'Online store'**
+  String get storeEnable;
+
+  /// No description provided for @storeEnableSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Customers can browse your items and place orders from a link'**
+  String get storeEnableSubtitle;
+
+  /// No description provided for @storeLinkTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Your store link'**
+  String get storeLinkTitle;
+
+  /// No description provided for @storeLinkHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Share this on WhatsApp, Instagram or a printed QR. Anyone with the link can order.'**
+  String get storeLinkHint;
+
+  /// No description provided for @storeCopyLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy link'**
+  String get storeCopyLink;
+
+  /// No description provided for @storeLinkCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Link copied'**
+  String get storeLinkCopied;
+
+  /// No description provided for @storeShareLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get storeShareLink;
+
+  /// No description provided for @storeShareQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Share QR'**
+  String get storeShareQr;
+
+  /// No description provided for @storeOrdersLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Online orders'**
+  String get storeOrdersLink;
+
+  /// No description provided for @storeOrdersLinkSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve or decline what customers send you'**
+  String get storeOrdersLinkSubtitle;
+
+  /// No description provided for @storeFulfilmentSection.
+  ///
+  /// In en, this message translates to:
+  /// **'How customers get their order'**
+  String get storeFulfilmentSection;
+
+  /// No description provided for @storePickup.
+  ///
+  /// In en, this message translates to:
+  /// **'Pickup'**
+  String get storePickup;
+
+  /// No description provided for @storePickupAlways.
+  ///
+  /// In en, this message translates to:
+  /// **'Always on — a customer can walk in and collect'**
+  String get storePickupAlways;
+
+  /// No description provided for @storeDelivery.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery'**
+  String get storeDelivery;
+
+  /// No description provided for @storeDeliverySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on to also offer delivery — customers enter an address'**
+  String get storeDeliverySubtitle;
+
+  /// No description provided for @storeDeliveryCharge.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery charge'**
+  String get storeDeliveryCharge;
+
+  /// No description provided for @storeDeliveryChargeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Added to the bill on every delivery order'**
+  String get storeDeliveryChargeHint;
+
+  /// No description provided for @storePaymentSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment'**
+  String get storePaymentSection;
+
+  /// No description provided for @storeAdvancePercent.
+  ///
+  /// In en, this message translates to:
+  /// **'Advance to collect'**
+  String get storeAdvancePercent;
+
+  /// No description provided for @storeAdvancePercentHint.
+  ///
+  /// In en, this message translates to:
+  /// **'0 = pay at the shop. 100 = pay in full before ordering.'**
+  String get storeAdvancePercentHint;
+
+  /// No description provided for @storePaymentRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Require payment to order'**
+  String get storePaymentRequired;
+
+  /// No description provided for @storePaymentRequiredSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Customers must enter a transaction ID before the order is sent'**
+  String get storePaymentRequiredSubtitle;
+
+  /// No description provided for @storeUpiId.
+  ///
+  /// In en, this message translates to:
+  /// **'Your UPI ID'**
+  String get storeUpiId;
+
+  /// No description provided for @storeUpiIdHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. shopname@okhdfcbank. Customers tap one button and their UPI app opens with your name and the amount already filled in.'**
+  String get storeUpiIdHint;
+
+  /// No description provided for @storeUpiIdInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid UPI ID, like shopname@okhdfcbank'**
+  String get storeUpiIdInvalid;
+
+  /// No description provided for @storePaymentQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Your payment QR'**
+  String get storePaymentQr;
+
+  /// No description provided for @storePaymentQrHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload your UPI QR. Customers scan it and pay you directly — the money never passes through this app.'**
+  String get storePaymentQrHint;
+
+  /// No description provided for @storeUploadQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload QR'**
+  String get storeUploadQr;
+
+  /// No description provided for @storeReplaceQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace'**
+  String get storeReplaceQr;
+
+  /// No description provided for @storeRemoveQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get storeRemoveQr;
+
+  /// No description provided for @storeQrNeeded.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload your payment QR to collect an advance'**
+  String get storeQrNeeded;
+
+  /// No description provided for @storeSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved'**
+  String get storeSaved;
+
+  /// No description provided for @storeInvalidPercent.
+  ///
+  /// In en, this message translates to:
+  /// **'Advance must be between 0 and 100'**
+  String get storeInvalidPercent;
+
+  /// No description provided for @onlineOrdersTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Online Orders'**
+  String get onlineOrdersTitle;
+
+  /// No description provided for @onlineOrdersTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Online'**
+  String get onlineOrdersTab;
+
+  /// No description provided for @onlineOrdersEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No online orders'**
+  String get onlineOrdersEmpty;
+
+  /// No description provided for @onlineOrdersEmptyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Orders customers place on your store link land here for you to approve.'**
+  String get onlineOrdersEmptyHint;
+
+  /// No description provided for @onlineOrdersWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for you'**
+  String get onlineOrdersWaiting;
+
+  /// No description provided for @onlineOrdersInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepted — bill still open'**
+  String get onlineOrdersInProgress;
+
+  /// No description provided for @onlineOrdersDecided.
+  ///
+  /// In en, this message translates to:
+  /// **'Decided today'**
+  String get onlineOrdersDecided;
+
+  /// No description provided for @onlineOrderPickup.
+  ///
+  /// In en, this message translates to:
+  /// **'Pickup'**
+  String get onlineOrderPickup;
+
+  /// No description provided for @onlineOrderDelivery.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery'**
+  String get onlineOrderDelivery;
+
+  /// No description provided for @onlineOrderPaidOnline.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid online'**
+  String get onlineOrderPaidOnline;
+
+  /// No description provided for @onlineOrderPaidFull.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid in full'**
+  String get onlineOrderPaidFull;
+
+  /// No description provided for @onlineOrderBalanceDue.
+  ///
+  /// In en, this message translates to:
+  /// **'{amount} at counter'**
+  String onlineOrderBalanceDue(String amount);
+
+  /// No description provided for @onlineOrderUnpaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Not paid yet'**
+  String get onlineOrderUnpaid;
+
+  /// No description provided for @onlineOrderTxnId.
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction ID'**
+  String get onlineOrderTxnId;
+
+  /// No description provided for @onlineOrderTxnCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction ID copied'**
+  String get onlineOrderTxnCopied;
+
+  /// No description provided for @onlineOrderPaymentReceived.
+  ///
+  /// In en, this message translates to:
+  /// **'I have received this payment'**
+  String get onlineOrderPaymentReceived;
+
+  /// No description provided for @onlineOrderAccept.
+  ///
+  /// In en, this message translates to:
+  /// **'Accept'**
+  String get onlineOrderAccept;
+
+  /// No description provided for @onlineOrderReject.
+  ///
+  /// In en, this message translates to:
+  /// **'Decline'**
+  String get onlineOrderReject;
+
+  /// No description provided for @onlineOrderAccepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepted — {billNumber} is now in Open Orders'**
+  String onlineOrderAccepted(String billNumber);
+
+  /// No description provided for @onlineOrderRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Order declined'**
+  String get onlineOrderRejected;
+
+  /// No description provided for @onlineOrderRejectTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Decline this order?'**
+  String get onlineOrderRejectTitle;
+
+  /// No description provided for @onlineOrderRejectHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The customer sees your reason on their order page. Refund any advance yourself.'**
+  String get onlineOrderRejectHint;
+
+  /// No description provided for @onlineOrderRejectReason.
+  ///
+  /// In en, this message translates to:
+  /// **'Reason (optional)'**
+  String get onlineOrderRejectReason;
+
+  /// No description provided for @onlineOrderStatusPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting'**
+  String get onlineOrderStatusPending;
+
+  /// No description provided for @onlineOrderStatusAccepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepted'**
+  String get onlineOrderStatusAccepted;
+
+  /// No description provided for @onlineOrderStatusRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Declined'**
+  String get onlineOrderStatusRejected;
+
+  /// No description provided for @onlineOrderDeliveryFee.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery'**
+  String get onlineOrderDeliveryFee;
+
+  /// No description provided for @onlineOrderTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get onlineOrderTotal;
+
+  /// No description provided for @onlineOrderNewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New online order'**
+  String get onlineOrderNewTitle;
+
+  /// No description provided for @onlineOrderNewBody.
+  ///
+  /// In en, this message translates to:
+  /// **'{orderNumber} · {count} item(s) · {total}'**
+  String onlineOrderNewBody(String orderNumber, int count, String total);
 }
 
 class _AppLocalizationsDelegate

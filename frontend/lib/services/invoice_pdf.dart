@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:flutter/painting.dart' show FontWeight;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -6,6 +7,65 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../models/models.dart';
 import '../utils/amount_words.dart';
+import 'devanagari_raster.dart';
+
+/// Devanagari text pre-shaped into images, so a synchronous widget build can
+/// place it. Keyed by size + weight + string, because the image is rendered at
+/// the exact size it will occupy.
+///
+/// WHY: the pdf package registers a Devanagari fallback font, so the GLYPHS are
+/// available — but it does no OpenType shaping. Its only substitution logic is a
+/// hardcoded Arabic table (`font/arabic.dart`); no GSUB or GPOS table is parsed
+/// anywhere. Devanagari is therefore drawn codepoint-by-codepoint in logical
+/// order: matras stay after their consonant instead of being reordered, halants
+/// remain visible, and conjuncts (क्ष, त्र, ज्ञ) never form. Letting Flutter
+/// (HarfBuzz) shape the text into pixels is the same answer
+/// [DevanagariRaster] gives for thermal printers, which cannot shape either.
+///
+/// Only strings that actually contain Devanagari take this detour — English and
+/// numbers stay real, selectable text.
+class _ShapedText {
+  /// Oversampling factor. The image is drawn back at 1/[_ppl] of its pixel size,
+  /// so it lands at exactly the requested point size but stays sharp when the
+  /// PDF is zoomed or printed.
+  static const double _ppl = 4;
+
+  final _images = <String, pw.MemoryImage>{};
+
+  static String _key(String text, double fontSize, bool bold) =>
+      '$fontSize|$bold|$text';
+
+  /// Shape [text] if it needs it. Safe to call repeatedly with the same string.
+  Future<void> add(String? text,
+      {double fontSize = 9, bool bold = false, double maxWidth = 400}) async {
+    if (text == null) return;
+    final s = text.trim();
+    if (s.isEmpty || !DevanagariRaster.containsDevanagari(s)) return;
+    final k = _key(s, fontSize, bold);
+    if (_images.containsKey(k)) return;
+    _images[k] = pw.MemoryImage(await DevanagariRaster.textToPng(
+      s,
+      fontSize: fontSize,
+      fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+      maxWidth: maxWidth,
+      pixelsPerLogical: _ppl,
+    ));
+  }
+
+  /// The widget for [text]: an image when it was shaped, otherwise ordinary
+  /// text. Sized from the image's own pixel dimensions rather than a fixed
+  /// height, so a wrapped multi-line address keeps its proportions.
+  pw.Widget widget(String text,
+      {double fontSize = 9,
+      bool bold = false,
+      pw.TextStyle? style,
+      pw.TextAlign? align}) {
+    final img = _images[_key(text.trim(), fontSize, bold)];
+    if (img == null) return pw.Text(text, style: style, textAlign: align);
+    return pw.Image(img,
+        width: (img.width ?? 1) / _ppl, height: (img.height ?? 1) / _ppl);
+  }
+}
 
 /// Builds an A4/A5 GST tax-invoice PDF for a finalized bill, modeled on a
 /// standard printed tax invoice: bordered header box, Bill-To, an items grid
@@ -70,6 +130,23 @@ class InvoicePdf {
     String? footerNote,
   }) async {
     final devanagari = await _loadDevanagari();
+
+    // Shape every Devanagari string up front — the widget tree below is built
+    // synchronously, so nothing can be rendered on demand inside it. Sizes and
+    // weights here must match the styles the widgets use, since each image is
+    // drawn at the size it was shaped for.
+    final shaped = _ShapedText();
+    await shaped.add(businessName, fontSize: 15, bold: true, maxWidth: 260);
+    await shaped.add(address?.replaceAll('\r\n', '\n'), maxWidth: 260);
+    await shaped.add(footerNote, maxWidth: 300);
+    await shaped.add('For: $businessName', bold: true, maxWidth: 200);
+    for (final b in bills) {
+      await shaped.add(b.customerName, fontSize: 11, bold: true, maxWidth: 260);
+      for (final i in b.items) {
+        await shaped.add(i.itemName, maxWidth: 220);
+      }
+    }
+
     final doc = pw.Document();
     final theme = pw.ThemeData.withFont(
       base: pw.Font.helvetica(),
@@ -139,9 +216,9 @@ class InvoicePdf {
             ),
             pw.SizedBox(height: 8),
             _headerBox(businessName, address, phone, gstin, fssai,
-                bill.displayNumber, dateStr),
-            _billToBox(bill),
-            _itemsTable(bill, showGst, codeOf, lineTaxOf, money),
+                bill.displayNumber, dateStr, shaped),
+            _billToBox(bill, shaped),
+            _itemsTable(bill, showGst, codeOf, lineTaxOf, money, shaped),
             pw.SizedBox(height: 10),
             _summary(bill, grandTotal, showGst, money),
             if (showGst) ...[
@@ -149,7 +226,7 @@ class InvoicePdf {
               _hsnTable(bill, codeOf, lineTaxOf, money),
             ],
             pw.SizedBox(height: 24),
-            _footer(businessName, footerNote),
+            _footer(businessName, footerNote, shaped),
           ],
         ),
       );
@@ -160,15 +237,18 @@ class InvoicePdf {
 
   // --- Header box: business (left) | Invoice No/Date (right) --------------
   static pw.Widget _headerBox(String name, String? address, String? phone,
-      String? gstin, String? fssai, String billNumber, String dateStr) {
+      String? gstin, String? fssai, String billNumber, String dateStr,
+      _ShapedText shaped) {
     final left = <pw.Widget>[
-      pw.Text(name,
+      shaped.widget(name,
+          fontSize: 15,
+          bold: true,
           style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold)),
     ];
     if (address != null && address.trim().isNotEmpty) {
       left.add(pw.SizedBox(height: 3));
-      left.add(pw.Text(address.replaceAll('\r\n', '\n'),
-          style: const pw.TextStyle(fontSize: 9)));
+      final addr = address.replaceAll('\r\n', '\n');
+      left.add(shaped.widget(addr, style: const pw.TextStyle(fontSize: 9)));
     }
     // Sits under the address, as on the thermal receipt, so the shop's contact
     // details read as one block.
@@ -233,7 +313,7 @@ class InvoicePdf {
       );
 
   // --- Bill To --------------------------------------------------------------
-  static pw.Widget _billToBox(Bill bill) {
+  static pw.Widget _billToBox(Bill bill, _ShapedText shaped) {
     if ((bill.customerName == null || bill.customerName!.isEmpty) &&
         (bill.customerPhone == null || bill.customerPhone!.isEmpty) &&
         (bill.tableNumber == null || bill.tableNumber!.isEmpty)) {
@@ -253,7 +333,9 @@ class InvoicePdf {
           pw.Text('Bill To', style: const pw.TextStyle(fontSize: 9)),
           pw.SizedBox(height: 2),
           if (bill.customerName != null && bill.customerName!.isNotEmpty)
-            pw.Text(bill.customerName!,
+            shaped.widget(bill.customerName!,
+                fontSize: 11,
+                bold: true,
                 style: pw.TextStyle(
                     fontSize: 11, fontWeight: pw.FontWeight.bold)),
           if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty)
@@ -273,7 +355,8 @@ class InvoicePdf {
       bool showGst,
       String Function(BillItem) codeOf,
       double Function(BillItem) lineTaxOf,
-      String Function(num) money) {
+      String Function(num) money,
+      _ShapedText shaped) {
     final headStyle = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
     final cellStyle = const pw.TextStyle(fontSize: 9);
     final anyHsn = showGst && bill.items.any((i) => codeOf(i).isNotEmpty);
@@ -315,7 +398,13 @@ class InvoicePdf {
     pw.TableRow itemRow(int idx, BillItem i) {
       final cells = <pw.Widget>[
         cell('${idx + 1}', align: pw.Alignment.center),
-        cell(i.itemName),
+        // The one column that carries an owner-typed name, so the one that
+        // needs shaping when the menu is in Marathi.
+        pw.Container(
+          alignment: pw.Alignment.centerLeft,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: shaped.widget(i.itemName, style: cellStyle),
+        ),
       ];
       if (anyHsn) cells.add(cell(codeOf(i), align: pw.Alignment.center));
       cells.add(cell(formatQty(i.quantity), align: pw.Alignment.centerRight));
@@ -528,7 +617,8 @@ class InvoicePdf {
   }
 
   // --- Footer ---------------------------------------------------------------
-  static pw.Widget _footer(String businessName, String? note) {
+  static pw.Widget _footer(
+      String businessName, String? note, _ShapedText shaped) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.end,
       children: [
@@ -539,7 +629,7 @@ class InvoicePdf {
               pw.Text('Terms and conditions',
                   style: pw.TextStyle(
                       fontSize: 9, fontWeight: pw.FontWeight.bold)),
-              pw.Text(
+              shaped.widget(
                   (note != null && note.trim().isNotEmpty)
                       ? note
                       : 'Thanks for doing business with us!',
@@ -547,7 +637,8 @@ class InvoicePdf {
             ],
           ),
         ),
-        pw.Text('For: $businessName',
+        shaped.widget('For: $businessName',
+            bold: true,
             style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
       ],
     );

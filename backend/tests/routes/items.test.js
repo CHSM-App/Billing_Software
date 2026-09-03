@@ -41,6 +41,13 @@ beforeEach(() => {
   mockRequest.reset();
 });
 
+/// Creating an item (and renaming one) now runs a duplicate-name pre-check
+/// first. Queue an empty result for it so a test can exercise whatever it is
+/// actually about; without this the shared `recordset` answers the check too and
+/// every save looks like a collision.
+const nameIsFree = () =>
+  mockRequest.query.mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
 // ------------------------------------------------------------------
 // Auth guard
 // ------------------------------------------------------------------
@@ -191,6 +198,10 @@ describe('GET /api/items/:id', () => {
 // POST /api/items — owner only
 // ------------------------------------------------------------------
 describe('POST /api/items', () => {
+  // A create always checks the name first, so every test in this block needs
+  // the name to come back free. The duplicate case has its own block below.
+  beforeEach(nameIsFree);
+
   test('creates item and returns 201', async () => {
     mockRequest.recordset = [sampleItem];
     const res = await request(app)
@@ -234,6 +245,38 @@ describe('POST /api/items', () => {
     expect(res.status).toBe(201);
     expect(res.body).toHaveProperty('variants');
     expect(Array.isArray(res.body.variants)).toBe(true);
+  });
+
+  test('persists major_category alongside category', async () => {
+    mockRequest.recordset = [
+      { ...sampleItem, major_category: 'Chinese', category: 'Chinese Starters' },
+    ];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({
+        name: 'Chilli Paneer',
+        price: 180,
+        major_category: 'Chinese',
+        category: 'Chinese Starters',
+      });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.major_category).toBe('Chinese');
+    expect(mockRequest.inputs.category).toBe('Chinese Starters');
+    expect(res.body.major_category).toBe('Chinese');
+  });
+
+  test('binds major_category as null when omitted (unchanged behaviour)', async () => {
+    // The whole feature is additive: an item created the old way, with only a
+    // category, must still insert cleanly and carry no major.
+    mockRequest.recordset = [sampleItem];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50, category: 'Grains' });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.major_category).toBeNull();
+    expect(mockRequest.inputs.category).toBe('Grains');
   });
 
   test('honours a supplied low_stock_threshold', async () => {
@@ -362,9 +405,11 @@ describe('POST /api/items', () => {
 // ------------------------------------------------------------------
 describe('PUT /api/items/:id', () => {
   test('updates item and returns updated record', async () => {
-    // Calls: 1) ownership check, 2) update, 3) attachVariants
+    // Calls: 1) ownership check, 2) duplicate-name check, 3) update,
+    // 4) attachVariants
     mockRequest.query
       .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ ...sampleItem, name: 'Basmati Rice' }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
 
@@ -400,6 +445,42 @@ describe('PUT /api/items/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.variants).toHaveLength(2);
     expect(res.body.variants.map((v) => v.label)).toEqual(['half', 'Full']);
+  });
+
+  test('updates major_category on its own', async () => {
+    // Grouping an existing item under a major is the common edit, and it must
+    // satisfy the "at least one field" guard by itself.
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({
+        recordset: [{ ...sampleItem, major_category: 'Chinese' }],
+        rowsAffected: [1],
+      })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ major_category: 'Chinese' });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.major_category).toBe('Chinese');
+    expect(res.body.major_category).toBe('Chinese');
+  });
+
+  test('leaves major_category alone when the field is omitted', async () => {
+    // ownership check, duplicate-name check (a name IS sent), update, variants
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Basmati Rice' });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.major_category).toBeUndefined();
   });
 
   test('returns 404 when item does not belong to business', async () => {
@@ -521,5 +602,110 @@ describe('POST /api/items/:id/variants', () => {
       .send({ label: 'Full', price: 280, barcode: '123456789012' });
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/barcode/i);
+  });
+});
+
+// ------------------------------------------------------------------
+// Duplicate item names
+//
+// Two items with the same name are indistinguishable on the billing list, on a
+// bill line and in a report, so the catalog refuses the second one. Deliberately
+// NOT inside the POST describe above: these tests need the name check to find a
+// match, so they must not get its nameIsFree() priming.
+// ------------------------------------------------------------------
+describe('duplicate item names', () => {
+  test('POST rejects a name that already exists', async () => {
+    // The shared recordset answers the name-check query with an existing row.
+    mockRequest.recordset = [{ id: 'other-item-id' }];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50 });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already exists/i);
+  });
+
+  test('POST compares trimmed and case-folded', async () => {
+    // Otherwise "rice", "Rice " and "RICE" would each slip past the check.
+    mockRequest.recordset = [{ id: 'other-item-id' }];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: '  RiCe  ', price: 50 });
+    expect(res.status).toBe(409);
+    // The value handed to SQL is trimmed; the query lowercases both sides.
+    expect(mockRequest.inputs.name).toBe('RiCe');
+  });
+
+  test('POST creates normally when the name is free', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50 });
+    expect(res.status).toBe(201);
+  });
+
+  test('PUT rejects renaming onto another item', async () => {
+    mockRequest.query
+      // ownership check
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      // duplicate-name check finds a DIFFERENT item already called that
+      .mockResolvedValueOnce({
+        recordset: [{ id: 'other-item-id' }],
+        rowsAffected: [1],
+      });
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Dal' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/already exists/i);
+  });
+
+  test('PUT excludes the item itself, so re-saving its own name is fine', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      // The check excludes this id, so it finds nothing.
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice' });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.exclude_id).toBe(ITEM_ID);
+  });
+
+  test('PUT without a name skips the check entirely', async () => {
+    // Only ownership, update and variants — no name means no collision to look
+    // for, and an extra query here would desync every caller's expectations.
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ price: 99 });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.exclude_id).toBeUndefined();
+  });
+
+  test('a soft-deleted item does not reserve its name', async () => {
+    // The check filters on is_active = 1, so a deleted "Rice" frees the name.
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50 });
+    expect(res.status).toBe(201);
   });
 });

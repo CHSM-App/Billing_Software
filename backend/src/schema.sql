@@ -25,6 +25,20 @@ CREATE TABLE businesses (
     logo_url         NVARCHAR(1000)   NULL,
     bill_prefix      NVARCHAR(10)     NULL DEFAULT 'INV',
     bill_footer_note NVARCHAR(500)    NULL,
+    -- Online store (added via migration 037) — a public, shop-level ordering
+    -- link. See online_orders at the bottom of this file.
+    store_enabled          BIT           NOT NULL DEFAULT 0,
+    store_token            NVARCHAR(32)  NULL,   -- unguessable token in the public link
+    -- No pickup column: a customer can always collect, so pickup is the
+    -- baseline every store offers. Delivery is the thing a shop opts into.
+    store_delivery_enabled BIT           NOT NULL DEFAULT 0,
+    store_delivery_charge  DECIMAL(10,2) NOT NULL DEFAULT 0,
+    store_payment_qr_url   NVARCHAR(500) NULL,   -- the shop's own uploaded UPI QR
+    -- VPA, e.g. shop@okhdfcbank (038). Lets checkout build a upi:// intent
+    -- with the amount prefilled; the QR image alone cannot carry an amount.
+    store_upi_id           NVARCHAR(100) NULL,
+    store_advance_percent  DECIMAL(5,2)  NOT NULL DEFAULT 0,  -- 0 = none, 100 = full prepay
+    store_payment_required BIT           NOT NULL DEFAULT 0,
     created_at       DATETIME2        NOT NULL DEFAULT GETUTCDATE()
 );
 
@@ -32,6 +46,11 @@ CREATE TABLE businesses (
 CREATE UNIQUE INDEX UQ_businesses_gst_number
     ON businesses (gst_number)
     WHERE gst_number IS NOT NULL;
+
+-- The public store link resolves a business by this token, so it must be unique.
+CREATE UNIQUE INDEX UQ_businesses_store_token
+    ON businesses (store_token)
+    WHERE store_token IS NOT NULL;
 
 CREATE TABLE users (
     id               UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
@@ -59,6 +78,12 @@ CREATE TABLE items (
     business_id     UNIQUEIDENTIFIER NOT NULL,
     name            NVARCHAR(200)    NOT NULL,
     barcode         NVARCHAR(100)    NULL,
+    -- Two free-text levels of grouping, both optional and neither normalized:
+    -- major_category is the coarse group ("Chinese") and category the
+    -- subcategory under it ("Chinese Starters"). There is no categories table —
+    -- a category exists only while some active item carries that exact string,
+    -- which is what the app's chip lists are derived from.
+    major_category  NVARCHAR(100)    NULL,
     category        NVARCHAR(100)    NULL,
     -- NULL only for an item sold through its variants (each size carries its
     -- own price). Required for a plain item — enforced in routes/items.js.
@@ -441,3 +466,102 @@ CREATE INDEX IX_vendor_bill_items_bill ON vendor_bill_items (vendor_bill_id);
 CREATE INDEX IX_vendor_bill_items_item ON vendor_bill_items (item_id) WHERE item_id IS NOT NULL;
 CREATE INDEX IX_vendor_bill_items_variant ON vendor_bill_items (variant_id) WHERE variant_id IS NOT NULL;
 CREATE INDEX IX_vendor_bill_items_raw_material ON vendor_bill_items (raw_material_id) WHERE raw_material_id IS NOT NULL;
+
+-- =============================================================================
+-- Online store (migration 037)
+-- =============================================================================
+-- Orders placed from the public shop link. They are NOT bills: an order sits in
+-- a pending queue until the owner accepts it, and only then is a draft bill
+-- created (online_orders.bill_id). Rejected orders never touch the books, which
+-- is why order_number is its own series and not a bill number.
+CREATE TABLE online_orders (
+    id                 UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    business_id        UNIQUEIDENTIFIER NOT NULL,
+    order_number       NVARCHAR(50)     NOT NULL,   -- 'ORD-0001', per business
+
+    customer_name      NVARCHAR(200)    NULL,
+    customer_phone     NVARCHAR(20)     NOT NULL,   -- OTP-verified
+
+    fulfilment         NVARCHAR(20)     NOT NULL,   -- 'pickup' | 'delivery'
+    address            NVARCHAR(500)    NULL,       -- required when 'delivery'
+    note               NVARCHAR(500)    NULL,
+
+    -- total = subtotal + delivery_charge. No GST here: tax is applied by the
+    -- normal billing path once the order is accepted.
+    subtotal           DECIMAL(10,2)    NOT NULL DEFAULT 0,
+    delivery_charge    DECIMAL(10,2)    NOT NULL DEFAULT 0,
+    total              DECIMAL(10,2)    NOT NULL DEFAULT 0,
+
+    -- amount_due is what the store ASKED for up front (store_advance_percent of
+    -- total). paid_amount + payment_txn_id are what the customer CLAIMS — a
+    -- typed UPI reference cannot be verified server-side, hence 'claimed' being
+    -- a distinct state from 'verified' (the owner confirms it when accepting).
+    amount_due         DECIMAL(10,2)    NOT NULL DEFAULT 0,
+    paid_amount        DECIMAL(10,2)    NOT NULL DEFAULT 0,
+    payment_txn_id     NVARCHAR(64)     NULL,
+    payment_status     NVARCHAR(20)     NOT NULL DEFAULT 'unpaid', -- 'unpaid','claimed','verified'
+
+    status             NVARCHAR(20)     NOT NULL DEFAULT 'pending', -- 'pending','accepted','rejected'
+    reject_reason      NVARCHAR(200)    NULL,
+    bill_id            UNIQUEIDENTIFIER NULL,     -- the draft bill, once accepted
+    decided_by_user_id UNIQUEIDENTIFIER NULL,
+    decided_at         DATETIME2        NULL,
+    created_at         DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
+
+    CONSTRAINT FK_online_orders_business
+        FOREIGN KEY (business_id) REFERENCES businesses (id)
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
+
+    -- SET NULL: voiding the bill must not erase the order history.
+    CONSTRAINT FK_online_orders_bill
+        FOREIGN KEY (bill_id) REFERENCES bills (id)
+        ON UPDATE NO ACTION ON DELETE SET NULL,
+
+    CONSTRAINT FK_online_orders_decided_by_user
+        FOREIGN KEY (decided_by_user_id) REFERENCES users (id)
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
+
+    CONSTRAINT UQ_online_orders_business_order_number
+        UNIQUE (business_id, order_number),
+
+    CONSTRAINT CK_online_orders_fulfilment
+        CHECK (fulfilment IN ('pickup', 'delivery')),
+
+    CONSTRAINT CK_online_orders_payment_status
+        CHECK (payment_status IN ('unpaid', 'claimed', 'verified')),
+
+    CONSTRAINT CK_online_orders_status
+        CHECK (status IN ('pending', 'accepted', 'rejected'))
+);
+
+CREATE INDEX IX_online_orders_business_status ON online_orders (business_id, status, created_at DESC);
+CREATE INDEX IX_online_orders_business_phone  ON online_orders (business_id, customer_phone, created_at DESC);
+
+-- Same column shape as bill_items, so accepting an order copies the lines
+-- straight across: unit_price is already the NET rate at 4dp.
+CREATE TABLE online_order_items (
+    id          UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    order_id    UNIQUEIDENTIFIER NOT NULL,
+    item_id     UNIQUEIDENTIFIER NULL,
+    variant_id  UNIQUEIDENTIFIER NULL,
+    item_name   NVARCHAR(200)    NOT NULL,   -- snapshot; survives item deletion
+    quantity    DECIMAL(10,2)    NOT NULL,
+    unit_price  DECIMAL(12,4)    NOT NULL,
+    tax_rate    DECIMAL(5,2)     NULL,
+    line_total  DECIMAL(10,2)    NOT NULL,
+
+    CONSTRAINT FK_online_order_items_order
+        FOREIGN KEY (order_id) REFERENCES online_orders (id)
+        ON UPDATE NO ACTION ON DELETE CASCADE,
+
+    CONSTRAINT FK_online_order_items_item
+        FOREIGN KEY (item_id) REFERENCES items (id)
+        ON UPDATE NO ACTION ON DELETE SET NULL,
+
+    -- NO ACTION: a cascade here would add a second path (variant -> item).
+    CONSTRAINT FK_online_order_items_variant
+        FOREIGN KEY (variant_id) REFERENCES item_variants (id)
+        ON UPDATE NO ACTION ON DELETE NO ACTION
+);
+
+CREATE INDEX IX_online_order_items_order ON online_order_items (order_id);

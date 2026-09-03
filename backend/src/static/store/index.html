@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#4F46E5" />
+  <title>Order Online</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ponytail: this page is a near-copy of static/order/index.html (the table-QR
+       menu). Both are static leaf artifacts with no build step, so sharing them
+       would mean introducing a templating layer to save two files. If a THIRD
+       customer page ever appears, factor the shared CSS + menu-rendering JS into
+       static/_shared/ and include it from all three. */
+    /* Palette mirrors the Flutter app's design system (lib/theme/app_theme.dart):
+       indigo primary, emerald accent, slate neutrals, Inter type, matched radii
+       and shadows — so the customer web page feels like the same product. */
+    :root {
+      --brand: #4F46E5;        /* AppColors.primary */
+      --brand-dark: #3730A3;   /* AppColors.primaryDark */
+      --brand-light: #EEF2FF;  /* AppColors.primaryLight */
+      --brand-grad: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); /* primaryGradient */
+      --accent: #10B981;       /* AppColors.accent */
+      --accent-light: #D1FAE5; /* AppColors.accentLight */
+      --bg: #F8F9FC;           /* AppColors.background */
+      --card: #FFFFFF;         /* AppColors.surface */
+      --surface-variant: #F1F5F9;
+      --text: #0F172A;         /* AppColors.textPrimary */
+      --muted: #64748B;        /* AppColors.textSecondary */
+      --line: #E2E8F0;         /* AppColors.border */
+      --danger: #EF4444;       /* AppColors.error */
+      --ok: #10B981;           /* AppColors.success */
+      --warn: #F59E0B;
+      /* radii — AppRadius */
+      --r-sm: 10px; --r-md: 14px; --r-lg: 20px;
+      /* shadows — AppShadow */
+      --sh-sm: 0 2px 8px rgba(15,23,42,.06);
+      --sh-md: 0 4px 16px rgba(15,23,42,.08), 0 1px 4px rgba(15,23,42,.04);
+      --sh-primary: 0 6px 20px rgba(79,70,229,.30);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text); padding-bottom: 100px;
+      -webkit-font-smoothing: antialiased; letter-spacing: -0.1px;
+    }
+    header {
+      background: var(--brand-grad); color: #fff; padding: 18px 16px; position: sticky; top: 0; z-index: 20;
+      display: flex; align-items: center; gap: 12px; box-shadow: var(--sh-primary);
+    }
+    header img { width: 42px; height: 42px; border-radius: var(--r-sm); object-fit: cover;
+      background: rgba(255,255,255,.18); }
+    header .shop { font-weight: 700; font-size: 18px; line-height: 1.2; letter-spacing: -0.3px; }
+    header .tbl { font-size: 13px; opacity: .85; font-weight: 500; margin-top: 2px; }
+    .topbar { position: sticky; top: 78px; z-index: 15; background: rgba(248,249,252,.92);
+      backdrop-filter: saturate(180%) blur(8px); border-bottom: 1px solid var(--line); }
+    .search { position: relative; padding: 10px 12px 0; }
+    .search input { width: 100%; border: 1px solid var(--line); background: var(--card);
+      border-radius: 999px; padding: 10px 36px 10px 38px; font-size: 15px; font-family: inherit;
+      color: var(--text); outline: none; }
+    .search input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-light); }
+    .search .ico { position: absolute; left: 25px; top: 21px; color: var(--muted); pointer-events: none; }
+    .search .clr { position: absolute; right: 20px; top: 15px; border: 0; background: transparent;
+      color: var(--muted); font-size: 20px; line-height: 1; padding: 4px 6px; display: none; }
+    .search .clr.show { display: block; }
+    .cats { padding: 10px 12px 12px; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+    .cats::-webkit-scrollbar { display: none; }
+    .section-title { display: flex; align-items: center; gap: 10px; margin: 22px 0 10px;
+      padding: 8px 12px; background: var(--brand-light); color: var(--brand-dark);
+      border-left: 4px solid var(--brand); border-radius: var(--r-sm);
+      font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+    .section-title .cnt { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--brand);
+      background: var(--card); border-radius: 999px; padding: 2px 9px; }
+    .section-title:first-child { margin-top: 4px; }
+    .cats button { flex: 0 0 auto; border: 1px solid var(--line); background: var(--card);
+      color: var(--muted); padding: 8px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
+      font-family: inherit; transition: all .18s ease; }
+    .cats button.active { background: var(--brand-light); color: var(--brand-dark);
+      border-color: var(--brand); }
+    /* `display:flex` above outranks the UA's [hidden] { display:none }, so a
+       hidden chip row would still paint as an empty padded strip. */
+    .cats[hidden] { display: none; }
+    /* Major-category row. Same chip size as the category row it replaces, but
+       filled when active — it FILTERS the menu rather than jumping to it. */
+    .cats.majors button.active { background: var(--brand); color: #fff;
+      border-color: var(--brand); }
+    main { padding: 12px; }
+    .item { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md);
+      padding: 14px; margin-bottom: 10px; display: flex; gap: 12px; box-shadow: var(--sh-sm); }
+    .item img { width: 68px; height: 68px; border-radius: var(--r-sm); object-fit: cover; flex: 0 0 auto;
+      background: var(--surface-variant); cursor: zoom-in; }
+    /* image lightbox — tap a product photo to see it large */
+    .lightbox { position: fixed; inset: 0; background: rgba(15,23,42,.86); z-index: 60;
+      display: none; align-items: center; justify-content: center; padding: 20px;
+      opacity: 0; transition: opacity .2s ease; }
+    .lightbox.show { display: flex; opacity: 1; }
+    .lightbox img { max-width: 100%; max-height: 80vh; border-radius: var(--r-md);
+      box-shadow: 0 12px 48px rgba(0,0,0,.5); animation: zoomIn .24s cubic-bezier(.16,1,.3,1); }
+    @keyframes zoomIn { from { transform: scale(.9); opacity: .4; } to { transform: scale(1); opacity: 1; } }
+    .lightbox .cap { position: absolute; left: 0; right: 0; bottom: 28px; text-align: center;
+      color: #fff; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; padding: 0 24px;
+      text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+    .lightbox .close { position: absolute; top: 16px; right: 16px; width: 40px; height: 40px;
+      border-radius: 999px; border: none; background: rgba(255,255,255,.18); color: #fff;
+      font-size: 22px; line-height: 1; font-family: inherit; }
+    .item .info { flex: 1; min-width: 0; }
+    .item .name { font-weight: 600; font-size: 15px; letter-spacing: -0.2px; }
+    .item .price { color: var(--brand); font-weight: 700; font-size: 14px; margin-top: 3px; }
+    .variants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .variants button { border: 1px solid var(--line); background: var(--surface-variant);
+      border-radius: var(--r-sm); padding: 6px 12px; font-size: 13px; color: var(--text);
+      font-family: inherit; font-weight: 500; transition: all .18s ease; }
+    .variants button.sel { border-color: var(--brand); background: var(--brand-light);
+      color: var(--brand-dark); font-weight: 600; }
+    .stepper { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .stepper button { width: 34px; height: 34px; border-radius: var(--r-sm); border: none; font-size: 20px;
+      background: var(--brand); color: #fff; line-height: 1; font-family: inherit;
+      box-shadow: 0 2px 6px rgba(79,70,229,.25); transition: transform .12s ease; }
+    .stepper button:active { transform: scale(.92); }
+    .stepper button:disabled { opacity: .35; box-shadow: none; }
+    .stepper .qty { min-width: 22px; text-align: center; font-weight: 700; font-size: 15px; }
+    .stepper .add { width: auto; padding: 0 18px; height: 36px; border-radius: var(--r-sm); font-size: 14px;
+      font-weight: 600; letter-spacing: 0.2px; }
+    /* Sized item with nothing picked: reads as an instruction, not a dead
+       button. Beats .stepper button:disabled on specificity, so it keeps full
+       opacity instead of being greyed into looking broken. */
+    .stepper .add.need-size { background: var(--surface-variant); color: var(--brand-dark);
+      border: 1px dashed var(--brand); box-shadow: none; opacity: 1; }
+    .cart-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--brand-grad);
+      color: #fff; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 -4px 20px rgba(79,70,229,.25); z-index: 30; }
+    .cart-bar.hidden { display: none; }
+    .cart-bar .count { font-size: 13px; opacity: .9; font-weight: 500; }
+    .cart-bar .total { font-weight: 800; font-size: 19px; letter-spacing: -0.3px; }
+    .cart-bar button { background: #fff; color: var(--brand-dark); border: none; border-radius: var(--r-sm);
+      padding: 12px 20px; font-weight: 700; font-size: 15px; font-family: inherit;
+      box-shadow: var(--sh-sm); transition: transform .12s ease; }
+    .cart-bar button:active { transform: scale(.96); }
+    .running { background: var(--accent-light); border: 1px solid #a7f3d0; border-radius: var(--r-md);
+      padding: 14px; margin-bottom: 10px; box-shadow: var(--sh-sm); }
+    .running h3 { margin: 0 0 10px; font-size: 14px; color: #047857; font-weight: 700; letter-spacing: -0.2px;
+      display: flex; align-items: center; gap: 8px; }
+    .running .row { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; }
+    .running .row .st { font-size: 11px; color: var(--muted); font-weight: 500; margin-top: 1px; }
+    /* Status pill on a submitted order. Waiting is amber so "the shop has not
+       looked at this yet" never reads as "done". */
+    .pill { margin-left: auto; font-size: 11px; font-weight: 700; padding: 3px 10px;
+      border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; }
+    .pill.pending  { background: #FEF3C7; color: #92400E; }
+    .pill.accepted { background: #D1FAE5; color: #047857; }
+    .pill.rejected { background: #FEE2E2; color: #991B1B; }
+    .order-card.pending  { background: #FFFBEB; border-color: #FDE68A; }
+    .order-card.pending h3  { color: #92400E; }
+    .order-card.rejected { background: #FEF2F2; border-color: #FECACA; }
+    .order-card.rejected h3 { color: #991B1B; }
+    /* modal */
+    .backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.5); z-index: 40; display: none;
+      align-items: flex-end; }
+    .backdrop.show { display: flex; }
+    .sheet { background: var(--card); width: 100%; border-radius: var(--r-lg) var(--r-lg) 0 0; padding: 24px;
+      box-shadow: 0 -8px 40px rgba(15,23,42,.2); animation: sheetUp .28s cubic-bezier(.16,1,.3,1); }
+    /* Checkout can outgrow the screen once delivery + payment are shown, so it
+       scrolls inside the sheet rather than pushing the button out of reach. */
+    .sheet.scroll { max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    @keyframes sheetUp { from { transform: translateY(20px); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
+    .sheet h2 { margin: 0 0 6px; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+    .sheet p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .sheet input, .sheet textarea { width: 100%; padding: 15px; border: 1px solid var(--line);
+      border-radius: var(--r-sm); font-size: 16px; margin-bottom: 12px; font-family: inherit;
+      background: var(--surface-variant); color: var(--text);
+      transition: border-color .18s ease, background .18s ease; }
+    .sheet textarea { min-height: 78px; resize: vertical; }
+    .sheet input:focus, .sheet textarea:focus { outline: none; border-color: var(--brand);
+      border-width: 2px; padding: 14px; background: var(--card); }
+    .sheet input::placeholder, .sheet textarea::placeholder { color: #94A3B8; }
+    .sheet .btn { width: 100%; padding: 16px; background: var(--brand); color: #fff; border: none;
+      border-radius: var(--r-md); font-size: 16px; font-weight: 600; font-family: inherit;
+      letter-spacing: 0.2px; box-shadow: var(--sh-primary); transition: transform .12s ease; }
+    .sheet .btn:active { transform: scale(.98); }
+    .sheet .btn:disabled { opacity: .5; box-shadow: none; }
+    .sheet .err { color: var(--danger); font-size: 13px; margin: -6px 0 12px; min-height: 16px; font-weight: 500; }
+    .label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--muted); margin: 4px 0 8px; }
+    /* fulfilment chooser */
+    .seg { display: flex; gap: 8px; margin-bottom: 16px; }
+    .seg button { flex: 1; padding: 13px 10px; border: 1px solid var(--line); background: var(--surface-variant);
+      border-radius: var(--r-sm); font-size: 14px; font-weight: 600; font-family: inherit;
+      color: var(--muted); transition: all .18s ease; }
+    .seg button.sel { border-color: var(--brand); background: var(--brand-light); color: var(--brand-dark); }
+    /* Stated fact, not a warning: this shop only does pickup. */
+    .notice { background: var(--surface-variant); border: 1px solid var(--line);
+      border-radius: var(--r-sm); padding: 13px 14px; margin-bottom: 16px;
+      font-size: 14px; line-height: 1.5; color: var(--text); }
+    /* order summary */
+    .sum { background: var(--surface-variant); border-radius: var(--r-sm); padding: 14px; margin-bottom: 16px; }
+    .sum .row { display: flex; justify-content: space-between; font-size: 14px; padding: 3px 0;
+      color: var(--muted); }
+    .sum .row.grand { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 10px;
+      font-size: 16px; font-weight: 800; color: var(--text); letter-spacing: -0.3px; }
+    .sum .row.due { color: var(--brand-dark); font-weight: 700; }
+    /* payment block */
+    .pay { border: 1px dashed var(--brand); background: var(--brand-light); border-radius: var(--r-md);
+      padding: 16px; margin-bottom: 16px; text-align: center; }
+    .pay .amt { font-size: 20px; font-weight: 800; color: var(--brand-dark); letter-spacing: -0.4px; }
+    .pay-seg { margin-bottom: 12px; }
+    .pay-seg button { background: var(--card); border-color: var(--line); }
+    .pay-seg button.sel { background: var(--brand); border-color: var(--brand); color: #fff; }
+    .pay .hint { font-size: 13px; color: var(--brand-dark); opacity: .85; margin: 6px 0 12px; line-height: 1.5; }
+    .pay img { width: 190px; max-width: 100%; border-radius: var(--r-sm); background: #fff;
+      padding: 8px; box-shadow: var(--sh-sm); cursor: zoom-in; }
+    .pay input { margin: 14px 0 0; text-align: center; background: #fff; }
+    .upi-btn { display: block; margin: 0 auto 14px; max-width: 320px; padding: 14px 18px;
+      background: var(--brand); color: #fff; border-radius: var(--r-md);
+      font-size: 15px; font-weight: 700; text-decoration: none;
+      box-shadow: var(--sh-primary); }
+    .upi-btn:active { transform: scale(.98); }
+    .pay .or { font-size: 12px; color: var(--brand-dark); opacity: .7; margin-bottom: 10px; }
+    .center { text-align: center; padding: 48px 20px; color: var(--muted); font-size: 14px; }
+    .toast { position: fixed; left: 50%; bottom: 116px; transform: translateX(-50%);
+      background: var(--text); color: #fff; padding: 12px 22px; border-radius: 999px; font-weight: 600;
+      z-index: 50; opacity: 0; transition: opacity .25s; font-size: 14px; box-shadow: var(--sh-md); }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <img id="logo" alt="" style="display:none" />
+    <div>
+      <div class="shop" id="shopName">Loading…</div>
+      <div class="tbl" id="shopSub"></div>
+    </div>
+  </header>
+
+  <div class="topbar" id="topbar">
+    <div class="search">
+      <svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="searchInput" type="search" placeholder="Search products…" autocomplete="off" />
+      <button class="clr" id="searchClear" aria-label="Clear search">×</button>
+    </div>
+    <!-- Coarse group filter. Stays hidden (and the catalog behaves exactly as it
+         always did) until the shop files items under a major category. -->
+    <div class="cats majors" id="majors" hidden></div>
+    <div class="cats" id="cats"></div>
+  </div>
+  <main id="main"><div class="center">Loading…</div></main>
+
+  <div class="cart-bar hidden" id="cartBar">
+    <div>
+      <div class="count" id="cartCount">0 items</div>
+      <div class="total" id="cartTotal">₹0</div>
+    </div>
+    <button id="placeBtn">Checkout</button>
+  </div>
+
+  <!-- Checkout sheet: how they want it, where it goes, and what to pay now -->
+  <div class="backdrop" id="coBackdrop">
+    <div class="sheet scroll">
+      <h2>Checkout</h2>
+      <p id="coSub">Tell the shop how you'd like your order.</p>
+
+      <div id="coFulfilWrap">
+        <div class="label">How would you like it?</div>
+        <div class="seg" id="coSeg"></div>
+      </div>
+      <!-- Shown instead of the chooser when the shop does not deliver, so the
+           customer learns that BEFORE they hunt for a missing delivery option. -->
+      <div class="notice" id="coPickupOnly" style="display:none">
+        🏬 <b>Pickup only</b> — this shop does not deliver. Please collect your
+        order from the shop.
+      </div>
+
+      <div id="coAddrWrap" style="display:none">
+        <div class="label">Delivery address</div>
+        <textarea id="coAddress" placeholder="House / flat, street, landmark, pincode"></textarea>
+      </div>
+
+      <div class="label">Anything else? (optional)</div>
+      <textarea id="coNote" placeholder="Notes for the shop"></textarea>
+
+      <div class="sum" id="coSum"></div>
+
+      <div class="pay" id="coPay" style="display:none">
+        <!-- Advance vs full. Only rendered when the two differ. -->
+        <div class="seg pay-seg" id="coPaySeg"></div>
+        <div class="amt" id="coPayAmt"></div>
+        <div class="hint" id="coPayHint"></div>
+        <!-- One tap into the customer's own UPI app, payee and amount already
+             filled. Android only: iOS has no upi:// scheme, so there the QR
+             below is the whole story. -->
+        <a class="upi-btn" id="coUpiBtn" href="#" style="display:none"></a>
+        <div class="or" id="coOr" style="display:none">or scan with another device</div>
+        <img id="coPayQr" alt="Payment QR code" />
+        <input id="coTxn" type="text" placeholder="UPI transaction / reference ID" autocomplete="off" />
+      </div>
+
+      <div class="err" id="coErr"></div>
+      <button class="btn" id="coBtn">Place Order</button>
+    </div>
+  </div>
+
+  <!-- OTP sheet -->
+  <div class="backdrop" id="otpBackdrop">
+    <div class="sheet">
+      <h2 id="otpTitle">Verify your phone</h2>
+      <p id="otpSub">We'll send a one-time code on WhatsApp to confirm your order.</p>
+      <input id="nameInput" type="text" placeholder="Your name (optional)" autocomplete="name" />
+      <input id="phoneInput" type="tel" placeholder="Mobile number" autocomplete="tel" inputmode="numeric" />
+      <input id="otpInput" type="text" placeholder="Enter OTP" inputmode="numeric" style="display:none" />
+      <div class="err" id="otpErr"></div>
+      <button class="btn" id="otpBtn">Send OTP</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Image lightbox — shows a tapped product photo (or the payment QR) enlarged -->
+  <div class="lightbox" id="lightbox">
+    <button class="close" id="lightboxClose" aria-label="Close">×</button>
+    <img id="lightboxImg" src="" alt="" />
+    <div class="cap" id="lightboxCap"></div>
+  </div>
+
+  <script>
+  (function () {
+    // storeToken is the last path segment of /store/:storeToken
+    var parts = location.pathname.split('/').filter(Boolean);
+    var storeToken = parts[parts.length - 1];
+    var API = '/store/' + encodeURIComponent(storeToken);
+    var LS_TOKEN = 'store_token_' + storeToken;
+    var LS_PHONE = 'store_phone_' + storeToken;
+    var LS_ADDR  = 'store_addr_' + storeToken;
+
+    var menu = [];            // items
+    var cart = {};            // key -> { item_id, variant_id, name, price, qty }
+    var selVariant = {};      // item_id -> variant_id
+    var activeCat = null;
+    // null = no major picked = show everything. There is no "All" chip; tapping
+    // the lit chip again clears the filter.
+    var activeMajor = null;
+    var query = '';           // current search text (lowercased)
+    var suppressSpy = 0;      // timestamp until which scroll-spy is ignored (after a chip tap)
+    var authToken = localStorage.getItem(LS_TOKEN) || null;
+    var cfg = null;           // store settings from /menu
+    var fulfilment = null;    // 'pickup' | 'delivery'
+    // 'full' | 'advance'. Defaults to settling the whole bill now: a customer
+    // who has decided to pay online usually means to be done with it, and the
+    // advance stays one tap away.
+    var payChoice = 'full';
+    var shopName = '';
+    var pollTimer = null;
+
+    var $ = function (id) { return document.getElementById(id); };
+    var rupee = function (n) { return '₹' + Number(n).toFixed(Number(n) % 1 ? 2 : 0); };
+    function esc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+
+    function toast(msg) {
+      var t = $('toast'); t.textContent = msg; t.classList.add('show');
+      setTimeout(function () { t.classList.remove('show'); }, 2200);
+    }
+
+    // ---- image lightbox ----
+    function openLightbox(src, name) {
+      if (!src) return;
+      $('lightboxImg').src = src;
+      $('lightboxImg').alt = name || '';
+      $('lightboxCap').textContent = name || '';
+      $('lightbox').classList.add('show');
+    }
+    function closeLightbox() {
+      $('lightbox').classList.remove('show');
+      // Drop the src so a large image isn't held in memory while hidden.
+      $('lightboxImg').src = '';
+    }
+    $('lightbox').onclick = function (e) {
+      // Tapping the backdrop (not the image) closes it.
+      if (e.target === this) closeLightbox();
+    };
+    $('lightboxClose').onclick = closeLightbox;
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeLightbox();
+    });
+
+    function keyOf(itemId, variantId) { return itemId + '::' + (variantId || ''); }
+
+    // An item sold through sizes has NO sellable base price — items.price is
+    // NULL for exactly that case — so it cannot be added until a size is picked.
+    function needsSize(item) {
+      return !!(item.variants && item.variants.length) && !selVariant[item.id];
+    }
+
+    // null when the item has no usable price of its own, so callers can tell
+    // "free" apart from "not priced yet". Returning Number(null) === 0 here is
+    // what used to render a sized item as a very tempting ₹0.
+    function unitPrice(item, variantId) {
+      if (variantId) {
+        var v = (item.variants || []).find(function (x) { return x.id === variantId; });
+        if (v && v.price != null) return Number(v.price);
+      }
+      return item.price == null ? null : Number(item.price);
+    }
+
+    // What goes where the price goes. With sizes and none picked yet, show the
+    // range they span — "₹140 – ₹220" tells a customer something; "₹0" lied.
+    function priceLabel(item, variantId) {
+      var p = unitPrice(item, variantId);
+      if (variantId && p != null) return rupee(p);
+      if (!item.variants || !item.variants.length) return p == null ? '—' : rupee(p);
+      var prices = [];
+      item.variants.forEach(function (v) {
+        var n = v.price != null ? Number(v.price) : (item.price != null ? Number(item.price) : null);
+        if (n != null && !isNaN(n)) prices.push(n);
+      });
+      if (!prices.length) return '—';
+      var lo = Math.min.apply(null, prices), hi = Math.max.apply(null, prices);
+      return lo === hi ? rupee(lo) : rupee(lo) + ' – ' + rupee(hi);
+    }
+
+    // ---- load catalog + this customer's orders ----
+    function load() {
+      fetch(API + '/menu').then(function (r) {
+        if (!r.ok) throw new Error('menu');
+        return r.json();
+      }).then(function (data) {
+        cfg = data.store || {};
+        // Pickup is always available and is the safer default even where the
+        // shop delivers — no address needed, no delivery fee sprung on anyone.
+        fulfilment = 'pickup';
+        shopName = data.shop_name || '';
+        $('shopName').textContent = data.shop_name;
+        $('shopSub').textContent = data.shop_address || 'Order online';
+        document.title = data.shop_name + ' — Order Online';
+        if (data.shop_logo) { $('logo').src = data.shop_logo; $('logo').style.display = 'block'; }
+        menu = data.items || [];
+        // With a single variant there is nothing to choose, so pick it for the
+        // customer instead of making them tap it before "Add" uses the right price.
+        menu.forEach(function (i) {
+          if (i.variants && i.variants.length === 1 && !selVariant[i.id]) {
+            selVariant[i.id] = i.variants[0].id;
+          }
+        });
+        renderMajors();
+        renderCats();
+        render();
+        loadOrders();
+      }).catch(function () {
+        $('main').innerHTML = '<div class="center">This store is not available right now.</div>';
+      });
+    }
+
+    // The customer's own orders and where each one stands. Polled while any of
+    // them is still waiting, because acceptance happens on the shop's phone —
+    // there is nothing on this page that would otherwise tell them.
+    function loadOrders() {
+      if (!authToken) return;
+      fetch(API + '/orders', { headers: { Authorization: 'Bearer ' + authToken } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.verified === false) {
+            authToken = null; localStorage.removeItem(LS_TOKEN); renderOrders([]); return;
+          }
+          renderOrders(d.orders || []);
+        }).catch(function () {});
+    }
+
+    function schedulePoll(orders) {
+      var waiting = orders.some(function (o) { return o.status === 'pending'; });
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (waiting) pollTimer = setTimeout(loadOrders, 10000);
+    }
+
+    function statusLine(o) {
+      if (o.status === 'accepted') return '🎉 Confirmed by the shop';
+      if (o.status === 'rejected') {
+        return '😔 Could not be accepted' + (o.reject_reason ? ' — ' + o.reject_reason : '');
+      }
+      return '⏳ Waiting for the shop to confirm…';
+    }
+
+    function renderOrders(orders) {
+      var el = $('ordersBox');
+      // Only the last few matter to a customer standing in the app.
+      var recent = orders.slice(0, 3);
+      if (recent.length === 0) { if (el) el.remove(); schedulePoll([]); return; }
+      var html = '<div id="ordersBox">';
+      recent.forEach(function (o) {
+        html += '<div class="running order-card ' + o.status + '">' +
+          '<h3>' + esc(o.order_number) +
+          '<span class="pill ' + o.status + '">' +
+            (o.status === 'pending' ? 'Waiting' : o.status === 'accepted' ? 'Confirmed' : 'Declined') +
+          '</span></h3>' +
+          '<div style="font-size:13px;margin-bottom:8px">' + esc(statusLine(o)) + '</div>';
+        (o.items || []).forEach(function (i) {
+          html += '<div class="row"><span>' + esc(i.item_name) + ' × ' + Number(i.quantity) +
+            '</span><span>' + rupee(i.line_total) + '</span></div>';
+        });
+        if (Number(o.delivery_charge) > 0) {
+          html += '<div class="row"><span>Delivery</span><span>' + rupee(o.delivery_charge) + '</span></div>';
+        }
+        html += '<div class="row" style="border-top:1px solid rgba(15,23,42,.12);margin-top:6px;padding-top:6px;font-weight:700">' +
+          '<span>Total</span><span>' + rupee(o.total) + '</span></div>';
+        if (Number(o.paid_amount) > 0) {
+          html += '<div class="row" style="font-size:12px"><span>Paid online</span><span>' +
+            rupee(o.paid_amount) + '</span></div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+      var main = $('main');
+      if (el) el.outerHTML = html; else main.insertAdjacentHTML('afterbegin', html);
+      schedulePoll(orders);
+    }
+
+    // The distinct major categories actually used, in menu order. Empty when the
+    // shop has never filed anything under one — which is what hides the strip
+    // and leaves this page behaving exactly as it did before majors existed.
+    function majors() {
+      var seen = [];
+      menu.forEach(function (i) {
+        var m = i.major_category || '';
+        if (m && seen.indexOf(m) === -1) seen.push(m);
+      });
+      return seen;
+    }
+
+    // The items the category chips and sections are built from: everything,
+    // narrowed to the picked major. Search deliberately ignores this and looks
+    // across the whole catalog (see matches() in render()).
+    function visibleMenu() {
+      if (activeMajor === null) return menu;
+      return menu.filter(function (i) {
+        return (i.major_category || '') === activeMajor;
+      });
+    }
+
+    function categories() {
+      var seen = [], out = [];
+      visibleMenu().forEach(function (i) {
+        var c = i.category || 'Products';
+        if (seen.indexOf(c) === -1) { seen.push(c); out.push(c); }
+      });
+      return out;
+    }
+
+    function renderMajors() {
+      var ms = majors();
+      var box = $('majors');
+      if (!ms.length) { box.hidden = true; box.innerHTML = ''; return; }
+      box.hidden = false;
+      // A selected major can vanish when the catalog reloads — clear the filter.
+      if (activeMajor !== null && ms.indexOf(activeMajor) === -1) activeMajor = null;
+      box.innerHTML = ms.map(function (m) {
+        return '<button data-major="' + esc(m) + '" class="' +
+          (m === activeMajor ? 'active' : '') + '">' + esc(m) + '</button>';
+      }).join('');
+      Array.prototype.forEach.call(box.children, function (b) {
+        b.onclick = function () {
+          var picked = b.getAttribute('data-major');
+          // Toggle: tapping the lit chip clears the filter and shows everything.
+          activeMajor = (picked === activeMajor) ? null : picked;
+          activeCat = null;
+          if (query) { query = ''; $('searchInput').value = ''; $('searchClear').classList.remove('show'); }
+          render();
+          renderMajors();
+          renderCats();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+      });
+    }
+
+    function renderCats() {
+      var cats = categories();
+      // One chip row, never two: once the catalog uses major categories they own
+      // the top bar and the category chips are hidden — the categories are still
+      // the section headings just below.
+      if (majors().length) { $('cats').hidden = true; $('cats').innerHTML = ''; return; }
+      $('cats').hidden = false;
+      if (activeCat && cats.indexOf(activeCat) === -1) activeCat = null;
+      activeCat = activeCat || cats[0] || null;
+      $('cats').innerHTML = cats.map(function (c) {
+        return '<button data-cat="' + esc(c) + '" class="' + (c === activeCat ? 'active' : '') + '">' + esc(c) + '</button>';
+      }).join('');
+      Array.prototype.forEach.call($('cats').children, function (b) {
+        b.onclick = function () {
+          activeCat = b.getAttribute('data-cat');
+          if (query) { query = ''; $('searchInput').value = ''; $('searchClear').classList.remove('show'); render(); }
+          renderCats();
+          scrollToCat(activeCat);
+        };
+      });
+      var act = $('cats').querySelector('.active');
+      if (act && act.scrollIntoView) act.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+
+    function sectionId(c) { return 'cat-' + encodeURIComponent(c); }
+
+    function scrollToCat(c) {
+      var el = document.getElementById(sectionId(c));
+      if (!el) return;
+      var top = el.getBoundingClientRect().top + window.pageYOffset - stickyHeight() - 8;
+      suppressSpy = Date.now() + 700;
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+
+    function stickyHeight() {
+      return document.querySelector('header').offsetHeight + $('topbar').offsetHeight;
+    }
+
+    // Highlight the category whose section is under the sticky bar as the
+    // customer scrolls, so the chips always reflect where they are.
+    function spy() {
+      if (query || Date.now() < suppressSpy) return;
+      var line = stickyHeight() + 12, cur = null;
+      Array.prototype.forEach.call(document.querySelectorAll('.section-title'), function (h) {
+        if (h.getBoundingClientRect().top <= line) cur = h.getAttribute('data-cat');
+      });
+      if (cur && cur !== activeCat) { activeCat = cur; renderCats(); }
+    }
+    window.addEventListener('scroll', spy, { passive: true });
+
+    $('searchInput').oninput = function () {
+      query = this.value.trim().toLowerCase();
+      $('searchClear').classList.toggle('show', !!query);
+      render();
+    };
+    $('searchClear').onclick = function () {
+      query = ''; $('searchInput').value = ''; this.classList.remove('show'); render(); $('searchInput').focus();
+    };
+
+    function render() {
+      var main = $('main');
+      var orders = $('ordersBox');
+      var html = '';
+      function matches(i) {
+        if (!query) return true;
+        var hay = (i.name || '') + ' ' + (i.category || '') + ' ' +
+          (i.variants || []).map(function (v) { return v.label || ''; }).join(' ');
+        return hay.toLowerCase().indexOf(query) !== -1;
+      }
+      var groups = [];
+      if (query) {
+        var hits = menu.filter(matches);
+        groups.push({ title: hits.length ? hits.length + ' result' + (hits.length === 1 ? '' : 's') : null, items: hits });
+        if (!hits.length) html = '<div class="center">Nothing matches "' + esc($('searchInput').value.trim()) + '".</div>';
+      } else {
+        var shown = visibleMenu();
+        categories().forEach(function (c) {
+          groups.push({ cat: c, title: c, items: shown.filter(function (i) { return (i.category || 'Products') === c; }) });
+        });
+        if (!menu.length) html = '<div class="center">This shop has not listed anything yet.</div>';
+      }
+      groups.forEach(function (g) {
+        if (g.title) html += '<div class="section-title"' + (g.cat ? ' id="' + sectionId(g.cat) + '" data-cat="' + esc(g.cat) + '"' : '') + '>' + esc(g.title) + (g.cat ? '<span class="cnt">' + g.items.length + '</span>' : '') + '</div>';
+        g.items.forEach(function (item) {
+        var vSel = selVariant[item.id] || null;
+        var price = unitPrice(item, vSel);
+        var k = keyOf(item.id, vSel);
+        var inCart = cart[k];
+        html += '<div class="item">';
+        if (item.image_url) html += '<img src="' + esc(item.image_url) + '" alt="' +
+          esc(item.name) + '" data-img="' + esc(item.image_url) + '" data-name="' + esc(item.name) + '" />';
+        html += '<div class="info"><div class="name">' + esc(item.name) + '</div>' +
+          '<div class="price">' + priceLabel(item, vSel) + '</div>';
+        if (item.variants && item.variants.length) {
+          html += '<div class="variants">' + item.variants.map(function (v) {
+            return '<button data-item="' + item.id + '" data-variant="' + v.id + '" class="' +
+              (v.id === vSel ? 'sel' : '') + '">' + esc(v.label) + '</button>';
+          }).join('') + '</div>';
+        }
+        html += '<div class="stepper">';
+        if (inCart) {
+          html += '<button data-dec="' + k + '">−</button><span class="qty">' + inCart.qty +
+            '</span><button data-inc="' + k + '">+</button>';
+        } else if (needsSize(item)) {
+          // No Add until a size is chosen. The server refuses a sized item with
+          // no size anyway (menuPricing.js), so offering it here could only ever
+          // end in a rejected order.
+          html += '<button class="add need-size" disabled>Select a size</button>';
+        } else {
+          html += '<button class="add" data-add="' + k + '" data-item="' + item.id + '">Add</button>';
+        }
+        html += '</div></div></div>';
+        });
+      });
+      main.innerHTML = html;
+      if (orders) main.insertAdjacentElement('afterbegin', orders);
+      wireItems();
+      renderCart();
+    }
+
+    function wireItems() {
+      // Tap a product photo to open it enlarged in the lightbox.
+      Array.prototype.forEach.call(document.querySelectorAll('[data-img]'), function (im) {
+        im.onclick = function () {
+          openLightbox(im.getAttribute('data-img'), im.getAttribute('data-name'));
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-variant]'), function (b) {
+        b.onclick = function () {
+          selVariant[b.getAttribute('data-item')] = b.getAttribute('data-variant');
+          render();
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-add]'), function (b) {
+        b.onclick = function () {
+          var itemId = b.getAttribute('data-item');
+          var vSel = selVariant[itemId] || null;
+          var item = menu.find(function (x) { return x.id === itemId; });
+          var k = keyOf(itemId, vSel);
+          cart[k] = { item_id: itemId, variant_id: vSel, name: item.name +
+            (vSel ? ' (' + (item.variants.find(function(v){return v.id===vSel;})||{}).label + ')' : ''),
+            price: unitPrice(item, vSel), qty: 1 };
+          render();
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-inc]'), function (b) {
+        b.onclick = function () { cart[b.getAttribute('data-inc')].qty++; render(); };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-dec]'), function (b) {
+        b.onclick = function () {
+          var k = b.getAttribute('data-dec');
+          cart[k].qty--; if (cart[k].qty <= 0) delete cart[k];
+          render();
+        };
+      });
+    }
+
+    function cartLines() { return Object.keys(cart).map(function (k) { return cart[k]; }); }
+    function cartSubtotal() { return cartLines().reduce(function (s, l) { return s + l.price * l.qty; }, 0); }
+    function cartCount() { return cartLines().reduce(function (s, l) { return s + l.qty; }, 0); }
+
+    function renderCart() {
+      var n = cartCount();
+      var bar = $('cartBar');
+      if (n === 0) { bar.classList.add('hidden'); return; }
+      bar.classList.remove('hidden');
+      $('cartCount').textContent = n + (n === 1 ? ' item' : ' items');
+      $('cartTotal').textContent = rupee(cartSubtotal());
+    }
+
+    // ---- checkout ------------------------------------------------------------
+    // These figures are a PREVIEW only. The server recomputes every one of them
+    // from the catalog and the shop's own settings when the order is submitted,
+    // so a tampered page can only mislead the person doing the tampering.
+    function money() {
+      var sub = cartSubtotal();
+      var delivery = (fulfilment === 'delivery') ? Number(cfg.delivery_charge || 0) : 0;
+      var total = sub + delivery;
+      var due = Math.round((total * Number(cfg.advance_percent || 0)) / 100 * 100) / 100;
+      // What this customer pays now, given their choice. The server re-derives
+      // both figures from the choice alone — this is only what they are shown.
+      var now = (payChoice === 'full' && due > 0) ? total : due;
+      return { sub: sub, delivery: delivery, total: total, due: due, now: now };
+    }
+
+    function renderCheckout() {
+      // Pickup is always on offer, so the chooser only appears when the shop
+      // ALSO delivers. When it does not, say so plainly rather than showing a
+      // one-option "choice" the customer has to tap for no reason.
+      var canDeliver = !!cfg.delivery_enabled;
+      $('coFulfilWrap').style.display = canDeliver ? 'block' : 'none';
+      $('coPickupOnly').style.display = canDeliver ? 'none' : 'block';
+      if (canDeliver) {
+        var modes = [
+          { id: 'pickup', label: '🏬 Pickup' },
+          { id: 'delivery', label: '🛵 Delivery' },
+        ];
+        $('coSeg').innerHTML = modes.map(function (m) {
+          return '<button data-mode="' + m.id + '" class="' + (m.id === fulfilment ? 'sel' : '') + '">' +
+            m.label + '</button>';
+        }).join('');
+        Array.prototype.forEach.call($('coSeg').children, function (b) {
+          b.onclick = function () { fulfilment = b.getAttribute('data-mode'); renderCheckout(); };
+        });
+      } else {
+        // Guard against a stale 'delivery' left over from a shop that turned
+        // delivery off between page load and checkout.
+        fulfilment = 'pickup';
+      }
+
+      $('coAddrWrap').style.display = fulfilment === 'delivery' ? 'block' : 'none';
+
+      var m = money();
+      var rows = '<div class="row"><span>Subtotal</span><span>' + rupee(m.sub) + '</span></div>';
+      if (m.delivery > 0) {
+        rows += '<div class="row"><span>Delivery</span><span>' + rupee(m.delivery) + '</span></div>';
+      }
+      rows += '<div class="row grand"><span>Total</span><span>' + rupee(m.total) + '</span></div>';
+      if (m.due > 0) {
+        var payingFull = m.now >= m.total;
+        rows += '<div class="row due"><span>Pay now' +
+          (payingFull ? '' : ' (' + Number(cfg.advance_percent) + '% advance)') +
+          '</span><span>' + rupee(m.now) + '</span></div>';
+        if (!payingFull) {
+          rows += '<div class="row"><span>At the shop</span><span>' +
+            rupee(Math.round((m.total - m.now) * 100) / 100) + '</span></div>';
+        }
+      }
+      $('coSum').innerHTML = rows;
+
+      // Payment block only when the shop actually asks for money up front AND
+      // has uploaded a QR to pay into — asking for a reference with nothing to
+      // scan would be a dead end.
+      var wantsPayment = m.due > 0 && (!!cfg.payment_qr_url || !!cfg.upi_id);
+      $('coPay').style.display = wantsPayment ? 'block' : 'none';
+      if (wantsPayment) {
+        // Nothing to choose when the advance IS the whole bill.
+        var canChoose = m.due < m.total;
+        $('coPaySeg').style.display = canChoose ? 'flex' : 'none';
+        if (canChoose) {
+          var opts = [
+            { id: 'full', label: 'Pay full ' + rupee(m.total) },
+            { id: 'advance', label: 'Advance ' + rupee(m.due) },
+          ];
+          $('coPaySeg').innerHTML = opts.map(function (o) {
+            return '<button data-pay="' + o.id + '" class="' +
+              (o.id === payChoice ? 'sel' : '') + '">' + o.label + '</button>';
+          }).join('');
+          Array.prototype.forEach.call($('coPaySeg').children, function (b) {
+            b.onclick = function () {
+              payChoice = b.getAttribute('data-pay');
+              renderCheckout();
+            };
+          });
+        } else {
+          payChoice = 'full';
+        }
+        $('coPayAmt').textContent = 'Pay ' + rupee(m.now);
+
+        // Rebuilt on every render so the link always carries the amount the
+        // customer is currently looking at, not the one they saw first.
+        var link = canOpenUpiApp() ? upiLink(m.now) : null;
+        var btn = $('coUpiBtn');
+        if (link) {
+          btn.href = link;
+          btn.textContent = 'Pay ' + rupee(m.now) + ' in your UPI app';
+          btn.style.display = 'block';
+        } else {
+          btn.style.display = 'none';
+        }
+        // Wording follows what the customer can actually DO on this device: a
+        // "scan this" instruction is noise to someone holding the only phone.
+        var viaApp = canOpenUpiApp() && !!cfg.upi_id;
+        $('coPayHint').textContent = viaApp
+          ? (cfg.payment_required
+              ? 'Pay in your UPI app, then enter the transaction ID below — the shop needs it to confirm your order.'
+              : 'Pay in your UPI app and enter the transaction ID, or pay at the shop.')
+          : (cfg.payment_required
+              ? 'Scan with any UPI app, then enter the transaction ID below. The shop needs it to confirm your order.'
+              : 'Scan with any UPI app and enter the transaction ID, or pay at the shop.');
+        // The QR only exists if the owner uploaded one; a shop may now have a
+        // UPI ID and no image at all.
+        var hasQr = !!cfg.payment_qr_url;
+        $('coPayQr').style.display = hasQr ? '' : 'none';
+        if (hasQr) $('coPayQr').src = cfg.payment_qr_url;
+        // With a working button the QR is the second option, not the first.
+        $('coOr').style.display = (link && hasQr) ? 'block' : 'none';
+      }
+
+      $('coBtn').textContent = authToken ? 'Place Order' : 'Continue';
+    }
+
+    $('coPayQr').onclick = function () { openLightbox(this.src, 'Scan to pay'); };
+
+    // Android resolves upi:// to the UPI app chooser (GPay / PhonePe / Paytm /
+    // BHIM). iOS registers no such scheme — each app has its own — and a desktop
+    // browser has nothing to hand it to, so the button is offered only where it
+    // can actually work rather than dead-ending everyone else.
+    function canOpenUpiApp() {
+      return /android/i.test(navigator.userAgent || '');
+    }
+
+    // ponytail: the uploaded QR carries the VPA but no amount, so a scanner
+    // still types the figure by hand. Rendering a QR of THIS string instead
+    // would prefill it there too — needs a QR encoder on the page; add one if
+    // customers start mistyping amounts.
+    function upiLink(amount) {
+      if (!cfg.upi_id) return null;
+      return 'upi://pay'
+        + '?pa=' + encodeURIComponent(cfg.upi_id)
+        + '&pn=' + encodeURIComponent(shopName || 'Shop')
+        + '&am=' + Number(amount).toFixed(2)
+        + '&cu=INR'
+        + '&tn=' + encodeURIComponent(shopName || 'Order');
+    }
+
+    $('placeBtn').onclick = function () {
+      if (cartCount() === 0) return;
+      $('coErr').textContent = '';
+      $('coAddress').value = $('coAddress').value || localStorage.getItem(LS_ADDR) || '';
+      renderCheckout();
+      $('coBackdrop').classList.add('show');
+    };
+    $('coBackdrop').onclick = function (e) { if (e.target === this) this.classList.remove('show'); };
+
+    $('coBtn').onclick = function () {
+      var err = $('coErr'); err.textContent = '';
+      if (fulfilment === 'delivery' && !$('coAddress').value.trim()) {
+        err.textContent = 'Please enter the delivery address.'; return;
+      }
+      var m = money();
+      if (cfg.payment_required && m.due > 0 && !$('coTxn').value.trim()) {
+        err.textContent = 'Please pay and enter the transaction ID to confirm.'; return;
+      }
+      if (fulfilment === 'delivery') localStorage.setItem(LS_ADDR, $('coAddress').value.trim());
+      if (authToken) submitOrder(); else openOtp();
+    };
+
+    // ---- OTP gate ------------------------------------------------------------
+    var otpStage = 'phone';
+    function openOtp() {
+      otpStage = 'phone';
+      $('otpErr').textContent = '';
+      $('otpInput').style.display = 'none';
+      $('otpInput').value = '';
+      $('phoneInput').value = localStorage.getItem(LS_PHONE) || '';
+      $('otpBtn').textContent = 'Send OTP';
+      $('otpBtn').disabled = false;
+      $('otpBackdrop').classList.add('show');
+    }
+    $('otpBackdrop').onclick = function (e) { if (e.target === this) this.classList.remove('show'); };
+
+    $('otpBtn').onclick = function () {
+      var phone = $('phoneInput').value.trim();
+      var err = $('otpErr'); err.textContent = '';
+      if (otpStage === 'phone') {
+        if (phone.length < 8) { err.textContent = 'Enter a valid mobile number.'; return; }
+        $('otpBtn').disabled = true; $('otpBtn').textContent = 'Sending…';
+        fetch(API + '/send-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone }) })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            $('otpBtn').disabled = false;
+            if (!res.ok) { err.textContent = res.j.error || 'Failed to send OTP.'; $('otpBtn').textContent = 'Send OTP'; return; }
+            otpStage = 'otp';
+            localStorage.setItem(LS_PHONE, phone);
+            $('otpInput').style.display = 'block';
+            $('otpSub').textContent = 'Enter the code we sent to ' + phone + '.';
+            $('otpBtn').textContent = 'Verify & Order';
+            if (res.j.dev_otp) { $('otpInput').value = res.j.dev_otp; } // dev convenience
+            $('otpInput').focus();
+          }).catch(function () { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Send OTP'; err.textContent = 'Network error.'; });
+      } else {
+        var otp = $('otpInput').value.trim();
+        if (!otp) { err.textContent = 'Enter the OTP.'; return; }
+        $('otpBtn').disabled = true; $('otpBtn').textContent = 'Verifying…';
+        fetch(API + '/verify-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone, otp: otp }) })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok) { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Verify & Order'; err.textContent = res.j.error || 'Invalid OTP.'; return; }
+            authToken = res.j.store_token;
+            localStorage.setItem(LS_TOKEN, authToken);
+            $('otpBackdrop').classList.remove('show');
+            submitOrder();
+          }).catch(function () { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Verify & Order'; err.textContent = 'Network error.'; });
+      }
+    };
+
+    function submitOrder() {
+      var lines = cartLines().map(function (l) {
+        return { item_id: l.item_id, variant_id: l.variant_id, quantity: l.qty };
+      });
+      if (lines.length === 0) { $('coBackdrop').classList.remove('show'); return; }
+      $('coBtn').disabled = true; $('coBtn').textContent = 'Placing…';
+      fetch(API, { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify({
+          items: lines,
+          name: $('nameInput').value.trim() || undefined,
+          fulfilment: fulfilment,
+          address: fulfilment === 'delivery' ? $('coAddress').value.trim() : undefined,
+          note: $('coNote').value.trim() || undefined,
+          payment_txn_id: $('coTxn').value.trim() || undefined,
+          // The CHOICE, never the figure — the server derives the amount, so a
+          // tampered page can only mislead the person tampering with it.
+          payment_choice: payChoice,
+        }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (res) {
+          $('coBtn').disabled = false;
+          $('coBtn').textContent = authToken ? 'Place Order' : 'Continue';
+          if (res.status === 401) { // token expired — re-verify by OTP
+            authToken = null; localStorage.removeItem(LS_TOKEN);
+            $('coBackdrop').classList.remove('show');
+            openOtp();
+            $('otpErr').textContent = res.j.error || 'Please verify your phone again.';
+            return;
+          }
+          if (!res.ok) {
+            // Keep the sheet open on a rejected submission: the fix (an address,
+            // a transaction ID) is inside the sheet they are looking at.
+            $('coErr').textContent = res.j.error || 'Could not place the order.';
+            return;
+          }
+          $('coBackdrop').classList.remove('show');
+          cart = {};
+          $('coTxn').value = '';
+          $('coNote').value = '';
+          render();
+          toast('Order sent! Waiting for the shop to confirm.');
+          loadOrders();
+        }).catch(function () {
+          $('coBtn').disabled = false;
+          $('coBtn').textContent = authToken ? 'Place Order' : 'Continue';
+          $('coErr').textContent = 'Network error. Please try again.';
+        });
+    }
+
+    // A backgrounded tab stops timing out reliably; refresh the moment the
+    // customer comes back so a confirmation that landed meanwhile is visible.
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) loadOrders();
+    });
+
+    load();
+  })();
+  </script>
+</body>
+</html>

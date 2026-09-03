@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../api.dart' as api;
+import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers/items_provider.dart';
 import '../providers/raw_materials_provider.dart';
@@ -52,6 +53,11 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
   final Set<String> _addedNames = {};
   bool _exporting = false;
   bool _sharing = false;
+
+  /// Set once a print/share is refused, so the rows without a quantity are
+  /// marked. Not on by default — an untouched list should not look like an
+  /// error the moment it opens.
+  bool _showQtyErrors = false;
 
   bool get _isRestaurantBiz =>
       isRestaurantBusiness(ref.read(businessTypeProvider));
@@ -262,6 +268,12 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
             label: 'Qty',
             controller: r.qty,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            // Only after a refused print/share, so the rows to fix are obvious
+            // instead of the owner hunting for which one was missing.
+            errorText: _showQtyErrors &&
+                    (double.tryParse(r.qty.text.trim()) ?? 0) <= 0
+                ? context.l10n.commonRequired
+                : null,
             suffixIcon: Padding(
               padding: const EdgeInsets.only(right: 10),
               child: Center(
@@ -320,6 +332,29 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
     });
   }
 
+  /// Rows with no usable quantity typed in.
+  ///
+  /// A blank field parsed to 0 and was then silently dropped by the `> 0`
+  /// filter below — so a raw material the owner meant to order just vanished
+  /// from the vendor's list, and a list with nothing filled in still produced a
+  /// normal-looking PDF containing a single "—" placeholder row.
+  List<_PurchaseListRow> get _rowsMissingQty => _rows
+      .where((r) => (double.tryParse(r.qty.text.trim()) ?? 0) <= 0)
+      .toList();
+
+  /// True when the list is ready to print/share. Shows a message and marks the
+  /// offending rows when it is not, rather than quietly dropping them.
+  bool _validateQuantities() {
+    final missing = _rowsMissingQty;
+    if (missing.isEmpty) return true;
+    setState(() => _showQtyErrors = true);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      backgroundColor: AppColors.error,
+      content: Text(context.l10n.purchaseListQtyRequired(missing.length)),
+    ));
+    return false;
+  }
+
   Future<Uint8List> _buildPdfBytes() {
     final lines = _rows
         .map((r) => PurchaseListLine(
@@ -333,6 +368,7 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
   }
 
   Future<void> _exportPdf() async {
+    if (!_validateQuantities()) return;
     setState(() => _exporting = true);
     try {
       final bytes = await _buildPdfBytes();
@@ -348,6 +384,7 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
   }
 
   Future<void> _sharePdf() async {
+    if (!_validateQuantities()) return;
     setState(() => _sharing = true);
     try {
       final bytes = await _buildPdfBytes();

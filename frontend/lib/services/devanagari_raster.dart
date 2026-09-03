@@ -365,6 +365,70 @@ class DevanagariRaster {
     return out.toBytes();
   }
 
+  /// Any Devanagari codepoint, including the Extended-A block and the combining
+  /// marks that sit outside the main range. Used to decide whether a string
+  /// needs the shaping detour at all — plain ASCII must stay real text.
+  static final RegExp devanagariPattern =
+      RegExp(r'[ऀ-ॿ꣠-ꣿ᳐-᳿]');
+
+  static bool containsDevanagari(String s) => devanagariPattern.hasMatch(s);
+
+  /// Shape [text] with Flutter's engine and return it as a transparent PNG.
+  ///
+  /// The PDF package can render Devanagari GLYPHS (a fallback font is
+  /// registered) but cannot SHAPE them: its only substitution logic is a
+  /// hardcoded Arabic table, and it parses no GSUB/GPOS. So matras stay after
+  /// their consonant instead of being reordered, halants remain visible and
+  /// conjuncts never form. Embedding pixels that Flutter (HarfBuzz) already
+  /// shaped is the same answer this class gives for thermal printers.
+  ///
+  /// [pixelsPerLogical] oversamples so the result stays sharp when the PDF is
+  /// printed or zoomed; the caller scales it back down to [fontSize] units.
+  /// Transparent background so it sits on the page like text, not a white box.
+  static Future<Uint8List> textToPng(
+    String text, {
+    double fontSize = 12,
+    FontWeight fontWeight = FontWeight.w400,
+    Color color = const Color(0xFF000000),
+    double maxWidth = 1000,
+    double pixelsPerLogical = 4,
+  }) async {
+    final builder = ui.ParagraphBuilder(ui.ParagraphStyle(
+      textAlign: TextAlign.left,
+      fontFamily: primaryFontFamily,
+      fontSize: fontSize * pixelsPerLogical,
+      fontWeight: fontWeight,
+    ))
+      ..pushStyle(ui.TextStyle(
+        color: color,
+        fontFamily: primaryFontFamily,
+        fontFamilyFallback: const ['Noto Sans Devanagari', 'Nirmala UI'],
+        fontSize: fontSize * pixelsPerLogical,
+        fontWeight: fontWeight,
+        height: 1.2,
+      ))
+      ..addText(text);
+
+    final paragraph = builder.build()
+      ..layout(ui.ParagraphConstraints(width: maxWidth * pixelsPerLogical));
+
+    // longestLine, not the constraint width — otherwise every label would be
+    // padded out to maxWidth and wreck the table columns.
+    final w = paragraph.longestLine.ceil().clamp(1, 20000);
+    final h = paragraph.height.ceil().clamp(1, 20000);
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.drawParagraph(paragraph, Offset.zero);
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(w, h);
+    picture.dispose();
+
+    final data = await img.toByteData(format: ui.ImageByteFormat.png);
+    img.dispose();
+    return data!.buffer.asUint8List();
+  }
+
   /// Convenience: warm up the bundled font so the first render isn't slow / falls
   /// back to a wrong font. Call once at startup (optional).
   static Future<void> ensureFontLoaded() async {

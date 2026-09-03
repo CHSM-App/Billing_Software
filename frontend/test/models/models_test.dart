@@ -104,6 +104,54 @@ void main() {
       expect(item.isActive, isTrue);
     });
 
+    test('parses major_category and carries it through copyWithVariants', () {
+      final item = Item.fromJson({
+        'id': 'item-1a',
+        'business_id': 'biz-1',
+        'name': 'Chilli Paneer',
+        'barcode': null,
+        'major_category': 'Chinese',
+        'category': 'Chinese Starters',
+        'price': 180.0,
+        'tax_rate': null,
+        'stock_quantity': null,
+        'is_active': true,
+      });
+      expect(item.majorCategory, 'Chinese');
+      expect(item.category, 'Chinese Starters');
+      // copyWithVariants re-attaches sizes after a partial API response; a field
+      // it forgets is a field the billing list silently loses.
+      final sized = item.copyWithVariants([
+        ItemVariant(
+          id: 'v1',
+          itemId: 'item-1a',
+          label: 'half',
+          price: 120,
+          sortOrder: 0,
+          isActive: true,
+        ),
+      ]);
+      expect(sized.majorCategory, 'Chinese');
+      expect(sized.category, 'Chinese Starters');
+    });
+
+    test('major_category is null for an item saved before majors existed', () {
+      // The whole feature is additive: an old payload has no such key at all.
+      final item = Item.fromJson({
+        'id': 'item-1b',
+        'business_id': 'biz-1',
+        'name': 'Rice',
+        'barcode': null,
+        'category': 'Grains',
+        'price': 50.0,
+        'tax_rate': null,
+        'stock_quantity': null,
+        'is_active': true,
+      });
+      expect(item.majorCategory, isNull);
+      expect(item.category, 'Grains');
+    });
+
     test('parses is_active = 1 as true', () {
       final item = Item.fromJson({
         'id': 'item-2',
@@ -455,6 +503,115 @@ void main() {
       final copy = entry.copyWith();
       expect(copy.quantity, 3);
       expect(copy.item.id, 'item-1');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // OnlineOrder
+  // ─────────────────────────────────────────────────────────────
+  group('OnlineOrder.fromJson', () {
+    Map<String, dynamic> json({Map<String, dynamic> over = const {}}) => {
+          'id': 'order-1',
+          'order_number': 'ORD-0001',
+          'customer_name': 'Ramesh',
+          'customer_phone': '9876543210',
+          'fulfilment': 'delivery',
+          'address': '12 Beach Road',
+          'note': 'Ring the bell',
+          // The API sends money as strings from mssql DECIMALs.
+          'subtotal': '200.00',
+          'delivery_charge': '30.00',
+          'total': '230.00',
+          'amount_due': '46.00',
+          'paid_amount': '46.00',
+          'payment_txn_id': 'UPI123',
+          'payment_status': 'claimed',
+          'status': 'pending',
+          'created_at': '2026-09-02T10:00:00.000Z',
+          'items': [
+            {
+              'item_name': 'Chai',
+              'quantity': '2.00',
+              'unit_price': '100.0000',
+              'line_total': '200.00',
+            }
+          ],
+          ...over,
+        };
+
+    test('parses a delivery order with its lines', () {
+      final o = OnlineOrder.fromJson(json());
+      expect(o.orderNumber, 'ORD-0001');
+      expect(o.isDelivery, isTrue);
+      expect(o.address, '12 Beach Road');
+      expect(o.total, 230.0);
+      expect(o.deliveryCharge, 30.0);
+      expect(o.items, hasLength(1));
+      expect(o.items.first.itemName, 'Chai');
+      expect(o.items.first.unitPrice, 100.0);
+    });
+
+    test('a pending order is pending', () {
+      expect(OnlineOrder.fromJson(json()).isPending, isTrue);
+      expect(
+        OnlineOrder.fromJson(json(over: {'status': 'accepted'})).isPending,
+        isFalse,
+      );
+    });
+
+    test('isOpen tracks the BILL, not the acceptance', () {
+      // Accepting only creates a draft bill — the shop is not done until that
+      // bill is settled, which is what keeps the Online tab on screen.
+      expect(OnlineOrder.fromJson(json()).isOpen, isTrue); // pending
+      expect(
+        OnlineOrder.fromJson(
+                json(over: {'status': 'accepted', 'bill_status': 'draft'}))
+            .isOpen,
+        isTrue,
+      );
+      expect(
+        OnlineOrder.fromJson(
+                json(over: {'status': 'accepted', 'bill_status': 'finalized'}))
+            .isOpen,
+        isFalse,
+      );
+      expect(
+        OnlineOrder.fromJson(json(over: {'status': 'rejected'})).isOpen,
+        isFalse,
+      );
+    });
+
+    test('needsPaymentCheck only when a claim carries a reference', () {
+      // The whole point of the flag: it drives the "I have received this
+      // payment" checkbox, which must never appear with nothing to verify.
+      expect(OnlineOrder.fromJson(json()).needsPaymentCheck, isTrue);
+      expect(
+        OnlineOrder.fromJson(json(over: {'payment_status': 'verified'}))
+            .needsPaymentCheck,
+        isFalse,
+      );
+      expect(
+        OnlineOrder.fromJson(
+                json(over: {'payment_status': 'unpaid', 'payment_txn_id': null}))
+            .needsPaymentCheck,
+        isFalse,
+      );
+    });
+
+    test('tolerates a pickup order with no address, note or items', () {
+      final o = OnlineOrder.fromJson({
+        'id': 'order-2',
+        'order_number': 'ORD-0002',
+        'customer_phone': '9876543210',
+        'fulfilment': 'pickup',
+        'total': 100,
+        'created_at': '2026-09-02T10:00:00.000Z',
+      });
+      expect(o.isDelivery, isFalse);
+      expect(o.address, isNull);
+      expect(o.items, isEmpty);
+      expect(o.subtotal, 0);
+      expect(o.paymentStatus, 'unpaid');
     });
   });
 }

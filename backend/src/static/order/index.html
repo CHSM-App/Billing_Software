@@ -74,6 +74,13 @@
       font-family: inherit; transition: all .18s ease; }
     .cats button.active { background: var(--brand-light); color: var(--brand-dark);
       border-color: var(--brand); }
+    /* `display:flex` above outranks the UA's [hidden] { display:none }, so a
+       hidden chip row would still paint as an empty padded strip. */
+    .cats[hidden] { display: none; }
+    /* Major-category row. Same chip size as the category row it replaces, but
+       filled when active — it FILTERS the menu rather than jumping to it. */
+    .cats.majors button.active { background: var(--brand); color: #fff;
+      border-color: var(--brand); }
     main { padding: 12px; }
     .cat-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
       color: var(--muted); margin: 18px 4px 8px; font-weight: 700; }
@@ -113,6 +120,11 @@
     .stepper .qty { min-width: 22px; text-align: center; font-weight: 700; font-size: 15px; }
     .stepper .add { width: auto; padding: 0 18px; height: 36px; border-radius: var(--r-sm); font-size: 14px;
       font-weight: 600; letter-spacing: 0.2px; }
+    /* Sized item with nothing picked: reads as an instruction, not a dead
+       button. Beats .stepper button:disabled on specificity, so it keeps full
+       opacity instead of being greyed into looking broken. */
+    .stepper .add.need-size { background: var(--surface-variant); color: var(--brand-dark);
+      border: 1px dashed var(--brand); box-shadow: none; opacity: 1; }
     .cart-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--brand-grad);
       color: #fff; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;
       box-shadow: 0 -4px 20px rgba(79,70,229,.25); z-index: 30; }
@@ -171,6 +183,9 @@
       <input id="searchInput" type="search" placeholder="Search dishes…" autocomplete="off" />
       <button class="clr" id="searchClear" aria-label="Clear search">×</button>
     </div>
+    <!-- Coarse group filter. Stays hidden (and the menu behaves exactly as it
+         always did) until the shop files items under a major category. -->
+    <div class="cats majors" id="majors" hidden></div>
     <div class="cats" id="cats"></div>
   </div>
   <main id="main"><div class="center">Loading menu…</div></main>
@@ -218,6 +233,9 @@
     var cart = {};            // key -> { item_id, variant_id, name, price, qty }
     var selVariant = {};      // item_id -> variant_id
     var activeCat = null;
+    // null = no major picked = show everything. There is no "All" chip; tapping
+    // the lit chip again clears the filter.
+    var activeMajor = null;
     var query = '';           // current search text (lowercased)
     var suppressSpy = 0;      // timestamp until which scroll-spy is ignored (after a chip tap)
     var orderToken = localStorage.getItem(LS_TOKEN) || null;
@@ -277,12 +295,37 @@
 
     function keyOf(itemId, variantId) { return itemId + '::' + (variantId || ''); }
 
+    // An item sold through sizes has NO sellable base price — items.price is
+    // NULL for exactly that case — so it cannot be added until a size is picked.
+    function needsSize(item) {
+      return !!(item.variants && item.variants.length) && !selVariant[item.id];
+    }
+
+    // null when the item has no usable price of its own, so callers can tell
+    // "free" apart from "not priced yet". Returning Number(null) === 0 here is
+    // what used to render a sized item as a very tempting ₹0.
     function unitPrice(item, variantId) {
       if (variantId) {
         var v = (item.variants || []).find(function (x) { return x.id === variantId; });
         if (v && v.price != null) return Number(v.price);
       }
-      return Number(item.price);
+      return item.price == null ? null : Number(item.price);
+    }
+
+    // What goes where the price goes. With sizes and none picked yet, show the
+    // range they span — "₹140 – ₹220" tells a customer something; "₹0" lied.
+    function priceLabel(item, variantId) {
+      var p = unitPrice(item, variantId);
+      if (variantId && p != null) return rupee(p);
+      if (!item.variants || !item.variants.length) return p == null ? '—' : rupee(p);
+      var prices = [];
+      item.variants.forEach(function (v) {
+        var n = v.price != null ? Number(v.price) : (item.price != null ? Number(item.price) : null);
+        if (n != null && !isNaN(n)) prices.push(n);
+      });
+      if (!prices.length) return '—';
+      var lo = Math.min.apply(null, prices), hi = Math.max.apply(null, prices);
+      return lo === hi ? rupee(lo) : rupee(lo) + ' – ' + rupee(hi);
     }
 
     // ---- load menu + running order ----
@@ -303,6 +346,7 @@
             selVariant[i.id] = i.variants[0].id;
           }
         });
+        renderMajors();
         renderCats();
         render();
         loadCurrent();
@@ -337,17 +381,76 @@
       if (el) el.outerHTML = html; else main.insertAdjacentHTML('afterbegin', html);
     }
 
+    // The distinct major categories actually used, in menu order. Empty when the
+    // shop has never filed anything under one — which is what hides the strip
+    // and leaves this page behaving exactly as it did before majors existed.
+    function majors() {
+      var seen = [];
+      menu.forEach(function (i) {
+        var m = i.major_category || '';
+        if (m && seen.indexOf(m) === -1) seen.push(m);
+      });
+      return seen;
+    }
+
+    // The items the category chips and sections are built from: everything,
+    // narrowed to the picked major. Search deliberately ignores this and looks
+    // across the whole menu (see matches() in render()).
+    function visibleMenu() {
+      if (activeMajor === null) return menu;
+      return menu.filter(function (i) {
+        return (i.major_category || '') === activeMajor;
+      });
+    }
+
     function categories() {
       var seen = [], out = [];
-      menu.forEach(function (i) {
+      visibleMenu().forEach(function (i) {
         var c = i.category || 'Menu';
         if (seen.indexOf(c) === -1) { seen.push(c); out.push(c); }
       });
       return out;
     }
 
+    function renderMajors() {
+      var ms = majors();
+      var box = $('majors');
+      if (!ms.length) { box.hidden = true; box.innerHTML = ''; return; }
+      box.hidden = false;
+      // A selected major can vanish when the menu reloads — clear the filter.
+      if (activeMajor !== null && ms.indexOf(activeMajor) === -1) activeMajor = null;
+      box.innerHTML = ms.map(function (m) {
+        return '<button data-major="' + esc(m) + '" class="' +
+          (m === activeMajor ? 'active' : '') + '">' + esc(m) + '</button>';
+      }).join('');
+      Array.prototype.forEach.call(box.children, function (b) {
+        b.onclick = function () {
+          var picked = b.getAttribute('data-major');
+          // Toggle: tapping the lit chip clears the filter and shows everything.
+          activeMajor = (picked === activeMajor) ? null : picked;
+          // The open category almost certainly belongs to the major being left,
+          // so let renderCats() pick the first one of the new selection.
+          activeCat = null;
+          if (query) { query = ''; $('searchInput').value = ''; $('searchClear').classList.remove('show'); }
+          render();
+          renderMajors();
+          renderCats();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+      });
+    }
+
     function renderCats() {
       var cats = categories();
+      // One chip row, never two: once the menu uses major categories they own
+      // the top bar and the category chips are hidden — the categories are
+      // still the section headings just below. A menu with no majors keeps its
+      // category chips exactly as before.
+      if (majors().length) { $('cats').hidden = true; $('cats').innerHTML = ''; return; }
+      $('cats').hidden = false;
+      // Same guard, one level down: the previously active category may not exist
+      // inside the newly picked major.
+      if (activeCat && cats.indexOf(activeCat) === -1) activeCat = null;
       activeCat = activeCat || cats[0] || null;
       $('cats').innerHTML = cats.map(function (c) {
         return '<button data-cat="' + esc(c) + '" class="' + (c === activeCat ? 'active' : '') + '">' + esc(c) + '</button>';
@@ -415,8 +518,9 @@
         groups.push({ title: hits.length ? hits.length + ' result' + (hits.length === 1 ? '' : 's') : null, items: hits });
         if (!hits.length) html = '<div class="center">No dishes match "' + esc($('searchInput').value.trim()) + '".</div>';
       } else {
+        var shown = visibleMenu();
         categories().forEach(function (c) {
-          groups.push({ cat: c, title: c, items: menu.filter(function (i) { return (i.category || 'Menu') === c; }) });
+          groups.push({ cat: c, title: c, items: shown.filter(function (i) { return (i.category || 'Menu') === c; }) });
         });
         if (!menu.length) html = '<div class="center">No items on the menu yet.</div>';
       }
@@ -431,7 +535,7 @@
         if (item.image_url) html += '<img src="' + esc(item.image_url) + '" alt="' +
           esc(item.name) + '" data-img="' + esc(item.image_url) + '" data-name="' + esc(item.name) + '" />';
         html += '<div class="info"><div class="name">' + esc(item.name) + '</div>' +
-          '<div class="price">' + rupee(price) + '</div>';
+          '<div class="price">' + priceLabel(item, vSel) + '</div>';
         if (item.variants && item.variants.length) {
           html += '<div class="variants">' + item.variants.map(function (v) {
             return '<button data-item="' + item.id + '" data-variant="' + v.id + '" class="' +
@@ -442,6 +546,11 @@
         if (inCart) {
           html += '<button data-dec="' + k + '">−</button><span class="qty">' + inCart.qty +
             '</span><button data-inc="' + k + '">+</button>';
+        } else if (needsSize(item)) {
+          // No Add until a size is chosen. The server refuses a sized item with
+          // no size anyway (menuPricing.js), so offering it here could only ever
+          // end in a rejected order.
+          html += '<button class="add need-size" disabled>Select a size</button>';
         } else {
           html += '<button class="add" data-add="' + k + '" data-item="' + item.id + '">Add</button>';
         }

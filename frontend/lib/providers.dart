@@ -10,3 +10,4 @@ export 'providers/expenses_provider.dart';
 export 'providers/locale_provider.dart';
 export 'providers/printer_provider.dart';
 export 'providers/credit_provider.dart';
+export 'providers/online_orders_provider.dart';

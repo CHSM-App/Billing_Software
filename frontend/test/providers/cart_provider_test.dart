@@ -44,9 +44,18 @@ ItemVariant makeVariant({
 /// [gstEnabled] mirrors the business's master GST toggle. It defaults to true so
 /// the tax/total tests exercise the normal taxed path; pass false to assert that
 /// tax is ignored entirely even when items still carry a tax_rate.
-ProviderContainer makeContainer({bool gstEnabled = true}) => ProviderContainer(
-      overrides: [gstEnabledProvider.overrideWithValue(gstEnabled)],
-    );
+///
+/// [inventoryEnabled] mirrors the per-business stock toggle that gates the
+/// over-stock warning. It defaults to false, matching a business that does not
+/// track stock — for which no warning may ever fire.
+ProviderContainer makeContainer({
+  bool gstEnabled = true,
+  bool inventoryEnabled = false,
+}) =>
+    ProviderContainer(overrides: [
+      gstEnabledProvider.overrideWithValue(gstEnabled),
+      inventoryEnabledProvider.overrideWithValue(inventoryEnabled),
+    ]);
 
 void main() {
   // ─────────────────────────────────────────────────────────────
@@ -530,6 +539,228 @@ void main() {
       // The size's 210 is an MRP too: 200 net + 10 tax.
       expect(container.read(cartSubtotalProvider), closeTo(200.0, 0.001));
       expect(container.read(cartTotalProvider), closeTo(210.0, 0.001));
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // loadFromBill — duplicate bill lines must merge
+  //
+  // The server APPENDS a bill_items row per order rather than merging: a QR
+  // self-order (public_order.js) and PUT /:id/add-items both insert. So one
+  // dish ordered twice arrives as two lines sharing an item id.
+  // ─────────────────────────────────────────────────────────────
+  group('CartNotifier.loadFromBill — duplicate lines', () {
+    Bill billWith(List<BillItem> items) => Bill(
+          id: 'bill-1',
+          businessId: 'biz-1',
+          billNumber: 'INV-0001',
+          subtotal: 0,
+          taxAmount: 0,
+          total: 0,
+          paymentMode: 'cash',
+          status: 'draft',
+          createdByUserId: 'user-1',
+          createdAt: DateTime.now(),
+          items: items,
+        );
+
+    test('two lines for the same item merge into one entry', () {
+      final container = makeContainer();
+      final rice = makeItem(id: 'item-1', name: 'Rice', price: 50.0);
+      final bill = billWith([
+        BillItem(
+            id: 'bi-1',
+            billId: 'bill-1',
+            itemId: 'item-1',
+            itemName: 'Rice',
+            quantity: 2,
+            unitPrice: 50.0,
+            lineTotal: 100.0),
+        BillItem(
+            id: 'bi-2',
+            billId: 'bill-1',
+            itemId: 'item-1',
+            itemName: 'Rice',
+            quantity: 3,
+            unitPrice: 50.0,
+            lineTotal: 150.0),
+      ]);
+
+      container.read(cartProvider.notifier).loadFromBill(bill, [rice]);
+      final cart = container.read(cartProvider);
+      expect(cart.length, 1, reason: 'duplicate keys must fold into one line');
+      expect(cart.first.quantity, 5);
+    });
+
+    test('a merged line is still editable and deletable', () {
+      // The real damage of a duplicate: every lookup is indexWhere (first match
+      // only), so the second row could never be edited, while deleting "one"
+      // used to remove both at once.
+      final container = makeContainer();
+      final rice = makeItem(id: 'item-1', name: 'Rice', price: 50.0);
+      final bill = billWith([
+        BillItem(
+            id: 'bi-1',
+            billId: 'bill-1',
+            itemId: 'item-1',
+            itemName: 'Rice',
+            quantity: 2,
+            unitPrice: 50.0,
+            lineTotal: 100.0),
+        BillItem(
+            id: 'bi-2',
+            billId: 'bill-1',
+            itemId: 'item-1',
+            itemName: 'Rice',
+            quantity: 1,
+            unitPrice: 50.0,
+            lineTotal: 50.0),
+      ]);
+      container.read(cartProvider.notifier).loadFromBill(bill, [rice]);
+
+      container.read(cartProvider.notifier).changeQty('item-1', 4);
+      expect(container.read(cartProvider).single.quantity, 7);
+
+      container.read(cartProvider.notifier).setQty('item-1', 0);
+      expect(container.read(cartProvider), isEmpty);
+    });
+
+    test('different sizes of one item stay separate lines', () {
+      // Merging is by item+variant, so this must NOT collapse.
+      final container = makeContainer();
+      final half =
+          makeVariant(id: 'v1', itemId: 'item-1', label: 'half', price: 180);
+      final full =
+          makeVariant(id: 'v2', itemId: 'item-1', label: 'Full', price: 280);
+      final dish =
+          makeItem(id: 'item-1', name: 'Chicken 65', variants: [half, full]);
+      final bill = billWith([
+        BillItem(
+            id: 'bi-1',
+            billId: 'bill-1',
+            itemId: 'item-1',
+            variantId: 'v1',
+            itemName: 'Chicken 65 (half)',
+            quantity: 1,
+            unitPrice: 180,
+            lineTotal: 180),
+        BillItem(
+            id: 'bi-2',
+            billId: 'bill-1',
+            itemId: 'item-1',
+            variantId: 'v2',
+            itemName: 'Chicken 65 (Full)',
+            quantity: 1,
+            unitPrice: 280,
+            lineTotal: 280),
+      ]);
+
+      container.read(cartProvider.notifier).loadFromBill(bill, [dish]);
+      expect(container.read(cartProvider).length, 2);
+    });
+
+    test('same size ordered twice merges', () {
+      final container = makeContainer();
+      final half =
+          makeVariant(id: 'v1', itemId: 'item-1', label: 'half', price: 180);
+      final dish = makeItem(id: 'item-1', name: 'Chicken 65', variants: [half]);
+      final bill = billWith([
+        BillItem(
+            id: 'bi-1',
+            billId: 'bill-1',
+            itemId: 'item-1',
+            variantId: 'v1',
+            itemName: 'Chicken 65 (half)',
+            quantity: 1,
+            unitPrice: 180,
+            lineTotal: 180),
+        BillItem(
+            id: 'bi-2',
+            billId: 'bill-1',
+            itemId: 'item-1',
+            variantId: 'v1',
+            itemName: 'Chicken 65 (half)',
+            quantity: 2,
+            unitPrice: 180,
+            lineTotal: 360),
+      ]);
+
+      container.read(cartProvider.notifier).loadFromBill(bill, [dish]);
+      final cart = container.read(cartProvider);
+      expect(cart.length, 1);
+      expect(cart.single.quantity, 3);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // stockShortfall — warn past available stock, never block
+  // ─────────────────────────────────────────────────────────────
+  group('CartNotifier.stockShortfall', () {
+    test('null while the quantity still fits', () {
+      final container = makeContainer(inventoryEnabled: true);
+      container.read(cartProvider.notifier).addItem(makeItem(stockQuantity: 8));
+      expect(container.read(cartProvider.notifier).stockShortfall('item-1'),
+          isNull);
+    });
+
+    test('reports the available stock once the cart exceeds it', () {
+      final container = makeContainer(inventoryEnabled: true);
+      final rice = makeItem(stockQuantity: 2);
+      container.read(cartProvider.notifier)
+        ..addItem(rice)
+        ..addItem(rice)
+        ..addItem(rice);
+      expect(container.read(cartProvider.notifier).stockShortfall('item-1'), 2);
+      // Warned, NOT blocked — the line still holds all three.
+      expect(container.read(cartProvider).single.quantity, 3);
+    });
+
+    test('silent when the business does not track inventory', () {
+      final container = makeContainer(inventoryEnabled: false);
+      final rice = makeItem(stockQuantity: 1);
+      container.read(cartProvider.notifier)
+        ..addItem(rice)
+        ..addItem(rice);
+      expect(container.read(cartProvider.notifier).stockShortfall('item-1'),
+          isNull);
+    });
+
+    test('silent when the item carries no stock figure', () {
+      // Untracked is not the same as zero.
+      final container = makeContainer(inventoryEnabled: true);
+      container
+          .read(cartProvider.notifier)
+          .addItem(makeItem(stockQuantity: null));
+      expect(container.read(cartProvider.notifier).stockShortfall('item-1'),
+          isNull);
+    });
+
+    test('a sized line is measured against its own size stock', () {
+      final container = makeContainer(inventoryEnabled: true);
+      final half = makeVariant(
+          id: 'v1',
+          itemId: 'item-1',
+          label: 'half',
+          price: 180,
+          stockQuantity: 1);
+      final dish = makeItem(
+          id: 'item-1',
+          name: 'Chicken 65',
+          stockQuantity: 99,
+          variants: [half]);
+      container.read(cartProvider.notifier)
+        ..addItem(dish, variant: half)
+        ..addItem(dish, variant: half);
+      // 2 in the cart against the SIZE's stock of 1 — the parent's 99 is
+      // irrelevant for a sized item.
+      expect(
+          container.read(cartProvider.notifier).stockShortfall('item-1:v1'), 1);
+    });
+
+    test('null for a key that is not in the cart', () {
+      final container = makeContainer(inventoryEnabled: true);
+      expect(
+          container.read(cartProvider.notifier).stockShortfall('nope'), isNull);
     });
   });
 }

@@ -44,3 +44,7 @@ frontend/android/local.properties
 frontend/android/key.properties
 frontend/android/app/google-services.json
 frontend/ios/Runner/GoogleService-Info.plist
+
+# Downloaded by windows-release.yml before compiling installer.iss — not
+# committed, CI fetches the current one from Microsoft on every release build.
+frontend/windows/vc_redist.x64.exe

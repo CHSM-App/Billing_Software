@@ -75,12 +75,20 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             IconButton(
               icon: const Icon(Icons.refresh_outlined),
               tooltip: l10n.commonRefresh,
-              onPressed: () {
-                ref.invalidate(reportSummaryProvider);
-                ref.invalidate(weeklySalesProvider);
-              },
+              // The daily chart now reads the summary's own breakdown, so this
+              // one invalidation refreshes the whole screen.
+              onPressed: () => ref.invalidate(reportSummaryProvider),
             ),
           ],
+        ),
+        // The period chips live OUTSIDE the async branch on purpose. Inside it
+        // they were replaced by the spinner on every tap and vanished entirely
+        // on an error, leaving only the error widget — which is what "the
+        // report is not shown by filter" actually looked like. The filter must
+        // stay on screen and stay tappable no matter what the fetch is doing.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: _buildPeriodChips(l10n, filter),
         ),
         Expanded(
           child: summaryAsync.when(
@@ -95,13 +103,9 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                 children: [
-                  _buildPeriodChips(l10n, filter),
-                  const SizedBox(height: 12),
                   _buildSalesCard(l10n, summary, filter),
                   const SizedBox(height: 16),
-                  // Last-7-days chart uses its OWN provider (not the period
-                  // filter), so it always shows the real last week.
-                  _buildLast7DaysSection(l10n),
+                  _buildPeriodSalesSection(l10n, filter),
                   const SizedBox(height: 16),
                   if (summary.topItems.isNotEmpty) ...[
                     _buildTopItems(l10n, summary),
@@ -298,15 +302,68 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 
   // ── Period quick-chips ──────────────────────────────────────────────────────
+  /// Which preset (if any) the current filter corresponds to, so the matching
+  /// chip can be lit. Without this the chips gave no feedback at all and the
+  /// filter looked like it had not applied.
+  _Period _activePeriod(ReportSummaryFilter filter) {
+    final now = DateTime.now();
+    bool sameDay(DateTime a, DateTime b) =>
+        a.year == b.year && a.month == b.month && a.day == b.day;
+
+    if (sameDay(filter.from, DateTime(now.year, now.month, now.day)) &&
+        sameDay(filter.to, now)) {
+      return _Period.today;
+    }
+    if (sameDay(filter.from, DateTime(now.year, now.month, 1)) &&
+        sameDay(filter.to, DateTime(now.year, now.month + 1, 0))) {
+      return _Period.month;
+    }
+    if (sameDay(filter.from, DateTime(now.year, 1, 1)) &&
+        sameDay(filter.to, DateTime(now.year, 12, 31))) {
+      return _Period.year;
+    }
+    return _Period.custom;
+  }
+
   Widget _buildPeriodChips(AppLocalizations l10n, ReportSummaryFilter filter) {
-    return Row(
+    final active = _activePeriod(filter);
+    final fmt = DateFormat('d MMM yyyy');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(child: _PeriodChip(label: l10n.reportsToday, onTap: _setToday)),
-        const SizedBox(width: 8),
-        Expanded(
-            child: _PeriodChip(label: l10n.reportsMonth, onTap: _setThisMonth)),
-        const SizedBox(width: 8),
-        Expanded(child: _PeriodChip(label: l10n.reportsYear, onTap: _setThisYear)),
+        Row(
+          children: [
+            Expanded(
+                child: _PeriodChip(
+                    label: l10n.reportsToday,
+                    selected: active == _Period.today,
+                    onTap: _setToday)),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _PeriodChip(
+                    label: l10n.reportsMonth,
+                    selected: active == _Period.month,
+                    onTap: _setThisMonth)),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _PeriodChip(
+                    label: l10n.reportsYear,
+                    selected: active == _Period.year,
+                    onTap: _setThisYear)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Spell out the range being reported on. A custom range picked from the
+        // calendar lights no chip, so this is the only confirmation of it.
+        Text(
+          active == _Period.today
+              ? fmt.format(filter.from)
+              : '${fmt.format(filter.from)} – ${fmt.format(filter.to)}',
+          style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w500),
+        ),
       ],
     );
   }
@@ -401,31 +458,38 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     );
   }
 
-  // ── Last 7 days bar chart ───────────────────────────────────────────────────
-  // Watches its own weeklySalesProvider so the chart is unaffected by the date
-  // filter — it always shows the true last 7 days.
-  Widget _buildLast7DaysSection(AppLocalizations l10n) {
-    final weeklyAsync = ref.watch(weeklySalesProvider);
-    return weeklyAsync.when(
-      loading: () => _SectionCard(
-        title: l10n.reportsLast7Days,
-        child: const SizedBox(
-            height: 120, child: Center(child: CircularProgressIndicator())),
-      ),
-      error: (_, __) => const SizedBox.shrink(),
-      data: (weekly) => _buildLast7DaysChart(l10n, weekly),
-    );
+  // ── Daily sales bar chart ──────────────────────────────────────────────────
+  //
+  // Driven by the SELECTED period's own daily breakdown, which the summary
+  // already carries — so picking Month or Year moves this chart along with
+  // everything else. It used to watch weeklySalesProvider and show the true
+  // last 7 days regardless of the filter, which made the biggest block on the
+  // screen look like the filter had done nothing.
+  //
+  // Long periods are windowed to the last 7 days IN the period rather than
+  // drawn as 365 unreadable bars; the title states exactly what is shown.
+  Widget _buildPeriodSalesSection(
+      AppLocalizations l10n, ReportSummaryFilter filter) {
+    final summary = ref.watch(reportSummaryProvider).valueOrNull;
+    if (summary == null) return const SizedBox.shrink();
+    return _buildDailyChart(l10n, summary.daily, filter);
   }
 
-  Widget _buildLast7DaysChart(AppLocalizations l10n, List<DailyReport> weekly) {
-    // Build a fixed 7-day window ending today. Days with no bills get ₹0 bars,
-    // so the chart always shows all 7 weekdays. Data comes from the weekly
-    // provider (independent of the report period).
+  Widget _buildDailyChart(AppLocalizations l10n, List<DailyReport> daily,
+      ReportSummaryFilter filter) {
+    // Window: at most the last 7 days of the selected period, never past today
+    // (a month filter's `to` is the last day of the month, i.e. the future).
     final today = DateTime.now();
-    final byDay = {for (final d in weekly) d.day: d.revenue};
-    final days = List.generate(7, (i) {
-      final date = DateTime(today.year, today.month, today.day)
-          .subtract(Duration(days: 6 - i));
+    final todayMidnight = DateTime(today.year, today.month, today.day);
+    var end = DateTime(filter.to.year, filter.to.month, filter.to.day);
+    if (end.isAfter(todayMidnight)) end = todayMidnight;
+    final start = DateTime(filter.from.year, filter.from.month, filter.from.day);
+    final spanDays = end.difference(start).inDays + 1;
+    final barCount = spanDays.clamp(1, 7);
+
+    final byDay = {for (final d in daily) d.day: d.revenue};
+    final days = List.generate(barCount, (i) {
+      final date = end.subtract(Duration(days: barCount - 1 - i));
       final key = DateFormat('yyyy-MM-dd').format(date);
       return _ChartDay(date: date, revenue: byDay[key] ?? 0.0);
     });
@@ -436,11 +500,21 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     for (var i = 1; i < days.length; i++) {
       if (days[i].revenue > days[peakIndex].revenue) peakIndex = i;
     }
-    final selectedIndex = _selectedDayIndex ?? peakIndex;
+    // Clamp: the window shrinks with the period (Today is a single bar), so a
+    // selection made under a longer period would index past the end.
+    final selectedIndex =
+        (_selectedDayIndex ?? peakIndex).clamp(0, days.length - 1);
     final selected = days[selectedIndex];
 
+    // Say what is actually plotted rather than a fixed "Last 7 days" that a
+    // Month or Year filter would make untrue.
+    final fmt = DateFormat('d MMM');
+    final title = days.length == 1
+        ? fmt.format(days.first.date)
+        : '${fmt.format(days.first.date)} – ${fmt.format(days.last.date)}';
+
     return _SectionCard(
-      title: l10n.reportsLast7Days,
+      title: title,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -729,11 +803,23 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
+/// The preset the current filter matches, so one chip can be lit. [custom] is a
+/// range picked from the calendar, which matches no preset.
+enum _Period { today, month, year, custom }
+
 class _PeriodChip extends StatelessWidget {
   final String label;
+
+  /// Fills the chip. Previously every chip rendered identically, so tapping one
+  /// gave no feedback and the filter looked inert.
+  final bool selected;
   final VoidCallback onTap;
 
-  const _PeriodChip({required this.label, required this.onTap});
+  const _PeriodChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -743,14 +829,19 @@ class _PeriodChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 8),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: AppColors.primary.withValues(alpha: 0.08),
+          color: selected
+              ? AppColors.primary
+              : AppColors.primary.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(AppRadius.small),
+          border: Border.all(
+            color: selected ? AppColors.primary : Colors.transparent,
+          ),
         ),
         child: Text(label,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: AppColors.primary)),
+                color: selected ? Colors.white : AppColors.primary)),
       ),
     );
   }

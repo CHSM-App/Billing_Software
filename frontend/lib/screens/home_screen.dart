@@ -75,10 +75,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // and scrolling keeps the chip of the section under the header highlighted.
   // A ValueNotifier drives the chip highlight so scroll ticks don't rebuild
   // this whole (large) screen.
-  final ValueNotifier<String> _activeCategory = ValueNotifier('');
+  final ValueNotifier<String?> _activeCategory = ValueNotifier(null);
   final ScrollController _itemsScrollCtrl = ScrollController();
   final ScrollController _catStripCtrl = ScrollController();
   final Map<String, GlobalKey> _catChipKeys = {};
+  // The MAJOR category strip that replaces the category chips once a menu uses
+  // majors. Unlike the category chips (a jump-list), this one FILTERS: only the
+  // picked major's items reach _groupByCategory, so the sections below narrow
+  // with it.
+  //
+  // null means NO major is picked, which shows everything — there is no "All"
+  // chip; tapping the lit chip again clears it. A business that never sets a
+  // major has no majors to draw, so the strip falls back to the category chips.
+  final ValueNotifier<String?> _activeMajor = ValueNotifier(null);
+  final ScrollController _majorStripCtrl = ScrollController();
+  final Map<String, GlobalKey> _majorChipKeys = {};
   // Snapshot of the sections currently rendered — the scroll listener needs
   // them (and the column mode) to map a scroll offset back to a category.
   List<_CategorySection> _sections = const [];
@@ -132,6 +143,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final _discountPctController = TextEditingController();
   final _discountAmtController = TextEditingController();
   bool _updatingDiscount = false;
+
+  /// Which discount field the cashier actually typed into — the one that holds
+  /// their intent when the cart changes underneath it.
+  ///
+  /// A percentage means "take a tenth off whatever this comes to", so the rupee
+  /// figure must follow the subtotal. A rupee amount means "take fifty off",
+  /// which stays fifty however the cart moves; only the percentage it works out
+  /// to is refreshed. Without this, quantity changes left BOTH fields frozen
+  /// against the subtotal they were typed against.
+  ///
+  /// Starts false because a restored draft carries only `discount_amount`.
+  bool _discountByPct = false;
 
   // Focus nodes — used to auto-scroll the field above the keyboard
   final _customerNameFocus = FocusNode();
@@ -257,6 +280,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _itemsScrollCtrl.dispose();
     _catStripCtrl.dispose();
     _activeCategory.dispose();
+    _majorStripCtrl.dispose();
+    _activeMajor.dispose();
     _customerSearchDebounce?.cancel();
     _customerNameController.dispose();
     _customerPhoneController.dispose();
@@ -370,11 +395,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {}
   }
 
-  List<Item> _filteredItems(List<Item> allItems) {
+  /// Active items for the list, narrowed to [activeMajor] (null = no major
+  /// picked, so nothing is narrowed) and then to the search box.
+  List<Item> _filteredItems(List<Item> allItems, String? activeMajor) {
     final query = _searchController.text.toLowerCase();
+    // Search looks across the whole menu: a cashier typing a dish name wants it
+    // found wherever it is filed, not only inside the major they last tapped.
+    // This mirrors how search already spreads every matching section open.
+    final major = query.isEmpty ? activeMajor : null;
     return allItems.where((item) {
       if (!item.isActive) return false;
-      return query.isEmpty || item.name.toLowerCase().contains(query);
+      if (major != null && (item.majorCategory?.trim() ?? '') != major) {
+        return false;
+      }
+      if (query.isEmpty) return true;
+      // Match the category as well as the name, so typing "soups" pulls up every
+      // soup rather than nothing. Same rule the Items screen has always used
+      // (items_screen.dart _filtered).
+      return item.name.toLowerCase().contains(query) ||
+          (item.category?.toLowerCase().contains(query) ?? false);
     }).toList();
   }
 
@@ -498,7 +537,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// a viewport [viewportHeight] tall: the (single) open section while any
   /// of it is on screen — so a bar tap keeps its chip lit — and otherwise the
   /// section whose bar sits under the pinned header.
-  String _categoryAtOffset(double offset, double viewportHeight) {
+  String? _categoryAtOffset(double offset, double viewportHeight) {
+    // Nothing open → nothing to point at. The fallback below picks the bar
+    // under the header, which defaults to the first section, so collapsing
+    // every category used to leave its chip lit as though it were still open.
+    if (!_sections.any((s) => s.expanded)) return null;
     // Rows under the pinned column header don't count as visible.
     final bottom =
         offset + viewportHeight - _ExcelItemTable.columnHeaderHeight;
@@ -527,10 +570,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _setActiveCategory(_categoryAtOffset(pos.pixels, pos.viewportDimension));
   }
 
-  void _setActiveCategory(String cat) {
+  void _setActiveCategory(String? cat) {
     if (_activeCategory.value == cat) return;
     _activeCategory.value = cat;
-    _revealCategoryChip(cat);
+    // Nothing selected → no chip to scroll into view; leave the strip put.
+    if (cat != null) _revealCategoryChip(cat);
   }
 
   /// Horizontally scroll the chip strip so the active chip is centred.
@@ -570,7 +614,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// two rows (scrolling sideways as one block) once they stop fitting.
   Widget _buildCategoryStrip(List<String> categories) {
     final l10n = context.l10n;
-    return ValueListenableBuilder<String>(
+    return ValueListenableBuilder<String?>(
       valueListenable: _activeCategory,
       builder: (context, active, _) => CategoryChipStrip(
         categories: categories,
@@ -579,6 +623,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         onTap: _jumpToCategory,
         controller: _catStripCtrl,
         chipKeys: _catChipKeys,
+      ),
+    );
+  }
+
+  /// Major-category tap. Toggles: tapping the lit chip clears the filter and
+  /// shows the whole menu again, which is why there is no separate "All" chip.
+  ///
+  /// The category that was spread open almost certainly belongs to the major
+  /// being left, so fold everything and let the existing first-load logic
+  /// auto-open the first section of whatever is now showing.
+  void _selectMajor(String major) {
+    final next = _activeMajor.value == major ? null : major;
+    _activeMajor.value = next;
+    setState(() {
+      _expandedCategories.clear();
+      _autoOpenedFirstCategory = false;
+    });
+    if (next != null) _revealMajorChip(next);
+  }
+
+  /// Horizontally scroll the major strip so the picked chip is centred — the
+  /// same courtesy [_revealCategoryChip] does for the category strip.
+  void _revealMajorChip(String major) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_majorStripCtrl.hasClients) return;
+      final chipCtx = _majorChipKeys[major]?.currentContext;
+      if (chipCtx == null) return;
+      Scrollable.ensureVisible(chipCtx,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut);
+    });
+  }
+
+  /// The major-category filter strip, drawn with the same chip widget as the
+  /// category jump-list it replaces. No "All" chip: no chip lit means no filter,
+  /// which CategoryChipStrip already renders for a null [active].
+  Widget _buildMajorStrip(List<String> majors) {
+    final l10n = context.l10n;
+    return ValueListenableBuilder<String?>(
+      valueListenable: _activeMajor,
+      builder: (context, active, _) => CategoryChipStrip(
+        categories: majors,
+        active: active,
+        labelOf: (m) => _categoryLabel(m, l10n),
+        onTap: _selectMajor,
+        controller: _majorStripCtrl,
+        chipKeys: _majorChipKeys,
       ),
     );
   }
@@ -691,12 +783,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  /// Suggestions for [row]: those containing what has been typed so far (all
-  /// of them when the field is still empty), minus the exact current text and
-  /// anything already used on another row of this bill.
+  /// Suggestions for [row]: those containing what has been typed so far, minus
+  /// the exact current text and anything already used on another row of this
+  /// bill.
+  ///
+  /// Nothing is offered until at least one character is typed. Popping the list
+  /// open the moment the field is focused covered the Amount field and the
+  /// Settle button underneath it, so adding a charge meant dismissing a menu
+  /// nobody asked for first.
   List<ChargeSuggestion> _chargeSuggestionsFor(_ChargeRow row) {
     if (_chargeSuggestRow != row || _chargeSuggestions.isEmpty) return const [];
     final q = row.name.toLowerCase();
+    if (q.isEmpty) return const [];
     final taken = {
       for (final r in _charges)
         if (r != row && r.name.isNotEmpty) r.name.toLowerCase(),
@@ -704,7 +802,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return _chargeSuggestions
         .where((s) {
           final n = s.name.toLowerCase();
-          return n != q && !taken.contains(n) && (q.isEmpty || n.contains(q));
+          return n != q && !taken.contains(n) && n.contains(q);
         })
         .take(_maxChargeSuggestionsShown)
         .toList();
@@ -853,28 +951,43 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   void _onDiscountPctChanged() {
     if (_updatingDiscount) return;
-    // Discount is applied to the NET (pre-tax) subtotal — tax is then charged on
-    // the discounted net. So percentages are of the subtotal, not the gross total.
-    final net = ref.read(cartSubtotalProvider);
-    final pct = double.tryParse(_discountPctController.text) ?? 0;
-    _updatingDiscount = true;
-    final amt = net > 0 && pct > 0 ? (net * pct / 100) : 0.0;
-    _discountAmtController.text = amt > 0 ? amt.toStringAsFixed(2) : '';
-    _updatingDiscount = false;
-    setState(() {});
-    _sheetSetState?.call(() {});
+    _discountByPct = true;
+    _syncDiscount();
   }
 
   void _onDiscountAmtChanged() {
     if (_updatingDiscount) return;
-    // Percentage is of the NET subtotal (see _onDiscountPctChanged).
+    _discountByPct = false;
+    _syncDiscount();
+  }
+
+  /// Re-derive whichever discount field is NOT the one the cashier typed into,
+  /// against the current subtotal.
+  ///
+  /// Runs on a text edit and, crucially, on every cart change — a quantity
+  /// change moves the subtotal, and both fields are relative to it. Previously
+  /// this only ran on a keystroke, so changing a quantity left a discount that
+  /// had been computed against the old subtotal.
+  ///
+  /// Discount is applied to the NET (pre-tax) subtotal — tax is then charged on
+  /// the discounted net. So percentages are of the subtotal, not the gross
+  /// total, and both directions here use the same base.
+  void _syncDiscount() {
     final net = ref.read(cartSubtotalProvider);
-    final amt = double.tryParse(_discountAmtController.text) ?? 0;
     _updatingDiscount = true;
-    final pct = net > 0 && amt > 0 ? (amt / net * 100) : 0.0;
-    _discountPctController.text = pct > 0 ? pct.toStringAsFixed(2) : '';
+    if (_discountByPct) {
+      // "10% off" holds as the cart grows: the rupees follow the subtotal.
+      final pct = double.tryParse(_discountPctController.text) ?? 0;
+      final amt = net > 0 && pct > 0 ? (net * pct / 100) : 0.0;
+      _discountAmtController.text = amt > 0 ? amt.toStringAsFixed(2) : '';
+    } else {
+      // "₹50 off" stays ₹50; only the percentage it represents is refreshed.
+      final amt = double.tryParse(_discountAmtController.text) ?? 0;
+      final pct = net > 0 && amt > 0 ? (amt / net * 100) : 0.0;
+      _discountPctController.text = pct > 0 ? pct.toStringAsFixed(2) : '';
+    }
     _updatingDiscount = false;
-    setState(() {});
+    if (mounted) setState(() {});
     _sheetSetState?.call(() {});
   }
 
@@ -921,7 +1034,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _revealVariantItem(item);
       return;
     }
-    ref.read(cartProvider.notifier).addItem(item, variant: variant);
+    _cartChange(
+      CartNotifier.keyFor(item.id, variant?.id),
+      () => ref.read(cartProvider.notifier).addItem(item, variant: variant),
+    );
   }
 
   List<Map<String, dynamic>> get _cartPayload {
@@ -2532,6 +2648,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  /// Run a cart change, then warn if that line now exceeds what's in stock.
+  ///
+  /// The quantity is still accepted — a counted stock figure drifts from the
+  /// shelf, so refusing a sale the shop can actually serve would be worse than
+  /// allowing it. This just stops the cashier finding out only at settle time,
+  /// when the server rejects the whole bill.
+  void _cartChange(String key, VoidCallback mutate) {
+    mutate();
+    final stock = ref.read(cartProvider.notifier).stockShortfall(key);
+    if (stock == null) return;
+    final entry =
+        ref.read(cartProvider).where((e) => e.key == key).firstOrNull;
+    if (entry == null) return;
+    // showSnackBar QUEUES, so holding + past the stock level stacked one
+    // identical warning per press and they played back one after another long
+    // after the cashier had moved on. Drop any pending ones so exactly one
+    // warning is on screen, showing the latest quantity.
+    ScaffoldMessenger.of(context).clearSnackBars();
+    _showSnack(
+      context.l10n.billingStockExceeded(_trimQty(stock), entry.displayName),
+      isError: true,
+    );
+  }
+
+  /// 8 rather than 8.0, but 0.5 kept — stock is decimal for measured units.
+  static String _trimQty(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
+
   void _showSnack(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(
@@ -2658,18 +2802,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final userName = ref.watch(userNameProvider);
     final isWide = MediaQuery.of(context).size.width >= 720;
 
+    // The discount is relative to the subtotal, so it has to be re-derived
+    // whenever the cart moves — adding a line or changing a quantity. Listening
+    // (rather than reading on keystroke alone) is what makes "10% off" still
+    // mean 10% after the cashier bumps a quantity.
+    ref.listen<double>(cartSubtotalProvider, (previous, next) {
+      if (previous == next) return;
+      // Nothing entered yet — don't manufacture a discount out of an empty box.
+      if (_discountPctController.text.isEmpty &&
+          _discountAmtController.text.isEmpty) {
+        return;
+      }
+      _syncDiscount();
+    });
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          _buildAppBar(businessName, userName),
+          // LayoutBuilder so the expanding search field can size itself against
+          // the BAR's width rather than the window's — see _buildAppBar.
+          LayoutBuilder(
+            builder: (context, bar) =>
+                _buildAppBar(businessName, userName, bar.maxWidth),
+          ),
           Expanded(child: isWide ? _buildWideLayout() : _buildNarrowLayout()),
         ],
       ),
     );
   }
 
-  ShellAppBar _buildAppBar(String businessName, String userName) {
+  ShellAppBar _buildAppBar(
+      String businessName, String userName, double barWidth) {
     final l10n = context.l10n;
     // Show a back arrow only when this screen was pushed — opened from a table
     // (tableId) or from Open Orders (activeBillId) — not when it's the root
@@ -2721,7 +2885,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             AnimatedBuilder(
               animation: _searchAnim,
               builder: (context, child) {
-                final maxWidth = MediaQuery.of(context).size.width - 80;
+                // Sized against the APP BAR, not MediaQuery.size: on desktop
+                // the bar starts to the right of the navigation rail, so the
+                // window width overshot by the rail's width and the field ran
+                // off the right edge. Reserve room for the search toggle
+                // (48 + 4 gap + padding) and, when the screen was pushed, the
+                // back arrow too — those share the bar with the field.
+                final maxWidth =
+                    (barWidth - (isPushed ? 136 : 80)).clamp(0.0, barWidth);
                 return SizedBox(
                   width: _searchAnim.value * maxWidth,
                   // Fixed height keeps the expanded field within the toolbar so
@@ -2924,6 +3095,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final itemsAsync = ref.watch(itemsProvider);
       final cart = ref.watch(cartProvider);
       final cats = ref.watch(categoriesProvider).valueOrNull ?? [];
+      // Real majors only — the '' bucket is "no major set", which is every item
+      // for a business that has not used the field. Left empty here, the strip
+      // is not built at all and the screen is exactly what it always was.
+      final majors = (ref.watch(categoryTreeProvider).valueOrNull ?? {})
+          .keys
+          .where((m) => m.isNotEmpty)
+          .toList();
 
       return itemsAsync.when(
         loading: () => const BillingSkeleton(),
@@ -2932,7 +3110,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           if (allItems.isEmpty && !ref.read(connectivityProvider)) {
             return NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider));
           }
-          final items = _filteredItems(allItems);
+          // A selected major can disappear under us (its last item deleted or
+          // re-filed). Drop the filter for THIS build rather than rendering an
+          // empty list for a frame, and clear the notifier afterwards.
+          var activeMajor = _activeMajor.value;
+          if (activeMajor != null && !majors.contains(activeMajor)) {
+            activeMajor = null;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _activeMajor.value = null;
+            });
+          }
+
+          final items = _filteredItems(allItems, activeMajor);
           var sections = _groupByCategory(items, cats);
 
           // First load (fresh login / opening the billing screen): spread the
@@ -2964,23 +3153,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 .addPostFrameCallback((_) => _syncActiveCategoryToScroll());
           }
 
-          // The chip strip lists the sections actually on screen; when nothing
-          // matches the search it falls back to every category (as a hint).
-          final stripCats = sections.isNotEmpty
-              ? [for (final s in sections) s.category]
-              : cats;
-          final strip =
-              stripCats.isEmpty ? null : _buildCategoryStrip(stripCats);
+          // ONE strip at the top, never two. Once the menu uses major
+          // categories they take the top row and the category chips go away —
+          // the categories are still right there as the section bars, so a
+          // second row of chips just repeated them.
+          //
+          // A business with no majors keeps the category jump-list exactly as
+          // it has always been, so nothing changes for menus that never adopt
+          // the new level.
+          final Widget? strip;
+          if (majors.isNotEmpty) {
+            strip = _buildMajorStrip(majors);
+          } else {
+            // The chip strip lists the sections actually on screen; when nothing
+            // matches the search it falls back to every category (as a hint).
+            final stripCats = sections.isNotEmpty
+                ? [for (final s in sections) s.category]
+                : cats;
+            strip = stripCats.isEmpty ? null : _buildCategoryStrip(stripCats);
+          }
 
           Future<void> refresh() async {
             ref.invalidate(itemsProvider);
             ref.invalidate(categoriesProvider);
+            ref.invalidate(categoryTreeProvider);
             await ref.read(itemsProvider.future);
           }
 
           // The strip sits above the scrolling table (not in its pinned
           // header) because it is one or two rows tall depending on how many
-          // categories fit the width.
+          // chips fit the width.
           Widget withStrip(Widget list) => strip == null
               ? list
               : Column(children: [strip, Expanded(child: list)]);
@@ -3017,7 +3219,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 if (item.hasVariants) {
                   _toggleVariantItem(item);
                 } else {
-                  ref.read(cartProvider.notifier).addItem(item);
+                  _cartChange(CartNotifier.keyFor(item.id),
+                      () => ref.read(cartProvider.notifier).addItem(item));
                 }
               },
               onDecrement: (item) {
@@ -3033,28 +3236,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 if (item.hasVariants) {
                   _toggleVariantItem(item);
                 } else {
-                  ref
-                      .read(cartProvider.notifier)
-                      .changeQty(CartNotifier.keyFor(item.id), 1);
+                  final key = CartNotifier.keyFor(item.id);
+                  _cartChange(key,
+                      () => ref.read(cartProvider.notifier).changeQty(key, 1));
                 }
               },
               onSetQty: (item, qty) {
                 if (item.hasVariants) {
                   _toggleVariantItem(item);
                 } else {
-                  ref
-                      .read(cartProvider.notifier)
-                      .setQty(CartNotifier.keyFor(item.id), qty);
+                  final key = CartNotifier.keyFor(item.id);
+                  _cartChange(key,
+                      () => ref.read(cartProvider.notifier).setQty(key, qty));
                 }
               },
-              onVariantAdd: (item, v) =>
-                  ref.read(cartProvider.notifier).addItem(item, variant: v),
-              onVariantDelta: (item, v, delta) => ref
-                  .read(cartProvider.notifier)
-                  .changeQty(CartNotifier.keyFor(item.id, v.id), delta),
-              onVariantSetQty: (item, v, qty) => ref
-                  .read(cartProvider.notifier)
-                  .setQty(CartNotifier.keyFor(item.id, v.id), qty),
+              onVariantAdd: (item, v) => _cartChange(
+                  CartNotifier.keyFor(item.id, v.id),
+                  () => ref
+                      .read(cartProvider.notifier)
+                      .addItem(item, variant: v)),
+              onVariantDelta: (item, v, delta) => _cartChange(
+                  CartNotifier.keyFor(item.id, v.id),
+                  () => ref
+                      .read(cartProvider.notifier)
+                      .changeQty(CartNotifier.keyFor(item.id, v.id), delta)),
+              onVariantSetQty: (item, v, qty) => _cartChange(
+                  CartNotifier.keyFor(item.id, v.id),
+                  () => ref
+                      .read(cartProvider.notifier)
+                      .setQty(CartNotifier.keyFor(item.id, v.id), qty)),
             ),
           ));
         },
@@ -3150,7 +3360,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
       return Container(
         color: AppColors.surface,
-        child: Column(
+        child: LayoutBuilder(builder: (context, panel) {
+          // The footer is a non-flex child, so the Column gives it its full
+          // natural height and hands only the leftover to the item list. On a
+          // short window (or once Customer details expands) that natural height
+          // can exceed the panel and the Column overflows — the yellow stripe
+          // under the Settle button. Cap it here, where the panel's real height
+          // is known: a non-flex child of a Column is laid out with an UNBOUNDED
+          // main axis, so a LayoutBuilder inside _wrapFooter would only ever see
+          // infinity. Past the cap the footer scrolls internally instead of
+          // painting out of bounds, and the list keeps its share.
+          final footerMax = !inSheet && panel.hasBoundedHeight
+              ? panel.maxHeight * 0.75
+              : double.infinity;
+          return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: inSheet ? MainAxisSize.min : MainAxisSize.max,
           children: [
@@ -3296,8 +3519,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
 
             // Footer (payment, customer, discount, totals, actions) — pinned to
-            // the bottom and never scrolls; see [_wrapFooter].
+            // the bottom; scrolls only once it outgrows [footerMax].
             _wrapFooter(
+              footerMax,
               [
             const Divider(height: 1),
 
@@ -3608,14 +3832,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                       ],
                     ),
-                    if (_charges.isEmpty)
-                      Text(
-                        l10n.billingAdditionalChargesHint,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: AppColors.textSecondary),
-                      ),
                     for (final row in _charges)
                       Padding(
                         key: row.key,
@@ -4127,33 +4343,42 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ],
             ),
           ],
-        ),
+          );
+        }),
       );
     });
   }
 
-  /// Wraps the cart-panel footer widgets. In the wide layout it returns a
-  /// scrollable Flexible so the footer can never overflow (extra CGST/SGST /
-  /// discount / previous-due rows scroll instead of clipping). In the bottom
-  /// sheet the surrounding column is min-sized and the sheet scrolls itself, so
-  /// the children render inline (a Flexible in an unbounded column would throw).
   /// The cart footer — payment mode, customer fields, discounts, totals and the
   /// action buttons.
   ///
-  /// It is PINNED to the bottom and never scrolls: only the items list above it
-  /// scrolls. Previously the footer was a loose [Flexible] wrapped in a
-  /// [SingleChildScrollView], so it competed with the item list for vertical
-  /// space — a long order pushed Payment Mode and the Save/WhatsApp buttons into
-  /// their own scroll region, and the cashier had to scroll the panel to reach
-  /// them. Keeping it fixed means the controls are always in the same place.
+  /// It is PINNED to the bottom and, up to [maxHeight], does not scroll: only
+  /// the items list above it scrolls. Previously the footer was a loose
+  /// [Flexible] wrapped in a [SingleChildScrollView], so it competed with the
+  /// item list for vertical space — a long order pushed Payment Mode and the
+  /// Save/WhatsApp buttons into their own scroll region, and the cashier had to
+  /// scroll the panel to reach them. Keeping it fixed means the controls are
+  /// always in the same place.
   ///
-  /// In the bottom sheet the whole sheet scrolls, so the footer renders inline —
-  /// which is the same min-sized column, hence no per-layout branch here.
-  Widget _wrapFooter(List<Widget> children) {
-    return Column(
+  /// Fixed height alone overflowed, though: as a non-flex child the footer asks
+  /// for its full natural height, and on a short window (or with Customer
+  /// details expanded) that is more than the panel has. [maxHeight] bounds it,
+  /// so the rare too-tall case scrolls inside the footer rather than painting
+  /// past the bottom edge — the controls stay reachable either way.
+  ///
+  /// [maxHeight] is [double.infinity] in the bottom sheet: there the whole sheet
+  /// scrolls and the surrounding column is min-sized, so the children render
+  /// inline exactly as before.
+  Widget _wrapFooter(double maxHeight, List<Widget> children) {
+    final column = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: children,
+    );
+    if (maxHeight == double.infinity) return column;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: SingleChildScrollView(child: column),
     );
   }
 
@@ -4202,13 +4427,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   key: ValueKey('qty-${entry.key}'),
                   quantity: entry.quantity,
                   allowDecimal: entry.item.isMeasured,
-                  onSubmitted: (q) =>
-                      ref.read(cartProvider.notifier).setQty(entry.key, q),
+                  onSubmitted: (q) => _cartChange(entry.key,
+                      () => ref.read(cartProvider.notifier).setQty(entry.key, q)),
                 ),
                 _qtyButton(Icons.add, () {
-                  ref
-                      .read(cartProvider.notifier)
-                      .changeQty(entry.key, 1);
+                  _cartChange(
+                      entry.key,
+                      () => ref
+                          .read(cartProvider.notifier)
+                          .changeQty(entry.key, 1));
                 }),
               ],
             ),
@@ -4445,27 +4672,40 @@ String _categoryLabel(String category, AppLocalizations l10n) =>
 /// A row of the flattened list: a category section bar, one row of item(s) —
 /// one per row on phones, two side by side on wide screens — or one row of
 /// size(s) unfolded beneath a variant parent.
+/// One cell of a table row — a dish, one of a dish's sizes, or nothing.
+///
+/// Cells exist because the two columns flow INDEPENDENTLY: opening a dish
+/// lengthens only its own column, and the other column carries on listing its
+/// next dishes beside it. Rows are just the two columns zipped together, so a
+/// row routinely pairs an ordinary dish on one side with a size on the other.
+class _Cell {
+  /// Set → an ordinary dish row, numbered [number].
+  final Item? item;
+  final int number;
+
+  /// Set → one size of [sizeParent].
+  final Item? sizeParent;
+  final ItemVariant? variant;
+
+  const _Cell.item(Item this.item, this.number)
+      : sizeParent = null,
+        variant = null;
+  const _Cell.size(Item this.sizeParent, ItemVariant this.variant)
+      : item = null,
+        number = 0;
+
+  bool get isSize => sizeParent != null;
+}
+
 class _ListEntry {
   final _CategorySection? section;
-  final List<Item> items;
-  final int firstIndex; // 1-based running number of items.first
-  final Item? parent; // set → this row holds sizes of [parent]
-  final List<ItemVariant> variants;
-  const _ListEntry.header(this.section)
-      : items = const [],
-        firstIndex = 0,
-        parent = null,
-        variants = const [];
-  const _ListEntry.rows(this.items, this.firstIndex)
-      : section = null,
-        parent = null,
-        variants = const [];
-  const _ListEntry.sizes(this.parent, this.variants)
-      : section = null,
-        items = const [],
-        firstIndex = 0;
+
+  /// One entry per COLUMN, positionally. A null means that column has nothing
+  /// on this row — it has simply run out of dishes before the other one has.
+  final List<_Cell?> cells;
+  const _ListEntry.header(this.section) : cells = const [];
+  const _ListEntry.row(this.cells) : section = null;
   bool get isHeader => section != null;
-  bool get isSizes => parent != null;
 }
 
 class _ExcelItemTable extends StatefulWidget {
@@ -4515,34 +4755,46 @@ class _ExcelItemTable extends StatefulWidget {
   /// running item number. Items are numbered even while folded so a number
   /// never shifts when another category opens.
   ///
-  /// In two-column mode an unfolded variant parent takes a row on its own so
-  /// its size rows sit directly beneath it (sizes are paired two per row).
+  /// The two columns are built as INDEPENDENT streams and then zipped into
+  /// rows. Dishes alternate between them, so with nothing open the rows read
+  /// exactly as a left-to-right grid; once a dish unfolds, its sizes lengthen
+  /// only ITS column and the other column keeps listing dishes alongside them.
+  ///
+  /// Earlier versions coupled the columns: sizes were chunked two-per-row
+  /// (spreading one dish's sizes across both columns), and an open dish was
+  /// pulled onto a row of its own (so tapping a dish on the right made it jump
+  /// left). Keeping them coupled but ordered left the opposite column showing
+  /// blank rows for as long as the sizes were open. Independent streams are
+  /// what remove all three.
+  ///
+  /// Numbers are assigned per dish as it is placed, so a dish keeps its number
+  /// whatever is open.
   static (List<_ListEntry>, int) _sectionEntries(
       _CategorySection s, bool twoColumns, int index) {
     final out = <_ListEntry>[];
     if (!s.expanded) return (out, index + s.items.length);
-    final step = twoColumns ? 2 : 1;
     bool open(Item it) => it.hasVariants && s.openItems.contains(it.id);
-    var i = 0;
-    while (i < s.items.length) {
+
+    final columns = <List<_Cell>>[[], if (twoColumns) []];
+    for (var i = 0; i < s.items.length; i++) {
       final item = s.items[i];
-      final next = i + 1 < s.items.length ? s.items[i + 1] : null;
-      if (step == 2 && !open(item) && next != null && !open(next)) {
-        out.add(_ListEntry.rows([item, next], index));
-        index += 2;
-        i += 2;
-        continue;
-      }
-      out.add(_ListEntry.rows([item], index));
-      index += 1;
-      i += 1;
+      final col = columns[i % columns.length];
+      col.add(_Cell.item(item, index + i));
       if (open(item)) {
-        final vs = item.variants;
-        for (var j = 0; j < vs.length; j += step) {
-          final end = j + step > vs.length ? vs.length : j + step;
-          out.add(_ListEntry.sizes(item, vs.sublist(j, end)));
+        for (final v in item.variants) {
+          col.add(_Cell.size(item, v));
         }
       }
+    }
+    index += s.items.length;
+
+    var rows = 0;
+    for (final c in columns) {
+      if (c.length > rows) rows = c.length;
+    }
+    for (var r = 0; r < rows; r++) {
+      out.add(_ListEntry.row(
+          [for (final c in columns) r < c.length ? c[r] : null]));
     }
     return (out, index);
   }
@@ -4570,7 +4822,7 @@ class _ExcelItemTable extends StatefulWidget {
     for (final s in sections) {
       offset += sectionHeaderExtent;
       for (final e in _sectionEntries(s, twoColumns, 0).$1) {
-        if (e.items.any((it) => it.id == itemId)) return offset;
+        if (e.cells.any((c) => c != null && c.item?.id == itemId)) return offset;
         offset += rowExtent;
       }
     }
@@ -4717,10 +4969,21 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
       final (rows, next) =
           _ExcelItemTable._sectionEntries(visible, widget.twoColumns, index);
       for (final e in rows) {
+        // A row squashes with the variant fold only when EVERY cell on it is a
+        // size — with independent columns a row routinely pairs a size with an
+        // ordinary dish, and squashing that row would drag the dish's height
+        // down with a fold happening in the other column. Mixed rows keep full
+        // height and the size cell fades on its own (see _entry).
         var p = sp;
-        if (e.isSizes) {
-          final id = e.parent!.id;
-          p *= _progress(_variantFold, id, s.openItems.contains(id));
+        final present = e.cells.whereType<_Cell>();
+        if (present.isNotEmpty && present.every((c) => c.isSize)) {
+          var vp = 0.0;
+          for (final c in present) {
+            final id = c.sizeParent!.id;
+            final q = _progress(_variantFold, id, s.openItems.contains(id));
+            if (q > vp) vp = q;
+          }
+          p *= vp;
         }
         if (p <= 0) continue;
         entries.add((e, _ExcelItemTable.rowExtent * p));
@@ -4766,14 +5029,13 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
             duration: _ExcelItemTable.foldDuration,
             curve: _ExcelItemTable.foldCurve,
             height: _ExcelItemTable.sectionHeaderExtent,
-            decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(
-                    color: open ? AppColors.primary : AppColors.border, width: 3),
-                bottom: const BorderSide(color: AppColors.border),
-              ),
+            // No accent rail here — the bar already reads as a category from
+            // its tint and full width. The rail now means one thing only: this
+            // row is a size of the dish above it.
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
-            padding: const EdgeInsets.only(left: 9, right: 8),
+            padding: const EdgeInsets.only(left: 12, right: 8),
             child: Row(
               children: [
                 // Name + count hug the left; the single Expanded takes ALL the
@@ -4884,15 +5146,19 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
     );
   }
 
+  /// Renders one column's cell: a dish, one of a dish's sizes, or blank when
+  /// that column has run out while the other is still going.
+  Widget _cell(_Cell? c) {
+    if (c == null) return const SizedBox();
+    if (!c.isSize) return _itemRow(c.item!, c.number);
+    return _sizeRow(c.sizeParent!, c.variant!);
+  }
+
   Widget _entry(_ListEntry e, double extent, AppLocalizations l10n) {
     if (e.isHeader) return _sectionHeader(e.section!, l10n);
-    // Left/right cells of this row: items or sizes, one or two of them.
-    final cells = e.isSizes
-        ? [for (final v in e.variants) _sizeRow(e.parent!, v)]
-        : [
-            for (var i = 0; i < e.items.length; i++)
-              _itemRow(e.items[i], e.firstIndex + i),
-          ];
+    // One widget per column. Each cell is a dish, a size, or nothing — the two
+    // columns advance independently, so any combination can share a row.
+    final cells = [for (final c in e.cells) _cell(c)];
     final Widget row;
     if (!widget.twoColumns) {
       row = cells.first;
@@ -5167,6 +5433,10 @@ class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
 // ---------------------------------------------------------------------------
 
 class _ExcelItemRow extends StatefulWidget {
+  /// How far a size row's accent rail is inset from the row's left edge, so a
+  /// size reads as sitting *under* its parent dish rather than beside it.
+  static const double _railIndent = 16;
+
   final int index;
   final Item item;
   final double qty;
@@ -5395,17 +5665,26 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                       : widget.expanded || widget.nested
                           ? const Color(0xFFFAFBFF) // faint tint: open group
                           : AppColors.surface,
-                  // An unfolded parent and its variant rows share one accent
-                  // rail on the left, so the open group reads as a block.
-                  border: widget.expanded || widget.nested
-                      ? const Border(
-                          left: BorderSide(color: AppColors.primary, width: 3))
-                      : null,
                 ),
-                padding: EdgeInsets.only(
-                    left: widget.expanded || widget.nested ? 9 : 12,
-                    right: 12),
-                child: Row(
+                // The accent rail marks SIZE rows only — the category bar has
+                // its own, and the parent dish is an ordinary item that happens
+                // to be open, so railing it too made all three levels look
+                // alike. Inset from the left edge as well, so the rail sits
+                // visibly indented under its parent and the nesting reads at a
+                // glance. Drawn on an inner box so the row's tint still runs
+                // the full width behind it.
+                child: Container(
+                  margin: EdgeInsets.only(
+                      left: widget.nested ? _ExcelItemRow._railIndent : 0),
+                  decoration: widget.nested
+                      ? const BoxDecoration(
+                          border: Border(
+                              left: BorderSide(
+                                  color: AppColors.primary, width: 3)))
+                      : null,
+                  padding: EdgeInsets.only(
+                      left: widget.nested ? 9 : 12, right: 12),
+                  child: Row(
                   children: [
                     // Row number — a variant row shows a small tag icon
                     // instead, marking it as one option of the item above.
@@ -5573,6 +5852,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                       ),
                     ),
                     ],
+                  ),
                 ),
               ),
             ),

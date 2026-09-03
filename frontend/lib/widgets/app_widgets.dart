@@ -452,6 +452,11 @@ class AppTextField extends StatelessWidget {
   final bool capitalizeWords;
   final List<TextInputFormatter>? inputFormatters;
 
+  /// Error message shown under the field. For validation driven by the screen
+  /// rather than by a [Form] — [validator] only runs inside one, so a field
+  /// that lives outside a Form has no other way to show a problem.
+  final String? errorText;
+
   const AppTextField({
     super.key,
     required this.label,
@@ -467,6 +472,7 @@ class AppTextField extends StatelessWidget {
     this.focusNode,
     this.capitalizeWords = false,
     this.inputFormatters,
+    this.errorText,
   });
 
   @override
@@ -477,6 +483,7 @@ class AppTextField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
+        errorText: errorText,
         suffixIcon: suffixIcon,
         prefixIcon: prefixIcon,
         counterText: '',

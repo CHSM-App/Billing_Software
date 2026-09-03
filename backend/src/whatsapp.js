@@ -325,6 +325,17 @@ async function sendBillLink({ phone, shopName, billNumber, receiptUrl }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function sendOnboardingAlert({ businessName, ownerName, phone, businessType }) {
+  // Production only. This alert tells a real person that a real shop signed up,
+  // and it fires automatically on every registration — so a dev or staging box
+  // pointed at the live API token would page the admin for every test account.
+  // Gated on NODE_ENV rather than WHATSAPP_ENABLED because turning that off
+  // would also kill OTP, which dev needs to log in at all.
+  if (process.env.NODE_ENV !== 'production') {
+    logger.info(
+      `[WhatsApp] Non-production — onboarding alert for "${businessName}" skipped`)
+    return { sent: false, skipped: true }
+  }
+
   if (!ENABLED) {
     logger.info(`[WhatsApp] Disabled — onboarding alert for "${businessName}" skipped`)
     return { sent: false, skipped: true }

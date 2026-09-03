@@ -43,6 +43,48 @@ beforeEach(() => {
 // ------------------------------------------------------------------
 // GST toggle — requires a GSTIN
 // ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// UPI ID — checked here as well as in the app, because a malformed VPA
+// reaches a customer's phone as a Pay button that opens their UPI app on
+// an address that does not exist.
+// ------------------------------------------------------------------
+describe('PUT /api/businesses/profile — UPI ID', () => {
+  test('rejects a UPI ID with no @psp', async () => {
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader())
+      .send({ store_upi_id: 'shopname' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/UPI/i);
+  });
+
+  test('rejects a UPI ID containing a space', async () => {
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader())
+      .send({ store_upi_id: 'shop name@okhdfcbank' });
+    expect(res.status).toBe(400);
+  });
+
+  test('accepts a dotted VPA', async () => {
+    mockRequest.recordset = [oldRow()];
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader())
+      .send({ store_upi_id: 'shop.name@okhdfcbank' });
+    expect(res.status).toBe(200);
+  });
+
+  test('accepts a phone-number VPA', async () => {
+    mockRequest.recordset = [oldRow()];
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader())
+      .send({ store_upi_id: '9422229951@ybl' });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('PUT /api/businesses/profile — GST toggle guard', () => {
   test('rejects turning GST on when the business has no GSTIN', async () => {
     // Only the old-values snapshot runs; the request is rejected before UPDATE.

@@ -30,7 +30,17 @@ function makeDbMock() {
       this.inputs = {};
       this.recordset = [];
       this.rowsAffected = [1];
-      this.query.mockClear();
+      // mockReset (not mockClear) so queued mockResolvedValueOnce/
+      // mockRejectedValueOnce values are DRAINED. With mockClear they survived
+      // into the next test, so one failing test cascaded into unrelated ones
+      // and the real failure was buried. Resetting drops the implementation
+      // too, so put the default back.
+      this.query.mockReset();
+      this.query.mockImplementation(() =>
+        Promise.resolve({
+          recordset: this.recordset,
+          rowsAffected: this.rowsAffected,
+        }));
     },
   };
 

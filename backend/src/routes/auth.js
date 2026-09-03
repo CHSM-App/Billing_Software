@@ -368,7 +368,7 @@ router.post('/login', loginLimiter, async (req, res) => {
                b.inventory_enabled, b.has_barcode_scanner, b.address,
                b.phone AS business_phone,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
-               b.round_off_enabled,
+               b.round_off_enabled, b.store_enabled,
                s.allow_mobile, s.allow_desktop
         FROM users u
         JOIN businesses b ON u.business_id = b.id
@@ -494,6 +494,10 @@ router.post('/login', loginLimiter, async (req, res) => {
         default_sac_code: row.default_sac_code ?? null,
         fssai_number: row.fssai_number ?? null,
         round_off_enabled: !!row.round_off_enabled,
+        // Online store master switch. Sent at login so a CASHIER's shell knows
+        // whether to poll the order queue — the business profile that carries
+        // this is owner-only, so they could not find out any other way.
+        store_enabled: !!row.store_enabled,
         // Device-access policy — surfaced at login so the client can enforce it
         // immediately, without depending on a separate /license fetch that may
         // fail on a flaky network. NULL (no subscription) defaults to allowed.

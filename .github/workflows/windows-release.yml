@@ -94,6 +94,18 @@ jobs:
           CMAKE_GENERATOR: 'Visual Studio 17 2022'
         run: flutter build windows --release
 
+      # The offline half of the app-fails-to-launch-on-a-bare-Windows-10-box fix:
+      # flutter_windows.dll and every plugin link the MSVC runtime dynamically, and
+      # a fresh Windows 10 machine commonly lacks vcruntime140_1.dll (Windows 11
+      # tends to already carry it). Fetched fresh from Microsoft's permanent
+      # redirect on every release; installer.iss embeds it and runs it only when
+      # VCRedistNeedsInstall finds it missing on the target machine.
+      - name: Download VC++ Redistributable
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' `
+            -OutFile 'frontend/windows/vc_redist.x64.exe'
+
       # Inno Setup 6 (ISCC) ships preinstalled on the windows runner image.
       # PrivilegesRequired=lowest in installer.iss means the produced setup
       # installs per-user, so the in-app updater can run it without a UAC prompt.

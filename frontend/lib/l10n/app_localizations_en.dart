@@ -1154,6 +1154,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingCategoryOther => 'Other';
 
   @override
+  String billingStockExceeded(String stock, String name) {
+    return 'Only $stock $name in stock';
+  }
+
+  @override
   String billingSizesCount(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1291,6 +1296,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsFieldName => 'Name';
+
+  @override
+  String get itemsFieldMajorCategory => 'Major Category';
+
+  @override
+  String get itemsFieldMajorCategoryHint => 'e.g. Chinese';
 
   @override
   String get itemsFieldCategory => 'Category';
@@ -1442,6 +1453,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsManageSizes => 'Add variants';
+
+  @override
+  String get itemsPickSizeForBarcode => 'Which size?';
 
   @override
   String itemsManageSizesCount(int count) {
@@ -1820,9 +1834,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get reportsAvgBill => 'Avg bill';
-
-  @override
-  String get reportsLast7Days => 'Last 7 days';
 
   @override
   String get reportsTopSellingItems => 'Top selling items';
@@ -2697,6 +2708,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get purchaseListFabShort => 'Purchase list';
 
   @override
+  String purchaseListQtyRequired(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Enter a quantity for $count items',
+      one: 'Enter a quantity for 1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get purchaseListFabLong => 'Create purchase list';
 
   @override
@@ -2919,5 +2941,223 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String expensesPurchaseInvoice(String number) {
     return 'Purchase - Inv $number';
+  }
+
+  @override
+  String get settingsOnlineStore => 'Online Store';
+
+  @override
+  String get settingsOnlineStoreSubtitle =>
+      'Share one link — customers browse and order, you approve';
+
+  @override
+  String get storeTitle => 'Online Store';
+
+  @override
+  String get storeEnable => 'Online store';
+
+  @override
+  String get storeEnableSubtitle =>
+      'Customers can browse your items and place orders from a link';
+
+  @override
+  String get storeLinkTitle => 'Your store link';
+
+  @override
+  String get storeLinkHint =>
+      'Share this on WhatsApp, Instagram or a printed QR. Anyone with the link can order.';
+
+  @override
+  String get storeCopyLink => 'Copy link';
+
+  @override
+  String get storeLinkCopied => 'Link copied';
+
+  @override
+  String get storeShareLink => 'Share';
+
+  @override
+  String get storeShareQr => 'Share QR';
+
+  @override
+  String get storeOrdersLink => 'Online orders';
+
+  @override
+  String get storeOrdersLinkSubtitle =>
+      'Approve or decline what customers send you';
+
+  @override
+  String get storeFulfilmentSection => 'How customers get their order';
+
+  @override
+  String get storePickup => 'Pickup';
+
+  @override
+  String get storePickupAlways =>
+      'Always on — a customer can walk in and collect';
+
+  @override
+  String get storeDelivery => 'Delivery';
+
+  @override
+  String get storeDeliverySubtitle =>
+      'Turn on to also offer delivery — customers enter an address';
+
+  @override
+  String get storeDeliveryCharge => 'Delivery charge';
+
+  @override
+  String get storeDeliveryChargeHint =>
+      'Added to the bill on every delivery order';
+
+  @override
+  String get storePaymentSection => 'Payment';
+
+  @override
+  String get storeAdvancePercent => 'Advance to collect';
+
+  @override
+  String get storeAdvancePercentHint =>
+      '0 = pay at the shop. 100 = pay in full before ordering.';
+
+  @override
+  String get storePaymentRequired => 'Require payment to order';
+
+  @override
+  String get storePaymentRequiredSubtitle =>
+      'Customers must enter a transaction ID before the order is sent';
+
+  @override
+  String get storeUpiId => 'Your UPI ID';
+
+  @override
+  String get storeUpiIdHint =>
+      'e.g. shopname@okhdfcbank. Customers tap one button and their UPI app opens with your name and the amount already filled in.';
+
+  @override
+  String get storeUpiIdInvalid =>
+      'Enter a valid UPI ID, like shopname@okhdfcbank';
+
+  @override
+  String get storePaymentQr => 'Your payment QR';
+
+  @override
+  String get storePaymentQrHint =>
+      'Upload your UPI QR. Customers scan it and pay you directly — the money never passes through this app.';
+
+  @override
+  String get storeUploadQr => 'Upload QR';
+
+  @override
+  String get storeReplaceQr => 'Replace';
+
+  @override
+  String get storeRemoveQr => 'Remove';
+
+  @override
+  String get storeQrNeeded => 'Upload your payment QR to collect an advance';
+
+  @override
+  String get storeSaved => 'Saved';
+
+  @override
+  String get storeInvalidPercent => 'Advance must be between 0 and 100';
+
+  @override
+  String get onlineOrdersTitle => 'Online Orders';
+
+  @override
+  String get onlineOrdersTab => 'Online';
+
+  @override
+  String get onlineOrdersEmpty => 'No online orders';
+
+  @override
+  String get onlineOrdersEmptyHint =>
+      'Orders customers place on your store link land here for you to approve.';
+
+  @override
+  String get onlineOrdersWaiting => 'Waiting for you';
+
+  @override
+  String get onlineOrdersInProgress => 'Accepted — bill still open';
+
+  @override
+  String get onlineOrdersDecided => 'Decided today';
+
+  @override
+  String get onlineOrderPickup => 'Pickup';
+
+  @override
+  String get onlineOrderDelivery => 'Delivery';
+
+  @override
+  String get onlineOrderPaidOnline => 'Paid online';
+
+  @override
+  String get onlineOrderPaidFull => 'Paid in full';
+
+  @override
+  String onlineOrderBalanceDue(String amount) {
+    return '$amount at counter';
+  }
+
+  @override
+  String get onlineOrderUnpaid => 'Not paid yet';
+
+  @override
+  String get onlineOrderTxnId => 'Transaction ID';
+
+  @override
+  String get onlineOrderTxnCopied => 'Transaction ID copied';
+
+  @override
+  String get onlineOrderPaymentReceived => 'I have received this payment';
+
+  @override
+  String get onlineOrderAccept => 'Accept';
+
+  @override
+  String get onlineOrderReject => 'Decline';
+
+  @override
+  String onlineOrderAccepted(String billNumber) {
+    return 'Accepted — $billNumber is now in Open Orders';
+  }
+
+  @override
+  String get onlineOrderRejected => 'Order declined';
+
+  @override
+  String get onlineOrderRejectTitle => 'Decline this order?';
+
+  @override
+  String get onlineOrderRejectHint =>
+      'The customer sees your reason on their order page. Refund any advance yourself.';
+
+  @override
+  String get onlineOrderRejectReason => 'Reason (optional)';
+
+  @override
+  String get onlineOrderStatusPending => 'Waiting';
+
+  @override
+  String get onlineOrderStatusAccepted => 'Accepted';
+
+  @override
+  String get onlineOrderStatusRejected => 'Declined';
+
+  @override
+  String get onlineOrderDeliveryFee => 'Delivery';
+
+  @override
+  String get onlineOrderTotal => 'Total';
+
+  @override
+  String get onlineOrderNewTitle => 'New online order';
+
+  @override
+  String onlineOrderNewBody(String orderNumber, int count, String total) {
+    return '$orderNumber · $count item(s) · $total';
   }
 }

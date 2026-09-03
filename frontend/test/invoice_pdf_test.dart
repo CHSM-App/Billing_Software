@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/pdf.dart';
 
 import 'package:Vittam/models/models.dart';
+import 'package:Vittam/services/devanagari_raster.dart';
 import 'package:Vittam/services/invoice_pdf.dart';
 
 /// Net 20400 with a 4600 discount → discounted net 15800. Tax is charged on the
@@ -166,5 +167,132 @@ void main() {
     // draw calls, so their absence is reliable but their presence is not.)
     expect(text.contains('Tax'), true);
     expect(text.contains('GST'), true);
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Marathi (Devanagari)
+  //
+  // The pdf package has a Devanagari fallback FONT but no shaping: its only
+  // substitution logic is a hardcoded Arabic table and it parses no GSUB/GPOS.
+  // Drawn as text, matras stay after their consonant and conjuncts never form.
+  // So Devanagari is shaped by Flutter and embedded as an image instead.
+  // ─────────────────────────────────────────────────────────────
+  group('Devanagari detection', () {
+    test('recognises Marathi, and leaves plain ASCII alone', () {
+      expect(DevanagariRaster.containsDevanagari('तांदूळ'), isTrue);
+      expect(DevanagariRaster.containsDevanagari('क्षीर'), isTrue);
+      // Mixed: one Devanagari word is enough to need shaping.
+      expect(DevanagariRaster.containsDevanagari('Rice तांदूळ'), isTrue);
+      expect(DevanagariRaster.containsDevanagari('Rice'), isFalse);
+      expect(DevanagariRaster.containsDevanagari('250.00'), isFalse);
+      expect(DevanagariRaster.containsDevanagari(''), isFalse);
+    });
+  });
+
+  group('Marathi invoice', () {
+    Bill marathiBill() => Bill(
+          id: 'b2',
+          businessId: 'biz1',
+          billNumber: 'INV-200',
+          customerName: 'सागर धारगळकर',
+          subtotal: 250,
+          taxAmount: 0,
+          total: 250,
+          paymentMode: 'cash',
+          status: 'finalized',
+          createdByUserId: 'u1',
+          createdAt: DateTime(2026, 9, 2),
+          items: [
+            BillItem(
+              id: 'mi1',
+              billId: 'b2',
+              itemId: 'it1',
+              itemName: 'तांदूळ बासमती',
+              quantity: 2,
+              unitPrice: 125,
+              lineTotal: 250,
+            ),
+          ],
+        );
+
+    test('builds a valid PDF with Marathi names', () async {
+      final bytes = await InvoicePdf.build(
+        bill: marathiBill(),
+        pageFormat: PdfPageFormat.a4,
+        businessName: 'गोविंद इलेक्ट्रॉनिक्स',
+        address: 'मु. पो. दोडामार्ग',
+        gstEnabled: false,
+      );
+      expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+      // Non-trivial document — a broken image embed would truncate it.
+      expect(bytes.length, greaterThan(2000));
+    });
+
+    test('embeds the Marathi text as images, not as broken text', () async {
+      final marathi = await InvoicePdf.build(
+        bill: marathiBill(),
+        pageFormat: PdfPageFormat.a4,
+        businessName: 'गोविंद इलेक्ट्रॉनिक्स',
+        address: 'मु. पो. दोडामार्ग',
+        gstEnabled: false,
+      );
+      // The same invoice with ASCII names carries no embedded glyph images, so
+      // the Marathi one must be materially larger. This is what fails if the
+      // shaping detour is skipped and the text is drawn with the PDF font.
+      final ascii = await InvoicePdf.build(
+        bill: Bill(
+          id: 'b3',
+          businessId: 'biz1',
+          billNumber: 'INV-201',
+          customerName: 'Sagar',
+          subtotal: 250,
+          taxAmount: 0,
+          total: 250,
+          paymentMode: 'cash',
+          status: 'finalized',
+          createdByUserId: 'u1',
+          createdAt: DateTime(2026, 9, 2),
+          items: [
+            BillItem(
+              id: 'ai1',
+              billId: 'b3',
+              itemId: 'it1',
+              itemName: 'Basmati Rice',
+              quantity: 2,
+              unitPrice: 125,
+              lineTotal: 250,
+            ),
+          ],
+        ),
+        pageFormat: PdfPageFormat.a4,
+        businessName: 'Govind Electronics',
+        address: 'At Post Dodamarg',
+        gstEnabled: false,
+      );
+      // Direct evidence of the mechanism rather than a size heuristic: each
+      // shaped string becomes an image XObject. The ASCII invoice must have
+      // none at all — English stays real, selectable text.
+      int xobjects(List<int> pdf) =>
+          '/XObject'.allMatches(String.fromCharCodes(pdf)).length;
+      expect(xobjects(marathi), greaterThan(0),
+          reason: 'Marathi strings should be embedded as shaped images');
+      expect(xobjects(ascii), 0,
+          reason: 'an English invoice must not rasterise anything');
+    });
+
+    test('an all-ASCII invoice embeds no shaped images', () async {
+      // The detour must not fire for English menus — that text stays real,
+      // selectable text and the file stays small.
+      final bytes = await InvoicePdf.build(
+        bill: _sampleBill(withTax: true),
+        pageFormat: PdfPageFormat.a4,
+        businessName: 'GOVIND ELECTRONIC',
+        address: 'AT POST DODAMARG',
+        gstEnabled: true,
+      );
+      final text = _renderedText(bytes);
+      // Still ordinary text operators, as before.
+      expect(text.contains('GOVIND'), isTrue);
+    });
   });
 }

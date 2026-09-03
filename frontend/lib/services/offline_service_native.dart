@@ -90,7 +90,7 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
     );
@@ -104,6 +104,9 @@ class OfflineService {
         business_id    TEXT    NOT NULL,
         name           TEXT    NOT NULL,
         barcode        TEXT,
+        -- Two free-text grouping levels, mirroring items.major_category /
+        -- items.category. Both nullable — an item may carry neither.
+        major_category TEXT,
         category       TEXT,
         price          REAL    NOT NULL,
         tax_rate       REAL,
@@ -285,6 +288,15 @@ class OfflineService {
         await db.execute('ALTER TABLE $table ADD COLUMN additional_charges TEXT');
       }
     }
+    if (oldVersion < 11) {
+      // v10 → v11: cached_items gains major_category, the coarse group above
+      // category. Additive and nullable, so every already-cached row keeps its
+      // category and stays billable offline until the next sync fills the
+      // major in from the server.
+      await db.execute(
+        'ALTER TABLE cached_items ADD COLUMN major_category TEXT',
+      );
+    }
   }
 
   /// Cache of bills and drafts fetched FROM the server.
@@ -336,6 +348,7 @@ class OfflineService {
           'business_id': businessId,
           'name': item.name,
           'barcode': item.barcode,
+          'major_category': item.majorCategory,
           'category': item.category,
           'price': item.price,
           'tax_rate': item.taxRate,
@@ -490,22 +503,10 @@ class OfflineService {
       final base = _rowToItem(row);
       final variants = byItem[base.id];
       if (variants == null || variants.isEmpty) return base;
-      return Item(
-        id: base.id,
-        businessId: base.businessId,
-        name: base.name,
-        barcode: base.barcode,
-        category: base.category,
-        price: base.price,
-        taxRate: base.taxRate,
-        priceInclusiveTax: base.priceInclusiveTax,
-        stockQuantity: base.stockQuantity,
-        lowStockThreshold: base.lowStockThreshold,
-        unit: base.unit,
-        variants: variants,
-        isActive: base.isActive,
-        imageUrl: base.imageUrl,
-      );
+      // Rebuilt through copyWithVariants rather than by hand: this used to be a
+      // field-by-field Item(...) that silently dropped whatever the model gained
+      // next (hsnCode already went missing that way).
+      return base.copyWithVariants(variants);
     }).toList();
   }
 
@@ -639,6 +640,7 @@ class OfflineService {
       businessId: row['business_id'] as String,
       name: row['name'] as String,
       barcode: row['barcode'] as String?,
+      majorCategory: row['major_category'] as String?,
       category: row['category'] as String?,
       price: (row['price'] as num).toDouble(),
       taxRate:

@@ -1,12 +1,10 @@
-import 'dart:typed_data';
-import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:image/image.dart' as img;
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../theme/app_theme.dart';
+import '../utils/jpeg_compress.dart';
 import '../widgets/app_widgets.dart';
 
 /// Owner-only screen for managing dish photos shown to customers on the QR
@@ -110,7 +108,7 @@ class _MenuPhotosScreenState extends ConsumerState<MenuPhotosScreen> {
     setState(() => _busy.add(id));
     try {
       final raw = await picked.readAsBytes();
-      final jpeg = await _compressToJpeg(raw);
+      final jpeg = await compressToJpeg(raw);
       final newUrl = await uploadItemImage(id, jpeg);
       if (!mounted) return;
       setState(() => item['image_url'] = newUrl);
@@ -121,12 +119,6 @@ class _MenuPhotosScreenState extends ConsumerState<MenuPhotosScreen> {
     }
   }
 
-  /// Decode, resize to max 1000px on the long edge, and JPEG-encode at ~80%.
-  /// Runs the CPU-heavy encode work in a background isolate (compute) so the UI
-  /// stays smooth. Keeps uploads to roughly a few hundred KB.
-  Future<Uint8List> _compressToJpeg(Uint8List bytes) {
-    return compute(_compressJpegSync, bytes);
-  }
 
   Future<void> _removePhoto(Map<String, dynamic> item) async {
     final l10n = context.l10n;
@@ -364,21 +356,3 @@ class _MenuPhotosScreenState extends ConsumerState<MenuPhotosScreen> {
       );
 }
 
-/// Top-level so it can run in a background isolate via [compute]. Decodes the
-/// image, downscales the long edge to 1000px (only if larger), and re-encodes
-/// as JPEG at quality 80.
-Uint8List _compressJpegSync(Uint8List bytes) {
-  final decoded = img.decodeImage(bytes);
-  if (decoded == null) return bytes; // not decodable — send as-is, server validates
-  const maxEdge = 1000;
-  img.Image out = decoded;
-  final longEdge = decoded.width > decoded.height ? decoded.width : decoded.height;
-  if (longEdge > maxEdge) {
-    if (decoded.width >= decoded.height) {
-      out = img.copyResize(decoded, width: maxEdge);
-    } else {
-      out = img.copyResize(decoded, height: maxEdge);
-    }
-  }
-  return img.encodeJpg(out, quality: 80);
-}
