@@ -261,19 +261,28 @@ class _SettingsContentState extends State<_SettingsContent>
                       ),
                       // Online store — every business type. A retail shop and a
                       // restaurant doing takeaway both sell from one link.
-                      const SizedBox(height: AppSpacing.space8),
-                      _buildNavCard(
-                        context,
-                        icon: Icons.shopping_cart_outlined,
-                        iconColor: const Color(0xFF7C3AED),
-                        title: l10n.settingsOnlineStore,
-                        subtitle: l10n.settingsOnlineStoreSubtitle,
-                        onTap: () => Navigator.push(
+                      // Gated on the platform-admin entitlement (subscriptions.
+                      // allow_online_store, migration 039), NOT the owner's own
+                      // store_enabled toggle — that toggle lives INSIDE this
+                      // screen, so hiding the entry point is how an admin revokes
+                      // the feature entirely rather than just its default state.
+                      // Defaults to visible while _license is still loading, so
+                      // the card doesn't flash in after the fetch settles.
+                      if (_license?.allowOnlineStore ?? true) ...[
+                        const SizedBox(height: AppSpacing.space8),
+                        _buildNavCard(
                           context,
-                          MaterialPageRoute(
-                              builder: (_) => const StoreSettingsScreen()),
+                          icon: Icons.shopping_cart_outlined,
+                          iconColor: const Color(0xFF7C3AED),
+                          title: l10n.settingsOnlineStore,
+                          subtitle: l10n.settingsOnlineStoreSubtitle,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const StoreSettingsScreen()),
+                          ),
                         ),
-                      ),
+                      ],
                       // Customer QR self-ordering — restaurants only.
                       if (session.businessType == 'restaurant_with_tables') ...[
                         const SizedBox(height: AppSpacing.space8),

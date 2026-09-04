@@ -12,6 +12,7 @@ import '../widgets/skeletons.dart';
 import '../api.dart';
 import '../services/printer_service.dart';
 import 'menu_photos_screen.dart';
+import 'major_category_order_screen.dart';
 import 'raw_materials_tab.dart';
 
 /// Localized short label for an item's unit-of-measure (e.g. 'kg', 'plate').
@@ -416,6 +417,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     final withRawMaterials =
         _showRawMaterials(businessType, inventoryEnabled, userRole);
     _ensureTabController(withRawMaterials);
+    // Nothing to reorder for a business that has never filed an item under a
+    // major category — same "real majors only" filter the billing chip strip
+    // itself uses, so this button appears exactly when that strip does.
+    final hasMajors = (ref.watch(categoryTreeProvider).valueOrNull ?? {})
+        .keys
+        .any((m) => m.isNotEmpty);
     final onRawTab = withRawMaterials && _activeTab == 1;
 
     return Scaffold(
@@ -430,17 +437,28 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
               // Owners manage customer-facing dish photos here. Photos live in a
               // dedicated screen and never appear during billing. Restaurants
               // only — a retail shop has no QR menu for the photos to appear on.
-              actions: userRole == 'owner' && isRestaurant
+              actions: userRole == 'owner'
                   ? [
-                      IconButton(
-                        icon: const Icon(Icons.photo_library_outlined),
-                        color: AppColors.textPrimary,
-                        tooltip: l10n.menuPhotosTooltip,
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => const MenuPhotosScreen()),
+                      if (hasMajors)
+                        IconButton(
+                          icon: const Icon(Icons.swap_vert_outlined),
+                          color: AppColors.textPrimary,
+                          tooltip: l10n.categoryOrderTooltip,
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const MajorCategoryOrderScreen()),
+                          ),
                         ),
-                      ),
+                      if (isRestaurant)
+                        IconButton(
+                          icon: const Icon(Icons.photo_library_outlined),
+                          color: AppColors.textPrimary,
+                          tooltip: l10n.menuPhotosTooltip,
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => const MenuPhotosScreen()),
+                          ),
+                        ),
                       const SizedBox(width: 4),
                     ]
                   : null),

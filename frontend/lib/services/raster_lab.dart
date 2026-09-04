@@ -488,6 +488,20 @@ class RasterLab {
     return (widths: fitted, fits: fits);
   }
 
+  /// Rule/separator positions accumulate from fractional row heights (text
+  /// metrics, gaps), so a thin (single-[unit]) stroke almost never lands on a
+  /// whole source pixel. Drawing it there gets it antialiased across 2-3
+  /// source rows/cols, softened further by the eventual downscale, and a
+  /// hairline that averages out close to the 1-bit threshold can then vanish
+  /// entirely — differently on every bill, since it depends on that bill's
+  /// exact (content-fitted) row heights and column widths. Snapping a thin
+  /// stroke's edge to the nearest whole [unit] before drawing makes it land on
+  /// exact source-pixel boundaries, so it survives the downscale + threshold
+  /// as a clean, fully solid line every time.
+  @visibleForTesting
+  static double snapToGrid(double v, double unit) =>
+      (v / unit).roundToDouble() * unit;
+
   /// Font-size multipliers tried, in order, for the item table when its
   /// content-fitted columns don't fit the paper at full size (narrow 58mm
   /// rolls, or very large amounts). The first scale at which every numeric
@@ -560,7 +574,12 @@ class RasterLab {
       if (r.isRule) {
         // Light rules are hairlines and sit tighter to the rows they divide, so
         // repeating one after every item doesn't stretch the receipt.
-        final hh = (r.light ? 1.0 : (r.bold ? 3.0 : 2.0)) * ss;
+        // 1.0 (a single supersampled px, ~0.5 destination px after downscale)
+        // is the most threshold-fragile width there is — snapping its position
+        // to the pixel grid (below) stops it drifting off-grid, but even a
+        // perfectly aligned 1px stroke has almost no dark "core" left once the
+        // 1-bit pack's threshold is applied. 1.5 survives with margin.
+        final hh = (r.light ? 1.5 : (r.bold ? 3.0 : 2.0)) * ss;
         measured.add(_MRow.rule(hh, light: r.light));
         totalH += hh + (r.light ? gapY * 0.5 : gapY);
       } else if (r.isCenter) {
@@ -607,7 +626,7 @@ class RasterLab {
         // border on both sides so the two meet as a proper T-junction rather
         // than leaving the rule floating inside the frame.
         canvas.drawRect(
-          Rect.fromLTWH(borderInset, y, renderW - borderInset * 2, m.height),
+          Rect.fromLTWH(borderInset, snapToGrid(y, ss), renderW - borderInset * 2, m.height),
           Paint()..color = const Color(0xFF000000),
         );
         // Must match the spacing used when measuring, or every row below this
@@ -652,15 +671,19 @@ class RasterLab {
             return g + between.height;
           }
 
-          final lineW = 1.0 * ss;
-          final top = y - (prevRuled ? reach(idx - 1) : 0);
-          final bottom = y + m.height + (nextRuled ? reach(idx + 1) : 0);
+          // Same fragility as the light horizontal rule above — widened for
+          // the same reason, not just for symmetry.
+          final lineW = 1.5 * ss;
+          final top = snapToGrid(y - (prevRuled ? reach(idx - 1) : 0), ss);
+          final bottom = snapToGrid(
+              y + m.height + (nextRuled ? reach(idx + 1) : 0), ss);
           final paint = Paint()..color = const Color(0xFF000000);
           double bx = padX;
           for (var i = 0; i < m.paras.length - 1; i++) {
             bx += m.colWidths![i];
+            final left = snapToGrid(bx - lineW / 2, ss);
             canvas.drawRect(
-                Rect.fromLTWH(bx - lineW / 2, top, lineW, bottom - top), paint);
+                Rect.fromLTWH(left, top, lineW, bottom - top), paint);
           }
         }
         y += m.height + gapY;

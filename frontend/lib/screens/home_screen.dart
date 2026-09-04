@@ -3103,10 +3103,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // Real majors only — the '' bucket is "no major set", which is every item
       // for a business that has not used the field. Left empty here, the strip
       // is not built at all and the screen is exactly what it always was.
-      final majors = (ref.watch(categoryTreeProvider).valueOrNull ?? {})
-          .keys
-          .where((m) => m.isNotEmpty)
-          .toList();
+      //
+      // Order follows the owner's own drag-and-drop arrangement for THIS
+      // device (see major_category_order_provider.dart) rather than plain
+      // alphabetical — falling back to alphabetical is the provider's own job
+      // while it resolves or for a business that never customised it.
+      final majors = ref.watch(majorCategoryOrderProvider).valueOrNull ??
+          (ref.watch(categoryTreeProvider).valueOrNull ?? {})
+              .keys
+              .where((m) => m.isNotEmpty)
+              .toList();
 
       return itemsAsync.when(
         loading: () => const BillingSkeleton(),

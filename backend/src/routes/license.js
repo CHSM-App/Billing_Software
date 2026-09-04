@@ -33,6 +33,7 @@ router.get('/', requireAuth, async (req, res) => {
         grace_period_days,
         allow_mobile,
         allow_desktop,
+        allow_online_store,
         is_trial,
         updated_at
       FROM subscriptions
@@ -71,6 +72,11 @@ router.get('/', requireAuth, async (req, res) => {
       grace_period_days: sub.grace_period_days,
       allow_mobile: !!sub.allow_mobile,
       allow_desktop: !!sub.allow_desktop,
+      // Platform-admin kill switch for the online store (migration 039),
+      // separate from the OWNER's own businesses.store_enabled toggle. NULL
+      // (no admin decision yet) reads as allowed — matches allow_mobile/
+      // allow_desktop's own default-open behaviour.
+      allow_online_store: sub.allow_online_store == null ? true : !!sub.allow_online_store,
       is_trial: !!sub.is_trial,
       verified_at: new Date().toISOString()
     });

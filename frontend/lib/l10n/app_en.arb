@@ -417,6 +417,10 @@
   "paymentOther": "Other",
 
   "itemsTitle": "Items / Menu",
+  "categoryOrderTitle": "Reorder Categories",
+  "categoryOrderTooltip": "Reorder categories",
+  "categoryOrderHint": "Drag to arrange the order these appear in on the billing screen. Saved on this device only.",
+  "categoryOrderEmpty": "No major categories yet — file some items under one first.",
   "menuPhotosTitle": "Menu Photos",
   "menuPhotosTooltip": "Menu photos",
   "menuPhotosSubtitle": "Photos shown to customers on the QR order menu.",

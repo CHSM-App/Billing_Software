@@ -216,6 +216,26 @@ class AuthStorage {
   static String _keyChargeSuggestions(String businessId) =>
       'charge_suggestions_$businessId';
 
+  // Major-category display order — a PHONE preference, deliberately never
+  // synced to the server: two staff on two devices are free to browse the
+  // billing screen's chip strip in whatever order suits them, and a new
+  // install starts from the plain alphabetical default. Stored as a JSON
+  // string list; the provider owns decoding it and merging in majors this
+  // device has never seen before. Keyed by business for the same reason as
+  // charge suggestions above.
+  static String _keyMajorCategoryOrder(String businessId) =>
+      'major_category_order_$businessId';
+
+  Future<void> saveMajorCategoryOrder(String businessId, String json) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyMajorCategoryOrder(businessId), json);
+  }
+
+  Future<String?> getMajorCategoryOrder(String businessId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyMajorCategoryOrder(businessId));
+  }
+
   Future<void> saveChargeSuggestions(String businessId, String json) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyChargeSuggestions(businessId), json);
@@ -385,6 +405,10 @@ Future<void>    saveCachedChargeSuggestions(String businessId, String json) =>
     AuthStorage.instance.saveChargeSuggestions(businessId, json);
 Future<String?> getCachedChargeSuggestions(String businessId) =>
     AuthStorage.instance.getChargeSuggestions(businessId);
+Future<void>    saveMajorCategoryOrder(String businessId, String json) =>
+    AuthStorage.instance.saveMajorCategoryOrder(businessId, json);
+Future<String?> getMajorCategoryOrder(String businessId) =>
+    AuthStorage.instance.getMajorCategoryOrder(businessId);
 Future<String>  nextOfflineBillNumber()        => AuthStorage.instance.nextOfflineBillNumber();
 Future<String>  getDeviceTag()                 => AuthStorage.instance.getDeviceTag();
 Future<void>    savePaperSize(String size)     => AuthStorage.instance.savePaperSize(size);

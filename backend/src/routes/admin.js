@@ -144,6 +144,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
         s.max_staff         AS max_staff,
         s.allow_mobile      AS allow_mobile,
         s.allow_desktop     AS allow_desktop,
+        s.allow_online_store AS allow_online_store,
         (SELECT COUNT(*) FROM users su
            WHERE su.business_id = b.id
              AND su.role IN (${MANAGED_ROLES_SQL})) AS staff_count,
@@ -179,6 +180,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
         max_staff:         r.max_staff,
         allow_mobile:      !!r.allow_mobile,
         allow_desktop:     !!r.allow_desktop,
+        allow_online_store: r.allow_online_store == null ? true : !!r.allow_online_store,
       },
       staff_count:       r.staff_count,
       bill_count:        r.bill_count,
@@ -196,7 +198,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
 // PUT /admin/api/businesses/:id — update a business's subscription + flags.
 // Body may include any of:
 //   status, expires_at, max_offline_days, grace_period_days,
-//   max_staff, allow_mobile, allow_desktop      (-> subscriptions, upserted)
+//   max_staff, allow_mobile, allow_desktop, allow_online_store (-> subscriptions, upserted)
 //   whatsapp_mode, is_verified                  (-> businesses)
 // Only the provided fields are changed. Mirrors the /api/license/admin/activate
 // MERGE so a business with no subscription row still gets one created.
@@ -205,7 +207,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
   const businessId = req.params.id;
   const {
     status, expires_at, max_offline_days, grace_period_days,
-    max_staff, allow_mobile, allow_desktop, is_trial,
+    max_staff, allow_mobile, allow_desktop, allow_online_store, is_trial,
     whatsapp_mode, is_verified,
   } = req.body || {};
 
@@ -259,7 +261,8 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
 
     // ── subscription fields (upsert via MERGE) ──────────────────────────────
     const subProvided = [status, expires_at, max_offline_days, grace_period_days,
-      max_staff, allow_mobile, allow_desktop, is_trial].some((v) => v !== undefined);
+      max_staff, allow_mobile, allow_desktop, allow_online_store, is_trial]
+      .some((v) => v !== undefined);
 
     if (subProvided) {
       // Read current row so an upsert of a partial set keeps existing values
@@ -267,7 +270,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
       const cur = await pool.request()
         .input('id', sql.UniqueIdentifier, businessId)
         .query(`SELECT status, expires_at, max_offline_days, grace_period_days,
-                       max_staff, allow_mobile, allow_desktop, is_trial
+                       max_staff, allow_mobile, allow_desktop, allow_online_store, is_trial
                 FROM subscriptions WHERE business_id = @id`);
       const c = cur.recordset[0] || {};
 
@@ -279,6 +282,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
       const effMaxStaff        = max_staff         !== undefined ? max_staff        : (c.max_staff ?? 10);
       const effAllowMobile     = allow_mobile      !== undefined ? (allow_mobile ? 1 : 0)  : (c.allow_mobile  != null ? c.allow_mobile  : 1);
       const effAllowDesktop    = allow_desktop     !== undefined ? (allow_desktop ? 1 : 0) : (c.allow_desktop != null ? c.allow_desktop : 1);
+      const effAllowOnlineStore = allow_online_store !== undefined ? (allow_online_store ? 1 : 0) : (c.allow_online_store != null ? c.allow_online_store : 1);
       const effIsTrial         = is_trial          !== undefined ? (is_trial ? 1 : 0)      : (c.is_trial      != null ? c.is_trial      : 0);
 
       const mReq = pool.request()
@@ -290,6 +294,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
         .input('max_staff', sql.Int, effMaxStaff)
         .input('allow_mobile', sql.Bit, effAllowMobile)
         .input('allow_desktop', sql.Bit, effAllowDesktop)
+        .input('allow_online_store', sql.Bit, effAllowOnlineStore)
         .input('is_trial', sql.Bit, effIsTrial);
 
       await mReq.query(`
@@ -305,13 +310,14 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
             max_staff         = @max_staff,
             allow_mobile      = @allow_mobile,
             allow_desktop     = @allow_desktop,
+            allow_online_store = @allow_online_store,
             is_trial          = @is_trial,
             updated_at        = GETUTCDATE()
         WHEN NOT MATCHED THEN
           INSERT (business_id, status, expires_at, max_offline_days, grace_period_days,
-                  max_staff, allow_mobile, allow_desktop, is_trial)
+                  max_staff, allow_mobile, allow_desktop, allow_online_store, is_trial)
           VALUES (@business_id, @status, @expires_at, @max_offline_days, @grace_period_days,
-                  @max_staff, @allow_mobile, @allow_desktop, @is_trial);
+                  @max_staff, @allow_mobile, @allow_desktop, @allow_online_store, @is_trial);
       `);
 
       // Activating a paid subscription should also verify the business, matching

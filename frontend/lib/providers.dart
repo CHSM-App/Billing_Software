@@ -11,3 +11,4 @@ export 'providers/locale_provider.dart';
 export 'providers/printer_provider.dart';
 export 'providers/credit_provider.dart';
 export 'providers/online_orders_provider.dart';
+export 'providers/major_category_order_provider.dart';

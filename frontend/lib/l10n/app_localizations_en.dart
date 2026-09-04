@@ -1227,6 +1227,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsTitle => 'Items / Menu';
 
   @override
+  String get categoryOrderTitle => 'Reorder Categories';
+
+  @override
+  String get categoryOrderTooltip => 'Reorder categories';
+
+  @override
+  String get categoryOrderHint =>
+      'Drag to arrange the order these appear in on the billing screen. Saved on this device only.';
+
+  @override
+  String get categoryOrderEmpty =>
+      'No major categories yet — file some items under one first.';
+
+  @override
   String get menuPhotosTitle => 'Menu Photos';
 
   @override

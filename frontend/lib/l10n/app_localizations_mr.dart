@@ -1232,6 +1232,20 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsTitle => 'वस्तू / मेनू';
 
   @override
+  String get categoryOrderTitle => 'श्रेणींचा क्रम बदला';
+
+  @override
+  String get categoryOrderTooltip => 'श्रेणींचा क्रम बदला';
+
+  @override
+  String get categoryOrderHint =>
+      'बिलिंग स्क्रीनवर दिसण्याचा क्रम ठरवण्यासाठी ओढा. फक्त याच डिव्हाइसवर जतन होईल.';
+
+  @override
+  String get categoryOrderEmpty =>
+      'अजून प्रमुख श्रेणी नाहीत — आधी काही वस्तू एखाद्या श्रेणीत टाका.';
+
+  @override
   String get menuPhotosTitle => 'मेनू फोटो';
 
   @override

@@ -35,6 +35,14 @@ class LicenseStatus {
   /// without re-deriving it from [daysUntilExpiry] (which is truncated days,
   /// not the real timestamp).
   final DateTime? expiresAt;
+  /// Platform-admin kill switch for the online store (subscriptions.
+  /// allow_online_store, migration 039) — separate from the OWNER's own
+  /// businesses.store_enabled toggle. Only meaningful on [LicenseState.allowed]
+  /// / [LicenseState.grace]: a blocked state never lets the user reach
+  /// Settings anyway, so it is not threaded through the block logic at all —
+  /// unlike allowMobile/allowDesktop this never changes [state] itself.
+  /// Defaults true so an unset/never-cached value never hides the feature.
+  final bool allowOnlineStore;
   /// True when the check failed because the local session (access/refresh
   /// token) is invalid or unreadable rather than because the device is
   /// offline. Callers should send the user to the login screen instead of
@@ -47,6 +55,7 @@ class LicenseStatus {
     this.daysUntilExpiry,
     this.graceDaysRemaining,
     this.expiresAt,
+    this.allowOnlineStore = true,
     this.sessionInvalid = false,
   });
 }
@@ -73,6 +82,7 @@ class LicenseService {
   static const _keyVerifiedAt       = 'lic_verified_at';
   static const _keyAllowMobile      = 'lic_allow_mobile';
   static const _keyAllowDesktop     = 'lic_allow_desktop';
+  static const _keyAllowOnlineStore = 'lic_allow_online_store';
 
   // -------------------------------------------------------------------------
   // check() — call on every app startup after login
@@ -113,6 +123,7 @@ class LicenseService {
       // never block on a field the server didn't send.
       final allowMobile  = data['allow_mobile']  as bool? ?? true;
       final allowDesktop = data['allow_desktop'] as bool? ?? true;
+      final allowOnlineStore = data['allow_online_store'] as bool? ?? true;
 
       // Save to secure storage
       await Future.wait([
@@ -123,6 +134,7 @@ class LicenseService {
         _secure.write(key: _keyVerifiedAt,       value: data['verified_at'] as String),
         _secure.write(key: _keyAllowMobile,      value: allowMobile  ? '1' : '0'),
         _secure.write(key: _keyAllowDesktop,     value: allowDesktop ? '1' : '0'),
+        _secure.write(key: _keyAllowOnlineStore, value: allowOnlineStore ? '1' : '0'),
       ]);
 
       final result = _evaluate(
@@ -133,6 +145,7 @@ class LicenseService {
         verifiedAt:      DateTime.parse(data['verified_at'] as String),
         allowMobile:     allowMobile,
         allowDesktop:    allowDesktop,
+        allowOnlineStore: allowOnlineStore,
       );
 
       // If server says blocked, clear local cache so offline fallback also blocks
@@ -215,6 +228,7 @@ class LicenseService {
       _secure.read(key: _keyVerifiedAt),
       _secure.read(key: _keyAllowMobile),
       _secure.read(key: _keyAllowDesktop),
+      _secure.read(key: _keyAllowOnlineStore),
     ]);
 
     final status          = values[0];
@@ -226,6 +240,8 @@ class LicenseService {
     // value never locks the user out of their own device.
     final allowMobile     = values[5] != '0';
     final allowDesktop    = values[6] != '0';
+    // Absent (never cached) defaults open, same as allowMobile/allowDesktop.
+    final allowOnlineStore = values[7] != '0';
 
     // Device-access is enforced FIRST — before the "no license cache" bailout —
     // so a forbidden device is blocked even when we're offline and the rest of
@@ -247,6 +263,7 @@ class LicenseService {
       verifiedAt:      DateTime.parse(verifiedAtStr),
       allowMobile:     allowMobile,
       allowDesktop:    allowDesktop,
+      allowOnlineStore: allowOnlineStore,
     );
   }
 
@@ -258,6 +275,7 @@ class LicenseService {
     required DateTime verifiedAt,
     bool allowMobile = true,
     bool allowDesktop = true,
+    bool allowOnlineStore = true,
   }) {
     // Device-access entitlement — checked first because it's independent of the
     // subscription's time/status. "Desktop" = Windows native or web; everything
@@ -293,7 +311,8 @@ class LicenseService {
       // Within offline limit — allowed
       final daysUntilExpiry = expiresAt.difference(now).inDays;
       return LicenseStatus(LicenseState.allowed,
-          daysUntilExpiry: daysUntilExpiry, expiresAt: expiresAt);
+          daysUntilExpiry: daysUntilExpiry, expiresAt: expiresAt,
+          allowOnlineStore: allowOnlineStore);
     }
 
     final totalAllowed = maxOfflineDays + gracePeriodDays;
@@ -301,7 +320,8 @@ class LicenseService {
       // In grace period — show warning
       final graceDaysRemaining = totalAllowed - offlineDays;
       return LicenseStatus(LicenseState.grace,
-          graceDaysRemaining: graceDaysRemaining, expiresAt: expiresAt);
+          graceDaysRemaining: graceDaysRemaining, expiresAt: expiresAt,
+          allowOnlineStore: allowOnlineStore);
     }
 
     // Exceeded offline limit + grace — hard block
@@ -367,6 +387,7 @@ class LicenseService {
       _secure.delete(key: _keyVerifiedAt),
       _secure.delete(key: _keyAllowMobile),
       _secure.delete(key: _keyAllowDesktop),
+      _secure.delete(key: _keyAllowOnlineStore),
     ]);
   }
 }

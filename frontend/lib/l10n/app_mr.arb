@@ -417,6 +417,10 @@
   "paymentOther": "इतर",
 
   "itemsTitle": "वस्तू / मेनू",
+  "categoryOrderTitle": "श्रेणींचा क्रम बदला",
+  "categoryOrderTooltip": "श्रेणींचा क्रम बदला",
+  "categoryOrderHint": "बिलिंग स्क्रीनवर दिसण्याचा क्रम ठरवण्यासाठी ओढा. फक्त याच डिव्हाइसवर जतन होईल.",
+  "categoryOrderEmpty": "अजून प्रमुख श्रेणी नाहीत — आधी काही वस्तू एखाद्या श्रेणीत टाका.",
   "menuPhotosTitle": "मेनू फोटो",
   "menuPhotosTooltip": "मेनू फोटो",
   "menuPhotosSubtitle": "QR ऑर्डर मेनूवर ग्राहकांना दिसणारे फोटो.",

@@ -84,16 +84,24 @@ async function resolveStore(storeToken) {
   const result = await pool.request()
     .input('store_token', sql.NVarChar(32), storeToken)
     .query(`
-      SELECT id AS business_id, name AS shop_name, address, phone, logo_url,
-             store_enabled, store_delivery_enabled,
-             store_delivery_charge, store_payment_qr_url, store_upi_id,
-             store_advance_percent, store_payment_required
-      FROM businesses
-      WHERE store_token = @store_token
+      SELECT b.id AS business_id, b.name AS shop_name, b.address, b.phone, b.logo_url,
+             b.store_enabled, b.store_delivery_enabled,
+             b.store_delivery_charge, b.store_payment_qr_url, b.store_upi_id,
+             b.store_advance_percent, b.store_payment_required,
+             s.allow_online_store AS allow_online_store
+      FROM businesses b
+      LEFT JOIN subscriptions s ON s.business_id = b.id
+      WHERE b.store_token = @store_token
     `);
   if (result.recordset.length === 0) return null;
   const row = result.recordset[0];
   if (!row.store_enabled) return null;
+  // Platform-admin kill switch (subscriptions.allow_online_store, migration
+  // 039) — separate from the OWNER's own store_enabled toggle above. NULL
+  // (no subscription row, or an admin who never touched this field) reads as
+  // allowed, matching allow_mobile/allow_desktop's own default-open behaviour.
+  const allowOnlineStore = row.allow_online_store == null ? true : !!row.allow_online_store;
+  if (!allowOnlineStore) return null;
   return row;
 }
 

@@ -2258,6 +2258,30 @@ abstract class AppLocalizations {
   /// **'Items / Menu'**
   String get itemsTitle;
 
+  /// No description provided for @categoryOrderTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reorder Categories'**
+  String get categoryOrderTitle;
+
+  /// No description provided for @categoryOrderTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Reorder categories'**
+  String get categoryOrderTooltip;
+
+  /// No description provided for @categoryOrderHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Drag to arrange the order these appear in on the billing screen. Saved on this device only.'**
+  String get categoryOrderHint;
+
+  /// No description provided for @categoryOrderEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No major categories yet — file some items under one first.'**
+  String get categoryOrderEmpty;
+
   /// No description provided for @menuPhotosTitle.
   ///
   /// In en, this message translates to:
