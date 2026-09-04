@@ -1984,8 +1984,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// new state without a manual pull-to-refresh. Safe to call offline: each
   /// provider falls back to its local cache.
   void _refreshAfterBill(Bill bill) {
-    // History gains the new bill.
-    ref.read(billsProvider.notifier).refreshSilently();
+    // History gains the new bill. Invalidate rather than refreshSilently: the
+    // latter fires another fetch on the critical path right after the settle's
+    // own round trips, and SWALLOWS its errors — so a slow or timed-out refresh
+    // left History showing stale data with nothing to correct it. Invalidating
+    // costs no request now and cannot fail; History refetches when next opened.
+    ref.invalidate(billsProvider);
     // Selling decrements stock — refresh the catalogue so quantities and
     // low-stock badges are current.
     ref.read(itemsProvider.notifier).refreshInBackground();
@@ -2098,7 +2102,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _clearCharges();
       setState(() => _paymentMode = 'cash');
       ref.invalidate(reportProvider);
-      ref.invalidate(billsProvider);
+      // billsProvider is invalidated by _refreshAfterBill below — doing it here
+      // too meant two history fetches per settle.
       // Reconcile table state with the server after the finalize commits.
       unawaited(ref.read(tablesProvider.notifier).refreshSilently());
       // A just-finalized table-less draft leaves the Open Orders queue — refresh

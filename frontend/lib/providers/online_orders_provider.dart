@@ -71,13 +71,7 @@ final pendingOnlineOrderCountProvider = Provider<int>((ref) =>
 /// change the user made themselves.
 final openOnlineOrdersRequestProvider = StateProvider<bool>((ref) => false);
 
-/// Whether the shop has ANY unfinished online order — pending, or accepted with
-/// its bill still sitting as a draft. Drives whether the Online sub-tab exists.
-///
-/// Deliberately broader than [pendingOnlineOrderCountProvider]: accepting the
-/// last order must not make the tab disappear while the customer is still
-/// waiting for their food. The tab goes only when there is genuinely nothing
-/// left to do.
-final hasOpenOnlineOrdersProvider = Provider<bool>((ref) =>
-    (ref.watch(onlineOrdersProvider).valueOrNull ?? const <OnlineOrder>[])
-        .any((o) => o.isOpen));
+// No hasOpenOnlineOrders provider: the Online tab now follows the store toggle,
+// not the queue's contents, so nothing needs to ask "are any still open?".
+// OnlineOrder.isOpen still drives the Waiting / Accepted / Decided grouping
+// inside the screen.

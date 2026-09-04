@@ -3126,6 +3126,11 @@ class AppLocalizationsMr extends AppLocalizations {
   String get onlineOrderPaymentReceived => 'मला हे पेमेंट मिळाले आहे';
 
   @override
+  String onlineOrderBillNow(String billNumber) {
+    return '$billNumber चे बिल करा';
+  }
+
+  @override
   String get onlineOrderAccept => 'मंजूर करा';
 
   @override

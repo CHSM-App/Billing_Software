@@ -559,6 +559,40 @@ void main() {
       );
     });
 
+    test('canBill only when accepted with an unsettled draft bill', () {
+      // Drives the Bill button. It must never appear on an order with no bill
+      // to open, and must disappear once that bill is actually settled.
+      expect(OnlineOrder.fromJson(json()).canBill, isFalse); // pending
+      expect(
+        OnlineOrder.fromJson(json(over: {
+          'status': 'accepted',
+          'bill_status': 'draft',
+          'bill_id': 'bill-1',
+        })).canBill,
+        isTrue,
+      );
+      expect(
+        OnlineOrder.fromJson(json(over: {
+          'status': 'accepted',
+          'bill_status': 'finalized',
+          'bill_id': 'bill-1',
+        })).canBill,
+        isFalse,
+      );
+      // Accepted but bill_id missing — nothing to navigate to.
+      expect(
+        OnlineOrder.fromJson(json(over: {
+          'status': 'accepted',
+          'bill_status': 'draft',
+        })).canBill,
+        isFalse,
+      );
+      expect(
+        OnlineOrder.fromJson(json(over: {'status': 'rejected'})).canBill,
+        isFalse,
+      );
+    });
+
     test('isOpen tracks the BILL, not the acceptance', () {
       // Accepting only creates a draft bill — the shop is not done until that
       // bill is settled, which is what keeps the Online tab on screen.

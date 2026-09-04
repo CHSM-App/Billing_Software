@@ -1055,6 +1055,8 @@
   "onlineOrderTxnId": "ट्रान्झॅक्शन आयडी",
   "onlineOrderTxnCopied": "ट्रान्झॅक्शन आयडी कॉपी झाला",
   "onlineOrderPaymentReceived": "मला हे पेमेंट मिळाले आहे",
+  "onlineOrderBillNow": "{billNumber} चे बिल करा",
+  "@onlineOrderBillNow": { "placeholders": { "billNumber": { "type": "String" } } },
   "onlineOrderAccept": "मंजूर करा",
   "onlineOrderReject": "नाकारा",
   "onlineOrderAccepted": "मंजूर — {billNumber} आता खुल्या ऑर्डरमध्ये आहे",

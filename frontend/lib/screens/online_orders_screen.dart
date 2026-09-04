@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../api.dart' show ApiException, sanitizeUiErrorMessage;
+import '../api.dart' show ApiException, sanitizeUiErrorMessage, getBill;
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
@@ -10,6 +10,7 @@ import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import 'home_screen.dart';
 
 /// The shop's queue of orders placed on the public store link.
 ///
@@ -163,6 +164,51 @@ class _OnlineOrderCardState extends ConsumerState<_OnlineOrderCard> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Open the draft bill this order became, in the billing screen — the same
+  /// destination Open Orders uses, reached without hunting for the order in a
+  /// second queue.
+  ///
+  /// The Bill is fetched rather than reconstructed from the order: staff may
+  /// have already added items or a discount to the draft, and billing must show
+  /// what is actually on it, not what the customer originally sent.
+  void _openBill() {
+    final o = widget.order;
+    if (!o.canBill) return;
+    // Start from a clean cart; HomeScreen loads the draft's items itself.
+    ref.read(cartProvider.notifier).clear();
+
+    // Accepting an online order puts its draft in the Open Orders queue, which
+    // is already loaded — so reuse that Bill and the cart fills on the FIRST
+    // frame, the way tapping the same order in Open Orders does. Fetching it
+    // again cost a full round trip during which the billing screen sat empty.
+    Bill? cached;
+    for (final b in ref.read(openDraftsProvider).valueOrNull ?? const <Bill>[]) {
+      if (b.id == o.billId) { cached = b; break; }
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HomeScreen(
+          activeBillId: o.billId,
+          // Only pay for a fetch when the draft genuinely is not cached (queue
+          // still loading, or staff opened this from a stale list).
+          activeBillFuture: cached != null
+              ? Future.value(cached)
+              : getBill(o.billId!).then((j) => Bill.fromJson(j)),
+        ),
+      ),
+    ).then((_) {
+      if (!mounted) return;
+      // Back from billing: drop the borrowed cart so a draft's items never leak
+      // into a fresh order, and re-read both queues — finalizing the bill is
+      // what closes this online order out of the Online tab.
+      ref.read(cartProvider.notifier).clear();
+      ref.read(openDraftsProvider.notifier).refreshSilently();
+      ref.read(onlineOrdersProvider.notifier).refreshSilently();
+    });
   }
 
   Future<void> _reject() async {
@@ -346,7 +392,27 @@ class _OnlineOrderCardState extends ConsumerState<_OnlineOrderCard> {
                 ],
               ),
             ),
+          ] else if (o.canBill) ...[
+            // Accepted and still unsettled — the one action left on this card.
+            const SizedBox(height: AppSpacing.space12),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: FilledButton.icon(
+                onPressed: _busy ? null : _openBill,
+                icon: const Icon(Icons.point_of_sale_outlined, size: 17),
+                label: Text(
+                  l10n.onlineOrderBillNow(o.billNumber ?? ''),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  padding: EdgeInsets.zero,
+                ),
+              ),
+            ),
           ] else if (o.billNumber != null)
+            // Already settled (or voided) — nothing to do, just the reference.
             _iconLine(Icons.receipt_long_outlined, o.billNumber!)
           else if (o.rejectReason?.isNotEmpty ?? false)
             _iconLine(Icons.block, o.rejectReason!, color: AppColors.error),

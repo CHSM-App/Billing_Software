@@ -3115,6 +3115,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get onlineOrderPaymentReceived => 'I have received this payment';
 
   @override
+  String onlineOrderBillNow(String billNumber) {
+    return 'Bill $billNumber';
+  }
+
+  @override
   String get onlineOrderAccept => 'Accept';
 
   @override

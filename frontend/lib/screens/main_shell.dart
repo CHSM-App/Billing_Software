@@ -314,10 +314,11 @@ class _MainShellState extends ConsumerState<MainShell>
         final hasCredit =
             session.userRole != 'kitchen' && ref.watch(hasCreditProvider);
         // Only a role that can decide an order needs the queue — and only when
-        // the shop actually runs a store.
+        // the shop actually runs a store. Deliberately NOT gated on there being
+        // open orders: with the store on, the Online tab is always available,
+        // so the Orders page must be reachable to host it.
         final hasOnlineOrders =
-            session.storeEnabled && _canDecideOnlineOrders(session.userRole) &&
-                ref.watch(hasOpenOnlineOrdersProvider);
+            session.storeEnabled && _canDecideOnlineOrders(session.userRole);
         final items = _buildNavItems(session.userRole, session.businessType,
             hasOpenDrafts, hasCredit, hasOnlineOrders);
         // Kept so a notification tap can find the Orders tab's index without

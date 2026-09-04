@@ -61,45 +61,4 @@ void main() {
     final c = containerWith([order('pending')]);
     expect(c.read(pendingOnlineOrderCountProvider), 0);
   });
-
-  // ─────────────────────────────────────────────────────────────
-  // hasOpenOnlineOrdersProvider — decides whether the tab exists
-  // ─────────────────────────────────────────────────────────────
-  group('hasOpenOnlineOrders', () {
-    test('stays true after the last order is accepted but not settled',
-        () async {
-      // The bug this guards: accepting the last order used to empty the tab,
-      // taking the accepted order off screen while the customer waited for it.
-      final c = containerWith([order('accepted', billStatus: 'draft')]);
-      await c.read(onlineOrdersProvider.future);
-      expect(c.read(hasOpenOnlineOrdersProvider), isTrue);
-    });
-
-    test('goes false once the accepted order\'s bill is finalized', () async {
-      final c = containerWith([order('accepted', billStatus: 'finalized')]);
-      await c.read(onlineOrdersProvider.future);
-      expect(c.read(hasOpenOnlineOrdersProvider), isFalse);
-    });
-
-    test('a rejected order is finished immediately', () async {
-      final c = containerWith([order('rejected')]);
-      await c.read(onlineOrdersProvider.future);
-      expect(c.read(hasOpenOnlineOrdersProvider), isFalse);
-    });
-
-    test('a pending order keeps it open', () async {
-      final c = containerWith([
-        order('pending'),
-        order('rejected'),
-      ]);
-      await c.read(onlineOrdersProvider.future);
-      expect(c.read(hasOpenOnlineOrdersProvider), isTrue);
-    });
-
-    test('an empty queue is closed', () async {
-      final c = containerWith([]);
-      await c.read(onlineOrdersProvider.future);
-      expect(c.read(hasOpenOnlineOrdersProvider), isFalse);
-    });
-  });
 }

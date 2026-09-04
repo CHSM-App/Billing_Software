@@ -5512,6 +5512,12 @@ abstract class AppLocalizations {
   /// **'I have received this payment'**
   String get onlineOrderPaymentReceived;
 
+  /// No description provided for @onlineOrderBillNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill {billNumber}'**
+  String onlineOrderBillNow(String billNumber);
+
   /// No description provided for @onlineOrderAccept.
   ///
   /// In en, this message translates to:

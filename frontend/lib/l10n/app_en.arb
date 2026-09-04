@@ -1055,6 +1055,8 @@
   "onlineOrderTxnId": "Transaction ID",
   "onlineOrderTxnCopied": "Transaction ID copied",
   "onlineOrderPaymentReceived": "I have received this payment",
+  "onlineOrderBillNow": "Bill {billNumber}",
+  "@onlineOrderBillNow": { "placeholders": { "billNumber": { "type": "String" } } },
   "onlineOrderAccept": "Accept",
   "onlineOrderReject": "Decline",
   "onlineOrderAccepted": "Accepted — {billNumber} is now in Open Orders",

@@ -148,8 +148,11 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
       if (widget.showTables) _OrdersTab.tables,
       if (ref.watch(hasOpenDraftsProvider)) _OrdersTab.openOrders,
       if (ref.watch(hasCreditProvider)) _OrdersTab.credit,
-      if (storeEnabled && ref.watch(hasOpenOnlineOrdersProvider))
-        _OrdersTab.online,
+      // Unlike the other queues, this tab does NOT come and go with its
+      // contents: a shop that has switched the store on needs somewhere to look
+      // when a customer says "I ordered online" — including when the answer is
+      // "nothing arrived". Tables behaves the same way for the same reason.
+      if (storeEnabled) _OrdersTab.online,
     ]);
 
     // Every queue drained at once. The shell normally hides this whole nav item

@@ -825,6 +825,10 @@ class OnlineOrder {
   /// 'pending' | 'accepted' | 'rejected'.
   final String status;
   final String? rejectReason;
+
+  /// The draft bill this order became, once accepted. Needed to open it in the
+  /// billing screen straight from the order card.
+  final String? billId;
   final String? billNumber;
 
   /// Status of the draft bill this order became — 'draft' until staff settle it,
@@ -853,6 +857,7 @@ class OnlineOrder {
     required this.paymentStatus,
     required this.status,
     this.rejectReason,
+    this.billId,
     this.billNumber,
     this.billStatus,
     required this.createdAt,
@@ -873,6 +878,11 @@ class OnlineOrder {
   /// the customer is still waiting for it.
   bool get isOpen =>
       isPending || (status == 'accepted' && billStatus == 'draft');
+
+  /// Accepted, and its bill is still an unsettled draft — so there is something
+  /// to bill. Once the bill is finalized there is nothing left to do from here.
+  bool get canBill =>
+      status == 'accepted' && billStatus == 'draft' && (billId?.isNotEmpty ?? false);
 
   /// True when the customer submitted a payment reference nobody has confirmed
   /// yet — the one thing the accept sheet must put in front of the owner.
@@ -896,6 +906,7 @@ class OnlineOrder {
         paymentStatus: j['payment_status'] ?? 'unpaid',
         status: j['status'] ?? 'pending',
         rejectReason: j['reject_reason'] as String?,
+        billId: j['bill_id'] as String?,
         billNumber: j['bill_number'] as String?,
         billStatus: j['bill_status'] as String?,
         createdAt: DateTime.parse(j['created_at']),

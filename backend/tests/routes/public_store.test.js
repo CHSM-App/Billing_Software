@@ -153,7 +153,7 @@ describe('POST /store/:token — auth', () => {
     mockRequest.recordset = [store()];
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
     expect(res.status).toBe(401);
   });
 
@@ -162,7 +162,7 @@ describe('POST /store/:token — auth', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth({ business_id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' }))
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
     expect(res.status).toBe(401);
   });
 });
@@ -180,6 +180,7 @@ describe('POST /store/:token — pricing is server-side', () => {
       // The browser claims Chai costs 1 rupee. The catalog says 100.
       .send({
         items: [{ item_id: ITEM_ID, quantity: 2, price: 1, unit_price: 1, line_total: 2 }],
+        name: 'Ramesh',
         fulfilment: 'pickup',
       });
 
@@ -207,7 +208,7 @@ describe('POST /store/:token — pricing is server-side', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
 
     expect(res.status).toBe(201);
     expect(res.body.total).toBe(100);
@@ -223,6 +224,7 @@ describe('POST /store/:token — pricing is server-side', () => {
       .set(storeAuth())
       .send({
         items: [{ item_id: ITEM_ID, quantity: 1 }],
+        name: 'Ramesh',
         fulfilment: 'delivery',
         address: '12 Beach Road',
         delivery_charge: 0,          // ignored
@@ -257,7 +259,7 @@ describe('POST /store/:token — pricing is server-side', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 5 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 5 }], name: 'Ramesh', fulfilment: 'pickup' });
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('size_required');
@@ -281,7 +283,7 @@ describe('POST /store/:token — pricing is server-side', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
 
     expect(res.status).toBe(400);
   });
@@ -291,7 +293,7 @@ describe('POST /store/:token — pricing is server-side', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 0 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 0 }], name: 'Ramesh', fulfilment: 'pickup' });
     expect(res.status).toBe(400);
   });
 });
@@ -300,12 +302,50 @@ describe('POST /store/:token — pricing is server-side', () => {
 // POST /store/:token — fulfilment + payment rules
 // ------------------------------------------------------------------
 describe('POST /store/:token — fulfilment and payment', () => {
+  test('an order with no name is rejected', async () => {
+    // The name used to live in the OTP sheet, which a returning customer never
+    // sees again for 4h — so real orders arrived with customer_name NULL and a
+    // counter had only a phone number to call out.
+    mockRequest.recordset = [store()];
+    const res = await request(app)
+      .post(`/store/${STORE_TOKEN}`)
+      .set(storeAuth())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('name_required');
+  });
+
+  test('a whitespace-only name is rejected', async () => {
+    mockRequest.recordset = [store()];
+    const res = await request(app)
+      .post(`/store/${STORE_TOKEN}`)
+      .set(storeAuth())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: '   ', fulfilment: 'pickup' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('name_required');
+  });
+
+  test('the name is trimmed and stored on the order', async () => {
+    const { inputsSeen } = wirePlaceOrder();
+    const res = await request(app)
+      .post(`/store/${STORE_TOKEN}`)
+      .set(storeAuth())
+      .send({
+        items: [{ item_id: ITEM_ID, quantity: 1 }],
+        name: '  Ramesh Kadam  ',
+        fulfilment: 'pickup',
+      });
+    expect(res.status).toBe(201);
+    const orderInsert = inputsSeen.find((i) => i.subtotal !== undefined);
+    expect(orderInsert.customer_name).toBe('Ramesh Kadam');
+  });
+
   test('delivery without an address is rejected', async () => {
     mockRequest.recordset = [store()];
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'delivery', address: '   ' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'delivery', address: '   ' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/address/i);
   });
@@ -315,7 +355,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'delivery', address: 'x' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'delivery', address: 'x' });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('delivery_unavailable');
   });
@@ -327,7 +367,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
     expect(res.status).toBe(201);
   });
 
@@ -336,7 +376,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'teleport' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'teleport' });
     expect(res.status).toBe(400);
   });
 
@@ -345,7 +385,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('payment_required');
   });
@@ -360,6 +400,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
       .set(storeAuth())
       .send({
         items: [{ item_id: ITEM_ID, quantity: 1 }],
+        name: 'Ramesh',
         fulfilment: 'pickup',
         payment_txn_id: 'UPI123456789',
       });
@@ -380,6 +421,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
       .set(storeAuth())
       .send({
         items: [{ item_id: ITEM_ID, quantity: 1 }],
+        name: 'Ramesh',
         fulfilment: 'pickup',
         payment_choice: 'full',
         payment_txn_id: 'UPI-FULL-1',
@@ -402,6 +444,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
       .set(storeAuth())
       .send({
         items: [{ item_id: ITEM_ID, quantity: 1 }],
+        name: 'Ramesh',
         fulfilment: 'pickup',
         payment_choice: 'advance',
         payment_txn_id: 'UPI-ADV-1',
@@ -421,6 +464,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
       .set(storeAuth())
       .send({
         items: [{ item_id: ITEM_ID, quantity: 1 }],
+        name: 'Ramesh',
         fulfilment: 'pickup',
         payment_choice: 'advance',
         payment_txn_id: 'UPI-LIAR',
@@ -447,6 +491,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
       .set(storeAuth())
       .send({
         items: [{ item_id: ITEM_ID, quantity: 1 }],
+        name: 'Ramesh',
         fulfilment: 'pickup',
         payment_choice: 'full',
         payment_txn_id: 'UPI-X',
@@ -466,7 +511,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
 
     // payment_required only bites when there is actually something to pay.
     expect(res.status).toBe(201);
@@ -483,7 +528,7 @@ describe('POST /store/:token — fulfilment and payment', () => {
     const res = await request(app)
       .post(`/store/${STORE_TOKEN}`)
       .set(storeAuth())
-      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], fulfilment: 'pickup' });
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
 
     expect(res.status).toBe(429);
     expect(res.body.code).toBe('too_many_pending');

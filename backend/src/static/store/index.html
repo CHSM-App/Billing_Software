@@ -205,6 +205,8 @@
     .pay { border: 1px dashed var(--brand); background: var(--brand-light); border-radius: var(--r-md);
       padding: 16px; margin-bottom: 16px; text-align: center; }
     .pay .amt { font-size: 20px; font-weight: 800; color: var(--brand-dark); letter-spacing: -0.4px; }
+    .who { display: flex; align-items: center; gap: 6px; margin: -4px 0 16px;
+      font-size: 13px; color: var(--muted); }
     .pay-seg { margin-bottom: 12px; }
     .pay-seg button { background: var(--card); border-color: var(--line); }
     .pay-seg button.sel { background: var(--brand); border-color: var(--brand); color: #fff; }
@@ -261,6 +263,12 @@
       <h2>Checkout</h2>
       <p id="coSub">Tell the shop how you'd like your order.</p>
 
+      <div class="label">Your details</div>
+      <input id="coName" type="text" placeholder="Your name" autocomplete="name" />
+      <!-- The OTP-verified number, shown read-only so the customer can see
+           which phone the shop will call about this order. -->
+      <div class="who" id="coPhone" style="display:none"></div>
+
       <div id="coFulfilWrap">
         <div class="label">How would you like it?</div>
         <div class="seg" id="coSeg"></div>
@@ -306,7 +314,6 @@
     <div class="sheet">
       <h2 id="otpTitle">Verify your phone</h2>
       <p id="otpSub">We'll send a one-time code on WhatsApp to confirm your order.</p>
-      <input id="nameInput" type="text" placeholder="Your name (optional)" autocomplete="name" />
       <input id="phoneInput" type="tel" placeholder="Mobile number" autocomplete="tel" inputmode="numeric" />
       <input id="otpInput" type="text" placeholder="Enter OTP" inputmode="numeric" style="display:none" />
       <div class="err" id="otpErr"></div>
@@ -332,6 +339,7 @@
     var LS_TOKEN = 'store_token_' + storeToken;
     var LS_PHONE = 'store_phone_' + storeToken;
     var LS_ADDR  = 'store_addr_' + storeToken;
+    var LS_NAME  = 'store_name_' + storeToken;
 
     var menu = [];            // items
     var cart = {};            // key -> { item_id, variant_id, name, price, qty }
@@ -889,7 +897,14 @@
     $('placeBtn').onclick = function () {
       if (cartCount() === 0) return;
       $('coErr').textContent = '';
+      // Returning customers should not retype what we already know.
+      $('coName').value = $('coName').value || localStorage.getItem(LS_NAME) || '';
       $('coAddress').value = $('coAddress').value || localStorage.getItem(LS_ADDR) || '';
+      var knownPhone = localStorage.getItem(LS_PHONE) || '';
+      $('coPhone').style.display = knownPhone ? 'flex' : 'none';
+      if (knownPhone) {
+        $('coPhone').textContent = '📞 ' + knownPhone + ' — the shop will call this number';
+      }
       renderCheckout();
       $('coBackdrop').classList.add('show');
     };
@@ -897,6 +912,12 @@
 
     $('coBtn').onclick = function () {
       var err = $('coErr'); err.textContent = '';
+      // A name is how the shop calls out a ready order and greets whoever
+      // collects it. Required, not optional — the old field sat in the OTP
+      // sheet, which a returning customer never sees, so it was always blank.
+      if (!$('coName').value.trim()) {
+        err.textContent = 'Please enter your name.'; return;
+      }
       if (fulfilment === 'delivery' && !$('coAddress').value.trim()) {
         err.textContent = 'Please enter the delivery address.'; return;
       }
@@ -904,6 +925,7 @@
       if (cfg.payment_required && m.due > 0 && !$('coTxn').value.trim()) {
         err.textContent = 'Please pay and enter the transaction ID to confirm.'; return;
       }
+      localStorage.setItem(LS_NAME, $('coName').value.trim());
       if (fulfilment === 'delivery') localStorage.setItem(LS_ADDR, $('coAddress').value.trim());
       if (authToken) submitOrder(); else openOtp();
     };
@@ -969,7 +991,7 @@
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
         body: JSON.stringify({
           items: lines,
-          name: $('nameInput').value.trim() || undefined,
+          name: $('coName').value.trim(),
           fulfilment: fulfilment,
           address: fulfilment === 'delivery' ? $('coAddress').value.trim() : undefined,
           note: $('coNote').value.trim() || undefined,

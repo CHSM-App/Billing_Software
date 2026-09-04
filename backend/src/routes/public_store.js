@@ -57,6 +57,7 @@ const STORE_TOKEN_TTL = '4h';
 // A verified number may keep at most this many orders waiting on the shop, so a
 // single customer cannot bury the owner's queue.
 const MAX_PENDING_PER_PHONE = 3;
+const MAX_NAME_LEN = 200;   // matches online_orders.customer_name
 const MAX_ADDRESS_LEN = 500;
 const MAX_NOTE_LEN = 500;
 const MAX_TXN_LEN = 64;
@@ -357,6 +358,17 @@ router.post('/:token', storeLimiter, async (req, res) => {
     });
   }
 
+  // Required, unlike the table-QR flow where staff can see who is sitting
+  // there. A delivery rider or a counter calling out a collection order has
+  // nothing but this name and the phone.
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+  if (!cleanName) {
+    return res.status(400).json({ code: 'name_required', error: 'Please enter your name.' });
+  }
+  if (cleanName.length > MAX_NAME_LEN) {
+    return res.status(400).json({ error: 'Name is too long' });
+  }
+
   const cleanAddress = typeof address === 'string' ? address.trim() : '';
   if (fulfilment === 'delivery' && !cleanAddress) {
     return res.status(400).json({ error: 'A delivery address is required' });
@@ -443,7 +455,7 @@ router.post('/:token', storeLimiter, async (req, res) => {
     const createRes = await transaction.request()
       .input('business_id', sql.UniqueIdentifier, store.business_id)
       .input('order_number', sql.NVarChar(50), orderNumber)
-      .input('customer_name', sql.NVarChar(200), (name || '').trim() || null)
+      .input('customer_name', sql.NVarChar(200), cleanName)
       .input('customer_phone', sql.NVarChar(20), payload.phone)
       .input('fulfilment', sql.NVarChar(20), fulfilment)
       .input('address', sql.NVarChar(500), cleanAddress || null)
@@ -492,7 +504,7 @@ router.post('/:token', storeLimiter, async (req, res) => {
     broadcast(store.business_id, { type: 'store' });
     sendOnlineOrderNotification(pool, sql, store.business_id, {
       orderNumber: order.order_number,
-      customerName: (name || '').trim() || null,
+      customerName: cleanName,
       total,
       itemCount: priced.length,
     }).catch((err) => logger.error({ err }, 'Online order push failed'));
