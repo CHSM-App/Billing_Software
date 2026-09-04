@@ -554,6 +554,12 @@ abstract class AppLocalizations {
   /// **'Profile'**
   String get settingsTitle;
 
+  /// No description provided for @settingsSubscriptionActiveTill.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription active till {date}'**
+  String settingsSubscriptionActiveTill(String date);
+
   /// No description provided for @settingsSectionActivity.
   ///
   /// In en, this message translates to:

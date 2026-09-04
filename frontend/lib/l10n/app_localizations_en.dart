@@ -270,6 +270,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsTitle => 'Profile';
 
   @override
+  String settingsSubscriptionActiveTill(String date) {
+    return 'Subscription active till $date';
+  }
+
+  @override
   String get settingsSectionActivity => 'ACTIVITY';
 
   @override

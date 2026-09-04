@@ -30,6 +30,11 @@ class LicenseStatus {
   final LicenseState state;
   final int? daysUntilExpiry;      // for warning banner
   final int? graceDaysRemaining;   // how many grace days left
+  /// The subscription's actual expiry date — set on [LicenseState.allowed] and
+  /// [LicenseState.grace] so the Profile screen can show "Active till DATE"
+  /// without re-deriving it from [daysUntilExpiry] (which is truncated days,
+  /// not the real timestamp).
+  final DateTime? expiresAt;
   /// True when the check failed because the local session (access/refresh
   /// token) is invalid or unreadable rather than because the device is
   /// offline. Callers should send the user to the login screen instead of
@@ -41,6 +46,7 @@ class LicenseStatus {
     this.state, {
     this.daysUntilExpiry,
     this.graceDaysRemaining,
+    this.expiresAt,
     this.sessionInvalid = false,
   });
 }
@@ -286,14 +292,16 @@ class LicenseService {
     if (offlineDays <= maxOfflineDays) {
       // Within offline limit — allowed
       final daysUntilExpiry = expiresAt.difference(now).inDays;
-      return LicenseStatus(LicenseState.allowed, daysUntilExpiry: daysUntilExpiry);
+      return LicenseStatus(LicenseState.allowed,
+          daysUntilExpiry: daysUntilExpiry, expiresAt: expiresAt);
     }
 
     final totalAllowed = maxOfflineDays + gracePeriodDays;
     if (offlineDays <= totalAllowed) {
       // In grace period — show warning
       final graceDaysRemaining = totalAllowed - offlineDays;
-      return LicenseStatus(LicenseState.grace, graceDaysRemaining: graceDaysRemaining);
+      return LicenseStatus(LicenseState.grace,
+          graceDaysRemaining: graceDaysRemaining, expiresAt: expiresAt);
     }
 
     // Exceeded offline limit + grace — hard block

@@ -90,6 +90,8 @@
   "@kitchenMinAgo": { "placeholders": { "minutes": { "type": "int" } } },
 
   "settingsTitle": "Profile",
+  "settingsSubscriptionActiveTill": "Subscription active till {date}",
+  "@settingsSubscriptionActiveTill": { "placeholders": { "date": { "type": "String" } } },
   "settingsSectionActivity": "ACTIVITY",
   "settingsSectionReports": "REPORTS",
   "settingsHistory": "History",

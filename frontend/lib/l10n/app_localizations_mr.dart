@@ -271,6 +271,11 @@ class AppLocalizationsMr extends AppLocalizations {
   String get settingsTitle => 'प्रोफाइल';
 
   @override
+  String settingsSubscriptionActiveTill(String date) {
+    return 'सबस्क्रिप्शन $date पर्यंत सक्रिय आहे';
+  }
+
+  @override
   String get settingsSectionActivity => 'कार्य';
 
   @override

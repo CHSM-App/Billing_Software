@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb; // used to hide printer tile on web
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/license_service.dart';
 import '../api.dart';
 import '../storage.dart';
 import '../l10n/l10n_ext.dart';
@@ -65,6 +67,8 @@ class _SettingsContentState extends State<_SettingsContent>
   late final AnimationController _controller;
   late final Animation<double> _fadeAnim;
   String _appVersion = '';
+  LicenseStatus? _license;
+  static final _subDateFmt = DateFormat('dd MMM yyyy');
 
   @override
   void initState() {
@@ -78,6 +82,14 @@ class _SettingsContentState extends State<_SettingsContent>
     _controller.forward();
     PackageInfo.fromPlatform().then((info) {
       if (mounted) setState(() => _appVersion = info.version);
+    });
+    // Same online-first, offline-cache-fallback check the app already runs at
+    // startup/resume (see MainShell) — this just reads the same result to show
+    // it, rather than re-deriving expiry from scratch.
+    LicenseService.instance
+        .check(isOnline: widget.ref.read(connectivityProvider))
+        .then((status) {
+      if (mounted) setState(() => _license = status);
     });
   }
 
@@ -568,6 +580,28 @@ class _SettingsContentState extends State<_SettingsContent>
               ),
             ],
           ),
+          // Subscription expiry - same style as the rows above. Only ever set
+          // on LicenseState.allowed/grace (see LicenseStatus.expiresAt), so a
+          // blocked subscription simply shows no row here; the full-screen
+          // block elsewhere already covers that case.
+          if (_license?.expiresAt != null) ...[
+            const SizedBox(height: 6.0),
+            Row(
+              children: [
+                const Icon(Icons.event_available_outlined,
+                    size: 16, color: Colors.white70),
+                const SizedBox(width: AppSpacing.space8),
+                Text(
+                  context.l10n.settingsSubscriptionActiveTill(
+                      _subDateFmt.format(_license!.expiresAt!)),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white.withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

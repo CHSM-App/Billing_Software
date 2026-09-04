@@ -90,6 +90,8 @@
   "@kitchenMinAgo": { "placeholders": { "minutes": { "type": "int" } } },
 
   "settingsTitle": "प्रोफाइल",
+  "settingsSubscriptionActiveTill": "सबस्क्रिप्शन {date} पर्यंत सक्रिय आहे",
+  "@settingsSubscriptionActiveTill": { "placeholders": { "date": { "type": "String" } } },
   "settingsSectionActivity": "कार्य",
   "settingsSectionReports": "अहवाल",
   "settingsHistory": "इतिहास",
