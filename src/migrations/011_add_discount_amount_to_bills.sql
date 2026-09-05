@@ -1,0 +1,3 @@
+ALTER TABLE bills
+  ADD discount_amount DECIMAL(10, 2) NOT NULL DEFAULT 0;
+GO

@@ -1,0 +1,1 @@
+curl -X POST https://Vittam.vengurlatech.com/api/license/admin/activate -H "Content-Type: application/json" -H "x-admin-secret: "a12a4d060dad802359cdd0e8ba351265f73625e6eebaf4ac6421fb981e70336c" " -d "{\"business_id\": \"E7AA34DE-E9ED-4028-8383-50474D7EA780\", \"expires_at\": \"2027-07-22\", \"max_offline_days\": 1, \"grace_period_days\": 5, \"status\": \"active\"}"

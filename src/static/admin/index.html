@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex, nofollow"/>
+<title>Vittam Admin</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#141b2e; --panel2:#1b2540; --border:#26304d;
+    --text:#e6eaf5; --muted:#8b96b5; --primary:#5b8cff; --primary-d:#3f6fe0;
+    --green:#22c55e; --amber:#f59e0b; --red:#ef4444; --chip:#233152;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:var(--primary)}
+  button{font-family:inherit;cursor:pointer}
+  input,select{font-family:inherit;font-size:14px}
+
+  /* ---------- Login ---------- */
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .login-card{background:var(--panel);border:1px solid var(--border);border-radius:16px;
+    padding:32px;width:100%;max-width:360px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+  .login-card h1{font-size:20px;margin-bottom:4px}
+  .login-card .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+  .field input{width:100%;padding:11px 12px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:9px;color:var(--text);outline:none}
+  .field input:focus{border-color:var(--primary)}
+  .btn{background:var(--primary);color:#fff;border:none;border-radius:9px;padding:11px 16px;
+    font-weight:600;width:100%;transition:background .15s}
+  .btn:hover{background:var(--primary-d)}
+  .btn:disabled{opacity:.6;cursor:default}
+  .err{color:var(--red);font-size:13px;margin-top:12px;min-height:18px}
+
+  /* ---------- App shell ---------- */
+  #app{display:none}
+  header{position:sticky;top:0;z-index:10;background:rgba(11,16,32,.9);backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:16px;font-weight:700;letter-spacing:.3px}
+  header .spacer{flex:1}
+  .search{background:var(--panel2);border:1px solid var(--border);border-radius:9px;
+    padding:8px 12px;color:var(--text);outline:none;min-width:200px}
+  .search:focus{border-color:var(--primary)}
+  .ghost{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:8px 12px}
+  .ghost:hover{color:var(--text);border-color:var(--muted)}
+  .stat{color:var(--muted);font-size:13px}
+  .stat b{color:var(--text)}
+
+  main{padding:20px;max-width:1600px;margin:0 auto}
+  .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:var(--panel)}
+  table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
+  thead th{text-align:left;padding:11px 14px;color:var(--muted);font-size:11px;text-transform:uppercase;
+    letter-spacing:.6px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel2)}
+  tbody td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--panel2)}
+  .biz-name{font-weight:600;white-space:normal;min-width:150px}
+  .biz-sub{color:var(--muted);font-size:12px}
+  .chip{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:var(--chip)}
+  .chip.green{background:rgba(34,197,94,.15);color:#4ade80}
+  .chip.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+  .chip.red{background:rgba(239,68,68,.15);color:#f87171}
+  .chip.blue{background:rgba(91,140,255,.15);color:#93b4ff}
+  .chip.gray{background:var(--chip);color:var(--muted)}
+  .devs{display:flex;gap:5px}
+  .manage{background:var(--primary);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:600}
+  .manage:hover{background:var(--primary-d)}
+  .muted{color:var(--muted)}
+  .empty{padding:60px;text-align:center;color:var(--muted)}
+
+  /* ---------- Drawer ---------- */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:none}
+  .overlay.open{display:block}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:100%;max-width:460px;background:var(--panel);
+    border-left:1px solid var(--border);z-index:51;transform:translateX(100%);transition:transform .22s ease;
+    display:flex;flex-direction:column}
+  .drawer.open{transform:translateX(0)}
+  .drawer-head{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:12px}
+  .drawer-head .x{background:transparent;border:none;color:var(--muted);font-size:22px;line-height:1}
+  .drawer-head h2{font-size:17px}
+  .drawer-body{padding:20px;overflow-y:auto;flex:1}
+  .drawer-foot{padding:16px 20px;border-top:1px solid var(--border);display:flex;gap:10px}
+  .section-label{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+    margin:18px 0 10px;font-weight:700}
+  .section-label:first-child{margin-top:0}
+  .row{display:flex;gap:12px}
+  .row .field{flex:1}
+  .field select, .field input[type=date], .field input[type=number]{
+    width:100%;padding:9px 11px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:8px;color:var(--text);outline:none}
+  .field select:focus,.field input:focus{border-color:var(--primary)}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;
+    background:var(--panel2);border:1px solid var(--border);border-radius:8px;margin-bottom:8px}
+  .toggle-row span{font-size:13px}
+  .switch{position:relative;width:42px;height:24px;flex:none}
+  .switch input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;background:var(--border);border-radius:24px;transition:.2s}
+  .slider:before{content:'';position:absolute;height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+  .switch input:checked + .slider{background:var(--green)}
+  .switch input:checked + .slider:before{transform:translateX(18px)}
+  .kv{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid var(--border)}
+  .kv:last-child{border-bottom:none}
+  .kv .k{color:var(--muted)}
+  .save-btn{flex:1;background:var(--primary);color:#fff;border:none;border-radius:9px;padding:12px;font-weight:600}
+  .save-btn:hover{background:var(--primary-d)}
+  .save-btn:disabled{opacity:.6;cursor:default}
+  .cancel-btn{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:9px;padding:12px 18px}
+  .drawer-msg{font-size:13px;margin-top:10px;min-height:18px}
+  .drawer-msg.ok{color:#4ade80}
+  .drawer-msg.bad{color:#f87171}
+
+  /* Toast */
+  #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);
+    background:var(--panel2);border:1px solid var(--border);color:var(--text);padding:12px 20px;
+    border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.4);z-index:100;opacity:0;transition:.25s;font-size:13px}
+  #toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+  #toast.bad{border-color:var(--red)}
+</style>
+</head>
+<body>
+
+<!-- ===== Login ===== -->
+<div id="login">
+  <form class="login-card" id="loginForm">
+    <h1>Vittam Admin</h1>
+    <div class="sub">Internal control panel</div>
+    <div class="field">
+      <label for="u">Username</label>
+      <input id="u" autocomplete="username" autofocus/>
+    </div>
+    <div class="field">
+      <label for="p">Password</label>
+      <input id="p" type="password" autocomplete="current-password"/>
+    </div>
+    <button class="btn" id="loginBtn" type="submit">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<!-- ===== App ===== -->
+<div id="app">
+  <header>
+    <h1>Vittam Admin</h1>
+    <span class="stat" id="counts"></span>
+    <div class="spacer"></div>
+    <input class="search" id="search" placeholder="Search name / phone / owner…"/>
+    <button class="ghost" id="refreshBtn">Refresh</button>
+    <button class="ghost" id="logoutBtn">Log out</button>
+  </header>
+  <main>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Business</th>
+            <th>Owner</th>
+            <th>Registered</th>
+            <th>Last Active</th>
+            <th>Subscription</th>
+            <th>Expires</th>
+            <th>Staff</th>
+            <th>Bills</th>
+            <th>Items</th>
+            <th>Devices</th>
+            <th>WhatsApp</th>
+            <th>Verified</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty" style="display:none">No businesses found.</div>
+    </div>
+  </main>
+</div>
+
+<!-- ===== Edit drawer ===== -->
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div style="flex:1">
+      <h2 id="dName">—</h2>
+      <div class="biz-sub" id="dMeta"></div>
+    </div>
+    <button class="x" id="dClose">&times;</button>
+  </div>
+  <div class="drawer-body">
+    <div class="section-label">Account</div>
+    <div class="kv"><span class="k">Owner</span><span id="dOwner">—</span></div>
+    <div class="kv"><span class="k">Phone</span><span id="dPhone">—</span></div>
+    <div class="kv"><span class="k">Type</span><span id="dType">—</span></div>
+    <div class="kv"><span class="k">Registered</span><span id="dCreated">—</span></div>
+    <div class="kv"><span class="k">Last active</span><span id="dLastActive">—</span></div>
+    <div class="kv"><span class="k">Bills</span><span id="dBills">—</span></div>
+    <div class="kv"><span class="k">Items</span><span id="dItems">—</span></div>
+
+    <div class="section-label">Subscription</div>
+    <div class="toggle-row">
+      <span>Trial subscription</span>
+      <label class="switch"><input type="checkbox" id="fTrial"/><span class="slider"></span></label>
+    </div>
+    <div class="field">
+      <label>Status</label>
+      <select id="fStatus">
+        <option value="active">active</option>
+        <option value="pending">pending</option>
+        <option value="suspended">suspended</option>
+        <option value="expired">expired</option>
+      </select>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Expires on</label>
+        <input type="date" id="fExpires"/>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>Max offline days</label>
+        <input type="number" id="fOffline" min="0"/>
+      </div>
+      <div class="field">
+        <label>Grace period days</label>
+        <input type="number" id="fGrace" min="0"/>
+      </div>
+    </div>
+
+    <div class="section-label">Limits &amp; Devices</div>
+    <div class="field">
+      <label>Max staff</label>
+      <input type="number" id="fMaxStaff" min="0"/>
+    </div>
+    <div class="toggle-row">
+      <span>Allow mobile (Android / iOS)</span>
+      <label class="switch"><input type="checkbox" id="fMobile"/><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <span>Allow desktop (Windows / web)</span>
+      <label class="switch"><input type="checkbox" id="fDesktop"/><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <span>Allow online store</span>
+      <label class="switch"><input type="checkbox" id="fOnlineStore"/><span class="slider"></span></label>
+    </div>
+
+    <div class="section-label">Messaging &amp; Verification</div>
+    <div class="field">
+      <label>WhatsApp mode</label>
+      <select id="fWhatsapp">
+        <option value="deeplink">deeplink (free — opens cashier's WhatsApp)</option>
+        <option value="api">api (paid — auto-send via Business API)</option>
+      </select>
+    </div>
+    <div class="toggle-row">
+      <span>Verified (can log in)</span>
+      <label class="switch"><input type="checkbox" id="fVerified"/><span class="slider"></span></label>
+    </div>
+
+    <div class="drawer-msg" id="dMsg"></div>
+  </div>
+  <div class="drawer-foot">
+    <button class="cancel-btn" id="dCancel">Cancel</button>
+    <button class="save-btn" id="dSave">Save changes</button>
+  </div>
+</aside>
+
+<div id="toast"></div>
+
+<script>
+(function(){
+  'use strict';
+  var TOKEN_KEY = 'vittam_admin_token';
+  var token = localStorage.getItem(TOKEN_KEY) || null;
+  var all = [];        // full list
+  var current = null;  // business being edited
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  // ---- API helper ----
+  function api(method, path, body){
+    var opts = { method: method, headers: {} };
+    if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+    if (body !== undefined){ opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    return fetch('/admin/api' + path, opts).then(function(r){
+      if (r.status === 401){ logout(); throw new Error('Session expired — please sign in again.'); }
+      return r.json().catch(function(){ return {}; }).then(function(data){
+        if (!r.ok) throw new Error(data.error || ('Request failed (' + r.status + ')'));
+        return data;
+      });
+    });
+  }
+
+  function toast(msg, bad){
+    var t = $('toast'); t.textContent = msg; t.className = bad ? 'bad show' : 'show';
+    setTimeout(function(){ t.className = bad ? 'bad' : ''; }, 2600);
+  }
+
+  // ---- Auth ----
+  function showApp(){ $('login').style.display='none'; $('app').style.display='block'; load(); }
+  function showLogin(){ $('app').style.display='none'; $('login').style.display='flex'; }
+  function logout(){ token=null; localStorage.removeItem(TOKEN_KEY); showLogin(); }
+
+  $('loginForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    var btn=$('loginBtn'); btn.disabled=true; $('loginErr').textContent='';
+    fetch('/admin/api/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ username:$('u').value, password:$('p').value })
+    }).then(function(r){ return r.json().then(function(d){ if(!r.ok) throw new Error(d.error||'Login failed'); return d; }); })
+      .then(function(d){ token=d.token; localStorage.setItem(TOKEN_KEY, token); $('p').value=''; showApp(); })
+      .catch(function(err){ $('loginErr').textContent = err.message; })
+      .finally(function(){ btn.disabled=false; });
+  });
+  $('logoutBtn').addEventListener('click', logout);
+  $('refreshBtn').addEventListener('click', load);
+
+  // ---- List ----
+  function load(){
+    api('GET','/businesses').then(function(d){
+      all = d.businesses || [];
+      render();
+    }).catch(function(err){ toast(err.message, true); });
+  }
+
+  function fmtDate(s){
+    if(!s) return '—';
+    var d = new Date(s);
+    if(isNaN(d)) return '—';
+    return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  }
+  // Relative "last active" label + colour: green if within a day, amber within
+  // a week, gray/red for stale or never. Returns a ready-to-insert chip string.
+  function fmtLastActive(s){
+    if(!s) return '<span class="chip gray">never</span>';
+    var d = new Date(s); if(isNaN(d)) return '<span class="chip gray">never</span>';
+    var mins = Math.floor((new Date() - d)/60000);
+    var label, cls;
+    if(mins < 2){ label='just now'; cls='green'; }
+    else if(mins < 60){ label=mins+'m ago'; cls='green'; }
+    else if(mins < 1440){ label=Math.floor(mins/60)+'h ago'; cls='green'; }
+    else {
+      var days = Math.floor(mins/1440);
+      label = days+'d ago';
+      cls = days<=7 ? 'amber' : 'red';
+    }
+    return '<span class="chip '+cls+'" title="'+esc(d.toLocaleString('en-IN'))+'">'+label+'</span>';
+  }
+  function daysLeft(s){
+    if(!s) return null;
+    var d = new Date(s); if(isNaN(d)) return null;
+    return Math.ceil((d - new Date())/(24*60*60*1000));
+  }
+  function esc(v){ return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function statusChip(sub){
+    if(!sub) return '<span class="chip gray">none</span>';
+    var cls = sub.status==='active' ? 'green' : (sub.status==='pending' ? 'amber' : 'red');
+    var trial = sub.is_trial ? ' <span class="chip blue">trial</span>' : '';
+    return '<span class="chip '+cls+'">'+esc(sub.status)+'</span>'+trial;
+  }
+  function devChips(sub){
+    if(!sub) return '<span class="muted">—</span>';
+    var m = '<span class="chip '+(sub.allow_mobile?'green':'gray')+'">Mob</span>';
+    var d = '<span class="chip '+(sub.allow_desktop?'green':'gray')+'">Desk</span>';
+    return '<div class="devs">'+m+d+'</div>';
+  }
+
+  function render(){
+    var q = ($('search').value||'').toLowerCase().trim();
+    var list = all.filter(function(b){
+      if(!q) return true;
+      return (b.name||'').toLowerCase().indexOf(q)>=0
+        || (b.phone||'').toLowerCase().indexOf(q)>=0
+        || (b.owner_name||'').toLowerCase().indexOf(q)>=0
+        || (b.owner_phone||'').toLowerCase().indexOf(q)>=0;
+    });
+
+    var active = all.filter(function(b){ return b.subscription && b.subscription.status==='active'; }).length;
+    $('counts').innerHTML = '<b>'+all.length+'</b> businesses &middot; <b>'+active+'</b> active';
+
+    var rows = list.map(function(b){
+      var sub = b.subscription;
+      var dl = sub ? daysLeft(sub.expires_at) : null;
+      var expClass = dl!=null && dl<0 ? 'red' : (dl!=null && dl<=3 ? 'amber' : 'gray');
+      var expTxt = sub ? (fmtDate(sub.expires_at) + (dl!=null ? ' <span class="chip '+expClass+'">'+(dl<0?'expired':dl+'d')+'</span>' : '')) : '<span class="muted">—</span>';
+      var staff = sub ? (b.staff_count+' / '+(sub.max_staff==null?'∞':sub.max_staff)) : b.staff_count;
+      var wa = '<span class="chip '+(b.whatsapp_mode==='api'?'blue':'gray')+'">'+esc(b.whatsapp_mode)+'</span>';
+      var ver = b.is_verified ? '<span class="chip green">yes</span>' : '<span class="chip red">no</span>';
+      return '<tr>'
+        + '<td><div class="biz-name">'+esc(b.name)+'</div><div class="biz-sub">'+esc(b.phone)+' &middot; '+esc(b.business_type)+'</div></td>'
+        + '<td>'+esc(b.owner_name||'—')+'<div class="biz-sub">'+esc(b.owner_phone||'')+'</div></td>'
+        + '<td>'+fmtDate(b.created_at)+'</td>'
+        + '<td>'+fmtLastActive(b.last_active_at)+'</td>'
+        + '<td>'+statusChip(sub)+'</td>'
+        + '<td>'+expTxt+'</td>'
+        + '<td>'+staff+'</td>'
+        + '<td>'+(b.bill_count!=null?b.bill_count:0)+'</td>'
+        + '<td>'+(b.item_count!=null?b.item_count:0)+'</td>'
+        + '<td>'+devChips(sub)+'</td>'
+        + '<td>'+wa+'</td>'
+        + '<td>'+ver+'</td>'
+        + '<td><button class="manage" data-id="'+b.id+'">Manage</button></td>'
+        + '</tr>';
+    }).join('');
+
+    $('rows').innerHTML = rows;
+    $('empty').style.display = list.length ? 'none' : 'block';
+
+    Array.prototype.forEach.call(document.querySelectorAll('.manage'), function(btn){
+      btn.addEventListener('click', function(){ openDrawer(btn.getAttribute('data-id')); });
+    });
+  }
+  $('search').addEventListener('input', render);
+
+  // ---- Drawer ----
+  function toDateInput(s){
+    if(!s) return '';
+    var d = new Date(s); if(isNaN(d)) return '';
+    // yyyy-mm-dd in local time
+    var mm = String(d.getMonth()+1).padStart(2,'0');
+    var dd = String(d.getDate()).padStart(2,'0');
+    return d.getFullYear()+'-'+mm+'-'+dd;
+  }
+
+  function openDrawer(id){
+    current = all.filter(function(b){ return b.id===id; })[0];
+    if(!current) return;
+    var b = current, sub = b.subscription || {};
+    $('dName').textContent = b.name;
+    $('dMeta').textContent = b.business_type + ' · ' + b.phone;
+    $('dOwner').textContent = b.owner_name || '—';
+    $('dPhone').textContent = b.owner_phone || '—';
+    $('dType').textContent = b.business_type;
+    $('dCreated').textContent = fmtDate(b.created_at);
+    $('dLastActive').innerHTML = fmtLastActive(b.last_active_at)
+      + (b.last_active_at ? ' <span class="muted">'+esc(new Date(b.last_active_at).toLocaleString('en-IN'))+'</span>' : '');
+    $('dBills').textContent = b.bill_count!=null ? b.bill_count : 0;
+    $('dItems').textContent = b.item_count!=null ? b.item_count : 0;
+
+    $('fTrial').checked = !!sub.is_trial;
+    $('fStatus').value  = sub.status || 'active';
+    $('fExpires').value = toDateInput(sub.expires_at);
+    $('fOffline').value = sub.max_offline_days!=null ? sub.max_offline_days : 30;
+    $('fGrace').value   = sub.grace_period_days!=null ? sub.grace_period_days : 5;
+    $('fMaxStaff').value= sub.max_staff!=null ? sub.max_staff : 10;
+    $('fMobile').checked = sub.allow_mobile !== false;
+    $('fDesktop').checked = sub.allow_desktop !== false;
+    $('fOnlineStore').checked = sub.allow_online_store !== false;
+    $('fWhatsapp').value = b.whatsapp_mode || 'deeplink';
+    $('fVerified').checked = !!b.is_verified;
+    $('dMsg').textContent = '';
+
+    $('overlay').classList.add('open');
+    $('drawer').classList.add('open');
+  }
+  function closeDrawer(){ $('overlay').classList.remove('open'); $('drawer').classList.remove('open'); current=null; }
+  $('dClose').addEventListener('click', closeDrawer);
+  $('dCancel').addEventListener('click', closeDrawer);
+  $('overlay').addEventListener('click', closeDrawer);
+
+  $('dSave').addEventListener('click', function(){
+    if(!current) return;
+    var btn=$('dSave'); btn.disabled=true; $('dMsg').textContent='';
+    // expires_at: send end-of-day so "expires on <date>" lasts the whole day.
+    var expVal = $('fExpires').value ? new Date($('fExpires').value+'T23:59:59').toISOString() : undefined;
+    var payload = {
+      status: $('fStatus').value,
+      expires_at: expVal,
+      max_offline_days: parseInt($('fOffline').value,10),
+      grace_period_days: parseInt($('fGrace').value,10),
+      max_staff: parseInt($('fMaxStaff').value,10),
+      allow_mobile: $('fMobile').checked,
+      allow_desktop: $('fDesktop').checked,
+      allow_online_store: $('fOnlineStore').checked,
+      is_trial: $('fTrial').checked,
+      whatsapp_mode: $('fWhatsapp').value,
+      is_verified: $('fVerified').checked
+    };
+    api('PUT','/businesses/'+current.id, payload).then(function(){
+      $('dMsg').className='drawer-msg ok'; $('dMsg').textContent='Saved.';
+      toast('Saved '+current.name);
+      return load();
+    }).then(function(){
+      setTimeout(closeDrawer, 500);
+    }).catch(function(err){
+      $('dMsg').className='drawer-msg bad'; $('dMsg').textContent=err.message;
+    }).finally(function(){ btn.disabled=false; });
+  });
+
+  // ---- Boot ----
+  if(token) showApp(); else showLogin();
+})();
+</script>
+</body>
+</html>

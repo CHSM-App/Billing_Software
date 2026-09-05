@@ -1,0 +1,13 @@
+# https://vittam.vengurlatech.com/robots.txt
+User-agent: *
+Allow: /
+
+# Application, API and internal surfaces — no crawl value, keep them out of the index.
+Disallow: /api/
+Disallow: /admin/
+Disallow: /order/
+Disallow: /receipt/
+Disallow: /uploads/
+Disallow: /downloads/
+
+Sitemap: https://vittam.vengurlatech.com/sitemap.xml
