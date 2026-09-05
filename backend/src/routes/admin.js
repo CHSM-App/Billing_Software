@@ -152,7 +152,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
            WHERE bl.business_id = b.id
              AND bl.status = 'finalized') AS bill_count,
         (SELECT COUNT(*) FROM items it
-           WHERE it.business_id = b.id) AS item_count
+           WHERE it.business_id = b.id AND it.is_active = 1) AS item_count
       FROM businesses b
       LEFT JOIN users u ON u.business_id = b.id AND u.role = 'owner'
       LEFT JOIN subscriptions s ON s.business_id = b.id
