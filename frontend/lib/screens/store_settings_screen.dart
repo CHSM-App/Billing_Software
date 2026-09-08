@@ -1,3 +1,4 @@
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -46,6 +47,22 @@ class _StoreSettingsScreenState extends ConsumerState<StoreSettingsScreen> {
   bool _paymentRequired = false;
   String? _paymentQrUrl;
 
+  // ── Editing the store link ────────────────────────────────────────────────
+  // The card is read-only until the owner taps "Edit link"; the field then
+  // checks availability as they type so they learn a link is taken before
+  // committing to it rather than on save.
+  final _linkController = TextEditingController();
+  bool _editingLink = false;
+  bool _checkingLink = false;
+  /// null while unchecked/checking; true = free, false = rejected ([_linkError]
+  /// says why).
+  bool? _linkAvailable;
+  String? _linkError;
+  /// Guards against a slow earlier check landing after a later one and
+  /// overwriting its verdict with a stale answer.
+  int _linkCheckSeq = 0;
+  Timer? _linkDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -54,6 +71,8 @@ class _StoreSettingsScreenState extends ConsumerState<StoreSettingsScreen> {
 
   @override
   void dispose() {
+    _linkDebounce?.cancel();
+    _linkController.dispose();
     _deliveryController.dispose();
     _advanceController.dispose();
     _upiController.dispose();
@@ -87,6 +106,100 @@ class _StoreSettingsScreenState extends ConsumerState<StoreSettingsScreen> {
   }
 
   String get _link => _storeToken == null ? '' : storeUrl(_storeToken!);
+
+  // ── Editing the store link ────────────────────────────────────────────────
+
+  void _startEditingLink() {
+    setState(() {
+      _editingLink = true;
+      _linkController.text = _storeToken ?? '';
+      // The current link is trivially "available" to its own shop, but there is
+      // nothing to save until it actually changes, so start with no verdict.
+      _linkAvailable = null;
+      _linkError = null;
+      _checkingLink = false;
+    });
+  }
+
+  void _cancelEditingLink() {
+    _linkDebounce?.cancel();
+    setState(() {
+      _editingLink = false;
+      _linkError = null;
+      _linkAvailable = null;
+      _checkingLink = false;
+    });
+  }
+
+  /// Ask the server whether what has been typed is usable, a beat after typing
+  /// stops. Debounced so a 12-character link is one request, not twelve.
+  void _onLinkChanged(String value) {
+    _linkDebounce?.cancel();
+    final slug = value.trim();
+    // Unchanged from what is already saved: nothing to check, nothing to save.
+    if (slug == (_storeToken ?? '')) {
+      setState(() {
+        _checkingLink = false;
+        _linkAvailable = null;
+        _linkError = null;
+      });
+      return;
+    }
+    setState(() {
+      _checkingLink = true;
+      _linkAvailable = null;
+      _linkError = null;
+    });
+    _linkDebounce = Timer(const Duration(milliseconds: 400), () async {
+      final seq = ++_linkCheckSeq;
+      try {
+        final r = await checkStoreLink(slug);
+        // A later keystroke already started its own check — drop this answer
+        // rather than letting it overwrite a fresher verdict.
+        if (!mounted || seq != _linkCheckSeq) return;
+        setState(() {
+          _checkingLink = false;
+          _linkAvailable = r.available;
+          _linkError = r.error;
+        });
+      } catch (e) {
+        if (!mounted || seq != _linkCheckSeq) return;
+        setState(() {
+          _checkingLink = false;
+          _linkAvailable = null;
+          _linkError = sanitizeUiErrorMessage(e);
+        });
+      }
+    });
+  }
+
+  /// Claim the typed link. The server re-checks it — the availability probe
+  /// above is advisory, and someone else can take a link in between — so a
+  /// rejection here is expected, not exceptional.
+  Future<void> _saveLink() async {
+    final l10n = context.l10n;
+    final slug = _linkController.text.trim();
+    if (slug.isEmpty || slug == _storeToken) return _cancelEditingLink();
+
+    setState(() => _saving = true);
+    try {
+      final updated = await updateBusinessProfile({'store_token': slug});
+      if (!mounted) return;
+      setState(() {
+        _storeToken = (updated['store_token'] as String?) ?? _storeToken;
+        _editingLink = false;
+        _linkError = null;
+        _linkAvailable = null;
+      });
+      _snack(l10n.storeLinkUpdated);
+    } on ApiException catch (e) {
+      // Stay in edit mode with the reason under the field: the owner needs to
+      // pick a different link, and bouncing them out would lose what they typed.
+      if (mounted) setState(() => _linkError = sanitizeUiErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   /// Full URL for the stored QR path — the server returns it root-relative.
   String? get _qrImageUrl {
@@ -345,40 +458,165 @@ class _StoreSettingsScreenState extends ConsumerState<StoreSettingsScreen> {
             Text(l10n.storeLinkHint,
                 style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
             const SizedBox(height: AppSpacing.space12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.space12),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceVariant,
-                borderRadius: BorderRadius.circular(AppRadius.small),
-              ),
-              child: SelectableText(_link,
-                  style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
-            ),
-            const SizedBox(height: AppSpacing.space12),
-            Row(children: [
-              Expanded(
-                child: SecondaryButton(
-                  text: l10n.storeCopyLink,
-                  icon: Icons.copy_outlined,
-                  onPressed: () async {
-                    await Clipboard.setData(ClipboardData(text: _link));
-                    if (mounted) _snack(l10n.storeLinkCopied);
-                  },
-                ),
-              ),
-              const SizedBox(width: AppSpacing.space8),
-              Expanded(
-                child: SecondaryButton(
-                  text: l10n.storeShareQr,
-                  icon: Icons.qr_code_2,
-                  onPressed: _shareQr,
-                ),
-              ),
-            ]),
+            if (_editingLink) ..._linkEditor(l10n) else ..._linkDisplay(l10n),
           ],
         ),
       ));
+
+  /// The settled state: the link, and what you can do with it.
+  List<Widget> _linkDisplay(AppLocalizations l10n) => [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppSpacing.space12),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceVariant,
+            borderRadius: BorderRadius.circular(AppRadius.small),
+          ),
+          child: SelectableText(_link,
+              style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
+        ),
+        const SizedBox(height: AppSpacing.space12),
+        Row(children: [
+          Expanded(
+            child: SecondaryButton(
+              text: l10n.storeCopyLink,
+              icon: Icons.copy_outlined,
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: _link));
+                if (mounted) _snack(l10n.storeLinkCopied);
+              },
+            ),
+          ),
+          const SizedBox(width: AppSpacing.space8),
+          Expanded(
+            child: SecondaryButton(
+              text: l10n.storeShareQr,
+              icon: Icons.qr_code_2,
+              onPressed: _shareQr,
+            ),
+          ),
+        ]),
+        const SizedBox(height: AppSpacing.space8),
+        // Deliberately quieter than Copy/Share: changing the link is the rare
+        // action here, and the destructive one.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _saving ? null : _startEditingLink,
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: Text(l10n.storeEditLink),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.space8),
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ),
+      ];
+
+  /// The editing state: the fixed host, then the part the owner owns.
+  List<Widget> _linkEditor(AppLocalizations l10n) {
+    final slug = _linkController.text.trim();
+    final changed = slug.isNotEmpty && slug != (_storeToken ?? '');
+    // Only offer Save once the server has actually said yes. A link that has
+    // not been checked (or is mid-check) is not something to commit to.
+    final canSave = changed && _linkAvailable == true && !_checkingLink && !_saving;
+
+    return [
+      // The host is not editable, so showing it as a prefix keeps the field
+      // about the one part the owner chooses.
+      Text('$storeBaseUrl/',
+          style: const TextStyle(
+              fontSize: 12,
+              fontFamily: 'monospace',
+              color: AppColors.textSecondary)),
+      const SizedBox(height: AppSpacing.space4),
+      TextField(
+        controller: _linkController,
+        autofocus: true,
+        enabled: !_saving,
+        // Lowercase as they type rather than rejecting it afterwards. Typing
+        // "Big Bazaar" would otherwise fail on the capital B first and the
+        // space only on the retry — two errors for one obvious intent. Case is
+        // the one rule with a single unambiguous fix, so just apply it.
+        inputFormatters: [
+          TextInputFormatter.withFunction((_, next) => next.copyWith(
+              text: next.text.toLowerCase())),
+        ],
+        onChanged: (v) => setState(() => _onLinkChanged(v)),
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) { if (canSave) _saveLink(); },
+        style: const TextStyle(fontSize: 14, fontFamily: 'monospace'),
+        decoration: InputDecoration(
+          labelText: l10n.storeLinkLabel,
+          helperText: l10n.storeLinkEditHint,
+          helperMaxLines: 3,
+          errorText: _linkError,
+          errorMaxLines: 3,
+          border: const OutlineInputBorder(),
+          isDense: true,
+          suffixIcon: _linkSuffix(),
+        ),
+      ),
+      if (_linkAvailable == true) ...[
+        const SizedBox(height: AppSpacing.space8),
+        Row(children: [
+          const Icon(Icons.check_circle_outline,
+              size: 16, color: AppColors.success),
+          const SizedBox(width: AppSpacing.space4),
+          Text(l10n.storeLinkAvailable,
+              style: const TextStyle(fontSize: 12, color: AppColors.success)),
+        ]),
+      ],
+      // Stated plainly rather than buried in a confirm dialog: the owner is
+      // about to break every QR poster already printed with the old link.
+      if (changed) ...[
+        const SizedBox(height: AppSpacing.space8),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.warning_amber_outlined,
+              size: 16, color: AppColors.warning),
+          const SizedBox(width: AppSpacing.space4),
+          Expanded(
+            child: Text(l10n.storeLinkChangeWarning,
+                style: const TextStyle(
+                    fontSize: 11, color: AppColors.textSecondary)),
+          ),
+        ]),
+      ],
+      const SizedBox(height: AppSpacing.space12),
+      Row(children: [
+        Expanded(
+          child: SecondaryButton(
+            text: l10n.storeLinkCancel,
+            onPressed: _saving ? null : _cancelEditingLink,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.space8),
+        Expanded(
+          child: PrimaryButton(
+            text: l10n.storeLinkSave,
+            onPressed: canSave ? _saveLink : null,
+          ),
+        ),
+      ]),
+    ];
+  }
+
+  /// In-field status: spinner while checking, tick when free. Failures show as
+  /// the field's own errorText instead, which reads better than an icon.
+  Widget? _linkSuffix() {
+    if (_checkingLink) {
+      return const Padding(
+        padding: EdgeInsets.all(12),
+        child: SizedBox(
+            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    if (_linkAvailable == true) {
+      return const Icon(Icons.check_circle, color: AppColors.success, size: 20);
+    }
+    return null;
+  }
 
   /// The UPI ID is what turns the payment step from "scan this and type the
   /// amount yourself" into one tap, so it sits ABOVE the QR — the QR is now the

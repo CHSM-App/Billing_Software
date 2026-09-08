@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -8,7 +9,11 @@ import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/skeletons.dart';
+import '../widgets/shell_app_bar.dart';
 import '../services/notification_service.dart';
+import '../services/printer_service.dart';
+import '../storage.dart';
+import 'kitchen_print_settings_screen.dart';
 
 /// Kitchen Display for restaurants. Shows active orders (draft bills) with each
 /// dish, letting the kitchen chef tick dishes as ready. Refreshes immediately
@@ -55,6 +60,37 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
 
   void _onPing() => _load(silent: true);
 
+  /// Print a kitchen ticket for each newly-arrived order, when the setting is
+  /// on. Best-effort by design: the queue is what the kitchen actually works
+  /// from, so a printer that is switched off or out of range must never stop
+  /// orders appearing on screen.
+  ///
+  /// Sequential, not concurrent — two jobs sent at once collide on a Bluetooth
+  /// link, the same reason [PrinterService.printBills] pauses between receipts.
+  /// The first failure stops the run: if the printer is unreachable the rest
+  /// will fail too, and one warning is enough.
+  Future<void> _autoPrintNewOrders(List<Map<String, dynamic>> orders) async {
+    if (orders.isEmpty) return;
+    if (!await getKitchenAutoPrint()) return;
+
+    final dots = PaperSizes.thermalDots(await getKitchenPaperSize());
+    for (final order in orders) {
+      try {
+        await PrinterService.instance
+            .printKitchenTicket(order, paperDots: dots);
+      } catch (e) {
+        debugPrint('Kitchen auto-print failed: $e');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Kitchen ticket did not print: '
+              '${sanitizeUiErrorMessage(e)}'),
+          backgroundColor: AppColors.error,
+        ));
+        return;
+      }
+    }
+  }
+
   Future<void> _playNewOrderChime() async {
     try {
       await _chimePlayer.stop();
@@ -71,16 +107,22 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
       final data = await getKitchenOrders();
       if (!mounted) return;
       final orders = data.cast<Map<String, dynamic>>();
-      final ids = orders
-          .map((o) => '${o['id']}')
-          .where((id) => id.isNotEmpty)
-          .toSet();
+      final ids =
+          orders.map((o) => '${o['id']}').where((id) => id.isNotEmpty).toSet();
       // Chime if any order id is new since the last load. Skip the very first
       // load so opening the screen with a backlog stays silent.
-      final hasNewOrder = _primed && ids.difference(_seenOrderIds).isNotEmpty;
+      // The ids themselves, not just "was there one" — auto-print needs to know
+      // WHICH orders are new so it prints those and nothing else.
+      final newIds = _primed ? ids.difference(_seenOrderIds) : const <String>{};
+      // Recorded before printing starts, so a reload that lands mid-print
+      // cannot queue the same ticket twice.
       _seenOrderIds = ids;
       _primed = true;
-      if (hasNewOrder) _playNewOrderChime();
+      if (newIds.isNotEmpty) {
+        _playNewOrderChime();
+        unawaited(_autoPrintNewOrders(
+            orders.where((o) => newIds.contains('${o['id']}')).toList()));
+      }
       setState(() {
         _orders = orders;
         _loading = false;
@@ -178,52 +220,73 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    // ShellAppBar, not Scaffold.appBar: this screen is a tab inside the shell's
+    // IndexedStack, where AppBar's Scaffold-dependent layout does not render —
+    // which is why the bar (and everything in it) was invisible here.
     return Scaffold(
-      appBar: AppBar(
-        title: Text(l10n.kitchenTitle),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: l10n.commonRefresh,
-            onPressed: () => _load(),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: [
-            Tab(text: l10n.kitchenTabPending),
-            Tab(text: l10n.kitchenTabCompleted),
+      backgroundColor: AppColors.background,
+      body: Column(children: [
+        ShellAppBar(
+          title: Text(l10n.kitchenTitle),
+          automaticallyImplyLeading: false,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.print_outlined),
+              tooltip: 'Kitchen printing',
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const KitchenPrintSettingsScreen(),
+              )),
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: l10n.commonRefresh,
+              onPressed: () => _load(),
+            ),
           ],
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: [
+              Tab(text: l10n.kitchenTabPending),
+              Tab(text: l10n.kitchenTabCompleted),
+            ],
+          ),
         ),
-      ),
-      body: _loading
-          ? const KitchenSkeleton()
-          : _error != null && _orders.isEmpty
-              ? ListView(
-                  children: [
-                    const SizedBox(height: 120),
-                    Center(child: Text(_error!, textAlign: TextAlign.center)),
-                  ],
-                )
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    RefreshIndicator(
-                      onRefresh: () => _load(),
-                      child: _buildOrderGrid(
-                        _orders.where((o) => o['all_ready'] != true).toList(),
-                        l10n.kitchenNoPendingOrders,
-                      ),
+        Expanded(
+          child: _loading
+              ? const KitchenSkeleton()
+              : _error != null && _orders.isEmpty
+                  ? ListView(
+                      children: [
+                        const SizedBox(height: 120),
+                        Center(
+                            child: Text(_error!, textAlign: TextAlign.center)),
+                      ],
+                    )
+                  : TabBarView(
+                      controller: _tabController,
+                      children: [
+                        RefreshIndicator(
+                          onRefresh: () => _load(),
+                          child: _buildOrderGrid(
+                            _orders
+                                .where((o) => o['all_ready'] != true)
+                                .toList(),
+                            l10n.kitchenNoPendingOrders,
+                          ),
+                        ),
+                        RefreshIndicator(
+                          onRefresh: () => _load(),
+                          child: _buildOrderGrid(
+                            _orders
+                                .where((o) => o['all_ready'] == true)
+                                .toList(),
+                            l10n.kitchenNoCompletedOrders,
+                          ),
+                        ),
+                      ],
                     ),
-                    RefreshIndicator(
-                      onRefresh: () => _load(),
-                      child: _buildOrderGrid(
-                        _orders.where((o) => o['all_ready'] == true).toList(),
-                        l10n.kitchenNoCompletedOrders,
-                      ),
-                    ),
-                  ],
-                ),
+        ),
+      ]),
     );
   }
 
@@ -409,8 +472,8 @@ class _OrderCard extends StatelessWidget {
                 }),
                 if (allReady)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 1),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                     decoration: BoxDecoration(
                       color: AppColors.success,
                       borderRadius: BorderRadius.circular(AppRadius.small),
@@ -452,8 +515,9 @@ class _OrderCard extends StatelessWidget {
               child: SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: busy.intersection(
-                          items.map((i) => i['id'] as String).toSet())
+                  onPressed: busy
+                          .intersection(
+                              items.map((i) => i['id'] as String).toSet())
                           .isEmpty
                       ? () => onMarkCompleted(order)
                       : null,
@@ -470,7 +534,6 @@ class _OrderCard extends StatelessWidget {
       ),
     );
   }
-
 }
 
 /// A single dish row in an order card. Stateful so it can play a smooth
@@ -582,8 +645,7 @@ class _ItemTileState extends State<_ItemTile>
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
-                        fontWeight:
-                            ready ? FontWeight.w500 : FontWeight.normal,
+                        fontWeight: ready ? FontWeight.w500 : FontWeight.normal,
                         decoration: ready ? TextDecoration.lineThrough : null,
                         color: ready
                             ? AppColors.textSecondary
@@ -597,8 +659,7 @@ class _ItemTileState extends State<_ItemTile>
             const SizedBox(width: 6),
             Text(
               '× $qtyLabel',
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
           ],
         ),

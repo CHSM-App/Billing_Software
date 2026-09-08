@@ -5,8 +5,27 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const audit = require('../audit');
 const logger = require('../logger');
+const {
+  uniqueStoreToken, validateSlug, isSlugAvailable, looksAutoDerived,
+} = require('../storeToken');
 
 const router = express.Router();
+
+/** The columns _formatBusiness() expects. Shared by the two places that read a
+ *  profile row back after a write, so they can never drift apart. */
+const PROFILE_COLUMNS = `
+  id, name, business_type, address, phone,
+  inventory_enabled, has_barcode_scanner,
+  self_order_enabled,
+  gst_number, pan_number, fssai_number, email, website,
+  city, state, pincode, logo_url,
+  bill_prefix, bill_footer_note,
+  gst_enabled, default_sac_code, round_off_enabled,
+  store_enabled, store_token, store_delivery_enabled,
+  store_delivery_charge, store_payment_qr_url, store_upi_id,
+  store_advance_percent, store_payment_required,
+  created_at
+`;
 
 // Only the owner of the business may read or modify the profile.
 function ownerOnly(req, res, next) {
@@ -79,6 +98,33 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/businesses/store-link/check?slug=my-shop
+// Is this store link free? Owner-only, read-only, cheap — the app calls it as
+// the owner types, so it answers with a reason rather than just a boolean.
+//
+// This is advisory: PUT /profile re-runs exactly the same two checks before it
+// writes, so a link taken between the check and the save is still refused.
+// ---------------------------------------------------------------------------
+router.get('/store-link/check', requireAuth, ownerOnly, async (req, res) => {
+  const slug = String(req.query.slug ?? '').trim();
+  const invalid = validateSlug(slug);
+  if (invalid) return res.json({ available: false, error: invalid });
+
+  try {
+    await poolConnect;
+    const free = await isSlugAvailable(
+      pool.request(), slug, req.user.business_id);
+    return res.json({
+      available: free,
+      error: free ? null : 'That link is already taken',
+    });
+  } catch (err) {
+    logger.error({ err }, 'Store link availability check error');
+    return res.status(500).json({ error: 'Failed to check link availability' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // PUT /api/businesses/profile
 // Updates editable business profile fields.
 // Owner-only. Business type and is_verified are immutable via this endpoint.
@@ -111,6 +157,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     store_advance_percent,
     store_payment_required,
     store_upi_id,
+    store_token,
   } = req.body;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -217,8 +264,12 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     store_upi_id,
   };
 
+  // store_token is deliberately NOT in `updatable`: it is validated and
+  // uniqueness-checked further down and pushed onto `fields` there, so routing
+  // it through the generic path would skip both. It still counts as something
+  // to update, otherwise changing only the store link would 400 here.
   const fields = Object.entries(updatable).filter(([, v]) => v !== undefined);
-  if (fields.length === 0) {
+  if (fields.length === 0 && store_token === undefined) {
     return res.status(400).json({ error: 'No fields provided to update' });
   }
 
@@ -236,7 +287,10 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           gst_enabled, default_sac_code, round_off_enabled,
           store_enabled, store_delivery_enabled,
           store_delivery_charge, store_advance_percent, store_payment_required,
-          store_upi_id
+          store_upi_id,
+          -- Not editable via the payload, but a rename rewrites it, so the
+          -- audit diff needs the old value to show the link that changed.
+          store_token
         FROM businesses WHERE id = @id
       `);
 
@@ -286,6 +340,49 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       fields.push(['gst_enabled', false]);
     }
 
+    // ── The public store link ────────────────────────────────────────────────
+    //
+    // Two ways it can change, and an owner-chosen one always wins:
+    //
+    //  1. The owner typed a link of their own. Validated and claimed here, on
+    //     the same checks GET /store-link/check runs — that endpoint is only
+    //     advisory, since a link can be taken in between checking and saving.
+    //  2. Nobody ever chose one, and the shop is being renamed. Then the link
+    //     follows the name so it never reads as the old shop.
+    //
+    // looksAutoDerived() is what separates the two without needing a "custom
+    // link" column: a link we generated is always slugify(name), that plus a
+    // numeric suffix, or a random fallback token.
+    if (store_token !== undefined) {
+      const wanted = String(store_token).trim().toLowerCase();
+      if (wanted !== (old.store_token ?? '').toLowerCase()) {
+        const invalid = validateSlug(wanted);
+        if (invalid) return res.status(400).json({ error: invalid });
+        const free = await isSlugAvailable(
+          pool.request(), wanted, req.user.business_id);
+        if (!free) {
+          return res.status(409).json({ error: 'That link is already taken' });
+        }
+        fields.push(['store_token', wanted]);
+      }
+    } else if (name !== undefined && name.trim() && name.trim() !== old.name &&
+               looksAutoDerived(old.store_token, old.name)) {
+      fields.push([
+        'store_token',
+        await uniqueStoreToken(pool.request(), name.trim(), req.user.business_id),
+      ]);
+    }
+
+    // Re-saving the link you already have leaves nothing to write. Skip the
+    // UPDATE (an empty SET is a syntax error) and fall through to returning the
+    // current row, so the caller still gets a normal 200 with the profile.
+    if (fields.length === 0) {
+      const same = await pool.request()
+        .input('id', sql.UniqueIdentifier, req.user.business_id)
+        .query(`SELECT ${PROFILE_COLUMNS} FROM businesses WHERE id = @id`);
+      return res.json(_formatBusiness(same.recordset[0]));
+    }
+
     // Build parameterised UPDATE
     const req2 = pool.request();
     req2.input('id', sql.UniqueIdentifier, req.user.business_id);
@@ -314,21 +411,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     // Fetch updated row to return
     const updated = await pool.request()
       .input('id', sql.UniqueIdentifier, req.user.business_id)
-      .query(`
-        SELECT
-          id, name, business_type, address, phone,
-          inventory_enabled, has_barcode_scanner,
-          self_order_enabled,
-          gst_number, pan_number, fssai_number, email, website,
-          city, state, pincode, logo_url,
-          bill_prefix, bill_footer_note,
-          gst_enabled, default_sac_code, round_off_enabled,
-          store_enabled, store_token, store_delivery_enabled,
-          store_delivery_charge, store_payment_qr_url, store_upi_id,
-          store_advance_percent, store_payment_required,
-          created_at
-        FROM businesses WHERE id = @id
-      `);
+      .query(`SELECT ${PROFILE_COLUMNS} FROM businesses WHERE id = @id`);
 
     const newBusiness = _formatBusiness(updated.recordset[0]);
 
@@ -441,8 +524,9 @@ function _formatBusiness(row) {
     gst_enabled:         !!row.gst_enabled,
     default_sac_code:    row.default_sac_code ?? null,
     round_off_enabled:   !!row.round_off_enabled,
-    // Online store. store_token is read-only — it identifies the public link and
-    // is never settable from the profile payload.
+    // Online store. store_token is never settable from the profile payload —
+    // the server derives it from the business name (see src/storeToken.js) at
+    // sign-up and again whenever the name changes.
     store_enabled:          !!row.store_enabled,
     store_token:            row.store_token ?? null,
     store_delivery_enabled: !!row.store_delivery_enabled,
@@ -484,6 +568,9 @@ function _sqlTypeFor(key) {
     store_advance_percent:  sql.Decimal(5, 2),
     store_upi_id:           sql.NVarChar(100),
     store_payment_required: sql.Bit,
+    // Not settable from the payload — the server re-derives it from the name
+    // on rename (see PUT /profile), and this is the type it writes with.
+    store_token:            sql.NVarChar(32),
   };
   return map[key] ?? sql.NVarChar(500);
 }

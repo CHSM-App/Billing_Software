@@ -15,6 +15,7 @@ import 'package:flutter_thermal_printer/utils/printer.dart' as ftp
     show Printer, ConnectionType;
 
 import 'receipt_labels.dart';
+import 'kitchen_ticket.dart';
 import 'raster_lab.dart';
 import 'barcode_image.dart';
 
@@ -80,6 +81,10 @@ class Printer {
 // ---------------------------------------------------------------------------
 
 const _prefKey = 'active_printer';
+// A second, independent slot. Restaurants normally run a counter printer for
+// bills and a separate one at the pass for tickets; a single-printer shop just
+// leaves this empty and the ticket falls back to the billing printer.
+const _kitchenPrefKey = 'kitchen_printer';
 
 bool get _isWindows {
   try {
@@ -211,6 +216,67 @@ class PrinterService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefKey);
     _bumpPrinterRevision();
+  }
+
+  // --- Kitchen printer -------------------------------------------------------
+  // A separate slot from the billing printer above, because the two are usually
+  // different machines in different rooms.
+
+  Future<void> setKitchenPrinter(Printer printer) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kitchenPrefKey, jsonEncode(printer.toJson()));
+    _bumpPrinterRevision();
+  }
+
+  /// The configured kitchen printer, or null when none is set.
+  ///
+  /// Deliberately NOT falling back to the billing printer here — the settings
+  /// screen has to be able to show "not set". [printKitchenTicket] applies the
+  /// fallback instead, where it is a printing decision rather than a UI one.
+  Future<Printer?> getKitchenPrinter() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kitchenPrefKey);
+    if (raw == null) return null;
+    try {
+      return Printer.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearKitchenPrinter() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kitchenPrefKey);
+    _bumpPrinterRevision();
+  }
+
+  /// Print one KOT for [order] (an entry from `GET /api/kitchen/orders`).
+  ///
+  /// Goes to the kitchen printer, falling back to the billing printer when none
+  /// is configured — a one-printer shop that switches auto-print on should get
+  /// a ticket, not silence.
+  ///
+  /// Same transport as [printBill]: one raster, one write, no inter-chunk
+  /// delay. Rasterised rather than sent as ESC/POS text because dish names are
+  /// routinely Marathi, which the printer's ROM cannot render.
+  Future<void> printKitchenTicket(
+    Map<String, dynamic> order, {
+    int paperDots = 576,
+    bool reprint = false,
+  }) async {
+    final printer = await getKitchenPrinter() ?? await getActivePrinter();
+    if (printer == null) throw PrinterException('No kitchen printer configured');
+
+    // Structured rows through the SAME renderer printBill uses. The monospace
+    // linesToReceiptRaster path is not an option here: proportional glyphs
+    // overflow its space-padded columns and re-wrap mid-word.
+    final rows = KitchenTicket.build(order, reprint: reprint);
+    final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
+    if (_isWindows) {
+      await _printWindows(printer, raster);
+    } else {
+      await _sendClassicBtTuned(printer, raster, 0, 0);
+    }
   }
 
   // -------------------------------------------------------------------------

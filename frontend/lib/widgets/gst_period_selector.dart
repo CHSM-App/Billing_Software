@@ -260,3 +260,60 @@ class GstTable extends StatelessWidget {
     );
   }
 }
+
+/// App-bar download control shared by the GST report screens.
+///
+/// One icon rather than a CSV button plus a PDF button: an app bar already
+/// carries Refresh, and two more icons crowd it on a phone. The menu also keeps
+/// the format names as words, which the icons alone did not.
+///
+/// [enabled] is false until the report has actually loaded, so the control can
+/// never export a period that is still fetching or that failed.
+class GstDownloadAction extends StatelessWidget {
+  const GstDownloadAction({
+    super.key,
+    required this.enabled,
+    required this.onCsv,
+    required this.onPdf,
+  });
+
+  final bool enabled;
+  final VoidCallback onCsv;
+  final VoidCallback onPdf;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_GstDownloadFormat>(
+      enabled: enabled,
+      tooltip: 'Download',
+      icon: Icon(
+        Icons.download_outlined,
+        // Greyed while loading — PopupMenuButton does not dim its own icon.
+        color: enabled ? null : AppColors.textSecondary.withValues(alpha: 0.4),
+      ),
+      onSelected: (f) => f == _GstDownloadFormat.csv ? onCsv() : onPdf(),
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: _GstDownloadFormat.csv,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.table_chart_outlined, size: 20),
+            title: Text('CSV'),
+          ),
+        ),
+        PopupMenuItem(
+          value: _GstDownloadFormat.pdf,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.picture_as_pdf_outlined, size: 20),
+            title: Text('PDF'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+enum _GstDownloadFormat { csv, pdf }

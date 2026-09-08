@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../api.dart' as api;
+import '../services/gstr3b_export.dart';
 import '../theme/app_theme.dart';
 import '../widgets/gst_period_selector.dart';
 import '../widgets/shell_app_bar.dart';
@@ -34,6 +37,9 @@ class Gstr3bScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final period = ref.watch(gstr3bPeriodProvider);
     final report = ref.watch(gstr3bReportProvider);
+    // Null while loading or after an error — the download control stays
+    // disabled until there is a real report to write out.
+    final data = report.valueOrNull;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -41,6 +47,11 @@ class Gstr3bScreen extends ConsumerWidget {
         ShellAppBar(
           title: const Text('GSTR-3B'),
           actions: [
+            GstDownloadAction(
+              enabled: data != null,
+              onCsv: () => _downloadCsv(context, data!, period),
+              onPdf: () => _downloadPdf(context, data!, period),
+            ),
             IconButton(
               icon: const Icon(Icons.refresh_outlined),
               tooltip: 'Refresh',
@@ -93,6 +104,50 @@ class Gstr3bScreen extends ConsumerWidget {
         ),
       ]),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Downloads
+  //
+  // No busy flag, unlike GSTR-1: both actions immediately hand off to a modal
+  // platform sheet (share / print), which blocks a second tap on its own. The
+  // report map is passed in rather than re-read, so the file always matches
+  // the period that was on screen when the menu was opened.
+  // -------------------------------------------------------------------------
+
+  Future<void> _downloadCsv(
+      BuildContext context, Map<String, dynamic> r, GstPeriod period) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = Gstr3bExport.buildCsv(r);
+      await Share.shareXFiles(
+        [
+          XFile.fromData(bytes,
+              name: 'GSTR3B-${period.slug}.csv', mimeType: 'text/csv')
+        ],
+        text: 'GSTR-3B ${period.label}',
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text('Could not create CSV: '
+              '${api.sanitizeUiErrorMessage(e)}')));
+    }
+  }
+
+  Future<void> _downloadPdf(
+      BuildContext context, Map<String, dynamic> r, GstPeriod period) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = await Gstr3bExport.buildPdf(r);
+      // layoutPdf gives the platform's own print/save-as-PDF sheet, matching
+      // how GSTR-1 and invoices are already emitted.
+      await Printing.layoutPdf(
+          onLayout: (_) async => bytes, name: 'GSTR3B-${period.slug}');
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text('Could not create PDF: '
+              '${api.sanitizeUiErrorMessage(e)}')));
+    }
   }
 
   Widget _body(Map<String, dynamic> r) {

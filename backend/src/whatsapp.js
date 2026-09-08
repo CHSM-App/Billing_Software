@@ -28,20 +28,34 @@ const OTP_EXPIRY_MINUTES = 10
 const OTP_LENGTH         = 6
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HTTP helper — JSON POST to api2.smsala.com
+// HTTP helper — POST to api2.smsala.com, JSON or form-encoded
+//
+// TIMEOUT: https.request has none by default, so a hung SMSala response used
+// to wait indefinitely — which is what made sending a bill over WhatsApp feel
+// like it could take forever, with no error and no way out. 10s is generous
+// for a single template send; anything slower fails fast so the caller can
+// show an error instead of leaving the cashier staring at a frozen action.
+//
+// Node's `timeout` option is an IDLE-socket timeout (no send/receive activity
+// for that long), not a hard cap on total request time — the right primitive
+// here since SMSala returns one JSON body in a single burst, not a stream.
+// destroy(err) below also fires the 'error' listener, so there is only one
+// reject path, not two racing.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function postJson(path, body) {
+const REQUEST_TIMEOUT_MS = 10000
+
+function httpPost(path, payload, contentType) {
   return new Promise((resolve, reject) => {
-    const payload = JSON.stringify(body)
     const options = {
       hostname: 'api2.smsala.com',
       path,
       method: 'POST',
       headers: {
-        'Content-Type':   'application/json',
+        'Content-Type':   contentType,
         'Content-Length': Buffer.byteLength(payload),
       },
+      timeout: REQUEST_TIMEOUT_MS,
     }
     const req = https.request(options, res => {
       let data = ''
@@ -51,10 +65,17 @@ function postJson(path, body) {
         catch { resolve({ raw: data }) }
       })
     })
+    req.on('timeout', () => {
+      req.destroy(new Error(`Request to ${path} timed out after ${REQUEST_TIMEOUT_MS}ms`))
+    })
     req.on('error', reject)
     req.write(payload)
     req.end()
   })
+}
+
+function postJson(path, body) {
+  return httpPost(path, JSON.stringify(body), 'application/json')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,35 +249,14 @@ async function verifyOtp(phone, otpCode, purpose) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HTTP helper — form-encoded POST (used by SendMessage)
+// Form-encoded POST (used by SendMessage) — shares httpPost's timeout above.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function postForm(path, body) {
-  return new Promise((resolve, reject) => {
-    const payload = Object.entries(body)
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-      .join('&')
-    const options = {
-      hostname: 'api2.smsala.com',
-      path,
-      method: 'POST',
-      headers: {
-        'Content-Type':   'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    }
-    const req = https.request(options, res => {
-      let data = ''
-      res.on('data', chunk => { data += chunk })
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)) }
-        catch { resolve({ raw: data }) }
-      })
-    })
-    req.on('error', reject)
-    req.write(payload)
-    req.end()
-  })
+  const payload = Object.entries(body)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&')
+  return httpPost(path, payload, 'application/x-www-form-urlencoded')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

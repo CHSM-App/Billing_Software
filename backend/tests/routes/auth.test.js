@@ -76,8 +76,10 @@ describe('POST /api/register', () => {
   };
 
   test('returns 200 on valid registration', async () => {
-    // First query inserts business and returns id; second inserts user
+    // Queries: 1) store-token slug collision lookup (nothing taken),
+    // 2) insert business and return id, 3) insert user.
     mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ id: BUSINESS_ID }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
 
@@ -87,8 +89,10 @@ describe('POST /api/register', () => {
   });
 
   test('accepts optional GSTIN/PAN/FSSAI and enables GST when a GSTIN is given', async () => {
-    // Queries: 1) GSTIN duplicate check (none), 2) insert business, 3) insert user.
+    // Queries: 1) GSTIN duplicate check (none), 2) store-token slug collision
+    // lookup (nothing taken), 3) insert business, 4) insert user.
     mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ id: BUSINESS_ID }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });

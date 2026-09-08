@@ -40,6 +40,7 @@ class Printer {
 }
 
 const _prefKey = 'active_printer';
+const _kitchenPrefKey = 'kitchen_printer';
 
 class PrinterService {
   PrinterService._();
@@ -75,6 +76,42 @@ class PrinterService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_prefKey);
     activePrinterRevision.value++;
+  }
+
+  // --- Kitchen printer -------------------------------------------------------
+  // Parity stubs so the kitchen settings screen compiles for web. The selection
+  // still persists (harmless, and it survives if the same account later opens
+  // the desktop app), but nothing can actually print in a browser.
+
+  Future<void> setKitchenPrinter(Printer printer) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kitchenPrefKey, jsonEncode(printer.toJson()));
+    activePrinterRevision.value++;
+  }
+
+  Future<Printer?> getKitchenPrinter() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kitchenPrefKey);
+    if (raw == null) return null;
+    try {
+      return Printer.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearKitchenPrinter() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kitchenPrefKey);
+    activePrinterRevision.value++;
+  }
+
+  Future<void> printKitchenTicket(
+    Map<String, dynamic> order, {
+    int paperDots = 576,
+    bool reprint = false,
+  }) async {
+    throw PrinterException('Printing is not supported in the browser');
   }
 
   Future<Uint8List> buildReceiptPreviewPng(Bill bill,

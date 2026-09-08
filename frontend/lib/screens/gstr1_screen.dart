@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import '../api.dart' as api;
 import '../services/gstr1_export.dart';
 import '../theme/app_theme.dart';
+import '../widgets/gst_period_selector.dart' show GstDownloadAction;
 import '../widgets/shell_app_bar.dart';
 
 final _money = NumberFormat('#,##0.00');
@@ -92,6 +93,13 @@ class _Gstr1ScreenState extends ConsumerState<Gstr1Screen> {
         ShellAppBar(
           title: const Text('GSTR-1'),
           actions: [
+            GstDownloadAction(
+              // Disabled while loading/errored, and while an export is already
+              // running — _busy is what the in-body buttons used to gate on.
+              enabled: !_busy && _hasRows(report.valueOrNull),
+              onCsv: () => _downloadCsv(report.value!),
+              onPdf: () => _downloadPdf(report.value!),
+            ),
             IconButton(
               icon: const Icon(Icons.refresh_outlined),
               tooltip: 'Refresh',
@@ -222,11 +230,19 @@ class _Gstr1ScreenState extends ConsumerState<Gstr1Screen> {
   // Report body
   // -------------------------------------------------------------------------
 
+  /// A period worth exporting: at least one B2CS or HSN row. An empty period
+  /// would otherwise produce a file with headers and nothing under them.
+  /// Shared by the app-bar download control and the body, so both agree.
+  static bool _hasRows(Map<String, dynamic>? r) {
+    if (r == null) return false;
+    return (r['b2cs'] as List? ?? []).isNotEmpty ||
+        (r['hsn'] as List? ?? []).isNotEmpty;
+  }
+
   Widget _reportBody(Map<String, dynamic> r) {
     final totals = Map<String, dynamic>.from(r['totals'] ?? {});
     final b2cs = (r['b2cs'] as List? ?? []);
     final hsn = (r['hsn'] as List? ?? []);
-    final hasData = b2cs.isNotEmpty || hsn.isNotEmpty;
 
     return Column(children: [
       _Card(
@@ -280,33 +296,17 @@ class _Gstr1ScreenState extends ConsumerState<Gstr1Screen> {
               ),
       ),
       const SizedBox(height: 16),
-      _Card(
-        title: 'Download',
-        child: Column(children: [
-          Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.table_chart_outlined, size: 18),
-                label: const Text('CSV'),
-                onPressed: _busy || !hasData ? null : () => _downloadCsv(r),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                label: const Text('PDF'),
-                onPressed: _busy || !hasData ? null : () => _downloadPdf(r),
-              ),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          const Text(
-            'All supplies are reported as B2C (consolidated by rate). '
-            'Intra-state supply assumed — tax splits as CGST + SGST.',
-            style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
-          ),
-        ]),
+      // CSV/PDF moved to the app bar (see GstDownloadAction) so every GST
+      // report exports the same way and the control is reachable without
+      // scrolling past the whole return. The scope note stays — it qualifies
+      // the figures above, not the buttons.
+      const _Card(
+        title: 'Scope',
+        child: Text(
+          'All supplies are reported as B2C (consolidated by rate). '
+          'Intra-state supply assumed — tax splits as CGST + SGST.',
+          style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+        ),
       ),
     ]);
   }

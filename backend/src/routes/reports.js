@@ -240,7 +240,11 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
           ORDER BY total DESC
         `),
       // Top-selling items — by revenue, over the same period. qty_sold is the
-      // total quantity across all finalized bills; revenue is the line totals.
+      // total quantity across all finalized bills. Revenue applies the SAME
+      // bill-level discount ratio the receipt and the GSTR-1 report use, so a
+      // discounted bill contributes what the customer actually paid. Summing
+      // raw line_total here reported an item above its own bill's Net Payable
+      // — ₹1,500 of soup on a ₹1,300 bill, right beside it in Recent bills.
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .input('from_dt',     sql.DateTime2,        fromDt)
@@ -248,8 +252,10 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         .query(`
           SELECT TOP 8
                  bi.item_name,
-                 SUM(bi.quantity)   AS qty_sold,
-                 SUM(bi.line_total) AS revenue
+                 SUM(bi.quantity) AS qty_sold,
+                 SUM(bi.line_total * CASE WHEN b.subtotal > 0
+                       THEN (b.subtotal - ISNULL(b.discount_amount, 0)) / b.subtotal
+                       ELSE 1 END) AS revenue
           FROM bill_items bi
           JOIN bills b ON b.id = bi.bill_id
           WHERE b.business_id = @business_id AND b.status = 'finalized'

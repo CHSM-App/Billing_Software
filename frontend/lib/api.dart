@@ -741,6 +741,21 @@ final String storeBaseUrl =
 /// The shareable shop link. One per business, from `businesses.store_token`.
 String storeUrl(String storeToken) => '$storeBaseUrl/$storeToken';
 
+/// Is [slug] free to use as this shop's store link?
+///
+/// Returns `(available, error)` — [error] is a ready-to-show reason when it is
+/// not, covering both "badly formed" and "already taken". Advisory only: the
+/// profile save re-runs the same checks, so a link claimed by someone else in
+/// between is still refused at save time.
+Future<({bool available, String? error})> checkStoreLink(String slug) async {
+  final r = _parse(await _authGet(Uri.parse(
+      '$baseUrl/businesses/store-link/check?slug=${Uri.encodeQueryComponent(slug)}')));
+  return (
+    available: r['available'] == true,
+    error: r['error'] as String?,
+  );
+}
+
 /// Online orders awaiting a decision, plus anything decided in the last 24h.
 Future<List<dynamic>> getOnlineOrders() async {
   return _parse(await _authGet(Uri.parse('$baseUrl/online-orders')));

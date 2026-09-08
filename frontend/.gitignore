@@ -44,3 +44,5 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 /lib/firebase_options.dart
+# Scratch PNGs from test/widgets/category_tree_render.dart (dev tool, see its header)
+test/.render/

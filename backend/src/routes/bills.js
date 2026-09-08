@@ -698,22 +698,32 @@ router.post('/', requireAuth, async (req, res) => {
 
       const billId = billResult.recordset[0].id;
 
-      // Insert bill_items
-      for (const li of lineItems) {
-        await transaction.request()
-          .input('bill_id', sql.UniqueIdentifier, billId)
-          .input('item_id', sql.UniqueIdentifier, li.item_id)
-          .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
-          .input('item_name', sql.NVarChar(200), li.item_name)
-          .input('quantity', sql.Decimal(10, 2), li.quantity)
-          .input('unit_price', sql.Decimal(12, 4), li.unit_price)
-          .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
-          .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
-          .input('line_total', sql.Decimal(10, 2), li.line_total)
-          .query(`
-            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
-            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @hsn_code, @line_total)
-          `);
+      // Insert bill_items — one multi-row INSERT instead of one network round
+      // trip per line (a 15-item bill was 15 sequential awaits in series; this
+      // is exactly one, whatever the cart size, which is most of why settling
+      // a bill with several lines felt slow). Unconditional insert with no
+      // per-row pass/fail to track, so batching it is risk-free — unlike the
+      // guarded stock/recipe decrements below, which stay one-at-a-time
+      // because each needs its own success check to name the short item.
+      if (lineItems.length > 0) {
+        const insertReq = transaction.request()
+          .input('bill_id', sql.UniqueIdentifier, billId);
+        const rows = lineItems.map((li, i) => {
+          insertReq
+            .input(`item_id${i}`, sql.UniqueIdentifier, li.item_id)
+            .input(`variant_id${i}`, sql.UniqueIdentifier, li.variant_id || null)
+            .input(`item_name${i}`, sql.NVarChar(200), li.item_name)
+            .input(`quantity${i}`, sql.Decimal(10, 2), li.quantity)
+            .input(`unit_price${i}`, sql.Decimal(12, 4), li.unit_price)
+            .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
+            .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
+            .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total);
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i})`;
+        });
+        await insertReq.query(`
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
+          VALUES ${rows.join(', ')}
+        `);
       }
 
       // Update table status if table_id provided
@@ -1273,21 +1283,27 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         }
       }
 
-      for (const li of lineItems) {
-        await transaction.request()
-          .input('bill_id', sql.UniqueIdentifier, req.params.id)
-          .input('item_id', sql.UniqueIdentifier, li.item_id)
-          .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
-          .input('item_name', sql.NVarChar(200), li.item_name)
-          .input('quantity', sql.Decimal(10, 2), li.quantity)
-          .input('unit_price', sql.Decimal(12, 4), li.unit_price)
-          .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
-          .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
-          .input('line_total', sql.Decimal(10, 2), li.line_total)
-          .query(`
-            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
-            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @hsn_code, @line_total)
-          `);
+      // One multi-row INSERT instead of one round trip per line — same
+      // reasoning as the create-bill path above.
+      if (lineItems.length > 0) {
+        const insertReq2 = transaction.request()
+          .input('bill_id', sql.UniqueIdentifier, req.params.id);
+        const rows2 = lineItems.map((li, i) => {
+          insertReq2
+            .input(`item_id${i}`, sql.UniqueIdentifier, li.item_id)
+            .input(`variant_id${i}`, sql.UniqueIdentifier, li.variant_id || null)
+            .input(`item_name${i}`, sql.NVarChar(200), li.item_name)
+            .input(`quantity${i}`, sql.Decimal(10, 2), li.quantity)
+            .input(`unit_price${i}`, sql.Decimal(12, 4), li.unit_price)
+            .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
+            .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
+            .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total);
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i})`;
+        });
+        await insertReq2.query(`
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
+          VALUES ${rows2.join(', ')}
+        `);
       }
 
       // Recalculate totals from all bill_items. Discount applies to the NET
@@ -1499,17 +1515,12 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         };
       });
 
-      // Centralized stock pre-check for new items.
-      // Note: old-item stock will be restored below before the new decrements,
-      // so we check against current stock_quantity as a conservative lower bound.
-      // The atomic UPDATE is still the final concurrency guard.
-      if (inventoryEnabled) {
-        const insufficient3 = checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap);
-        if (insufficient3.length > 0) {
-          await transaction.rollback();
-          return res.status(409).json({ error: 'Insufficient stock', items: insufficient3 });
-        }
-      }
+      // No pre-check here, unlike the create path. This draft's OWN items are
+      // still deducted from stock at this point and are only restored further
+      // down, so checking the new quantities against current stock_quantity
+      // rejects edits that are perfectly valid — an item whose draft consumed
+      // all of its stock could not even have its quantity REDUCED. The guarded
+      // decrement below runs after the restore and is the real check.
 
       // Snapshot old items for audit + stock restore. Kitchen fields are read
       // too so a dish the kitchen already marked ready keeps that status when the
@@ -1560,25 +1571,30 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         .query('DELETE FROM bill_items WHERE bill_id = @bill_id');
 
       // Insert new line items, carrying over the prior kitchen status for any
-      // dish that already existed on the order.
-      for (const li of lineItems) {
-        const k = takeKitchenStatus(li);
-        await transaction.request()
-          .input('bill_id', sql.UniqueIdentifier, req.params.id)
-          .input('item_id', sql.UniqueIdentifier, li.item_id)
-          .input('variant_id', sql.UniqueIdentifier, li.variant_id || null)
-          .input('item_name', sql.NVarChar(200), li.item_name)
-          .input('quantity', sql.Decimal(10, 2), li.quantity)
-          .input('unit_price', sql.Decimal(12, 4), li.unit_price)
-          .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
-          .input('hsn_code', sql.NVarChar(10), li.hsn_code || null)
-          .input('line_total', sql.Decimal(10, 2), li.line_total)
-          .input('kitchen_status', sql.NVarChar(20), k.kitchen_status)
-          .input('kitchen_done_at', sql.DateTime2, k.kitchen_done_at)
-          .query(`
-            INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, kitchen_status, kitchen_done_at)
-            VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity, @unit_price, @tax_rate, @hsn_code, @line_total, @kitchen_status, @kitchen_done_at)
-          `);
+      // dish that already existed on the order. One multi-row INSERT instead
+      // of one round trip per line — same reasoning as the create-bill path.
+      if (lineItems.length > 0) {
+        const insertReq3 = transaction.request()
+          .input('bill_id', sql.UniqueIdentifier, req.params.id);
+        const rows3 = lineItems.map((li, i) => {
+          const k = takeKitchenStatus(li);
+          insertReq3
+            .input(`item_id${i}`, sql.UniqueIdentifier, li.item_id)
+            .input(`variant_id${i}`, sql.UniqueIdentifier, li.variant_id || null)
+            .input(`item_name${i}`, sql.NVarChar(200), li.item_name)
+            .input(`quantity${i}`, sql.Decimal(10, 2), li.quantity)
+            .input(`unit_price${i}`, sql.Decimal(12, 4), li.unit_price)
+            .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
+            .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
+            .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total)
+            .input(`kitchen_status${i}`, sql.NVarChar(20), k.kitchen_status)
+            .input(`kitchen_done_at${i}`, sql.DateTime2, k.kitchen_done_at);
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @kitchen_status${i}, @kitchen_done_at${i})`;
+        });
+        await insertReq3.query(`
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, kitchen_status, kitchen_done_at)
+          VALUES ${rows3.join(', ')}
+        `);
       }
 
       // Recalculate totals, and update customer/discount fields when supplied.

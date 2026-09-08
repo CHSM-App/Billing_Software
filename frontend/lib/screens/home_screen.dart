@@ -28,7 +28,14 @@ import '../main.dart' show rootMessengerKey;
 import 'bill_preview_screen.dart';
 import 'login_screen.dart';
 import 'printer_setup_screen.dart';
-import '../widgets/category_sheet.dart' show CategoryChipStrip;
+import '../widgets/category_sheet.dart'
+    show
+        CategoryAccents,
+        CategoryChipStrip,
+        ItemRowFrame,
+        MajorCategoryCard,
+        SubCategoryCard,
+        TreeRail;
 
 extension _StringEx on String {
   String? get nullIfEmpty => isEmpty ? null : this;
@@ -90,15 +97,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final ValueNotifier<String?> _activeMajor = ValueNotifier(null);
   final ScrollController _majorStripCtrl = ScrollController();
   final Map<String, GlobalKey> _majorChipKeys = {};
-  // Snapshot of the sections currently rendered — the scroll listener needs
-  // them (and the column mode) to map a scroll offset back to a category.
-  List<_CategorySection> _sections = const [];
+  // Snapshot of the tree currently rendered — the scroll listener needs it
+  // (and the column mode) to map a scroll offset back to a category.
+  List<_MajorSection> _tree = const [];
   bool _twoColumns = false;
   bool _jumpingToCategory = false;
-  // Categories whose items are spread open in the list. The first category
-  // is spread open automatically the first time items land (see
-  // _autoOpenedFirstCategory) so the cashier can start tapping right away;
-  // everything else starts collapsed.
+  // Majors the cashier has explicitly FOLDED SHUT. Tracked inverted — every
+  // major is open by default, and closing one is the deliberate act — so the
+  // whole menu is browsable the moment it loads, several majors can be open at
+  // once, and a major that arrives later (a sync adds one) is open too rather
+  // than hiding until someone finds it.
+  final Set<String> _collapsedMajors = {};
+  // Sections whose items are spread open in the list, by _CategorySection.key
+  // (NOT bare category name — the same category can sit under several majors).
+  // The first section is spread open automatically the first time items land
+  // (see _autoOpenedFirstCategory) so the cashier can start tapping right
+  // away; everything else starts collapsed.
   final Set<String> _expandedCategories = {};
   // Set once the first category has been auto-opened on initial load so a
   // cashier who deliberately folds it shut is not fought on every rebuild.
@@ -395,19 +409,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } catch (_) {}
   }
 
-  /// Active items for the list, narrowed to [activeMajor] (null = no major
-  /// picked, so nothing is narrowed) and then to the search box.
-  List<Item> _filteredItems(List<Item> allItems, String? activeMajor) {
+  /// Active items for the list, narrowed to the search box.
+  ///
+  /// The major strip does NOT narrow this: picking a major scrolls to its bar
+  /// and spreads it open, leaving every other major right where it is so the
+  /// cashier can keep scrolling past it.
+  List<Item> _filteredItems(List<Item> allItems) {
     final query = _searchController.text.toLowerCase();
-    // Search looks across the whole menu: a cashier typing a dish name wants it
-    // found wherever it is filed, not only inside the major they last tapped.
-    // This mirrors how search already spreads every matching section open.
-    final major = query.isEmpty ? activeMajor : null;
     return allItems.where((item) {
       if (!item.isActive) return false;
-      if (major != null && (item.majorCategory?.trim() ?? '') != major) {
-        return false;
-      }
       if (query.isEmpty) return true;
       // Match the category as well as the name, so typing "soups" pulls up every
       // soup rather than nothing. Same rule the Items screen has always used
@@ -420,7 +430,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Groups [items] into category sections in [cats] order (alphabetical, from
   /// categoriesProvider). Items without a category go last under "Other".
   /// Order within a section is preserved (top-sold ranking, then name).
-  List<_CategorySection> _groupByCategory(List<Item> items, List<String> cats) {
+  ///
+  /// [major] is the major these items were already narrowed to (null when the
+  /// menu has no major level); it only distinguishes the sections' keys, since
+  /// one category name can appear under several majors as separate sections.
+  /// [accent] is that major's hue, inherited by every section under it.
+  List<_CategorySection> _groupByCategory(List<Item> items, List<String> cats,
+      String? major,
+      [Color accent = AppColors.primary]) {
     // While searching, every matching section is spread open — otherwise the
     // matches would be hidden behind collapsed bars.
     final searching = _searchController.text.trim().isNotEmpty;
@@ -441,23 +458,118 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         _CategorySection(
           cat,
           byCat[cat]!,
-          expanded: searching || _expandedCategories.contains(cat),
+          major: major,
+          expanded: searching ||
+              _expandedCategories.contains(
+                  _CategorySection.sectionKey(major, cat)),
           openItems: {
             for (final it in byCat[cat]!)
               if (it.hasVariants && _expandedVariantItems.contains(it.id))
                 it.id,
           },
+          accent: accent,
         ),
     ];
   }
 
+  /// Groups [items] into the two-level accordion the list renders: a bar per
+  /// major, each holding its own sub-category bars.
+  ///
+  /// An item's sub-category is grouped WITHIN its major, so a category used by
+  /// two majors shows up under both — each time listing only that major's
+  /// items. With no majors in the menu there is no major level at all and the
+  /// list is the flat category accordion it has always been.
+  List<_MajorSection> _groupByMajor(
+      List<Item> items, List<String> cats, List<String> majors) {
+    if (majors.isEmpty) {
+      return [_MajorSection.flat(_groupByCategory(items, cats, null))];
+    }
+    final searching = _searchController.text.trim().isNotEmpty;
+    final byMajor = <String, List<Item>>{};
+    for (final item in items) {
+      byMajor
+          .putIfAbsent(item.majorCategory?.trim() ?? '', () => [])
+          .add(item);
+    }
+    final ordered = <String>[
+      ...majors.where(byMajor.containsKey),
+      // Majors on items but missing from the ordering provider — never drop
+      // items on the floor.
+      ...byMajor.keys.where((m) => m.isNotEmpty && !majors.contains(m)),
+      // Items with no major of their own go last, under "Other".
+      if (byMajor.containsKey('')) '',
+    ];
+    return [
+      // Hue by POSITION in the ordered list, so it is stable for a given menu
+      // arrangement and every section under a major inherits the same one.
+      for (final (i, m) in ordered.indexed)
+        _MajorSection(
+          m,
+          _groupByCategory(byMajor[m]!, cats, m, CategoryAccents.of(i)),
+          expanded: searching || !_collapsedMajors.contains(m),
+          accent: CategoryAccents.of(i),
+        ),
+    ];
+  }
+
+  /// Horizontal capsule tap: take the cashier TO a major, never away from it.
+  ///
+  /// Deliberately not a toggle. The capsule strip is a jump-list — tapping the
+  /// one you are already looking at should not fold it shut under you, which
+  /// is what sharing [_toggleMajor] with the vertical bar used to do. So it
+  /// opens a folded major, leaves an open one alone, and scrolls either way.
+  Future<void> _jumpToMajor(String major) async {
+    final wasCollapsed = _collapsedMajors.contains(major);
+    if (wasCollapsed) {
+      setState(() => _collapsedMajors.remove(major));
+    }
+    _activeMajor.value = major;
+    _revealMajorChip(major);
+    // Only an actual unfold moves the offsets below it; when nothing changed
+    // the current frame's measurements are already right.
+    if (wasCollapsed) {
+      await _nextFrame();
+      if (!mounted) return;
+    }
+    final offset = _ExcelItemTable.majorOffset(_tree, major, _twoColumns);
+    if (offset != null) await _animateListTo(offset);
+  }
+
+  /// Vertical bar tap: fold one major shut, or spread it open again. Majors are
+  /// INDEPENDENT of each other — opening one does not close the rest, since
+  /// they all start open and closing is the deliberate act. Opening also
+  /// scrolls its bar to the top so its sub-categories are what the cashier is
+  /// looking at.
+  Future<void> _toggleMajor(String major) async {
+    final wasOpen = !_collapsedMajors.contains(major);
+    setState(() {
+      if (wasOpen) {
+        _collapsedMajors.add(major);
+      } else {
+        _collapsedMajors.remove(major);
+      }
+    });
+    // The capsule lights the major you last opened; folding it clears it.
+    _activeMajor.value = wasOpen ? null : major;
+    if (wasOpen) return;
+    _revealMajorChip(major);
+    // Offsets depend on what is open — wait for the rebuild so _tree reflects
+    // the major that just unfolded before measuring.
+    await _nextFrame();
+    if (!mounted) return;
+    final offset = _ExcelItemTable.majorOffset(_tree, major, _twoColumns);
+    if (offset != null) await _animateListTo(offset);
+  }
+
   /// Bar tap: spread open one category's items (folding whichever category
   /// was open) or fold it up if it was the open one — only one is ever open.
-  void _toggleCategory(String cat) {
-    final wasOpen = _expandedCategories.contains(cat);
+  /// [key] identifies the section, not the bare category name, since the same
+  /// category can be open under one major and shut under another.
+  void _toggleCategory(String key) {
+    final wasOpen = _expandedCategories.contains(key);
     setState(() {
       _expandedCategories.clear();
-      if (!wasOpen) _expandedCategories.add(cat);
+      if (!wasOpen) _expandedCategories.add(key);
     });
     if (wasOpen) {
       // Folded shut: fall back to whichever section sits under the header
@@ -466,7 +578,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           .addPostFrameCallback((_) => _syncActiveCategoryToScroll());
     } else {
       // The chip strip follows the bar the cashier just opened.
-      _setActiveCategory(cat);
+      _setActiveCategory(key);
     }
   }
 
@@ -495,7 +607,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // so clamp against the settled extent. The scroll physics clamp any
     // transient overshoot per frame.
     final settledMax = _ExcelItemTable.settledMaxScroll(
-      _sections,
+      _tree,
       _twoColumns,
       viewportHeight: pos.viewportDimension,
     );
@@ -516,45 +628,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// so the cashier can pick the plate.
   Future<void> _revealVariantItem(Item item) async {
     final cat = item.category?.trim() ?? '';
+    // The section only exists once its major is spread open, so open that too.
+    // Null major = flat menu, where there is no major level to open.
+    final major = _tree.first.major == null
+        ? null
+        : (item.majorCategory?.trim() ?? '');
+    final key = _CategorySection.sectionKey(major, cat);
     setState(() {
+      // Make sure the scanned item's major is not folded shut. Only this one —
+      // the others are left however the cashier had them.
+      if (major != null) _collapsedMajors.remove(major);
       _expandedCategories
         ..clear()
-        ..add(cat);
+        ..add(key);
       _expandedVariantItems
         ..clear()
         ..add(item.id);
     });
+    // Keep the capsule pointing at the major the list just jumped into.
+    if (major != null) _activeMajor.value = major;
     await _nextFrame();
     if (!mounted) return;
-    final offset =
-        _ExcelItemTable.itemOffset(_sections, item.id, _twoColumns);
+    final offset = _ExcelItemTable.itemOffset(_tree, item.id, _twoColumns);
     if (offset == null) return; // filtered out by the search box
-    _setActiveCategory(cat);
+    _setActiveCategory(key);
     await _animateListTo(offset);
   }
 
-  /// Which category the chip strip should point at for scroll [offset] with
+  /// Which section the chip strip should point at for scroll [offset] with
   /// a viewport [viewportHeight] tall: the (single) open section while any
   /// of it is on screen — so a bar tap keeps its chip lit — and otherwise the
-  /// section whose bar sits under the pinned header.
+  /// section whose bar sits under the pinned header. Returns a section key.
   String? _categoryAtOffset(double offset, double viewportHeight) {
+    final spans = _ExcelItemTable.sectionSpans(_tree, _twoColumns);
     // Nothing open → nothing to point at. The fallback below picks the bar
     // under the header, which defaults to the first section, so collapsing
     // every category used to leave its chip lit as though it were still open.
-    if (!_sections.any((s) => s.expanded)) return null;
+    if (spans.isEmpty || !spans.any((s) => s.expanded)) return null;
     // Rows under the pinned column header don't count as visible.
     final bottom =
         offset + viewportHeight - _ExcelItemTable.columnHeaderHeight;
-    for (var k = 0; k < _sections.length; k++) {
-      if (!_sections[k].expanded) continue;
-      final start = _ExcelItemTable.sectionOffset(_sections, k, _twoColumns);
-      final end = _ExcelItemTable.sectionOffset(_sections, k + 1, _twoColumns);
-      if (start < bottom && end > offset) return _sections[k].category;
+    for (final s in spans) {
+      if (!s.expanded) continue;
+      if (s.start < bottom && s.end > offset) return s.key;
     }
-    var active = _sections.first.category;
-    for (var k = 1; k < _sections.length; k++) {
-      if (_ExcelItemTable.sectionOffset(_sections, k, _twoColumns) <= offset + 1) {
-        active = _sections[k].category;
+    var active = spans.first.key;
+    for (var k = 1; k < spans.length; k++) {
+      if (spans[k].start <= offset + 1) {
+        active = spans[k].key;
       } else {
         break;
       }
@@ -562,12 +683,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return active;
   }
 
-  /// Scroll-spy: keep the chip strip pointing at the section being viewed.
+  /// Scroll-spy: keep the strips pointing at what is actually being viewed.
+  ///
+  /// Skipped while [_animateListTo] is driving the list — a jump already set
+  /// the target, and letting the spy overwrite it with every major the scroll
+  /// passes through on the way would make the capsule flicker.
   void _syncActiveCategoryToScroll() {
-    if (!mounted || _jumpingToCategory || _sections.isEmpty) return;
+    if (!mounted || _jumpingToCategory || _tree.isEmpty) return;
     if (!_itemsScrollCtrl.hasClients) return;
     final pos = _itemsScrollCtrl.position;
     _setActiveCategory(_categoryAtOffset(pos.pixels, pos.viewportDimension));
+    // The capsule strip follows a manual scroll too, so the lit chip is always
+    // the major on screen rather than only the one last tapped.
+    final major = _ExcelItemTable.majorAtOffset(_tree, pos.pixels, _twoColumns);
+    if (major != null && major != _activeMajor.value) {
+      _activeMajor.value = major;
+      _revealMajorChip(major);
+    }
   }
 
   void _setActiveCategory(String? cat) {
@@ -590,24 +722,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
-  /// Chip tap: spread [cat] open (if folded) and scroll the single item list so
-  /// its section bar lands right under the pinned header.
-  Future<void> _jumpToCategory(String cat) async {
-    if (_sections.indexWhere((s) => s.category == cat) < 0) return;
-    if (!_expandedCategories.contains(cat)) {
+  /// Chip tap: spread [key]'s section open (if folded) and scroll the single
+  /// item list so its section bar lands right under the pinned header. Only the
+  /// flat (no-majors) menu shows this strip, where a section key IS its
+  /// category name.
+  Future<void> _jumpToCategory(String key) async {
+    if (!_ExcelItemTable.sectionSpans(_tree, _twoColumns)
+        .any((s) => s.key == key)) {
+      return;
+    }
+    if (!_expandedCategories.contains(key)) {
       setState(() => _expandedCategories
         ..clear()
-        ..add(cat));
+        ..add(key));
       // Offsets depend on which sections are open — wait for the rebuild so
-      // _sections reflects the newly opened one before measuring.
+      // _tree reflects the newly opened one before measuring.
       await _nextFrame();
       if (!mounted) return;
     }
-    final k = _sections.indexWhere((s) => s.category == cat);
+    final spans = _ExcelItemTable.sectionSpans(_tree, _twoColumns);
+    final k = spans.indexWhere((s) => s.key == key);
     if (k < 0) return;
-    _setActiveCategory(cat);
-    await _animateListTo(
-        _ExcelItemTable.sectionOffset(_sections, k, _twoColumns));
+    _setActiveCategory(key);
+    await _animateListTo(spans[k].start);
   }
 
   /// The category jump-list shown above the item table: one row of chips, or
@@ -627,22 +764,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  /// Major-category tap. Toggles: tapping the lit chip clears the filter and
-  /// shows the whole menu again, which is why there is no separate "All" chip.
-  ///
-  /// The category that was spread open almost certainly belongs to the major
-  /// being left, so fold everything and let the existing first-load logic
-  /// auto-open the first section of whatever is now showing.
-  void _selectMajor(String major) {
-    final next = _activeMajor.value == major ? null : major;
-    _activeMajor.value = next;
-    setState(() {
-      _expandedCategories.clear();
-      _autoOpenedFirstCategory = false;
-    });
-    if (next != null) _revealMajorChip(next);
-  }
-
   /// Horizontally scroll the major strip so the picked chip is centred — the
   /// same courtesy [_revealCategoryChip] does for the category strip.
   void _revealMajorChip(String major) {
@@ -657,9 +778,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
   }
 
-  /// The major-category filter strip, drawn with the same chip widget as the
-  /// category jump-list it replaces. No "All" chip: no chip lit means no filter,
-  /// which CategoryChipStrip already renders for a null [active].
+  /// The major-category jump-list, drawn with the same chip widget as the
+  /// category strip it replaces. It filters nothing and it never folds
+  /// anything shut: a tap scrolls to that major's bar, opening it first if it
+  /// was folded. The lit chip is the major last jumped to; nothing is lit
+  /// until one is tapped, which CategoryChipStrip renders for a null [active].
   Widget _buildMajorStrip(List<String> majors) {
     final l10n = context.l10n;
     return ValueListenableBuilder<String?>(
@@ -668,7 +791,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         categories: majors,
         active: active,
         labelOf: (m) => _categoryLabel(m, l10n),
-        onTap: _selectMajor,
+        // Jump, not toggle — see _jumpToMajor.
+        onTap: _jumpToMajor,
         controller: _majorStripCtrl,
         chipKeys: _majorChipKeys,
       ),
@@ -2018,12 +2142,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       Map<String, dynamic> result;
       final additionalCharges = _chargesPayload();
       if (widget.activeBillId != null) {
-        // Push the cart together with the current discount and charges, so
-        // anything changed after reopening the draft reaches the bill before
-        // it is finalized (the finalize step itself recomputes nothing).
+        // Push the cart together with the customer details, discount and
+        // charges, so anything changed after reopening the draft reaches the
+        // bill before it is finalized (the finalize step itself recomputes
+        // nothing). Settling directly is a valid alternative to pressing Hold
+        // again, so this must send everything the Hold path sends — omitting
+        // the customer fields left the finalized bill (and every report built
+        // on it) showing the name/phone the draft was parked with.
         await updateBillItems(
           widget.activeBillId!,
           _cartPayload,
+          customerName: _customerNameController.text.trim().nullIfEmpty,
+          customerPhone: _customerPhoneController.text.trim().nullIfEmpty,
           discountAmount:
               double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
           additionalCharges: additionalCharges,
@@ -3121,43 +3251,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           if (allItems.isEmpty && !ref.read(connectivityProvider)) {
             return NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider));
           }
-          // A selected major can disappear under us (its last item deleted or
-          // re-filed). Drop the filter for THIS build rather than rendering an
-          // empty list for a frame, and clear the notifier afterwards.
-          var activeMajor = _activeMajor.value;
-          if (activeMajor != null && !majors.contains(activeMajor)) {
-            activeMajor = null;
+          // The lit major can disappear under us (its last item deleted or
+          // re-filed). Nothing is filtered by it any more, so there is no bad
+          // frame to avoid — just unlight the chip once the build is done.
+          final litMajor = _activeMajor.value;
+          if (litMajor != null && !majors.contains(litMajor)) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) _activeMajor.value = null;
             });
           }
 
-          final items = _filteredItems(allItems, activeMajor);
-          var sections = _groupByCategory(items, cats);
+          final items = _filteredItems(allItems);
+          var tree = _groupByMajor(items, cats, majors);
 
           // First load (fresh login / opening the billing screen): spread the
-          // first category open by default. Only once, and never while a
-          // search is active (search already opens every matching section).
+          // very first CATEGORY open so the cashier lands on tappable items
+          // rather than a wall of shut bars. The majors themselves need no
+          // seeding — they are open unless explicitly folded (_collapsedMajors).
+          // Only once, and never while a search is active (search already opens
+          // every matching section).
+          final firstMajor =
+              tree.where((m) => m.subs.isNotEmpty).firstOrNull;
           if (!_autoOpenedFirstCategory &&
-              sections.isNotEmpty &&
+              firstMajor != null &&
               _searchController.text.trim().isEmpty) {
             _autoOpenedFirstCategory = true;
-            final first = sections.first.category;
+            final firstKey = firstMajor.subs.first.key;
             _expandedCategories
               ..clear()
-              ..add(first);
-            sections = _groupByCategory(items, cats);
+              ..add(firstKey);
+            tree = _groupByMajor(items, cats, majors);
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _setActiveCategory(first);
+              if (!mounted) return;
+              // No capsule is lit on first load: with every major already open,
+              // none of them is the one the cashier chose. The strip lights up
+              // only once they actually tap a major to jump to it.
+              _setActiveCategory(firstKey);
             });
           }
 
           // Cache what the scroll listener needs, and re-point the chip strip
           // whenever the set of sections changes (search typed, items synced).
-          final sectionsChanged = sections.length != _sections.length ||
-              Iterable.generate(sections.length).any(
-                  (k) => sections[k].category != _sections[k].category);
-          _sections = sections;
+          final treeKeys = [
+            for (final m in tree) ...[m.major, for (final s in m.subs) s.key]
+          ];
+          final oldKeys = [
+            for (final m in _tree) ...[m.major, for (final s in m.subs) s.key]
+          ];
+          final sectionsChanged = treeKeys.length != oldKeys.length ||
+              Iterable.generate(treeKeys.length)
+                  .any((k) => treeKeys[k] != oldKeys[k]);
+          _tree = tree;
           _twoColumns = MediaQuery.of(context).size.width >= 1200;
           if (sectionsChanged) {
             WidgetsBinding.instance
@@ -3178,8 +3322,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           } else {
             // The chip strip lists the sections actually on screen; when nothing
             // matches the search it falls back to every category (as a hint).
-            final stripCats = sections.isNotEmpty
-                ? [for (final s in sections) s.category]
+            final flatSubs = tree.isEmpty ? const <_CategorySection>[] : tree.first.subs;
+            final stripCats = flatSubs.isNotEmpty
+                ? [for (final s in flatSubs) s.category]
                 : cats;
             strip = stripCats.isEmpty ? null : _buildCategoryStrip(stripCats);
           }
@@ -3218,10 +3363,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           return withStrip(RefreshIndicator(
             onRefresh: refresh,
             child: _ExcelItemTable(
-              sections: sections,
+              tree: tree,
               cart: cart,
               controller: _itemsScrollCtrl,
               twoColumns: _twoColumns,
+              onToggleMajor: _toggleMajor,
               onToggleSection: _toggleCategory,
               // A variant parent can't map one stepper to several sizes, so
               // every qty action on it (+/−/set/tap) unfolds its size rows in
@@ -4667,14 +4813,62 @@ class _CartQtyFieldState extends State<_CartQtyField> {
 class _CategorySection {
   /// Raw category string; empty for items that have no category ("Other").
   final String category;
+  /// Major this section was built under, or null when the menu has no major
+  /// level at all. The SAME category legitimately appears under several majors
+  /// (a "Rice" filed under both Veg and Non-Veg), so [key] — not [category] —
+  /// is what identifies a section for open/closed state and fold animations.
+  final String? major;
   final List<Item> items;
   /// Collapsed sections render only their bar; the item rows appear once the
   /// cashier taps the bar (or its + button).
   final bool expanded;
   /// Ids of variant items in [items] whose size rows are unfolded beneath them.
   final Set<String> openItems;
+  /// The hue of the major this sits under — see [CategoryAccents]. Carried on
+  /// the section (rather than looked up per widget) so the bar, its rail and
+  /// its item rows are all guaranteed to be tinted the same.
+  final Color accent;
   const _CategorySection(this.category, this.items,
-      {required this.expanded, this.openItems = const {}});
+      {required this.expanded,
+      this.major,
+      this.openItems = const {},
+      this.accent = AppColors.primary});
+
+  String get key => sectionKey(major, category);
+
+  /// Unique across the whole tree even when two majors share a category name.
+  /// The separator is a NUL so it can never occur inside a real name.
+  static String sectionKey(String? major, String category) =>
+      major == null ? category : '$major\u0000$category';
+}
+
+/// One major category and the sub-category sections filed under it. A menu that
+/// has never used the major level is represented by a single [_MajorSection.flat]
+/// — no bar of its own, always open — so the list below is exactly what it has
+/// always been for those businesses.
+class _MajorSection {
+  /// Null for the flat (no-major-level) case; '' is the real "Other" bucket for
+  /// items that have a major level in the menu but no major of their own.
+  final String? major;
+  final List<_CategorySection> subs;
+  final bool expanded;
+  /// This major's hue — see [CategoryAccents].
+  final Color accent;
+
+  const _MajorSection(this.major, this.subs,
+      {required this.expanded, this.accent = AppColors.primary});
+  const _MajorSection.flat(this.subs)
+      : major = null,
+        expanded = true,
+        accent = AppColors.primary;
+
+  int get itemCount {
+    var n = 0;
+    for (final s in subs) {
+      n += s.items.length;
+    }
+    return n;
+  }
 }
 
 String _categoryLabel(String category, AppLocalizations l10n) =>
@@ -4709,22 +4903,62 @@ class _Cell {
 }
 
 class _ListEntry {
+  final _MajorSection? majorSection;
   final _CategorySection? section;
 
   /// One entry per COLUMN, positionally. A null means that column has nothing
   /// on this row — it has simply run out of dishes before the other one has.
   final List<_Cell?> cells;
-  const _ListEntry.header(this.section) : cells = const [];
-  const _ListEntry.row(this.cells) : section = null;
+
+  /// True on the FINAL row of an open sub-category. The open card's border is
+  /// drawn in pieces down its rows — they are separate entries in the sliver,
+  /// so one widget cannot enclose them — and this is the row that closes it
+  /// off with a bottom edge and rounded corners.
+  final bool isLastRowOfSection;
+
+  /// The hue of the major this row sits under, so the box drawn round it
+  /// matches the card that opened it. See [CategoryAccents].
+  final Color accent;
+
+  const _ListEntry.majorHeader(this.majorSection)
+      : section = null,
+        cells = const [],
+        isLastRowOfSection = false,
+        accent = AppColors.primary;
+  const _ListEntry.header(this.section)
+      : majorSection = null,
+        cells = const [],
+        isLastRowOfSection = false,
+        accent = AppColors.primary;
+  const _ListEntry.row(this.cells,
+      {this.isLastRowOfSection = false, this.accent = AppColors.primary})
+      : section = null,
+        majorSection = null;
   bool get isHeader => section != null;
+  bool get isMajorHeader => majorSection != null;
+}
+
+/// Where one sub-section's bar and rows sit in the list, in scroll offsets.
+class _SectionSpan {
+  final String key;
+  final double start;
+  final double end;
+  final bool expanded;
+  const _SectionSpan(this.key, this.start, this.end, this.expanded);
 }
 
 class _ExcelItemTable extends StatefulWidget {
-  final List<_CategorySection> sections;
+  /// Two-level accordion: a bar per major, each holding its own category bars.
+  /// A menu with no major level is one [_MajorSection.flat] — no major bar,
+  /// always open — so it renders as the flat category list it always was.
+  final List<_MajorSection> tree;
   final List<CartEntry> cart;
   final ScrollController controller;
   final bool twoColumns;
-  final void Function(String category) onToggleSection;
+  final void Function(String major) onToggleMajor;
+  /// Called with the section's key (see [_CategorySection.key]), not its bare
+  /// category name — one category can appear under several majors.
+  final void Function(String sectionKey) onToggleSection;
   final void Function(Item) onAdd;
   final void Function(Item) onDecrement;
   final void Function(Item) onIncrement;
@@ -4734,10 +4968,11 @@ class _ExcelItemTable extends StatefulWidget {
   final void Function(Item, ItemVariant, double qty) onVariantSetQty;
 
   const _ExcelItemTable({
-    required this.sections,
+    required this.tree,
     required this.cart,
     required this.controller,
     required this.twoColumns,
+    required this.onToggleMajor,
     required this.onToggleSection,
     required this.onAdd,
     required this.onDecrement,
@@ -4750,10 +4985,23 @@ class _ExcelItemTable extends StatefulWidget {
 
   // Every row has a fixed extent so a chip tap can compute its target scroll
   // offset exactly (and the scroll-spy can invert it) without measuring.
-  static const double columnHeaderHeight = 29; // 28 header + 1 divider
-  static const double sectionHeaderExtent = 40;
+  // 0: there is no pinned "Item / Price / Qty" bar above the list any more —
+  // kept as a named constant (rather than deleted) since sectionOffset math
+  // elsewhere still adds it, so a header could come back without touching that.
+  static const double columnHeaderHeight = 0;
+  /// A sub-category card (40) plus the gap under it (6). The gap is part of the
+  /// extent rather than a margin between rows so the scroll math stays exact.
+  static const double sectionHeaderExtent = 46;
+  /// A major is one line of text like a sub bar; it only needs the slightly
+  /// wider gap above it that separates one major's block from the next.
+  static const double majorHeaderExtent = 50;
   static const double rowExtent = 41; // 40 row + 1 divider
   static const double bottomPadding = 80;
+  /// Indent of everything living under a major — the sub-category cards and
+  /// the item rows inside them. The tree rail is drawn down this gutter.
+  /// Kept narrow: every pixel here is taken off the item name, which is the
+  /// one thing on the row that actually needs the width.
+  static const double railGutter = 11;
   /// How long a category / variant group takes to unfold or fold shut. The
   /// bar's colours, rail and chevron run on the same clock so the whole group
   /// moves as one.
@@ -4805,7 +5053,11 @@ class _ExcelItemTable extends StatefulWidget {
     }
     for (var r = 0; r < rows; r++) {
       out.add(_ListEntry.row(
-          [for (final c in columns) r < c.length ? c[r] : null]));
+        [for (final c in columns) r < c.length ? c[r] : null],
+        isLastRowOfSection: r == rows - 1,
+        // Inherited from the section, which got it from its major.
+        accent: s.accent,
+      ));
     }
     return (out, index);
   }
@@ -4814,27 +5066,95 @@ class _ExcelItemTable extends StatefulWidget {
   static int _rowsIn(_CategorySection s, bool twoColumns) =>
       _sectionEntries(s, twoColumns, 0).$1.length;
 
-  /// Scroll offset (list-local, i.e. what [controller] should be set to so the
-  /// section bar sits right under the pinned header) of section [k].
-  static double sectionOffset(
-      List<_CategorySection> sections, int k, bool twoColumns) {
+  /// List-local scroll span of every sub-section currently in the list, in
+  /// order — [start] is what [controller] should be set to so that section's
+  /// bar sits right under the pinned header. Sections under a folded major are
+  /// not in the list at all, so they are absent here too.
+  static List<_SectionSpan> sectionSpans(
+      List<_MajorSection> tree, bool twoColumns) {
+    final out = <_SectionSpan>[];
     var offset = 0.0;
-    for (var i = 0; i < k && i < sections.length; i++) {
-      offset += sectionHeaderExtent + _rowsIn(sections[i], twoColumns) * rowExtent;
+    for (final m in tree) {
+      if (m.major != null) offset += majorHeaderExtent;
+      if (!m.expanded) continue;
+      for (final s in m.subs) {
+        final start = offset;
+        offset += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        out.add(_SectionSpan(s.key, start, offset, s.expanded));
+      }
     }
-    return offset;
+    return out;
+  }
+
+  /// Which major's block contains [offset] — its own bar plus everything
+  /// filed under it, down to the next major's bar. Null for a flat menu (no
+  /// major level) or an empty list.
+  ///
+  /// This is what lets the capsule strip follow a manual scroll: the lit chip
+  /// is whichever major the cashier is currently looking at.
+  static String? majorAtOffset(
+      List<_MajorSection> tree, double offset, bool twoColumns) {
+    String? current;
+    var y = 0.0;
+    for (final m in tree) {
+      if (m.major == null) continue; // flat menu — no majors to point at
+      // The bar itself starts this major's block.
+      if (y > offset) break;
+      current = m.major;
+      y += majorHeaderExtent;
+      if (!m.expanded) continue;
+      for (final s in m.subs) {
+        y += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+      }
+    }
+    return current;
+  }
+
+  /// List-local offset that puts [major]'s bar under the pinned header, or null
+  /// when that major isn't in the (filtered) list.
+  static double? majorOffset(
+      List<_MajorSection> tree, String major, bool twoColumns) {
+    var offset = 0.0;
+    for (final m in tree) {
+      if (m.major == major) return offset;
+      if (m.major != null) offset += majorHeaderExtent;
+      if (!m.expanded) continue;
+      for (final s in m.subs) {
+        offset += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+      }
+    }
+    return null;
+  }
+
+  /// Total height of the list's content, bars and rows, once settled.
+  static double _contentHeight(List<_MajorSection> tree, bool twoColumns) {
+    var h = 0.0;
+    for (final m in tree) {
+      if (m.major != null) h += majorHeaderExtent;
+      if (!m.expanded) continue;
+      for (final s in m.subs) {
+        h += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+      }
+    }
+    return h;
   }
 
   /// List-local offset that puts [itemId]'s row under the pinned header, or
   /// null when the item isn't in the (filtered, unfolded) list.
   static double? itemOffset(
-      List<_CategorySection> sections, String itemId, bool twoColumns) {
+      List<_MajorSection> tree, String itemId, bool twoColumns) {
     var offset = 0.0;
-    for (final s in sections) {
-      offset += sectionHeaderExtent;
-      for (final e in _sectionEntries(s, twoColumns, 0).$1) {
-        if (e.cells.any((c) => c != null && c.item?.id == itemId)) return offset;
-        offset += rowExtent;
+    for (final m in tree) {
+      if (m.major != null) offset += majorHeaderExtent;
+      if (!m.expanded) continue;
+      for (final s in m.subs) {
+        offset += sectionHeaderExtent;
+        for (final e in _sectionEntries(s, twoColumns, 0).$1) {
+          if (e.cells.any((c) => c != null && c.item?.id == itemId)) {
+            return offset;
+          }
+          offset += rowExtent;
+        }
       }
     }
     return null;
@@ -4844,16 +5164,15 @@ class _ExcelItemTable extends StatefulWidget {
   /// after a toggle the live extent is still catching up (rows are mid-grow),
   /// so a jump started in that frame must clamp against this instead.
   static double settledMaxScroll(
-    List<_CategorySection> sections,
+    List<_MajorSection> tree,
     bool twoColumns, {
     required double viewportHeight,
-  }) {
-    var content = columnHeaderHeight + bottomPadding;
-    for (final s in sections) {
-      content += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
-    }
-    return (content - viewportHeight).clamp(0.0, double.infinity);
-  }
+  }) =>
+      (columnHeaderHeight +
+              bottomPadding +
+              _contentHeight(tree, twoColumns) -
+              viewportHeight)
+          .clamp(0.0, double.infinity);
 
   @override
   State<_ExcelItemTable> createState() => _ExcelItemTableState();
@@ -4895,28 +5214,43 @@ class _Fold {
 
 class _ExcelItemTableState extends State<_ExcelItemTable>
     with TickerProviderStateMixin {
-  // Fold animations, keyed by category / variant item id. A fold only exists
-  // for a group that has been toggled since this widget mounted; for every
-  // other group the state is simply whatever [widget] says. Progress runs
-  // 0 (folded) → 1 (open) and scales every row of the group in unison
+  // Fold animations, keyed by major / section key / variant item id. A fold
+  // only exists for a group that has been toggled since this widget mounted;
+  // for every other group the state is simply whatever [widget] says. Progress
+  // runs 0 (folded) → 1 (open) and scales every row of the group in unison
   // (per-row squash + fade), so the rows below slide down/up instead of
-  // popping in and out.
+  // popping in and out. A major's fold multiplies into its sections' rows, so
+  // folding a major carries its whole subtree with it.
+  final Map<String, _Fold> _majorFold = {};
   final Map<String, _Fold> _sectionFold = {};
   final Map<String, _Fold> _variantFold = {};
 
-  static Set<String> _openCategories(List<_CategorySection> sections) =>
-      {for (final s in sections) if (s.expanded) s.category};
+  static Set<String> _openMajors(List<_MajorSection> tree) => {
+        for (final m in tree)
+          if (m.major != null && m.expanded) m.major!,
+      };
 
-  static Set<String> _openVariantItems(List<_CategorySection> sections) =>
-      {for (final s in sections) ...s.openItems};
+  // Collected regardless of whether the parent major is open, so a section's
+  // own open state survives its major being folded and unfolded.
+  static Set<String> _openCategories(List<_MajorSection> tree) => {
+        for (final m in tree)
+          for (final s in m.subs)
+            if (s.expanded) s.key,
+      };
+
+  static Set<String> _openVariantItems(List<_MajorSection> tree) => {
+        for (final m in tree)
+          for (final s in m.subs) ...s.openItems,
+      };
 
   @override
   void didUpdateWidget(_ExcelItemTable old) {
     super.didUpdateWidget(old);
-    _diffFolds(_sectionFold, _openCategories(old.sections),
-        _openCategories(widget.sections));
-    _diffFolds(_variantFold, _openVariantItems(old.sections),
-        _openVariantItems(widget.sections));
+    _diffFolds(_majorFold, _openMajors(old.tree), _openMajors(widget.tree));
+    _diffFolds(_sectionFold, _openCategories(old.tree),
+        _openCategories(widget.tree));
+    _diffFolds(_variantFold, _openVariantItems(old.tree),
+        _openVariantItems(widget.tree));
   }
 
   /// Starts a fold/unfold for every key whose open state flipped.
@@ -4942,6 +5276,9 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
 
   @override
   void dispose() {
+    for (final f in _majorFold.values) {
+      f.dispose();
+    }
     for (final f in _sectionFold.values) {
       f.dispose();
     }
@@ -4961,174 +5298,131 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
   List<(_ListEntry, double)> _entries() {
     final entries = <(_ListEntry, double)>[];
     var index = 1;
-    for (final s in widget.sections) {
-      entries.add((_ListEntry.header(s), _ExcelItemTable.sectionHeaderExtent));
-      final sp = _progress(_sectionFold, s.category, s.expanded);
-      if (sp <= 0) {
-        index += s.items.length;
+    for (final m in widget.tree) {
+      // The flat (no-major) case has no bar of its own and is always open, so
+      // the list below it is exactly the plain category accordion.
+      if (m.major != null) {
+        entries.add(
+            (_ListEntry.majorHeader(m), _ExcelItemTable.majorHeaderExtent));
+      }
+      final mp = m.major == null
+          ? 1.0
+          : _progress(_majorFold, m.major!, m.expanded);
+      if (mp <= 0) {
+        index += m.itemCount;
         continue;
       }
-      // Variant groups still folding shut stay unfolded for layout purposes.
-      final visible = _CategorySection(s.category, s.items,
-          expanded: true,
-          openItems: {
-            for (final it in s.items)
-              if (it.hasVariants &&
-                  _showing(_variantFold, it.id, s.openItems.contains(it.id)))
-                it.id,
-          });
-      final (rows, next) =
-          _ExcelItemTable._sectionEntries(visible, widget.twoColumns, index);
-      for (final e in rows) {
-        // A row squashes with the variant fold only when EVERY cell on it is a
-        // size — with independent columns a row routinely pairs a size with an
-        // ordinary dish, and squashing that row would drag the dish's height
-        // down with a fold happening in the other column. Mixed rows keep full
-        // height and the size cell fades on its own (see _entry).
-        var p = sp;
-        final present = e.cells.whereType<_Cell>();
-        if (present.isNotEmpty && present.every((c) => c.isSize)) {
-          var vp = 0.0;
-          for (final c in present) {
-            final id = c.sizeParent!.id;
-            final q = _progress(_variantFold, id, s.openItems.contains(id));
-            if (q > vp) vp = q;
-          }
-          p *= vp;
+      for (final s in m.subs) {
+        // The sub bar squashes with its major, so folding a major takes its
+        // whole subtree — bars and rows alike — down together.
+        entries.add(
+            (_ListEntry.header(s), _ExcelItemTable.sectionHeaderExtent * mp));
+        final sp = mp * _progress(_sectionFold, s.key, s.expanded);
+        if (sp <= 0) {
+          index += s.items.length;
+          continue;
         }
-        if (p <= 0) continue;
-        entries.add((e, _ExcelItemTable.rowExtent * p));
+        // Variant groups still folding shut stay unfolded for layout purposes.
+        // Copies EVERY field of the real section, accent included — the rows
+        // built from this stand-in inherit their colour from it, so dropping
+        // it here silently reverted every item row and the box drawn round
+        // them to the default indigo while the card above stayed correct.
+        final visible = _CategorySection(s.category, s.items,
+            major: s.major,
+            expanded: true,
+            accent: s.accent,
+            openItems: {
+              for (final it in s.items)
+                if (it.hasVariants &&
+                    _showing(_variantFold, it.id, s.openItems.contains(it.id)))
+                  it.id,
+            });
+        final (rows, next) =
+            _ExcelItemTable._sectionEntries(visible, widget.twoColumns, index);
+        for (final e in rows) {
+          // A row squashes with the variant fold only when EVERY cell on it is
+          // a size — with independent columns a row routinely pairs a size with
+          // an ordinary dish, and squashing that row would drag the dish's
+          // height down with a fold happening in the other column. Mixed rows
+          // keep full height and the size cell fades on its own (see _entry).
+          var p = sp;
+          final present = e.cells.whereType<_Cell>();
+          if (present.isNotEmpty && present.every((c) => c.isSize)) {
+            var vp = 0.0;
+            for (final c in present) {
+              final id = c.sizeParent!.id;
+              final q = _progress(_variantFold, id, s.openItems.contains(id));
+              if (q > vp) vp = q;
+            }
+            p *= vp;
+          }
+          if (p <= 0) continue;
+          entries.add((e, _ExcelItemTable.rowExtent * p));
+        }
+        index = next;
       }
-      index = next;
     }
     return entries;
   }
 
   /// Squash + fade: clips a partially open row to its current extent around
   /// its own centre (the row appears to grow out of its midline) while fading
-  /// it in with the same progress.
-  Widget _folded(Widget row, double extent) {
-    if (extent >= _ExcelItemTable.rowExtent) return row;
+  /// it in with the same progress. [full] is the extent the child is laid out
+  /// at when fully open — a row's height for rows, a bar's for bars.
+  Widget _folded(Widget row, double extent, double full) {
+    if (extent >= full) return row;
     return ClipRect(
       child: OverflowBox(
         alignment: Alignment.center,
-        minHeight: _ExcelItemTable.rowExtent,
-        maxHeight: _ExcelItemTable.rowExtent,
+        minHeight: full,
+        maxHeight: full,
         child: Opacity(
-          opacity: (extent / _ExcelItemTable.rowExtent).clamp(0.0, 1.0),
+          opacity: (extent / full).clamp(0.0, 1.0),
           child: row,
         ),
       ),
     );
   }
 
-  /// Highlighted, tappable category bar. Shows "name (count)" and a + button
-  /// while collapsed; expanding it reveals the items and flips the button to −.
-  Widget _sectionHeader(_CategorySection s, AppLocalizations l10n) {
-    final open = s.expanded;
-    // Bar tint and accent rail cross-fade on the fold clock instead of
-    // hard-flipping the instant the rows start moving.
-    return AnimatedContainer(
-      duration: _ExcelItemTable.foldDuration,
-      curve: _ExcelItemTable.foldCurve,
-      color: open ? AppColors.primaryLight : AppColors.surfaceVariant,
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: () => widget.onToggleSection(s.category),
-          child: AnimatedContainer(
-            duration: _ExcelItemTable.foldDuration,
-            curve: _ExcelItemTable.foldCurve,
-            height: _ExcelItemTable.sectionHeaderExtent,
-            // No accent rail here — the bar already reads as a category from
-            // its tint and full width. The rail now means one thing only: this
-            // row is a size of the dish above it.
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppColors.border)),
-            ),
-            padding: const EdgeInsets.only(left: 12, right: 8),
-            child: Row(
-              children: [
-                // Name + count hug the left; the single Expanded takes ALL the
-                // free space so the button below lands flush on the right edge.
-                Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          _categoryLabel(s.category, l10n),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppFont.style(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: open
-                                ? AppColors.primaryDark
-                                : AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      // Item count pill right next to the name.
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: open
-                              ? AppColors.primary.withValues(alpha: 0.12)
-                              : AppColors.border,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          '${s.items.length}',
-                          style: AppFont.style(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: open
-                                ? AppColors.primary
-                                : AppColors.textSecondary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Open/close chevron flush on the right edge. Round + chevron so
-                // it can't be confused with the square − / + qty steppers on the
-                // item rows below. Open state uses the emerald accent so it
-                // stands out against the indigo-tinted open bar.
-                AnimatedContainer(
-                  duration: _ExcelItemTable.foldDuration,
-                  curve: _ExcelItemTable.foldCurve,
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: open ? AppColors.accent : AppColors.surface,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: open ? AppColors.accent : AppColors.border),
-                  ),
-                  child: AnimatedRotation(
-                    turns: open ? 0.5 : 0,
-                    duration: _ExcelItemTable.foldDuration,
-                    curve: _ExcelItemTable.foldCurve,
-                    child: Icon(
-                      Icons.expand_more,
-                      size: 20,
-                      color: open ? Colors.white : AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+  Widget _sectionHeader(_CategorySection s, AppLocalizations l10n) =>
+      SubCategoryCard(
+        label: _categoryLabel(s.category, l10n),
+        countLabel: l10n.billingCategoryItemCount(s.items.length),
+        open: s.expanded,
+        // Hung off the rail: it reads as living inside the major above rather
+        // than as a peer of it. A menu with no major level has no rail.
+        nested: s.major != null,
+        isLast: _isLastSub(s),
+        onTap: () => widget.onToggleSection(s.key),
+        height: _ExcelItemTable.sectionHeaderExtent,
+        railGutter: _ExcelItemTable.railGutter,
+        accent: s.accent,
+      );
+
+  /// Whether [s] is the final sub-category of its major — the rail stops at it
+  /// rather than running on into the gap before the next major.
+  bool _isLastSub(_CategorySection s) {
+    for (final m in widget.tree) {
+      if (m.major != s.major) continue;
+      return m.subs.isNotEmpty && m.subs.last.key == s.key;
+    }
+    return false;
+  }
+
+  /// Major card. The trailing gap lives inside the fixed [majorHeaderExtent]
+  /// rather than as a margin between entries — the scroll math adds these
+  /// extents up, so spacing outside them would make a chip tap land short.
+  Widget _majorHeader(_MajorSection m, AppLocalizations l10n) {
+    return MajorCategoryCard(
+      label: _categoryLabel(m.major!, l10n),
+      open: m.expanded,
+      onTap: () => widget.onToggleMajor(m.major!),
+      height: _ExcelItemTable.majorHeaderExtent,
+      accent: m.accent,
     );
   }
 
-  Widget _itemRow(Item item, int index) => _ExcelItemRow(
+  Widget _itemRow(Item item, int index, Color accent) => _ExcelItemRow(
         index: index,
         item: item,
         qty: _qtyFor(item.id),
@@ -5136,11 +5430,13 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
         onDecrement: () => widget.onDecrement(item),
         onIncrement: () => widget.onIncrement(item),
         onSetQty: (v) => widget.onSetQty(item, v),
-        expanded: widget.sections.any((s) => s.openItems.contains(item.id)),
+        expanded: widget.tree.any(
+            (m) => m.subs.any((s) => s.openItems.contains(item.id))),
+        accent: accent,
       );
 
   /// A size row unfolded beneath its parent — same stepper/swipe as any row.
-  Widget _sizeRow(Item parent, ItemVariant v) {
+  Widget _sizeRow(Item parent, ItemVariant v, Color accent) {
     final qty = widget.cart
         .where((e) => e.key == CartNotifier.keyFor(parent.id, v.id))
         .fold(0.0, (s, e) => s + e.quantity);
@@ -5154,22 +5450,30 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
       onIncrement: () => widget.onVariantAdd(parent, v),
       onDecrement: () => widget.onVariantDelta(parent, v, -1),
       onSetQty: (q) => widget.onVariantSetQty(parent, v, q),
+      accent: accent,
     );
   }
 
   /// Renders one column's cell: a dish, one of a dish's sizes, or blank when
   /// that column has run out while the other is still going.
-  Widget _cell(_Cell? c) {
+  Widget _cell(_Cell? c, Color accent) {
     if (c == null) return const SizedBox();
-    if (!c.isSize) return _itemRow(c.item!, c.number);
-    return _sizeRow(c.sizeParent!, c.variant!);
+    if (!c.isSize) return _itemRow(c.item!, c.number, accent);
+    return _sizeRow(c.sizeParent!, c.variant!, accent);
   }
 
   Widget _entry(_ListEntry e, double extent, AppLocalizations l10n) {
-    if (e.isHeader) return _sectionHeader(e.section!, l10n);
+    // A major bar is always at full height — nothing folds it away.
+    if (e.isMajorHeader) return _majorHeader(e.majorSection!, l10n);
+    // A sub bar squashes with its major's fold, so it needs the same
+    // clip-and-fade treatment the rows below it get.
+    if (e.isHeader) {
+      return _folded(_sectionHeader(e.section!, l10n), extent,
+          _ExcelItemTable.sectionHeaderExtent);
+    }
     // One widget per column. Each cell is a dish, a size, or nothing — the two
     // columns advance independently, so any combination can share a row.
-    final cells = [for (final c in e.cells) _cell(c)];
+    final cells = [for (final c in e.cells) _cell(c, e.accent)];
     final Widget row;
     if (!widget.twoColumns) {
       row = cells.first;
@@ -5183,63 +5487,64 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
         ],
       );
     }
+    // Item rows live INSIDE their open sub-category's box: the card's border
+    // runs on down their sides and closes under the last of them. They carry
+    // no rail of their own — the box already says what they belong to — but
+    // the MAJOR's rail still runs past them in the gutter, so the tree line
+    // does not break for the height of an open section.
+    // Only a menu WITH majors has a rail; the rows of a flat menu hang off
+    // nothing. Everything else — the box round an open group, its inset, its
+    // cell rules — is the same either way, so a shop that never adopted major
+    // categories gets the same billing list, minus the tree line.
+    final railed = widget.tree.isNotEmpty && widget.tree.first.major != null;
+    final rowBody = Column(
+      children: [
+        Expanded(child: row),
+        // No divider under the final row — the frame's own bottom edge closes
+        // the box there, and both together read as a doubled line.
+        if (!e.isLastRowOfSection)
+          // Edge to edge so it MEETS the side borders and the rows read as
+          // cells of one table; lighter than the box's own edge, because these
+          // are internal rules and not part of its outline.
+          const Divider(
+            height: 1,
+            thickness: 1,
+            color: AppColors.border,
+            indent: 0,
+            endIndent: 0,
+          ),
+      ],
+    );
+
     return _folded(
-      Column(
-        children: [
-          SizedBox(height: _ExcelItemTable.rowExtent - 1, child: row),
-          const Divider(height: 1, indent: 12, endIndent: 12),
-        ],
+      Padding(
+        padding: const EdgeInsets.only(left: 8, right: 8),
+        child: railed
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TreeRail(
+                      width: _ExcelItemTable.railGutter,
+                      color: CategoryAccents.railTint(e.accent)),
+                  Expanded(
+                    child: ItemRowFrame(
+                      isLast: e.isLastRowOfSection,
+                      accent: e.accent,
+                      child: rowBody,
+                    ),
+                  ),
+                ],
+              )
+            : ItemRowFrame(
+                isLast: e.isLastRowOfSection,
+                accent: e.accent,
+                child: rowBody,
+              ),
       ),
       extent,
+      _ExcelItemTable.rowExtent,
     );
   }
-
-  Widget _header(AppLocalizations l10n) => Container(
-        height: 28,
-        color: AppColors.surfaceVariant,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          children: [
-            const SizedBox(width: 24),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(l10n.billingColItem,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.style(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                  )),
-            ),
-            SizedBox(
-              width: 72,
-              child: Text(l10n.billingColPrice,
-                  textAlign: TextAlign.right,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.style(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                  )),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 112,
-              child: Text(l10n.billingColQty,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppFont.style(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                  )),
-            ),
-          ],
-        ),
-      );
 
   // Total quantity for an item across all its cart lines (sums variants).
   double _qtyFor(String itemId) => widget.cart
@@ -5251,39 +5556,10 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
     final l10n = context.l10n;
     final entries = _entries();
 
-    // Two item columns only on large screens (≥1200px total) where the
-    // items panel is wide enough to comfortably fit two side-by-side tables.
-    final columnHeader = !widget.twoColumns
-        ? _header(l10n)
-        : Row(
-            children: [
-              Expanded(child: _header(l10n)),
-              Container(width: 1, color: AppColors.border),
-              Expanded(child: _header(l10n)),
-            ],
-          );
-
-    // The column header stays pinned while the rows scroll beneath it (the
-    // category jump-list sits above this whole table).
     return CustomScrollView(
       controller: widget.controller,
       physics: const AlwaysScrollableScrollPhysics(),
       slivers: [
-        SliverPersistentHeader(
-          pinned: true,
-          delegate: _PinnedHeaderDelegate(
-            height: _ExcelItemTable.columnHeaderHeight,
-            child: ColoredBox(
-              color: AppColors.surface,
-              child: Column(
-                children: [
-                  columnHeader,
-                  const Divider(height: 1),
-                ],
-              ),
-            ),
-          ),
-        ),
         SliverPadding(
           padding:
               const EdgeInsets.only(bottom: _ExcelItemTable.bottomPadding),
@@ -5420,25 +5696,6 @@ class _PrinterStatusLine extends ConsumerWidget {
   }
 }
 
-class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
-  final double height;
-  final Widget child;
-
-  const _PinnedHeaderDelegate({required this.height, required this.child});
-
-  @override
-  double get minExtent => height;
-  @override
-  double get maxExtent => height;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) => child;
-
-  @override
-  bool shouldRebuild(_PinnedHeaderDelegate old) =>
-      old.height != height || old.child != child;
-}
-
 // ---------------------------------------------------------------------------
 // Single row in the Excel table — animated highlight when in cart
 // ---------------------------------------------------------------------------
@@ -5462,6 +5719,10 @@ class _ExcelItemRow extends StatefulWidget {
   final bool nested;
   // Variant parent whose size rows are currently unfolded beneath it.
   final bool expanded;
+  /// The hue of the major this row's category sits under, so the size-row
+  /// rail, its tag and the in-cart tint all match the box around them rather
+  /// than staying the app's default indigo.
+  final Color accent;
 
   const _ExcelItemRow({
     required this.index,
@@ -5474,6 +5735,7 @@ class _ExcelItemRow extends StatefulWidget {
     this.variant,
     this.nested = false,
     this.expanded = false,
+    this.accent = AppColors.primary,
   });
 
   // Effective flags/labels — a variant row behaves like a plain (non-variant)
@@ -5688,31 +5950,19 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                   margin: EdgeInsets.only(
                       left: widget.nested ? _ExcelItemRow._railIndent : 0),
                   decoration: widget.nested
-                      ? const BoxDecoration(
+                      ? BoxDecoration(
                           border: Border(
                               left: BorderSide(
-                                  color: AppColors.primary, width: 3)))
+                                  color: widget.accent, width: 3)))
                       : null,
                   padding: EdgeInsets.only(
-                      left: widget.nested ? 9 : 12, right: 12),
+                      left: widget.nested ? 8 : 10, right: 10),
                   child: Row(
                   children: [
-                    // Row number — a variant row shows a small tag icon
-                    // instead, marking it as one option of the item above.
-                    SizedBox(
-                      width: 24,
-                      child: widget.nested
-                          ? const Icon(Icons.sell_outlined,
-                              size: 14, color: AppColors.primary)
-                          : Text(
-                              '${widget.index}',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: AppColors.textDisabled,
-                              ),
-                            ),
-                    ),
-                    const SizedBox(width: 8),
+                    // Nothing before the name — no running number, and no tag
+                    // icon on a size row. The size rows are already marked as
+                    // belonging to the dish above by their indent and accent
+                    // rail; the glyph only ate width the name wanted.
                     // Item name (or size label for a variant row)
                     Expanded(
                       child: Text(
@@ -5729,16 +5979,24 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    // Price (with /unit suffix for measured items)
+                    // Price (with /unit suffix for measured items). FittedBox
+                    // shrinks the text to fit rather than wrapping "₹200.00/
+                    // glass" onto a second line — the row has no room to grow
+                    // taller for it.
                     SizedBox(
                       width: 72,
-                      child: Text(
-                        widget.rowPriceLabel,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.textSecondary,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          widget.rowPriceLabel,
+                          textAlign: TextAlign.right,
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textSecondary,
+                          ),
                         ),
                       ),
                     ),
@@ -5892,18 +6150,18 @@ class _GridBtn extends StatelessWidget {
       onTap: enabled ? onTap : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        width: 26,
-        height: 26,
+        width: 28,
+        height: 28,
         decoration: BoxDecoration(
           color: enabled
               ? AppColors.primary
               : AppColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
           icon,
-          size: 14,
-          color: enabled ? Colors.white : AppColors.textDisabled,
+          size: 16,
+          color: enabled ? Colors.white : AppColors.textSecondary,
         ),
       ),
     );

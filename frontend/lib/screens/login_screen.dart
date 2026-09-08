@@ -369,7 +369,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     final isWide = size.width >= 720;
 
     return Scaffold(
-      resizeToAvoidBottomInset: false,
+      // Must resize for the keyboard (the Flutter default). With it off the
+      // body kept full height, so the form's scroll viewport still ran to the
+      // bottom of the SCREEN — behind the keyboard. Flutter then measured the
+      // focused PIN field as already on-screen and never scrolled to it, and
+      // the field sat under the keyboard with no way to reach it.
       body: isWide ? _buildWideLayout() : _buildNarrowLayout(),
     );
   }
@@ -388,7 +392,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           children: [
             Expanded(
               flex: 2,
-              child: Center(child: _buildLogo()),
+              // Scales down rather than overflowing: now that the body resizes
+              // for the keyboard, this band can end up far shorter than the
+              // logo's natural height.
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: _buildLogo(),
+                ),
+              ),
             ),
             Expanded(
               flex: 5,

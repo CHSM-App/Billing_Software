@@ -22,6 +22,7 @@ import 'printer_test_screen.dart'
     if (dart.library.html) 'printer_test_screen_web.dart';
 import 'printer_test_windows_screen.dart'
     if (dart.library.html) 'printer_test_windows_screen_web.dart';
+import 'kitchen_print_settings_screen.dart';
 import 'staff_screen.dart';
 import 'business_profile_screen.dart';
 import 'marathi_print_test_screen.dart';
@@ -372,6 +373,26 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const PrinterSetupScreen()),
                         ),
                       ),
+                      // The pass printer and its auto-print switch. Only a
+                      // restaurant has a kitchen to print tickets to, so this
+                      // is gated the same way the Kitchen tab itself is.
+                      if (session.businessType == 'restaurant_with_tables' ||
+                          session.businessType == 'restaurant_no_tables') ...[
+                        const SizedBox(height: AppSpacing.space8),
+                        _buildNavCard(
+                          context,
+                          icon: Icons.soup_kitchen_outlined,
+                          iconColor: const Color(0xFFEA580C),
+                          title: 'Kitchen printing',
+                          subtitle: 'Kitchen printer, roll width and auto-print',
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    const KitchenPrintSettingsScreen()),
+                          ),
+                        ),
+                      ],
                       // const SizedBox(height: AppSpacing.space8),
                       // _buildNavCard(
                       //   context,

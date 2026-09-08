@@ -857,7 +857,7 @@ abstract class AppLocalizations {
   /// No description provided for @businessTypeRestaurantTables.
   ///
   /// In en, this message translates to:
-  /// **'Restaurant (with tables)'**
+  /// **'Restaurant'**
   String get businessTypeRestaurantTables;
 
   /// No description provided for @businessTypeRestaurantTakeaway.
@@ -5283,6 +5283,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Link copied'**
   String get storeLinkCopied;
+
+  /// No description provided for @storeEditLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit link'**
+  String get storeEditLink;
+
+  /// No description provided for @storeLinkLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Link name'**
+  String get storeLinkLabel;
+
+  /// No description provided for @storeLinkEditHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Lowercase letters, numbers and hyphens. Changing it stops the old link from working.'**
+  String get storeLinkEditHint;
+
+  /// No description provided for @storeLinkAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Available'**
+  String get storeLinkAvailable;
+
+  /// No description provided for @storeLinkChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking…'**
+  String get storeLinkChecking;
+
+  /// No description provided for @storeLinkTaken.
+  ///
+  /// In en, this message translates to:
+  /// **'That link is already taken'**
+  String get storeLinkTaken;
+
+  /// No description provided for @storeLinkUpdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Store link updated'**
+  String get storeLinkUpdated;
+
+  /// No description provided for @storeLinkCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get storeLinkCancel;
+
+  /// No description provided for @storeLinkSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save link'**
+  String get storeLinkSave;
+
+  /// No description provided for @storeLinkChangeWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Anyone using your old link — including printed QR codes — will no longer reach your store.'**
+  String get storeLinkChangeWarning;
 
   /// No description provided for @storeShareLink.
   ///

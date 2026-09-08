@@ -99,6 +99,17 @@ class RealtimeService {
       }).catchError((e) {
         debugPrint('[realtime] handshake failed: $e');
         _setConnected(false);
+        // The server 401s the upgrade on an expired access token and expects
+        // the client to "retry with a fresh token" (realtime.js) — but nothing
+        // else does that for us. Left alone, a reconnect loop just retries the
+        // same dead token every 3s forever: the socket never comes back until
+        // some UNRELATED http call happens to 401 and rotate it first, which is
+        // exactly why this used to "fix itself" the moment someone hit refresh.
+        // Best-effort: refreshAccessToken() writes the new token to storage, so
+        // the next scheduled _connect() (already on its way via _onClosed)
+        // picks it up via getToken(). A network failure here just means that
+        // attempt tries again in 3s, same as any other failure.
+        refreshAccessToken().catchError((_) => false);
       });
       _sub = channel.stream.listen(
         _onMessage,

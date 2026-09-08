@@ -61,7 +61,7 @@ class ReceiptLabels {
     required this.total,
     required this.payment,
     required this.thankYou,
-    this.poweredBy = 'Powered by Vengurlatech',
+    this.poweredBy = 'Powered by Vengurla Tech',
   });
 
   factory ReceiptLabels.from(AppLocalizations l10n, String languageCode) =>

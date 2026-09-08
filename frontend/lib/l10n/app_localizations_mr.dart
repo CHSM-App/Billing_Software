@@ -442,7 +442,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get businessTypeRestaurant => 'रेस्टॉरंट';
 
   @override
-  String get businessTypeRestaurantTables => 'रेस्टॉरंट (टेबलसह)';
+  String get businessTypeRestaurantTables => 'रेस्टॉरंट';
 
   @override
   String get businessTypeRestaurantTakeaway => 'रेस्टॉरंट (पार्सल)';
@@ -3003,6 +3003,38 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get storeLinkCopied => 'लिंक कॉपी झाली';
+
+  @override
+  String get storeEditLink => 'लिंक बदला';
+
+  @override
+  String get storeLinkLabel => 'लिंकचे नाव';
+
+  @override
+  String get storeLinkEditHint =>
+      'लहान इंग्रजी अक्षरे, अंक आणि हायफन चालतील. बदलल्यास जुनी लिंक चालणार नाही.';
+
+  @override
+  String get storeLinkAvailable => 'उपलब्ध आहे';
+
+  @override
+  String get storeLinkChecking => 'तपासत आहे…';
+
+  @override
+  String get storeLinkTaken => 'ही लिंक आधीच घेतलेली आहे';
+
+  @override
+  String get storeLinkUpdated => 'स्टोअर लिंक बदलली';
+
+  @override
+  String get storeLinkCancel => 'रद्द करा';
+
+  @override
+  String get storeLinkSave => 'लिंक जतन करा';
+
+  @override
+  String get storeLinkChangeWarning =>
+      'तुमची जुनी लिंक वापरणाऱ्यांना — छापलेल्या QR कोडसह — तुमचे स्टोअर सापडणार नाही.';
 
   @override
   String get storeShareLink => 'शेअर करा';

@@ -9,6 +9,7 @@ const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const audit = require('../audit');
 const whatsapp = require('../whatsapp');
+const { uniqueStoreToken } = require('../storeToken');
 
 const router = express.Router();
 
@@ -125,9 +126,19 @@ router.post('/register', registerLimiter, async (req, res) => {
         }
       }
 
+      // The public store link, derived from the shop's own name so it is
+      // readable and can be dictated over the phone: /store/vengurla-tech.
+      // A second shop with the same name gets vengurla-tech-2, and so on.
+      // Computed inside the transaction so it sees this transaction's own view
+      // of the table; the filtered unique index on store_token is the backstop
+      // if two identical names register in the very same instant.
+      const storeToken = await uniqueStoreToken(
+        transaction.request(), businessNameSaved);
+
       // Insert business. Supplying a GSTIN at sign-up turns GST on immediately,
       // so the very first bill prints as a tax invoice.
       const businessResult = await transaction.request()
+        .input('store_token', sql.NVarChar(32), storeToken)
         .input('name', sql.NVarChar(200), businessNameSaved)
         .input('business_type', sql.NVarChar(50), business_type)
         .input('address', sql.NVarChar(500), addressSaved)
@@ -142,10 +153,10 @@ router.post('/register', registerLimiter, async (req, res) => {
         .input('fssai_number', sql.NVarChar(20), fssai_number || null)
         .query(`
           INSERT INTO businesses (name, business_type, address, phone, inventory_enabled, has_barcode_scanner,
-                                  gst_number, gst_enabled, pan_number, fssai_number)
+                                  gst_number, gst_enabled, pan_number, fssai_number, store_token)
           OUTPUT INSERTED.id
           VALUES (@name, @business_type, @address, @phone, @inventory_enabled, @has_barcode_scanner,
-                  @gst_number, @gst_enabled, @pan_number, @fssai_number)
+                  @gst_number, @gst_enabled, @pan_number, @fssai_number, @store_token)
         `);
 
       const businessId = businessResult.recordset[0].id;

@@ -91,6 +91,11 @@ class AuthStorage {
   // (current behaviour). 'mm58'/'mm80' print thermal ESC/POS; 'a5'/'a4' generate
   // a PDF invoice via the OS print dialog.
   static const _keyPaperSize        = 'paper_size';
+  // Kitchen (KOT) printing. Independent of the billing paper size above: the
+  // kitchen commonly runs a second, narrower roll, and a shop that prints
+  // A4 invoices still wants a thermal ticket for the cooks.
+  static const _keyKitchenAutoPrint = 'kitchen_auto_print';
+  static const _keyKitchenPaperSize = 'kitchen_paper_size';
 
   // -------------------------------------------------------------------------
   // Write
@@ -288,6 +293,33 @@ class AuthStorage {
     return PaperSizes.all.contains(s) ? s! : PaperSizes.mm80;
   }
 
+  Future<void> saveKitchenAutoPrint(bool on) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyKitchenAutoPrint, on);
+  }
+
+  /// Whether a kitchen ticket prints by itself when a new order arrives.
+  /// Off by default — a shop that has never set up a kitchen printer must not
+  /// start firing failed print jobs after an update.
+  Future<bool> getKitchenAutoPrint() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyKitchenAutoPrint) ?? false;
+  }
+
+  Future<void> saveKitchenPaperSize(String size) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyKitchenPaperSize, size);
+  }
+
+  /// Kitchen roll width. Thermal only — a KOT is a slip torn off at the pass,
+  /// so the A5/A4 PDF path the billing size allows is meaningless here and an
+  /// A4 value left over from the billing setting must never leak in.
+  Future<String> getKitchenPaperSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    final s = prefs.getString(_keyKitchenPaperSize);
+    return (s != null && PaperSizes.isThermal(s)) ? s : PaperSizes.mm80;
+  }
+
   Future<void> saveAccessToken(String accessToken) =>
       _secure.write(key: _keyAccessToken, value: accessToken);
 
@@ -413,6 +445,10 @@ Future<String>  nextOfflineBillNumber()        => AuthStorage.instance.nextOffli
 Future<String>  getDeviceTag()                 => AuthStorage.instance.getDeviceTag();
 Future<void>    savePaperSize(String size)     => AuthStorage.instance.savePaperSize(size);
 Future<String>  getPaperSize()                 => AuthStorage.instance.getPaperSize();
+Future<void>    saveKitchenAutoPrint(bool on)  => AuthStorage.instance.saveKitchenAutoPrint(on);
+Future<bool>    getKitchenAutoPrint()          => AuthStorage.instance.getKitchenAutoPrint();
+Future<void>    saveKitchenPaperSize(String s) => AuthStorage.instance.saveKitchenPaperSize(s);
+Future<String>  getKitchenPaperSize()          => AuthStorage.instance.getKitchenPaperSize();
 Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInventoryEnabled(e);
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);

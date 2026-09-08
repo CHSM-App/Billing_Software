@@ -28,7 +28,13 @@ CREATE TABLE businesses (
     -- Online store (added via migration 037) — a public, shop-level ordering
     -- link. See online_orders at the bottom of this file.
     store_enabled          BIT           NOT NULL DEFAULT 0,
-    store_token            NVARCHAR(32)  NULL,   -- unguessable token in the public link
+    -- Unguessable token in the public link. Defaulted (040) so EVERY business
+    -- has one from the moment it is created, whether or not the insert names
+    -- the column — turning the store on is then a single flag flip and the
+    -- link is stable from day one.
+    store_token            NVARCHAR(32)  NULL
+        CONSTRAINT DF_businesses_store_token
+        DEFAULT REPLACE(CONVERT(NVARCHAR(36), NEWID()), '-', ''),
     -- No pickup column: a customer can always collect, so pickup is the
     -- baseline every store offers. Delivery is the thing a shop opts into.
     store_delivery_enabled BIT           NOT NULL DEFAULT 0,

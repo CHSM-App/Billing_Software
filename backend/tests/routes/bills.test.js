@@ -373,10 +373,12 @@ describe('POST /api/bills', () => {
     expect(billInsert.tax_amount).toBe(5);
     expect(billInsert.total).toBe(105);
 
-    // The bill_items INSERT carries the HSN snapshot.
-    const lineInsert = capturedInputs.find((i) => 'hsn_code' in i);
+    // The bill_items INSERT carries the HSN snapshot. bill_items is now one
+    // multi-row INSERT, so its per-line inputs are suffixed by row index
+    // (hsn_code0, hsn_code1, ...) rather than a bare name per request.
+    const lineInsert = capturedInputs.find((i) => 'hsn_code0' in i);
     expect(lineInsert).toBeDefined();
-    expect(lineInsert.hsn_code).toBe('9963');
+    expect(lineInsert.hsn_code0).toBe('9963');
   });
 
   test('ignores tax entirely when GST is disabled for the business', async () => {
@@ -419,8 +421,8 @@ describe('POST /api/bills', () => {
     expect(billInsert.tax_amount).toBe(0);
     expect(billInsert.total).toBe(100);
     // The stored line's tax_rate is nulled out too (tax ignored entirely).
-    const lineInsert = capturedInputs.find((i) => 'hsn_code' in i);
-    expect(lineInsert.tax_rate).toBeNull();
+    const lineInsert = capturedInputs.find((i) => 'hsn_code0' in i);
+    expect(lineInsert.tax_rate0).toBeNull();
   });
 
   test('applies discount to the net subtotal, then charges tax on the discounted net', async () => {
@@ -769,6 +771,72 @@ describe('PUT /api/bills/:id/update-items', () => {
       .set(authHeader())
       .send({});
     expect(res.status).toBe(400);
+  });
+
+  // A draft ALREADY deducted its own items from stock when it was created. So
+  // when the cashier reopens a held bill and settles it, the new quantities
+  // must be checked against stock + whatever this draft is holding — never
+  // against the bare current stock, which would reject edits that free stock up.
+  test('editing a draft is not rejected when its own reservation covers the new qty', async () => {
+    // Rice: 10 in stock, all 10 held by this draft → items.stock_quantity is 0.
+    // Cashier reduces the line to 8. That must settle, not 409.
+    const restored = [];
+    const deducted = [];
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      return {
+        inputs,
+        input: jest.fn(function (name, _type, value) {
+          inputs[name] = value;
+          return this;
+        }),
+        query: jest.fn((sqlText) => {
+          if (/FROM bills b/.test(sqlText)) {
+            return Promise.resolve({
+              recordset: [{ id: BILL_ID, status: 'draft', inventory_enabled: true,
+                round_off_enabled: false, gst_enabled: false }],
+              rowsAffected: [1],
+            });
+          }
+          if (/FROM items\b/.test(sqlText)) {
+            return Promise.resolve({
+              recordset: [{ ...sampleItem, stock_quantity: 0 }],
+              rowsAffected: [1],
+            });
+          }
+          if (/FROM bill_items/.test(sqlText)) {
+            return Promise.resolve({
+              recordset: [{ item_id: ITEM_ID, variant_id: null, item_name: 'Rice',
+                quantity: 10, unit_price: 50, kitchen_status: 'pending', kitchen_done_at: null }],
+              rowsAffected: [1],
+            });
+          }
+          if (/stock_quantity \+ @qty/.test(sqlText)) {
+            restored.push(inputs.qty);
+            return Promise.resolve({ recordset: [], rowsAffected: [1] });
+          }
+          if (/stock_quantity - @qty/.test(sqlText)) {
+            deducted.push(inputs.qty);
+            return Promise.resolve({ recordset: [], rowsAffected: [1] });
+          }
+          return Promise.resolve({ recordset: [], rowsAffected: [1] });
+        }),
+      };
+    });
+    // fetchBill after commit: the bill row, then its items.
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .put(`/api/bills/${BILL_ID}/update-items`)
+      .set(authHeader())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 8 }] });
+
+    expect(res.status).toBe(200);
+    // The draft's 10 go back, the edited 8 come out — net stock 2, not a 409.
+    expect(restored).toEqual([10]);
+    expect(deducted).toEqual([8]);
   });
 });
 

@@ -441,7 +441,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get businessTypeRestaurant => 'Restaurant';
 
   @override
-  String get businessTypeRestaurantTables => 'Restaurant (with tables)';
+  String get businessTypeRestaurantTables => 'Restaurant';
 
   @override
   String get businessTypeRestaurantTakeaway => 'Restaurant (takeaway)';
@@ -2991,6 +2991,38 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get storeLinkCopied => 'Link copied';
+
+  @override
+  String get storeEditLink => 'Edit link';
+
+  @override
+  String get storeLinkLabel => 'Link name';
+
+  @override
+  String get storeLinkEditHint =>
+      'Lowercase letters, numbers and hyphens. Changing it stops the old link from working.';
+
+  @override
+  String get storeLinkAvailable => 'Available';
+
+  @override
+  String get storeLinkChecking => 'Checking…';
+
+  @override
+  String get storeLinkTaken => 'That link is already taken';
+
+  @override
+  String get storeLinkUpdated => 'Store link updated';
+
+  @override
+  String get storeLinkCancel => 'Cancel';
+
+  @override
+  String get storeLinkSave => 'Save link';
+
+  @override
+  String get storeLinkChangeWarning =>
+      'Anyone using your old link — including printed QR codes — will no longer reach your store.';
 
   @override
   String get storeShareLink => 'Share';

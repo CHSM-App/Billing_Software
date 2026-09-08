@@ -250,4 +250,74 @@ void main() {
       expect(controller.position.maxScrollExtent, 0);
     });
   });
+
+  // ---------------------------------------------------------------------
+  // Painting the two-level tree
+  // ---------------------------------------------------------------------
+  //
+  // These exist because the failure they guard is INVISIBLE to the analyzer:
+  // Flutter asserts "A borderRadius can only be given on borders with uniform
+  // colors" at PAINT time. BorderSide.none is not colourless — it carries the
+  // default black — so a Border that drops one side to leave a box open, plus
+  // any borderRadius, throws for every card that renders that way. It shipped
+  // twice: once blanking every open sub-category header, once flooding the
+  // console. Code that compiles is not code that paints.
+  group('the category tree paints without exceptions', () {
+    Future<void> pump(WidgetTester tester, Widget child) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: SizedBox(width: 400, child: child)),
+      ));
+      await tester.pump();
+    }
+
+    const accent = Color(0xFF0EA5E9);
+
+    for (final open in [false, true]) {
+      testWidgets('SubCategoryCard, open=$open', (tester) async {
+        await pump(
+          tester,
+          SubCategoryCard(
+            label: 'Beer',
+            countLabel: '8 items',
+            open: open,
+            nested: true,
+            isLast: false,
+            onTap: () {},
+            height: 46,
+            railGutter: 11,
+            accent: accent,
+          ),
+        );
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    for (final isLast in [false, true]) {
+      testWidgets('ItemRowFrame, isLast=$isLast', (tester) async {
+        await pump(
+          tester,
+          ItemRowFrame(
+            isLast: isLast,
+            accent: accent,
+            child: const SizedBox(height: 40),
+          ),
+        );
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('MajorCategoryCard', (tester) async {
+      await pump(
+        tester,
+        MajorCategoryCard(
+          label: 'Bar',
+          open: true,
+          onTap: () {},
+          height: 50,
+          accent: accent,
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    });
+  });
 }

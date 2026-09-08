@@ -1,4 +1,5 @@
 'use strict';
+
 // =============================================================================
 // Internal admin dashboard — mounted at /admin (see server.js).
 //
