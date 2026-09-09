@@ -230,13 +230,17 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
           title: Text(l10n.kitchenTitle),
           automaticallyImplyLeading: false,
           actions: [
-            IconButton(
-              icon: const Icon(Icons.print_outlined),
-              tooltip: 'Kitchen printing',
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => const KitchenPrintSettingsScreen(),
-              )),
-            ),
+            // Shortcut for the device that actually prints the tickets. The
+            // owner has the same screen under Settings → Kitchen printing, so
+            // it is only clutter on their view of the queue.
+            if (ref.watch(userRoleProvider) != 'owner')
+              IconButton(
+                icon: const Icon(Icons.print_outlined),
+                tooltip: 'Kitchen printing',
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const KitchenPrintSettingsScreen(),
+                )),
+              ),
             IconButton(
               icon: const Icon(Icons.refresh),
               tooltip: l10n.commonRefresh,

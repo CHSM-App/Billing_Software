@@ -90,7 +90,7 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
-      version: 11,
+      version: 12,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
     );
@@ -98,32 +98,7 @@ class OfflineService {
 
   /// Full schema for fresh installs (version 2).
   Future<void> _createSchema(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS cached_items (
-        id             TEXT    NOT NULL PRIMARY KEY,
-        business_id    TEXT    NOT NULL,
-        name           TEXT    NOT NULL,
-        barcode        TEXT,
-        -- Two free-text grouping levels, mirroring items.major_category /
-        -- items.category. Both nullable — an item may carry neither.
-        major_category TEXT,
-        category       TEXT,
-        price          REAL    NOT NULL,
-        tax_rate       REAL,
-        -- 1 = `price` is GST-inclusive (MRP) and billing back-calculates the
-        -- net rate; 0 = tax is added on top. Mirrors items.price_inclusive_tax.
-        price_inclusive_tax INTEGER NOT NULL DEFAULT 0,
-        stock_quantity REAL,
-        is_active      INTEGER NOT NULL DEFAULT 1,
-        cached_at      INTEGER NOT NULL
-      )
-    ''');
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_cached_items_barcode ON cached_items (barcode)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_cached_items_business ON cached_items (business_id)',
-    );
+    await _createItemCacheTable(db);
     await _createVariantCacheTable(db);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS offline_bills (
@@ -189,6 +164,47 @@ class OfflineService {
     ''');
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_offline_drafts_status ON offline_drafts (sync_status)',
+    );
+  }
+
+  /// Item cache table.
+  ///
+  /// `price` is NULLABLE and must stay that way: an item sold only through its
+  /// sizes carries no price of its own (items.price is NULL server-side since
+  /// migration 031). It used to be NOT NULL, and because every row is written
+  /// in ONE transaction, a single such item on the menu aborted the whole
+  /// [replaceItemCache] — so shops that sell anything by size had no offline
+  /// cache at all, and the billing screen was empty the moment they went
+  /// offline. Anything nullable on [Item] must be nullable here too.
+  Future<void> _createItemCacheTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cached_items (
+        id             TEXT    NOT NULL PRIMARY KEY,
+        business_id    TEXT    NOT NULL,
+        name           TEXT    NOT NULL,
+        barcode        TEXT,
+        -- Two free-text grouping levels, mirroring items.major_category /
+        -- items.category. Both nullable — an item may carry neither.
+        major_category TEXT,
+        category       TEXT,
+        price          REAL,
+        tax_rate       REAL,
+        -- 1 = `price` is GST-inclusive (MRP) and billing back-calculates the
+        -- net rate; 0 = tax is added on top. Mirrors items.price_inclusive_tax.
+        price_inclusive_tax INTEGER NOT NULL DEFAULT 0,
+        stock_quantity REAL,
+        -- 'piece', 'kg', 'litre', ... Drives decimal-quantity entry; without it
+        -- a weighed item billed offline could only be sold in whole units.
+        unit           TEXT    NOT NULL DEFAULT 'piece',
+        is_active      INTEGER NOT NULL DEFAULT 1,
+        cached_at      INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cached_items_barcode ON cached_items (barcode)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_cached_items_business ON cached_items (business_id)',
     );
   }
 
@@ -297,6 +313,15 @@ class OfflineService {
         'ALTER TABLE cached_items ADD COLUMN major_category TEXT',
       );
     }
+    if (oldVersion < 12) {
+      // v11 → v12: drop the NOT NULL on cached_items.price (and add `unit`).
+      // SQLite cannot relax a column constraint in place, and cached_items is a
+      // pure mirror of the server — nothing here is unsynced — so the table is
+      // rebuilt empty and refills on the next online fetch. Queued offline
+      // bills/drafts live in their own tables and are untouched.
+      await db.execute('DROP TABLE IF EXISTS cached_items');
+      await _createItemCacheTable(db);
+    }
   }
 
   /// Cache of bills and drafts fetched FROM the server.
@@ -354,6 +379,7 @@ class OfflineService {
           'tax_rate': item.taxRate,
           'price_inclusive_tax': item.priceInclusiveTax ? 1 : 0,
           'stock_quantity': item.stockQuantity,
+          'unit': item.unit,
           'is_active': item.isActive ? 1 : 0,
           'cached_at': now,
         });
@@ -642,13 +668,16 @@ class OfflineService {
       barcode: row['barcode'] as String?,
       majorCategory: row['major_category'] as String?,
       category: row['category'] as String?,
-      price: (row['price'] as num).toDouble(),
+      // Null for a variant-only item — reading it as non-null threw for exactly
+      // the rows the NOT NULL column could never store in the first place.
+      price: (row['price'] as num?)?.toDouble(),
       taxRate:
           row['tax_rate'] != null ? (row['tax_rate'] as num).toDouble() : null,
       priceInclusiveTax: (row['price_inclusive_tax'] as int? ?? 0) == 1,
       stockQuantity: row['stock_quantity'] != null
           ? (row['stock_quantity'] as num).toDouble()
           : null,
+      unit: (row['unit'] as String?) ?? 'piece',
       isActive: (row['is_active'] as int) == 1,
     );
   }

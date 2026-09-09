@@ -79,4 +79,73 @@ void main() {
         await OfflineService.instance.getCachedItemsWithStatus('biz-1');
     expect(result.items.single.id, 'c');
   });
+
+  // A sized item carries no base price of its own (items.price is NULL on the
+  // server for variant-only items — migration 031). The cache column was
+  // `price REAL NOT NULL`, so ONE such item on the menu aborted the whole
+  // replaceItemCache transaction and the shop's cache stayed empty forever.
+  test('a variant-only item (no base price) does not abort the cache write',
+      () async {
+    final sized = Item(
+      id: 'sized',
+      businessId: 'biz-1',
+      name: 'Pizza',
+      price: null,
+      isActive: true,
+      variants: [
+        ItemVariant(id: 'v1', itemId: 'sized', label: 'Small', price: 100),
+      ],
+    );
+
+    await OfflineService.instance.replaceItemCache([sized, _item('a')], 'biz-1');
+
+    final result =
+        await OfflineService.instance.getCachedItemsWithStatus('biz-1');
+    expect(result.items.length, 2);
+    expect(result.items.firstWhere((i) => i.id == 'sized').price, isNull);
+    expect(result.items.firstWhere((i) => i.id == 'sized').variants.single.price,
+        100);
+  });
+
+  // Every shop already on the old schema arrives here through onUpgrade, not
+  // onCreate — a migration that fails leaves them exactly as broken as before.
+  test('an existing v11 database migrates to a nullable price', () async {
+    final path =
+        '${await databaseFactory.getDatabasesPath()}/billing_offline.db';
+    await databaseFactory.deleteDatabase(path);
+    // Recreate the v11 table as it shipped: price NOT NULL, no unit column.
+    final old = await databaseFactory.openDatabase(path,
+        options: OpenDatabaseOptions(
+          version: 11,
+          onCreate: (db, _) async {
+            await db.execute('''
+              CREATE TABLE cached_items (
+                id TEXT NOT NULL PRIMARY KEY, business_id TEXT NOT NULL,
+                name TEXT NOT NULL, barcode TEXT, major_category TEXT,
+                category TEXT, price REAL NOT NULL, tax_rate REAL,
+                price_inclusive_tax INTEGER NOT NULL DEFAULT 0,
+                stock_quantity REAL, is_active INTEGER NOT NULL DEFAULT 1,
+                cached_at INTEGER NOT NULL)
+            ''');
+            await db.execute('''
+              CREATE TABLE cached_variants (
+                id TEXT NOT NULL PRIMARY KEY, item_id TEXT NOT NULL,
+                business_id TEXT NOT NULL, label TEXT NOT NULL, price REAL,
+                barcode TEXT, stock_quantity REAL, low_stock_threshold REAL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1)
+            ''');
+          },
+        ));
+    await old.close();
+
+    await OfflineService.instance.init();
+    await OfflineService.instance.replaceItemCache([
+      Item(id: 'sized', businessId: 'biz-1', name: 'Pizza', isActive: true),
+    ], 'biz-1');
+
+    final result =
+        await OfflineService.instance.getCachedItemsWithStatus('biz-1');
+    expect(result.items.single.price, isNull);
+  });
 }
