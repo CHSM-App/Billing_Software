@@ -277,6 +277,34 @@ class _MainShellState extends ConsumerState<MainShell>
     setState(() => _index = i);
   }
 
+  /// Push the offline queue, then reload everything that went stale offline.
+  ///
+  /// The refresh runs whether or not the sync succeeded. It used to hang off
+  /// `syncAll().then(...)`, and syncAll — despite its doc — is only
+  /// try/finally, so ONE throwing database call left every page frozen on the
+  /// offline error state it was showing when the network died, with no way back
+  /// short of restarting the app. Reconnecting must always reload; pushing the
+  /// queue is the part allowed to fail.
+  Future<void> _refreshAfterReconnect() async {
+    try {
+      await SyncService.instance.syncAll();
+    } catch (e) {
+      debugPrint('[SYNC] reconnect sync failed, refreshing anyway: $e');
+    }
+    if (!mounted) return;
+    ref.invalidate(itemsProvider);
+    ref.invalidate(categoriesProvider);
+    ref.invalidate(categoryTreeProvider);
+    ref.invalidate(tablesProvider);
+    // Queued offline drafts were just pushed; refresh Open Orders so their
+    // local copies are replaced by the authoritative server ones.
+    ref.invalidate(openDraftsProvider);
+    // History: the just-synced offline bills are now on the server and their
+    // local INV-<tag>-#### rows are gone, so re-fetch the authoritative copies.
+    ref.invalidate(billsProvider);
+    ref.invalidate(reportProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessionAsync = ref.watch(sessionProvider);
@@ -291,20 +319,7 @@ class _MainShellState extends ConsumerState<MainShell>
       data: (session) {
         ref.listen<bool>(connectivityProvider, (prev, next) {
           if (prev == false && next == true) {
-            SyncService.instance.syncAll().then((_) {
-              ref.invalidate(itemsProvider);
-              ref.invalidate(categoriesProvider);
-              ref.invalidate(categoryTreeProvider);
-              ref.invalidate(tablesProvider);
-              // Queued offline drafts were just pushed; refresh Open Orders so
-              // their local copies are replaced by the authoritative server ones.
-              ref.invalidate(openDraftsProvider);
-              // History: the just-synced offline bills are now on the server and
-              // their local INV-<tag>-#### rows are gone, so re-fetch to show the
-              // authoritative copies.
-              ref.invalidate(billsProvider);
-              ref.invalidate(reportProvider);
-            });
+            unawaited(_refreshAfterReconnect());
           }
         });
 

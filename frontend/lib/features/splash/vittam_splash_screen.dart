@@ -7,6 +7,7 @@ import '../../core/startup/startup_router.dart';
 import '../update/vittam_update_dialog.dart';
 import '../../l10n/l10n_ext.dart';
 import '../../theme/app_theme.dart';
+import '../../screens/login_screen.dart';
 import '../../screens/main_shell.dart';
 
 class VittamSplashScreen extends ConsumerStatefulWidget {
@@ -83,7 +84,18 @@ class _VittamSplashScreenState extends ConsumerState<VittamSplashScreen>
 
     // Wait for the bootstrap to finish (usually already done by now), then
     // navigate straight to the final screen — no intermediate splash/loader.
-    final destination = await destinationFuture;
+    //
+    // Guarded because this is the only await on the startup future: anything it
+    // throws lands here, and an unhandled throw means we simply never navigate —
+    // the app sits on the logo forever with nothing to tap. Login is the one
+    // destination that is always safe to offer and always recoverable.
+    Widget destination;
+    try {
+      destination = await destinationFuture;
+    } catch (e, st) {
+      debugPrint('Startup failed, falling back to login: $e\n$st');
+      destination = const LoginScreen();
+    }
     if (!mounted) return;
     Navigator.pushReplacement(
       context,

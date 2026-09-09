@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../api.dart' as api;
@@ -63,9 +64,13 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
       final items = rawItems.map((j) => Item.fromJson(j)).toList();
       final sorted = _sorted(items, topIds);
 
-      // Write fresh data to cache — fire and forget.
+      // Write fresh data to cache — fire and forget, but NOT silent. This write
+      // is the only thing standing between the shop and an empty billing screen
+      // the next time it goes offline, and a bare `unawaited` drops the reason
+      // it failed on the floor. Log it: a cache that never fills looks exactly
+      // like a cache that was never written.
       if (businessId != null) {
-        unawaited(OfflineService.instance.replaceItemCache(sorted, businessId));
+        unawaited(_cacheItems(sorted, businessId));
       }
 
       // Cache is now fresh — clear any stale banner.
@@ -79,24 +84,41 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     return _loadFromCache(businessId);
   }
 
+  /// Read the offline item cache.
+  ///
+  /// Guarded, because this is the LAST fallback: if it throws, itemsProvider
+  /// goes to AsyncError and the billing screen renders its error branch — which
+  /// looks identical to "cache is empty" but has a completely different cause.
+  /// Failing to an empty list keeps the two apart, and the log says which.
   Future<List<Item>> _loadFromCache(String? businessId) async {
     if (businessId == null) {
+      debugPrint('[OFFLINE] no businessId in storage — item cache not readable');
       ref.read(itemCacheInfoProvider.notifier).state =
           const ItemCacheInfo(status: CacheStatus.empty);
       return [];
     }
 
-    final result =
-        await OfflineService.instance.getCachedItemsWithStatus(businessId);
-    final ageLabel =
-        await OfflineService.instance.getCacheAgeLabel(businessId);
+    try {
+      final result =
+          await OfflineService.instance.getCachedItemsWithStatus(businessId);
+      final ageLabel =
+          await OfflineService.instance.getCacheAgeLabel(businessId);
 
-    ref.read(itemCacheInfoProvider.notifier).state = ItemCacheInfo(
-      status: result.status,
-      ageLabel: ageLabel,
-    );
+      debugPrint('[OFFLINE] item cache for $businessId: '
+          '${result.items.length} item(s), status ${result.status.name}');
 
-    return result.items;
+      ref.read(itemCacheInfoProvider.notifier).state = ItemCacheInfo(
+        status: result.status,
+        ageLabel: ageLabel,
+      );
+
+      return result.items;
+    } catch (e, st) {
+      debugPrint('[OFFLINE] item cache READ failed: $e\n$st');
+      ref.read(itemCacheInfoProvider.notifier).state =
+          const ItemCacheInfo(status: CacheStatus.empty);
+      return const [];
+    }
   }
 
   List<Item> _sorted(List<Item> items, List<String> topIds) {
@@ -183,9 +205,19 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     // Keep the offline cache consistent — fire and forget.
     getBusinessId().then((businessId) {
       if (businessId != null) {
-        unawaited(OfflineService.instance.replaceItemCache(updated, businessId));
+        unawaited(_cacheItems(updated, businessId));
       }
     });
+  }
+
+  /// Write the item cache, reporting a failure instead of swallowing it.
+  static Future<void> _cacheItems(List<Item> items, String businessId) async {
+    try {
+      await OfflineService.instance.replaceItemCache(items, businessId);
+    } catch (e, st) {
+      debugPrint('[OFFLINE] item cache write FAILED — the billing screen will '
+          'be empty offline: $e\n$st');
+    }
   }
 }
 

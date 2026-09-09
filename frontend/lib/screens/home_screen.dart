@@ -3225,6 +3225,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return _buildItemList();
   }
 
+  /// "Retry" on the offline item list.
+  ///
+  /// Re-probes the network FIRST. Invalidating the provider on its own could
+  /// not help: while the app believes it is offline every request fast-fails
+  /// without touching the network, so the retry just re-read the same empty
+  /// cache and redrew the same screen — the button looked dead even with the
+  /// wifi back. [recheck] calls /health directly, so a recovered connection is
+  /// noticed here rather than whenever the websocket next happens to reconnect.
+  Future<void> _retryItems() async {
+    await ref.read(connectivityProvider.notifier).recheck();
+    if (!mounted) return;
+    ref.invalidate(itemsProvider);
+  }
+
   Widget _buildItemList() {
     return Consumer(builder: (context, ref, _) {
       final itemsAsync = ref.watch(itemsProvider);
@@ -3246,10 +3260,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
       return itemsAsync.when(
         loading: () => const BillingSkeleton(),
-        error: (e, _) => NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider)),
+        // The detail line is the difference between "the network is down" and
+        // "the offline cache this screen falls back to has nothing in it" —
+        // identical on screen otherwise, and the second is a bug, not weather.
+        error: (e, _) => NoInternetWidget(
+            onRetry: _retryItems, detail: 'Item list failed: $e'),
         data: (allItems) {
           if (allItems.isEmpty && !ref.read(connectivityProvider)) {
-            return NoInternetWidget(onRetry: () => ref.invalidate(itemsProvider));
+            final cache = ref.watch(itemCacheInfoProvider);
+            return NoInternetWidget(
+              onRetry: _retryItems,
+              detail: 'Offline cache: ${cache.status.name}'
+                  '${cache.ageLabel != null ? ' (${cache.ageLabel})' : ''}',
+            );
           }
           // The lit major can disappear under us (its last item deleted or
           // re-filed). Nothing is filtered by it any more, so there is no bad

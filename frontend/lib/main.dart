@@ -32,7 +32,16 @@ void main() async {
     await VittamRemoteConfig.instance.initialize();
   } catch (_) {}
 
-  await OfflineService.instance.init();
+  // Best-effort: this runs BEFORE runApp, so an exception here means the user
+  // gets no app at all — a blank window. A corrupt or unopenable database is
+  // exactly what a crash mid-write while offline leaves behind, so it must not
+  // be fatal. The app opens without the offline queue and says so when a sale
+  // cannot be saved, which beats a black screen with no way back.
+  try {
+    await OfflineService.instance.init();
+  } catch (e, st) {
+    debugPrint('Offline database failed to open: $e\n$st');
+  }
 
   runApp(const ProviderScope(child: BillingApp()));
 }

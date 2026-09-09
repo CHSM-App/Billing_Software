@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../api.dart';
 import '../storage.dart';
@@ -104,7 +104,17 @@ class LicenseService {
     // Offline hint: if we have never cached a license there is nothing to evaluate
     // offline, so still try online once (the health probe may simply have timed
     // out). Otherwise trust the cache.
-    final hasCache = (await _secure.read(key: _keyVerifiedAt)) != null;
+    // Guarded: secure storage throws when it cannot decrypt (Windows DPAPI key
+    // rotated, Android keystore lost after a device-to-device restore). An
+    // unreadable store is the same as no cache — fall through to the online
+    // attempt, which fails cleanly instead of taking startup down with it.
+    bool hasCache;
+    try {
+      hasCache = (await _secure.read(key: _keyVerifiedAt)) != null;
+    } catch (e) {
+      debugPrint('[LICENSE] cache probe failed: $e');
+      hasCache = false;
+    }
     if (!hasCache) return await _checkOnline();
     return await _checkOffline();
   }
@@ -219,7 +229,23 @@ class LicenseService {
     }
   }
 
+  /// Evaluate the cached license with no network.
+  ///
+  /// NOTHING in here may throw. It is called from inside [check]'s catch
+  /// blocks, and [check] is awaited by the startup future that the splash
+  /// screen waits on — a throw here has nowhere to go and leaves the app on the
+  /// logo forever. Every failure resolves to [LicenseState.blockedOffline]
+  /// instead: a screen the user can actually act on.
   Future<LicenseStatus> _checkOffline() async {
+    try {
+      return await _checkOfflineUnsafe();
+    } catch (e) {
+      debugPrint('[LICENSE] offline cache unreadable: $e');
+      return const LicenseStatus(LicenseState.blockedOffline);
+    }
+  }
+
+  Future<LicenseStatus> _checkOfflineUnsafe() async {
     final values = await Future.wait([
       _secure.read(key: _keyStatus),
       _secure.read(key: _keyExpiresAt),

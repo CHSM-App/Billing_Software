@@ -681,7 +681,12 @@ enum StatusType { success, warning, error, info }
 class NoInternetWidget extends StatefulWidget {
   final VoidCallback? onRetry;
 
-  const NoInternetWidget({super.key, this.onRetry});
+  /// One line of diagnosis under the message, when the caller knows something
+  /// more specific than "no internet" — e.g. that the offline cache this page
+  /// falls back to is empty. Shown small and grey; omitted when null.
+  final String? detail;
+
+  const NoInternetWidget({super.key, this.onRetry, this.detail});
 
   @override
   State<NoInternetWidget> createState() => _NoInternetWidgetState();
@@ -747,6 +752,16 @@ class _NoInternetWidgetState extends State<NoInternetWidget>
                   .bodyMedium
                   ?.copyWith(color: AppColors.textSecondary),
             ),
+            if (widget.detail != null) ...[
+              const SizedBox(height: AppSpacing.space12),
+              Text(
+                widget.detail!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()]),
+              ),
+            ],
             if (widget.onRetry != null) ...[
               const SizedBox(height: AppSpacing.space24),
               SizedBox(

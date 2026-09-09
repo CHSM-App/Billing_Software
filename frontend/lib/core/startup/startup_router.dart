@@ -31,7 +31,10 @@ Future<Widget> resolveStartupDestination(
   await OfflineService.instance.resetStaleSyncing();
   await OfflineService.instance.resetStaleSyncingDrafts();
 
-  final ok = await checkHealth();
+  // checkReachable, not a plain 200-only health check: a 429 means the server
+  // ANSWERED, so the shop is online. Reading it as offline pushed a merely
+  // rate-limited till down the cached-license path for no reason.
+  final ok = await checkReachable();
 
   // Retry reading the session up to 3 times — SharedPreferences can return
   // empty on the first read after a cold boot or system-level app kill.

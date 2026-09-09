@@ -1117,16 +1117,8 @@ Future<Map<String, dynamic>> updateBusinessProfile(Map<String, dynamic> data) as
 
 /// Returns true if the backend is reachable and the DB is connected (a healthy
 /// 200). Used by the startup gate where we need the server able to serve data.
-Future<bool> checkHealth() async {
-  try {
-    final response = await _get(Uri.parse('$baseUrl/health'))
-        .timeout(const Duration(seconds: 5));
-    return response.statusCode == 200;
-  } catch (_) {
-    return false;
-  }
-}
-
+/// The app's ONE reachability check — startup and recovery both use it.
+///
 /// Returns true only if the server is actually HEALTHY (/health returns 200 —
 /// the DB is up and it can serve data). Used for connectivity RECOVERY: we go
 /// "online" only when requests will actually succeed, so a server that responds

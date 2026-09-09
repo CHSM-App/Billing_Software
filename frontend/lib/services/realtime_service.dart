@@ -107,9 +107,16 @@ class RealtimeService {
         // exactly why this used to "fix itself" the moment someone hit refresh.
         // Best-effort: refreshAccessToken() writes the new token to storage, so
         // the next scheduled _connect() (already on its way via _onClosed)
-        // picks it up via getToken(). A network failure here just means that
-        // attempt tries again in 3s, same as any other failure.
-        refreshAccessToken().catchError((_) => false);
+        // picks it up via getToken().
+        //
+        // ONLY for an auth failure. Offline, the handshake fails with an
+        // unreachable-network SocketException every single retry, and refreshing
+        // was firing a POST /api/refresh alongside all of them — a doomed
+        // 15s-timeout request every 3s, forever, on a device with no network.
+        // A dead socket caused by no internet needs internet, not a new token.
+        if (!isNetworkError(e)) {
+          refreshAccessToken().catchError((_) => false);
+        }
       });
       _sub = channel.stream.listen(
         _onMessage,
