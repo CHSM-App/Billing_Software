@@ -1417,6 +1417,39 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsUnitPlate => 'Plate';
 
   @override
+  String get itemsUnitPacket => 'Packet';
+
+  @override
+  String get itemsUnitBox => 'Box';
+
+  @override
+  String get itemsUnitBottle => 'Bottle';
+
+  @override
+  String get itemsUnitPair => 'Pair';
+
+  @override
+  String get itemsUnitSet => 'Set';
+
+  @override
+  String get itemsUnitBundle => 'Bundle';
+
+  @override
+  String get itemsUnitBag => 'Bag';
+
+  @override
+  String get itemsUnitSqft => 'Square foot (sq ft)';
+
+  @override
+  String get itemsUnitTon => 'Ton';
+
+  @override
+  String get itemsUnitQuintal => 'Quintal';
+
+  @override
+  String get itemsUnitRoll => 'Roll';
+
+  @override
   String get itemsHasVariants => 'This item has variants';
 
   @override

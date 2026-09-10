@@ -34,6 +34,28 @@ String itemUnitLabel(BuildContext context, String unit) {
       return l10n.itemsUnitDozen;
     case 'plate':
       return l10n.itemsUnitPlate;
+    case 'packet':
+      return l10n.itemsUnitPacket;
+    case 'box':
+      return l10n.itemsUnitBox;
+    case 'bottle':
+      return l10n.itemsUnitBottle;
+    case 'pair':
+      return l10n.itemsUnitPair;
+    case 'set':
+      return l10n.itemsUnitSet;
+    case 'bundle':
+      return l10n.itemsUnitBundle;
+    case 'bag':
+      return l10n.itemsUnitBag;
+    case 'sqft':
+      return l10n.itemsUnitSqft;
+    case 'ton':
+      return l10n.itemsUnitTon;
+    case 'quintal':
+      return l10n.itemsUnitQuintal;
+    case 'roll':
+      return l10n.itemsUnitRoll;
     default:
       return l10n.itemsUnitPiece;
   }
@@ -1491,6 +1513,17 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     'metre',
     'dozen',
     'plate',
+    'packet',
+    'box',
+    'bottle',
+    'pair',
+    'set',
+    'bundle',
+    'bag',
+    'sqft',
+    'ton',
+    'quintal',
+    'roll',
   ];
 
   @override
@@ -1652,28 +1685,6 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   String _trimRate(double rate) => rate == rate.roundToDouble()
       ? rate.toStringAsFixed(0)
       : rate.toString();
-
-  String _unitLabel(BuildContext context, String unit) {
-    final l10n = context.l10n;
-    switch (unit) {
-      case 'kg':
-        return l10n.itemsUnitKg;
-      case 'g':
-        return l10n.itemsUnitGram;
-      case 'litre':
-        return l10n.itemsUnitLitre;
-      case 'ml':
-        return l10n.itemsUnitMl;
-      case 'metre':
-        return l10n.itemsUnitMetre;
-      case 'dozen':
-        return l10n.itemsUnitDozen;
-      case 'plate':
-        return l10n.itemsUnitPlate;
-      default:
-        return l10n.itemsUnitPiece;
-    }
-  }
 
   @override
   void dispose() {
@@ -2307,7 +2318,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     for (final u in _units)
                       DropdownMenuItem(
                         value: u,
-                        child: Text(_unitLabel(context, u),
+                        child: Text(itemUnitLabel(context, u),
                             maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
                   ],
@@ -2362,7 +2373,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                         const TextInputType.numberWithOptions(decimal: true),
                     // Echoes the unit picked above, so "12" is unambiguously
                     // 12 kg and not 12 pieces.
-                    suffixIcon: UnitSuffix(_unitLabel(context, _unit)),
+                    suffixIcon: UnitSuffix(itemUnitLabel(context, _unit)),
                   ),
                   const SizedBox(height: AppSpacing.space12),
                   // Low-stock alert level. Until now this was hardcoded to 50
@@ -2373,7 +2384,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     controller: _lowStockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
-                    suffixIcon: UnitSuffix(_unitLabel(context, _unit)),
+                    suffixIcon: UnitSuffix(itemUnitLabel(context, _unit)),
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return null;
                       final n = double.tryParse(v.trim());

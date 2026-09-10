@@ -1423,6 +1423,39 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsUnitPlate => 'प्लेट';
 
   @override
+  String get itemsUnitPacket => 'पाकीट';
+
+  @override
+  String get itemsUnitBox => 'बॉक्स';
+
+  @override
+  String get itemsUnitBottle => 'बाटली';
+
+  @override
+  String get itemsUnitPair => 'जोडी';
+
+  @override
+  String get itemsUnitSet => 'संच';
+
+  @override
+  String get itemsUnitBundle => 'जुडी';
+
+  @override
+  String get itemsUnitBag => 'बॅग';
+
+  @override
+  String get itemsUnitSqft => 'चौरस फूट (sq ft)';
+
+  @override
+  String get itemsUnitTon => 'टन';
+
+  @override
+  String get itemsUnitQuintal => 'क्विंटल';
+
+  @override
+  String get itemsUnitRoll => 'रोल';
+
+  @override
   String get itemsHasVariants => 'या वस्तूचे प्रकार आहेत';
 
   @override

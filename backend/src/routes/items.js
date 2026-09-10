@@ -17,7 +17,11 @@ const router = express.Router();
 
 // Units an item may be sold in. Must stay in sync with `_units` in the Flutter
 // item form — the value drives unit conversion, not just display.
-const VALID_UNITS = ['piece', 'kg', 'g', 'litre', 'ml', 'metre', 'dozen', 'plate'];
+const VALID_UNITS = [
+  'piece', 'kg', 'g', 'litre', 'ml', 'metre', 'dozen', 'plate',
+  'packet', 'box', 'bottle', 'pair', 'set', 'bundle', 'bag', 'sqft', 'ton',
+  'quintal', 'roll',
+];
 
 // Item photos are compressed on the device and uploaded as JPEG. They live on
 // disk under backend/uploads/items and are served by an explicit static mount

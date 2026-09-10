@@ -2608,6 +2608,72 @@ abstract class AppLocalizations {
   /// **'Plate'**
   String get itemsUnitPlate;
 
+  /// No description provided for @itemsUnitPacket.
+  ///
+  /// In en, this message translates to:
+  /// **'Packet'**
+  String get itemsUnitPacket;
+
+  /// No description provided for @itemsUnitBox.
+  ///
+  /// In en, this message translates to:
+  /// **'Box'**
+  String get itemsUnitBox;
+
+  /// No description provided for @itemsUnitBottle.
+  ///
+  /// In en, this message translates to:
+  /// **'Bottle'**
+  String get itemsUnitBottle;
+
+  /// No description provided for @itemsUnitPair.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair'**
+  String get itemsUnitPair;
+
+  /// No description provided for @itemsUnitSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Set'**
+  String get itemsUnitSet;
+
+  /// No description provided for @itemsUnitBundle.
+  ///
+  /// In en, this message translates to:
+  /// **'Bundle'**
+  String get itemsUnitBundle;
+
+  /// No description provided for @itemsUnitBag.
+  ///
+  /// In en, this message translates to:
+  /// **'Bag'**
+  String get itemsUnitBag;
+
+  /// No description provided for @itemsUnitSqft.
+  ///
+  /// In en, this message translates to:
+  /// **'Square foot (sq ft)'**
+  String get itemsUnitSqft;
+
+  /// No description provided for @itemsUnitTon.
+  ///
+  /// In en, this message translates to:
+  /// **'Ton'**
+  String get itemsUnitTon;
+
+  /// No description provided for @itemsUnitQuintal.
+  ///
+  /// In en, this message translates to:
+  /// **'Quintal'**
+  String get itemsUnitQuintal;
+
+  /// No description provided for @itemsUnitRoll.
+  ///
+  /// In en, this message translates to:
+  /// **'Roll'**
+  String get itemsUnitRoll;
+
   /// No description provided for @itemsHasVariants.
   ///
   /// In en, this message translates to:

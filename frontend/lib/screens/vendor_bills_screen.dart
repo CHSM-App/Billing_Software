@@ -440,6 +440,8 @@ class _QuickAddDialog extends StatefulWidget {
 class _QuickAddDialogState extends State<_QuickAddDialog> {
   static const _itemUnits = [
     'piece', 'kg', 'g', 'litre', 'ml', 'metre', 'dozen', 'plate',
+    'packet', 'box', 'bottle', 'pair', 'set', 'bundle', 'bag', 'sqft', 'ton',
+    'quintal', 'roll',
   ];
   static const _materialUnits = ['piece', 'g', 'kg', 'ml', 'litre'];
 

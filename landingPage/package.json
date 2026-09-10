@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "npm run build:client && npm run build:ssr && npm run build:prerender",
     "build:client": "vite build",
     "build:ssr": "vite build --ssr src/entry-server.jsx --outDir .ssr",
