@@ -23,6 +23,7 @@ export default function Navbar() {
   }, [])
 
   return (
+    <>
     <nav
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         scrolled ? 'nav-blur shadow-sm ' : 'py-2'
@@ -87,7 +88,17 @@ export default function Navbar() {
         </div>
       )}
 
-      <BookDemoModal open={demoOpen} onClose={() => setDemoOpen(false)} />
     </nav>
+
+    {/* Deliberately a SIBLING of <nav>, not a child. Once scrolled, the nav
+        gets .nav-blur — and an element with a backdrop-filter becomes the
+        containing block for its position:fixed descendants, so the modal's
+        `fixed inset-0` resolved against the navbar strip instead of the
+        viewport and the form opened squashed behind the hero. Unscrolled
+        there is no backdrop-filter, which is why it looked fine until you
+        scrolled. Being outside also frees it from the nav's z-50 stacking
+        context, so z-[100] means what it says. */}
+    <BookDemoModal open={demoOpen} onClose={() => setDemoOpen(false)} />
+    </>
   )
 }

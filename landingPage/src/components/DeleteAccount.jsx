@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import Logo from './Logo'
 import { ArrowLeft, AlertTriangle, Phone, KeyRound, FileText, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 
-const API_BASE = 'https://Vittam.vengurlatech.com' || ''
+import { API_BASE } from '../apiBase'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

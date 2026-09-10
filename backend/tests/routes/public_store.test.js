@@ -40,12 +40,15 @@ const store = (over = {}) => ({ ...baseStore, ...over });
 
 // The catalog row the server re-prices from. Note price 100 — every test that
 // posts a cheaper price is asserting the client value is thrown away.
+// gst_enabled rides along on the row because priceLines joins businesses to
+// read it — an MRP price may only have its tax stripped while GST is on.
 const catalogItem = {
   id: ITEM_ID,
   name: 'Chai',
   price: 100,
   tax_rate: 0,
   price_inclusive_tax: false,
+  gst_enabled: true,
 };
 
 function storeAuth(over = {}) {
@@ -214,6 +217,32 @@ describe('POST /store/:token — pricing is server-side', () => {
     expect(res.body.total).toBe(100);
     const lineInsert = inputsSeen.find((i) => i.line_total !== undefined);
     expect(lineInsert.unit_price).toBeCloseTo(100, 6);
+  });
+
+  test('with GST off an MRP price is charged as-is, not stripped', async () => {
+    // A Rs.50 coffee carrying a leftover 10% rate from when GST was on. The
+    // menu shows Rs.50, so the order must be Rs.50 — not 50/1.1 = 45.45.
+    const { inputsSeen } = wirePlaceOrder({
+      item: {
+        ...catalogItem,
+        price: 50,
+        tax_rate: 10,
+        price_inclusive_tax: true,
+        gst_enabled: false,
+      },
+    });
+
+    const res = await request(app)
+      .post(`/store/${STORE_TOKEN}`)
+      .set(storeAuth())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.total).toBe(50);
+    const lineInsert = inputsSeen.find((i) => i.line_total !== undefined);
+    expect(lineInsert.unit_price).toBe(50);
+    // The leftover rate is not recorded either — the line carries no tax.
+    expect(lineInsert.tax_rate).toBeNull();
   });
 
   test('the delivery charge comes from the shop, not the request', async () => {

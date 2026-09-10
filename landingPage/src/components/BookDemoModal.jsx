@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { X, CalendarCheck, CheckCircle2 } from 'lucide-react'
 
-/* Team WhatsApp number the demo request is sent to (same as Help Center). */
-const WHATSAPP_NUMBER = '919422229951'
+/* The request is posted to our own API, which sends the team an approved
+   WhatsApp template. Same-origin in both dev and prod — see src/apiBase.js. */
+import { API_BASE } from '../apiBase'
 
 const BUSINESS_TYPES = [
   'Retail / General Store',
@@ -76,6 +77,8 @@ export default function BookDemoModal({ open, onClose }) {
   const [form, setForm] = useState(EMPTY)
   const [errors, setErrors] = useState({})
   const [sent, setSent] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [submitError, setSubmitError] = useState('')
   const firstFieldRef = useRef(null)
 
   const set = (key) => (ev) => {
@@ -91,7 +94,12 @@ export default function BookDemoModal({ open, onClose }) {
     window.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const t = setTimeout(() => firstFieldRef.current?.focus(), 60)
+    // preventScroll matters: focusing an input scrolls it into view inside the
+    // nearest scrollable ancestor, which here is the modal's own scroll
+    // container — so autofocusing the name field scrolled the card's header off
+    // the top the moment the dialog opened, on every screen too short to fit
+    // the whole form. The field is already visible; nothing needs scrolling.
+    const t = setTimeout(() => firstFieldRef.current?.focus({ preventScroll: true }), 60)
     return () => {
       window.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
@@ -102,50 +110,65 @@ export default function BookDemoModal({ open, onClose }) {
   /* Reset back to a blank form once the closing animation is out of the way */
   useEffect(() => {
     if (open) return
-    const t = setTimeout(() => { setForm(EMPTY); setErrors({}); setSent(false) }, 250)
+    const t = setTimeout(
+      () => { setForm(EMPTY); setErrors({}); setSent(false); setSubmitError('') }, 250)
     return () => clearTimeout(t)
   }, [open])
 
   if (!open) return null
 
-  const handleSubmit = (ev) => {
+  const handleSubmit = async (ev) => {
     ev.preventDefault()
     const found = validate(form)
     setErrors(found)
     if (Object.keys(found).length) return
 
-    const message =
-      `*New Demo Request — Vittam*\n\n` +
-      `Name: ${form.name}\n` +
-      `Mobile: +91 ${form.mobile}\n` +
-      `Business Type: ${form.businessType}\n` +
-      `Preferred Date: ${form.date}\n` +
-      `Preferred Time: ${form.time}\n` +
-      `Using billing software: ${form.usingSoftware}`
-
-    window.open(
-      `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`,
-      '_blank',
-      'noopener,noreferrer',
-    )
-    setSent(true)
+    setSending(true)
+    setSubmitError('')
+    try {
+      const res = await fetch(`${API_BASE}/api/demo/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error || 'Could not send your request. Please try again.')
+      }
+      setSent(true)
+    } catch (err) {
+      setSubmitError(err.message || 'Could not send your request. Please try again.')
+    } finally {
+      setSending(false)
+    }
   }
+
+  const closeOnBackdrop = ev => ev.target === ev.currentTarget && onClose()
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start md:items-center justify-center
-                 overflow-y-auto p-4 md:p-6"
+      className="fixed inset-0 z-[100] overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="book-demo-title"
-      onMouseDown={ev => ev.target === ev.currentTarget && onClose()}
+      onMouseDown={closeOnBackdrop}
     >
       {/* Backdrop */}
       <div className="fixed inset-0 bg-navy-950/60 backdrop-blur-sm" aria-hidden="true" />
 
-      {/* Card */}
-      <div className="relative w-full max-w-3xl my-auto rounded-3xl bg-white shadow-screen
-                      overflow-hidden animate-fadeUp">
+      {/* Centring wrapper. min-h-full (NOT items-center on the scroll container
+          itself) is what makes this scrollable: a flex item centred inside a
+          scroll container overflows EQUALLY in both directions, and overflow
+          above a scrollport's top edge cannot be scrolled to — so on a short
+          window the card's header was simply unreachable. Growing the wrapper
+          with the content instead means centring only applies when it fits. */}
+      <div
+        className="relative flex min-h-full items-center justify-center p-4 md:p-6"
+        onMouseDown={closeOnBackdrop}
+      >
+        {/* Card */}
+        <div className="relative w-full max-w-3xl rounded-3xl bg-white shadow-screen
+                        overflow-hidden animate-fadeUp">
         <button
           onClick={onClose}
           aria-label="Close"
@@ -295,12 +318,20 @@ export default function BookDemoModal({ open, onClose }) {
               </Field>
             </div>
 
+            {submitError && (
+              <p role="alert" className="text-center text-[12.5px] text-red-500 mt-5">
+                {submitError}
+              </p>
+            )}
+
             <button
               type="submit"
+              disabled={sending}
               className="btn-teal w-full sm:w-auto sm:min-w-64 sm:mx-auto sm:block mt-6 px-8 py-4
-                         rounded-2xl text-sm font-bold tracking-wide"
+                         rounded-2xl text-sm font-bold tracking-wide
+                         disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              BOOK MY DEMO
+              {sending ? 'SENDING…' : 'BOOK MY DEMO'}
             </button>
 
             <p className="text-center text-[11.5px] text-slate-400 mt-3.5">
@@ -308,6 +339,7 @@ export default function BookDemoModal({ open, onClose }) {
             </p>
           </form>
         )}
+        </div>
       </div>
     </div>
   )

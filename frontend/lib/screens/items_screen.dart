@@ -471,7 +471,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                                 builder: (_) => const MajorCategoryOrderScreen()),
                           ),
                         ),
-                      if (isRestaurant)
+                      // if (isRestaurant)
                         IconButton(
                           icon: const Icon(Icons.photo_library_outlined),
                           color: AppColors.textPrimary,

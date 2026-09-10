@@ -158,6 +158,11 @@ class _MainShellState extends ConsumerState<MainShell>
     try {
       final status = await LicenseService.instance.check(isOnline: true);
       if (!mounted) return;
+      // Same check also refreshes the cached store_enabled flag — pick it up so
+      // the online-order tab appears/disappears on resume rather than at the
+      // next login.
+      await ref.read(sessionProvider.notifier).refresh();
+      if (!mounted) return;
       if (status.state == LicenseState.blockedDevice) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(

@@ -214,6 +214,7 @@ app.use('/api/vendor-bills', require('./routes/vendor_bills'));
 app.use('/api/audit', require('./routes/audit'));
 app.use('/api/license', require('./routes/license'));
 app.use('/api/account', require('./routes/account'));
+app.use('/api/demo', require('./routes/demo'));
 app.use('/api/fcm', require('./routes/fcm'));
 // Internal admin dashboard — MUST be above the SPA catch-all so /admin/* isn't
 // swallowed by index.html. Gated by ADMIN_URL_SLUG (page) + admin JWT (API).

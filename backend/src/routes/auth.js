@@ -380,7 +380,7 @@ router.post('/login', loginLimiter, async (req, res) => {
                b.phone AS business_phone,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
                b.round_off_enabled, b.store_enabled,
-               s.allow_mobile, s.allow_desktop
+               s.allow_mobile, s.allow_desktop, s.allow_online_store
         FROM users u
         JOIN businesses b ON u.business_id = b.id
         LEFT JOIN subscriptions s ON s.business_id = u.business_id
@@ -508,7 +508,11 @@ router.post('/login', loginLimiter, async (req, res) => {
         // Online store master switch. Sent at login so a CASHIER's shell knows
         // whether to poll the order queue — the business profile that carries
         // this is owner-only, so they could not find out any other way.
-        store_enabled: !!row.store_enabled,
+        // ANDed with the admin entitlement (subscriptions.allow_online_store)
+        // so a revoked store never shows its tab, matching what /api/license
+        // sends on every later open/resume.
+        store_enabled: !!row.store_enabled &&
+          (row.allow_online_store == null ? true : !!row.allow_online_store),
         // Device-access policy — surfaced at login so the client can enforce it
         // immediately, without depending on a separate /license fetch that may
         // fail on a flaky network. NULL (no subscription) defaults to allowed.

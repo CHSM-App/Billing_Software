@@ -176,4 +176,19 @@ const deletionLimiter = rateLimit({
   skipSuccessfulRequests: false,
 });
 
-module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter };
+// POST /api/demo/request — 10 per IP per hour.
+//
+// Public and unauthenticated, and each accepted request sends a WhatsApp
+// template to the admin's phone. Ten is far above a genuine visitor booking a
+// demo (who submits once) and low enough that the form cannot be turned into a
+// way to spam that phone.
+const demoLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many demo requests. Please try again in 1 hour.',
+  handler: onLimitReached,
+});
+
+module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter, demoLimiter };

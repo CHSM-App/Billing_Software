@@ -64,10 +64,17 @@ async function priceLines(makeRequest, businessId, lines) {
   const inNames = itemIds.map((_, i) => `@it${i}`);
   const priceReq = request().input('business_id', sql.UniqueIdentifier, businessId);
   itemIds.forEach((id, i) => priceReq.input(`it${i}`, sql.UniqueIdentifier, id));
+  // gst_enabled is joined in because the tax on an MRP price may only be
+  // stripped when GST is actually ON. The staff biller reads the same flag
+  // (resolveNetPriceAndRate in routes/bills.js); without it here the two public
+  // flows priced a GST-off shop's items below their own menu.
   const priceResult = await priceReq.query(`
-    SELECT id, name, price, tax_rate, price_inclusive_tax
-    FROM items
-    WHERE business_id = @business_id AND is_active = 1 AND id IN (${inNames.join(',')})
+    SELECT i.id, i.name, i.price, i.tax_rate, i.price_inclusive_tax,
+           b.gst_enabled
+    FROM items i
+    JOIN businesses b ON b.id = i.business_id
+    WHERE i.business_id = @business_id AND i.is_active = 1
+      AND i.id IN (${inNames.join(',')})
   `);
   const itemMap = {};
   for (const r of priceResult.recordset) itemMap[r.id] = r;
@@ -138,6 +145,12 @@ async function priceLines(makeRequest, businessId, lines) {
       if (v.price != null) unitPrice = Number(v.price);
       itemName = `${item.name} (${v.label})`;
     }
+    // With GST off there is no tax to strip and no rate to record — an item's
+    // leftover tax_rate from when GST was on must be ignored, exactly as the
+    // staff biller ignores it (routes/bills.js). Stripping it anyway priced a
+    // Rs.50 @10% MRP coffee at Rs.45.45 while the menu still said Rs.50.
+    const taxRate =
+      item.gst_enabled && item.tax_rate != null ? Number(item.tax_rate) : null;
     // An MRP-priced item quotes its price GST-inclusive, so strip the tax to get
     // the net rate the line must store. bill_items.unit_price is net everywhere
     // (see resolveNetPriceAndRate in routes/bills.js) and subtotals are summed
@@ -145,7 +158,7 @@ async function priceLines(makeRequest, businessId, lines) {
     // customer a subtotal that grew again once staff finalized the bill.
     unitPrice = netUnitPrice(
       unitPrice,
-      item.tax_rate,
+      taxRate,
       item.price_inclusive_tax === true || item.price_inclusive_tax === 1,
     );
     priced.push({
@@ -154,7 +167,7 @@ async function priceLines(makeRequest, businessId, lines) {
       item_name: itemName,
       quantity: l.quantity,
       unit_price: unitPrice,
-      tax_rate: item.tax_rate,
+      tax_rate: taxRate,
       line_total: +(unitPrice * l.quantity).toFixed(2),
     });
   }

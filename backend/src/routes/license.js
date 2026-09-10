@@ -27,17 +27,19 @@ router.get('/', requireAuth, async (req, res) => {
 
     const result = await request.query(`
       SELECT
-        status,
-        expires_at,
-        max_offline_days,
-        grace_period_days,
-        allow_mobile,
-        allow_desktop,
-        allow_online_store,
-        is_trial,
-        updated_at
-      FROM subscriptions
-      WHERE business_id = @business_id
+        s.status,
+        s.expires_at,
+        s.max_offline_days,
+        s.grace_period_days,
+        s.allow_mobile,
+        s.allow_desktop,
+        s.allow_online_store,
+        s.is_trial,
+        s.updated_at,
+        b.store_enabled
+      FROM subscriptions s
+      JOIN businesses b ON b.id = s.business_id
+      WHERE s.business_id = @business_id
     `);
 
     if (result.recordset.length === 0) {
@@ -77,6 +79,12 @@ router.get('/', requireAuth, async (req, res) => {
       // (no admin decision yet) reads as allowed — matches allow_mobile/
       // allow_desktop's own default-open behaviour.
       allow_online_store: sub.allow_online_store == null ? true : !!sub.allow_online_store,
+      // Effective online-store switch = the owner's own toggle AND the admin
+      // entitlement. /login sends this too, but only once; this endpoint is hit
+      // on every app open/resume, so a change made from the admin dashboard, in
+      // the DB, or on another device reaches this device without a re-login.
+      store_enabled: !!sub.store_enabled &&
+        (sub.allow_online_store == null ? true : !!sub.allow_online_store),
       is_trial: !!sub.is_trial,
       verified_at: new Date().toISOString()
     });

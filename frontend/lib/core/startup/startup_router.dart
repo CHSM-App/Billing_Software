@@ -71,6 +71,11 @@ Future<Widget> resolveStartupDestination(
   // --- License check ---
   final licenseStatus = await LicenseService.instance.check(isOnline: ok);
 
+  // The check may have refreshed the cached store_enabled flag, and the session
+  // above was read before that. Re-read it so the shell gates the online-order
+  // tab on what the server just said, not on what login cached.
+  await ref.read(sessionProvider.notifier).refresh();
+
   if (licenseStatus.sessionInvalid) {
     // Local session (access/refresh token) is invalid or unreadable —
     // reconnecting won't fix this, so send the user straight to login

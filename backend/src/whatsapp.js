@@ -21,6 +21,10 @@ const ENABLED             = process.env.WHATSAPP_ENABLED === 'true'
 const OTP_TEMPLATE        = process.env.WHATSAPP_TPL_OTP           || ''
 const BILL_TEMPLATE       = process.env.WHATSAPP_TPL_BILL          || ''
 const ONBOARDING_TEMPLATE = process.env.WHATSAPP_TPL_ONBOARDING    || ''
+// Demo-request alert. Defaults to the approved template id rather than '' like
+// the others: this one is platform-level (one SMSala account, not per-shop), so
+// a missing env var would silently drop landing-page enquiries.
+const DEMO_TEMPLATE       = process.env.WHATSAPP_TPL_DEMO           || '677'
 const ADMIN_PHONE         = process.env.WHATSAPP_ADMIN_PHONE        || ''
 
 // OTP config
@@ -391,4 +395,79 @@ async function sendOnboardingAlert({ businessName, ownerName, phone, businessTyp
     : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
 }
 
-module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendOnboardingAlert }
+// ─────────────────────────────────────────────────────────────────────────────
+// sendDemoRequest — notifies admin when someone books a demo on the landing page
+//
+// Template 677 variables:
+//   {1} name  {2} mobile  {3} business_type  {4} date  {5} time  {6} current_software
+//
+// Same admin-alert shape as sendOnboardingAlert above, including the
+// non-production gate: this pages a real person, and the landing page runs
+// against the live API from a dev machine.
+//
+// Never throws — failures are only logged. A booking must still be recorded as
+// received even when the provider is down; chasing it is a human problem.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendDemoRequest({ name, mobile, businessType, date, time, currentSoftware }) {
+  if (process.env.NODE_ENV !== 'production') {
+    logger.info(`[WhatsApp] Non-production — demo request from "${name}" skipped`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!ENABLED) {
+    logger.info(`[WhatsApp] Disabled — demo request from "${name}" skipped`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] API token not configured — skipping demo request')
+    return { sent: false, error: 'API token not configured' }
+  }
+
+  const normAdmin = normalisePhone(ADMIN_PHONE)
+  if (!normAdmin) {
+    logger.warn('[WhatsApp] WHATSAPP_ADMIN_PHONE not set — skipping demo request')
+    return { sent: false, error: 'Admin phone not configured' }
+  }
+
+  // Sample is a COMMA-SEPARATED list, so a comma inside any value would shift
+  // every later variable into the wrong placeholder. Same guard the onboarding
+  // alert uses — these values are typed by the public, so it matters more here.
+  const clean = (v) => String(v ?? '').replace(/,/g, ' ').trim() || '-'
+  const sample = [
+    clean(name),
+    clean(mobile),
+    clean(businessType),
+    clean(date),
+    clean(time),
+    clean(currentSoftware),
+  ].join(',')
+
+  let result
+  try {
+    result = await postForm('/whatsapp/SendMessage', {
+      ApiToken:     API_TOKEN,
+      TemplateId:   DEMO_TEMPLATE,
+      QuickNumber:  normAdmin,
+      Sample:       sample,
+      CampaignName: 'demo_request',
+    })
+  } catch (err) {
+    logger.error({ err }, `[WhatsApp] Network error sending demo request from "${name}"`)
+    return { sent: false, error: err.message }
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  if (success) {
+    logger.info(`[WhatsApp] Demo request sent for "${name}" — CampaignId: ${result.ReturnData}`)
+  } else {
+    logger.warn({ result }, `[WhatsApp] Demo request failed for "${name}"`)
+  }
+
+  return success
+    ? { sent: true, campaignId: result.ReturnData }
+    : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
+}
+
+module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendOnboardingAlert, sendDemoRequest }

@@ -147,6 +147,15 @@ class LicenseService {
         _secure.write(key: _keyAllowOnlineStore, value: allowOnlineStore ? '1' : '0'),
       ]);
 
+      // The effective online-store switch, refreshed on every open/resume. The
+      // session cache is otherwise only written at login, so an owner toggle
+      // flipped in the DB / on another device, or an admin revoking the
+      // feature, never reached this device until the next re-login. Absent
+      // (older backend) → leave the cached value alone rather than guessing.
+      if (data['store_enabled'] is bool) {
+        await updateStoreEnabled(data['store_enabled'] as bool);
+      }
+
       final result = _evaluate(
         status:          data['status'] as String,
         expiresAt:       DateTime.parse(data['expires_at'] as String),
