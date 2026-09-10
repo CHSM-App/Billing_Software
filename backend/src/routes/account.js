@@ -30,7 +30,7 @@ const { pool, poolConnect, sql } = require('../db');
 const logger    = require('../logger');
 const audit     = require('../audit');
 const whatsapp  = require('../whatsapp');
-const { deletionLimiter } = require('../middleware/rateLimiter');
+const { deletionLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -44,7 +44,7 @@ const OTP_PURPOSE = 'delete_account';
 // attackers from enumerating which phones have Vittam accounts.
 // ─────────────────────────────────────────────────────────────────────────────
 
-router.post('/deletion/request', deletionLimiter, async (req, res) => {
+router.post('/deletion/request', deletionLimiter, otpSendLimiter, async (req, res) => {
   const { phone } = req.body;
 
   if (!phone || !/^\d{10}$/.test(phone)) {
@@ -92,7 +92,7 @@ router.post('/deletion/request', deletionLimiter, async (req, res) => {
 // Verifies the OTP and creates a pending deletion request.
 // ─────────────────────────────────────────────────────────────────────────────
 
-router.post('/deletion/confirm', deletionLimiter, async (req, res) => {
+router.post('/deletion/confirm', deletionLimiter, otpVerifyLimiter, async (req, res) => {
   const { phone, otp, reason } = req.body;
 
   if (!phone || !/^\d{10}$/.test(phone)) {

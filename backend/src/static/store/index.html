@@ -140,30 +140,49 @@
     .item .info { flex: 1; min-width: 0; }
     .item .name { font-weight: 700; font-size: 15px; letter-spacing: -0.2px; line-height: 1.3; }
     .item .price { color: var(--brand); font-weight: 700; font-size: 14px; margin-top: 3px; }
-    .variants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .variants button { border: 1px solid var(--line); background: var(--surface-variant);
-      border-radius: 8px; padding: 5px 11px; font-size: 12.5px; color: var(--text);
-      font-weight: 500; transition: all .18s ease; }
-    .variants button.sel { border-color: var(--brand); background: var(--brand-light);
-      color: var(--brand-dark); font-weight: 600; }
+    /* Every size gets its own row with its own price and its own +. A customer
+       ordering a pint AND a bottle adds both without going back, and nothing is
+       hidden behind a selection step. */
+    /* A long size list makes the card tall; centring would leave the photo
+       floating beside the middle of the list instead of next to the name. */
+    .item.sized { align-items: flex-start; }
+    .vrows { margin-top: 8px; display: flex; flex-direction: column; }
+    .vrow { display: flex; align-items: center; gap: 10px; padding: 6px 0;
+      border-top: 1px solid var(--line); }
+    .vrow:first-child { border-top: none; padding-top: 2px; }
+    .vrow .vlabel { flex: 1; min-width: 0; font-size: 13px; font-weight: 500;
+      color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vrow .vprice { flex: 0 0 auto; font-size: 13.5px; font-weight: 700; color: var(--brand); }
+    /* The per-row controls are a size down from the whole-card ones — six of
+       them stacked at 40px would make a beer list scroll forever. */
+    .vrow .stepper button { width: 30px; height: 30px; font-size: 18px; }
+    /* font-size:0 must be restated here. The rule above is (0,2,1) and beats
+       `.stepper .add`'s (0,2,0), which is what let the button's "Add" label —
+       there for screen readers, hidden from sight by font-size:0 — render as
+       visible text clipped inside the circle. */
+    .vrow .stepper .add { width: 32px; height: 32px; font-size: 0; }
+    .vrow .stepper .add::after { font-size: 21px; }
+    .vrow .stepper .qty { width: 38px; height: 30px; font-size: 14px; }
 
     .stepper { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
     .stepper button { width: 34px; height: 34px; border-radius: 999px; border: none; font-size: 20px;
       background: var(--brand-light); color: var(--brand); line-height: 1;
       transition: transform .12s ease; }
     .stepper button:active { transform: scale(.9); }
-    .stepper .qty { min-width: 18px; text-align: center; font-weight: 700; font-size: 15px; }
+    /* Typeable, so ordering 12 of something is one entry rather than twelve
+       taps on +. Still a plain number box either side of the − and + buttons. */
+    .stepper .qty { width: 44px; height: 34px; text-align: center; font-weight: 700;
+      font-size: 15px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--card); color: var(--text); padding: 0;
+      -moz-appearance: textfield; appearance: textfield; }
+    .stepper .qty::-webkit-outer-spin-button,
+    .stepper .qty::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .stepper .qty:focus { outline: none; border-color: var(--brand); background: var(--brand-light); }
     /* Add is the one filled control on the card. The label stays "Add" for
        screen readers; sighted customers get the + the reference calls for. */
     .stepper .add { width: 40px; height: 40px; border-radius: 999px; font-size: 0;
       background: var(--brand); color: #fff; box-shadow: var(--sh-primary); }
     .stepper .add::after { content: '+'; font-size: 24px; font-weight: 400; line-height: 1; }
-    /* Sized item with nothing picked: the + waits, tinted rather than greyed —
-       the size chips beside it are the thing to press. Beats
-       .stepper button:disabled on specificity, so it keeps full opacity
-       instead of being greyed into looking broken. */
-    .stepper .add.need-size { background: var(--brand-light); color: var(--brand);
-      box-shadow: none; opacity: 1; }
 
     /* --- cart bar ---------------------------------------------------------- */
     .cart-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--brand-grad);
@@ -435,7 +454,6 @@
 
     var menu = [];            // items
     var cart = {};            // key -> { item_id, variant_id, name, price, qty }
-    var selVariant = {};      // item_id -> variant_id
     var activeCat = null;
     // null = no major picked = show everything. There is no "All" chip; tapping
     // the lit chip again clears the filter.
@@ -483,12 +501,28 @@
       if (e.key === 'Escape') closeLightbox();
     });
 
+    // Mirrors MAX_LINE_QTY in src/menuPricing.js, which rejects the whole order
+    // above it — so the box must not let a customer type a number that would
+    // bounce at checkout.
+    var MAX_QTY = 50;
+
     function keyOf(itemId, variantId) { return itemId + '::' + (variantId || ''); }
 
-    // An item sold through sizes has NO sellable base price — items.price is
-    // NULL for exactly that case — so it cannot be added until a size is picked.
-    function needsSize(item) {
-      return !!(item.variants && item.variants.length) && !selVariant[item.id];
+    // The add/quantity control, used both for a whole unsized item and for each
+    // size row. `price == null` means the catalog has no usable price for this
+    // line — the server would refuse it (menuPricing.js), so it is shown
+    // disabled rather than offered and then rejected at checkout.
+    function stepperHtml(k, itemId, variantId, price) {
+      var inCart = cart[k];
+      if (inCart) {
+        return '<button data-dec="' + k + '" aria-label="One less">−</button>' +
+          '<input class="qty" type="number" inputmode="numeric" min="1" max="' + MAX_QTY +
+          '" step="1" value="' + inCart.qty + '" data-qty="' + k + '" aria-label="Quantity" />' +
+          '<button data-inc="' + k + '" aria-label="One more">+</button>';
+      }
+      if (price == null) return '<button class="add" disabled aria-label="Unavailable"></button>';
+      return '<button class="add" data-add="' + k + '" data-item="' + itemId + '"' +
+        (variantId ? ' data-vid="' + variantId + '"' : '') + ' aria-label="Add">Add</button>';
     }
 
     // null when the item has no usable price of its own, so callers can tell
@@ -538,13 +572,6 @@
           $('shopCall').style.display = 'flex';
         }
         menu = data.items || [];
-        // With a single variant there is nothing to choose, so pick it for the
-        // customer instead of making them tap it before "Add" uses the right price.
-        menu.forEach(function (i) {
-          if (i.variants && i.variants.length === 1 && !selVariant[i.id]) {
-            selVariant[i.id] = i.variants[0].id;
-          }
-        });
         renderMajors();
         renderCats();
         render();
@@ -758,38 +785,35 @@
       groups.forEach(function (g) {
         if (g.title) html += '<div class="section-title"' + (g.cat ? ' id="' + sectionId(g.cat) + '" data-cat="' + esc(g.cat) + '"' : '') + '>' + esc(g.title) + (g.cat ? '<span class="cnt">' + g.items.length + (g.items.length === 1 ? ' item' : ' items') + '</span>' : '') + '</div>';
         g.items.forEach(function (item) {
-        var vSel = selVariant[item.id] || null;
-        var price = unitPrice(item, vSel);
-        var k = keyOf(item.id, vSel);
-        var inCart = cart[k];
-        html += '<div class="item">';
+        var price = unitPrice(item, null);
+        var k = keyOf(item.id, null);
+        html += '<div class="item' + (item.variants && item.variants.length ? ' sized' : '') + '">';
         if (item.image_url) html += '<img src="' + esc(item.image_url) + '" alt="' +
           esc(item.name) + '" data-img="' + esc(item.image_url) + '" data-name="' + esc(item.name) + '" />';
         else html += '<div class="ph" aria-hidden="true">' +
           esc((item.name || '?').trim().charAt(0).toUpperCase()) + '</div>';
         html += '<div class="info"><div class="name">' + esc(item.name) + '</div>' +
-          '<div class="price">' + priceLabel(item, vSel) + '</div>';
-        if (item.variants && item.variants.length) {
-          html += '<div class="variants">' + item.variants.map(function (v) {
-            return '<button data-item="' + item.id + '" data-variant="' + v.id + '" class="' +
-              (v.id === vSel ? 'sel' : '') + '">' + esc(v.label) + '</button>';
+          '<div class="price">' + priceLabel(item, null) + '</div>';
+        var sized = !!(item.variants && item.variants.length);
+        if (sized) {
+          // One row per size, each with its own price and its own control, so
+          // every size is addable straight from the list and two sizes of the
+          // same drink can be in the cart at once (the cart is already keyed on
+          // item+variant, so they never collide).
+          html += '<div class="vrows">' + item.variants.map(function (v) {
+            var vk = keyOf(item.id, v.id);
+            var vp = unitPrice(item, v.id);
+            return '<div class="vrow"><span class="vlabel">' + esc(v.label) + '</span>' +
+              '<span class="vprice">' + (vp == null ? '—' : rupee(vp)) + '</span>' +
+              '<span class="stepper">' + stepperHtml(vk, item.id, v.id, vp) + '</span></div>';
           }).join('') + '</div>';
         }
-        // The stepper closes .info and sits BESIDE it, not under the sizes, so
-        // the card is three columns — photo, text, action — and stays short.
-        html += '</div><div class="stepper">';
-        if (inCart) {
-          html += '<button data-dec="' + k + '">−</button><span class="qty">' + inCart.qty +
-            '</span><button data-inc="' + k + '">+</button>';
-        } else if (needsSize(item)) {
-          // No Add until a size is chosen. The server refuses a sized item with
-          // no size anyway (menuPricing.js), so offering it here could only ever
-          // end in a rejected order.
-          html += '<button class="add need-size" disabled>Select a size</button>';
-        } else {
-          html += '<button class="add" data-add="' + k + '" data-item="' + item.id + '">Add</button>';
-        }
-        html += '</div></div>';
+        // For a sized item the controls live in the rows above, so the card is
+        // two columns; an unsized one keeps the third action column beside the
+        // text, which is what holds the row short.
+        html += '</div>';
+        if (!sized) html += '<div class="stepper">' + stepperHtml(k, item.id, null, price) + '</div>';
+        html += '</div>';
         });
       });
       main.innerHTML = html;
@@ -805,16 +829,12 @@
           openLightbox(im.getAttribute('data-img'), im.getAttribute('data-name'));
         };
       });
-      Array.prototype.forEach.call(document.querySelectorAll('[data-variant]'), function (b) {
-        b.onclick = function () {
-          selVariant[b.getAttribute('data-item')] = b.getAttribute('data-variant');
-          render();
-        };
-      });
       Array.prototype.forEach.call(document.querySelectorAll('[data-add]'), function (b) {
         b.onclick = function () {
           var itemId = b.getAttribute('data-item');
-          var vSel = selVariant[itemId] || null;
+          // The size comes off the button that was pressed, so there is no
+          // selected-variant state to keep in sync with what is on screen.
+          var vSel = b.getAttribute('data-vid') || null;
           var item = menu.find(function (x) { return x.id === itemId; });
           var k = keyOf(itemId, vSel);
           cart[k] = { item_id: itemId, variant_id: vSel, name: item.name +
@@ -824,7 +844,38 @@
         };
       });
       Array.prototype.forEach.call(document.querySelectorAll('[data-inc]'), function (b) {
-        b.onclick = function () { cart[b.getAttribute('data-inc')].qty++; render(); };
+        b.onclick = function () {
+          var line = cart[b.getAttribute('data-inc')];
+          if (line.qty < MAX_QTY) line.qty++;
+          render();
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-qty]'), function (inp) {
+        var k = inp.getAttribute('data-qty');
+        // While typing, update the cart and the total bar ONLY. A full render()
+        // rebuilds the list and destroys this input mid-keystroke, taking the
+        // caret and the on-screen keyboard with it.
+        inp.oninput = function () {
+          var n = parseInt(inp.value, 10);
+          if (!cart[k] || isNaN(n) || n < 1) return;   // '' mid-edit: settle on blur
+          if (n > MAX_QTY) { n = MAX_QTY; inp.value = String(n); }
+          cart[k].qty = n;
+          renderCart();
+        };
+        // Leaving the field is where an empty or nonsense value is resolved:
+        // clearing it to nothing means "remove this line", which is what a
+        // customer emptying the box is asking for.
+        inp.onblur = function () {
+          var n = parseInt(inp.value, 10);
+          if (!cart[k]) return;
+          if (isNaN(n) || n < 1) delete cart[k];
+          else cart[k].qty = Math.min(n, MAX_QTY);
+          render();
+        };
+        inp.onkeydown = function (e) { if (e.key === 'Enter') inp.blur(); };
+        // Selecting the current value means typing replaces it rather than
+        // appending to it — "3" after tapping a box showing 1 should be 3, not 13.
+        inp.onfocus = function () { inp.select(); };
       });
       Array.prototype.forEach.call(document.querySelectorAll('[data-dec]'), function (b) {
         b.onclick = function () {

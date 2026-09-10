@@ -36,6 +36,8 @@ const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
 const { cleanLines, priceLines } = require('../menuPricing');
+const { publicTokenSecret } = require('../auth');
+const { otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -50,7 +52,8 @@ try {
   logger.error({ path: ORDER_PAGE_PATH, err: e.message }, 'order page shell MISSING at boot');
 }
 
-const ORDER_SECRET = process.env.JWT_ACCESS_SECRET;
+// Distinct from the staff access-token key — see publicTokenSecret in src/auth.js.
+const ORDER_SECRET = publicTokenSecret('order');
 const ORDER_TOKEN_TTL = '4h';            // roughly the length of a dine-in visit
 
 // A brisk limiter so a leaked link can't be used to hammer the endpoints.
@@ -295,7 +298,7 @@ router.get('/:qrToken/current', orderLimiter, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /order/:qrToken/send-otp  — { phone }
 // ---------------------------------------------------------------------------
-router.post('/:qrToken/send-otp', orderLimiter, async (req, res) => {
+router.post('/:qrToken/send-otp', orderLimiter, otpSendLimiter, async (req, res) => {
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'phone is required' });
   try {
@@ -316,7 +319,7 @@ router.post('/:qrToken/send-otp', orderLimiter, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /order/:qrToken/verify-otp  — { phone, otp } -> order token
 // ---------------------------------------------------------------------------
-router.post('/:qrToken/verify-otp', orderLimiter, async (req, res) => {
+router.post('/:qrToken/verify-otp', orderLimiter, otpVerifyLimiter, async (req, res) => {
   const { phone, otp } = req.body || {};
   if (!phone || !otp) return res.status(400).json({ error: 'phone and otp are required' });
   try {

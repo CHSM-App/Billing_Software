@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { pool, poolConnect, sql } = require('../db');
 const crypto = require('crypto');
 const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../auth');
-const { loginLimiter, registerLimiter, refreshLimiter } = require('../middleware/rateLimiter');
+const { loginLimiter, registerLimiter, refreshLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const audit = require('../audit');
@@ -240,7 +240,7 @@ router.post('/register', registerLimiter, async (req, res) => {
 // POST /api/send-otp
 // Sends a WhatsApp OTP to the given phone number.
 // purpose: 'register' (before registration) | 'forgot_pin' (reset PIN)
-router.post('/send-otp', registerLimiter, async (req, res) => {
+router.post('/send-otp', registerLimiter, otpSendLimiter, async (req, res) => {
   const { phone, purpose } = req.body;
 
   if (!phone || !purpose) {
@@ -287,7 +287,7 @@ router.post('/send-otp', registerLimiter, async (req, res) => {
 // POST /api/verify-otp
 // Verifies OTP for a given phone+purpose. Returns a short-lived verified token
 // that the client must present when calling /register or /reset-pin.
-router.post('/verify-otp', async (req, res) => {
+router.post('/verify-otp', otpVerifyLimiter, async (req, res) => {
   const { phone, otp, purpose } = req.body;
 
   if (!phone || !otp || !purpose) {
@@ -313,7 +313,7 @@ router.post('/verify-otp', async (req, res) => {
 // POST /api/reset-pin
 // Resets the owner's PIN after OTP verification.
 // Requires the verified_token issued by /verify-otp with purpose=forgot_pin.
-router.post('/reset-pin', async (req, res) => {
+router.post('/reset-pin', otpVerifyLimiter, async (req, res) => {
   const { verified_token, new_pin } = req.body;
 
   if (!verified_token || !new_pin) {

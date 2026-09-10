@@ -1,6 +1,7 @@
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
 
+const { publicTokenSecret } = require('../../src/auth');
 const { makeDbMock } = require('../helpers/db');
 const { mockPool, mockRequest, mockTransaction } = makeDbMock();
 
@@ -54,7 +55,7 @@ const catalogItem = {
 function storeAuth(over = {}) {
   const token = jwt.sign(
     { typ: 'store', phone: '9876543210', business_id: BUSINESS_ID, ...over },
-    process.env.JWT_ACCESS_SECRET,
+    publicTokenSecret('store'),
     { expiresIn: '4h' },
   );
   return { Authorization: `Bearer ${token}` };

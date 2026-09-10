@@ -8,16 +8,7 @@ jest.mock('../../src/db', () => mockPool);
 // Rate limiters off, as in auth.test.js — this suite posts the form a dozen
 // times to cover the validation branches and would otherwise trip demoLimiter's
 // 10-per-hour cap partway through.
-jest.mock('../../src/middleware/rateLimiter', () => ({
-  healthLimiter: (req, res, next) => next(),
-  whatsappLimiter: (req, res, next) => next(),
-  globalLimiter: (req, res, next) => next(),
-  loginLimiter: (req, res, next) => next(),
-  registerLimiter: (req, res, next) => next(),
-  refreshLimiter: (req, res, next) => next(),
-  deletionLimiter: (req, res, next) => next(),
-  demoLimiter: (req, res, next) => next(),
-}));
+jest.mock('../../src/middleware/rateLimiter', () => require('../helpers/noRateLimit'));
 
 // The route's whole job is to hand a validated payload to this template send.
 const mockSendDemoRequest = jest.fn(() => Promise.resolve({ sent: true }));

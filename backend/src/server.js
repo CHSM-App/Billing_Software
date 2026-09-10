@@ -40,7 +40,14 @@ const app = express();
 
 // Behind IIS — without this every request looks like 127.0.0.1 and the
 // rate limiter buckets all users together.
-app.set('trust proxy', 1);
+//
+// The value is the NUMBER OF PROXY HOPS in front of node, and it must match the
+// deployment exactly. Too low and every client shares one bucket (the limiters
+// below stop isolating anyone); too high and a client can prepend its own
+// X-Forwarded-For entry to forge an address and reset any per-IP limit at will.
+// One hop (IIS only) is the current setup; put a CDN in front and this becomes
+// 2, hence the override rather than a literal.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
 
 // ---------------------------------------------------------------------------
 // Canonical host — send page requests arriving on any other hostname (notably

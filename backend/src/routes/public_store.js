@@ -37,6 +37,8 @@ const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
 const { cleanLines, priceLines } = require('../menuPricing');
+const { publicTokenSecret } = require('../auth');
+const { otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
 const { sendOnlineOrderNotification } = require('../fcm');
 
 const router = express.Router();
@@ -52,7 +54,8 @@ try {
   logger.error({ path: STORE_PAGE_PATH, err: e.message }, 'store page shell MISSING at boot');
 }
 
-const STORE_SECRET = process.env.JWT_ACCESS_SECRET;
+// Distinct from the staff access-token key — see publicTokenSecret in src/auth.js.
+const STORE_SECRET = publicTokenSecret('store');
 const STORE_TOKEN_TTL = '4h';
 // A verified number may keep at most this many orders waiting on the shop, so a
 // single customer cannot bury the owner's queue.
@@ -280,7 +283,7 @@ router.get('/:token/orders', storeLimiter, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /store/:token/send-otp  — { phone }
 // ---------------------------------------------------------------------------
-router.post('/:token/send-otp', storeLimiter, async (req, res) => {
+router.post('/:token/send-otp', storeLimiter, otpSendLimiter, async (req, res) => {
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'phone is required' });
   try {
@@ -303,7 +306,7 @@ router.post('/:token/send-otp', storeLimiter, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /store/:token/verify-otp  — { phone, otp } -> store token
 // ---------------------------------------------------------------------------
-router.post('/:token/verify-otp', storeLimiter, async (req, res) => {
+router.post('/:token/verify-otp', storeLimiter, otpVerifyLimiter, async (req, res) => {
   const { phone, otp } = req.body || {};
   if (!phone || !otp) return res.status(400).json({ error: 'phone and otp are required' });
   try {

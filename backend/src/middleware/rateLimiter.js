@@ -176,6 +176,51 @@ const deletionLimiter = rateLimit({
   skipSuccessfulRequests: false,
 });
 
+// ─── OTP limiters, keyed on the PHONE rather than the IP ────────────────────
+//
+// An OTP is per-phone, so the only key that actually bounds an attack on one is
+// the phone. IP keying does not: a 6-digit code live for 10 minutes gives 300
+// guesses per IP per window at the old 30/min storefront limit, and cheap
+// proxies turn that into as many attempts as the attacker cares to pay for.
+// Unlike staff login there is no per-account lockout behind these (no row to
+// lock — verifyOtp matches a hash), so these limiters ARE the control.
+//
+// Keyed on phone + IP: phone alone would let one attacker lock a victim out of
+// their own OTP by burning the budget from anywhere.
+function phoneKey(req) {
+  const digits = String(req.body?.phone ?? '').replace(/\D/g, '').slice(-10);
+  // No phone in the body → fall back to IP alone, so a malformed flood is still
+  // bounded. ipKeyGenerator normalises IPv6 into a sensible subnet bucket.
+  return digits ? `${digits}:${ipKeyGenerator(req.ip)}` : ipKeyGenerator(req.ip);
+}
+
+// Verifying an OTP — 8 attempts per phone per 15 minutes. A real customer needs
+// one or two; 8 leaves room for typos while making a 1-in-1,000,000 code
+// unguessable in the 10 minutes it stays valid.
+const otpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: phoneKey,
+  message: { error: 'Too many incorrect codes. Please request a new one shortly.' },
+  handler: onLimitReached,
+});
+
+// Requesting an OTP — 5 per phone per 15 minutes. Each one sends a real
+// WhatsApp message that costs money and lands on someone's phone, so this is
+// as much an anti-harassment control as an anti-abuse one: without it the
+// endpoint is a way to bomb an arbitrary number at somebody else's expense.
+const otpSendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: phoneKey,
+  message: { error: 'Too many code requests. Please wait a few minutes.' },
+  handler: onLimitReached,
+});
+
 // POST /api/demo/request — 10 per IP per hour.
 //
 // Public and unauthenticated, and each accepted request sends a WhatsApp
@@ -191,4 +236,4 @@ const demoLimiter = rateLimit({
   handler: onLimitReached,
 });
 
-module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter, demoLimiter };
+module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter };

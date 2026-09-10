@@ -6,15 +6,7 @@ const { mockPool } = makeDbMock();
 jest.mock('../../src/db', () => mockPool);
 
 // Rate limiters would otherwise warn about IPv6 key generation under supertest.
-jest.mock('../../src/middleware/rateLimiter', () => ({
-  healthLimiter: (req, res, next) => next(),
-  whatsappLimiter: (req, res, next) => next(),
-  globalLimiter: (req, res, next) => next(),
-  loginLimiter: (req, res, next) => next(),
-  registerLimiter: (req, res, next) => next(),
-  refreshLimiter: (req, res, next) => next(),
-  deletionLimiter: (req, res, next) => next(),
-}));
+jest.mock('../../src/middleware/rateLimiter', () => require('../helpers/noRateLimit'));
 
 // CANONICAL_HOST is read at module load, so it must be set before requiring the app.
 process.env.CANONICAL_HOST = 'vittam.vengurlatech.com';

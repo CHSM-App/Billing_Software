@@ -29,7 +29,6 @@ String sanitizeUiErrorMessage(Object? error, {String fallback = _genericApiError
   return fallback;
 }
 
-
 // ---------------------------------------------------------------------------
 // Connectivity notifier reference — set once from main.dart after ProviderScope
 // ---------------------------------------------------------------------------
