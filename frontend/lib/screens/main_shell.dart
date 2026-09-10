@@ -67,6 +67,7 @@ class _MainShellState extends ConsumerState<MainShell>
     // exactly when a shop is most likely to miss an order.
     NotificationService.instance.onlineOrderPing.addListener(_onOnlineOrderPing);
     NotificationService.instance.onlineOrderTap.addListener(_onOnlineOrderTapped);
+    NotificationService.instance.tableOrderPing.addListener(_onTableOrderPing);
 
     // Ensure the socket is live for this session. The app bootstrap starts it on
     // cold launch, but a re-login (login screen → new shell) mounts here without
@@ -189,10 +190,21 @@ class _MainShellState extends ConsumerState<MainShell>
     _realtimeSub?.cancel();
     NotificationService.instance.onlineOrderPing
         .removeListener(_onOnlineOrderPing);
+    NotificationService.instance.tableOrderPing
+        .removeListener(_onTableOrderPing);
     NotificationService.instance.onlineOrderTap
         .removeListener(_onOnlineOrderTapped);
     _railAnimController.dispose();
     super.dispose();
+  }
+
+  /// A QR table order arrived by push. Refreshes exactly what the WebSocket
+  /// `tables`/`drafts` events would have, for the case the socket was asleep
+  /// because the app was backgrounded.
+  void _onTableOrderPing() {
+    if (!mounted) return;
+    ref.read(tablesProvider.notifier).refreshSilently();
+    ref.read(openDraftsProvider.notifier).refreshSilently();
   }
 
   void _onOnlineOrderPing() {

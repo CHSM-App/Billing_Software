@@ -350,9 +350,107 @@ async function sendOnlineOrderNotification(pool, sql, businessId, order = {}) {
   }
 }
 
+/**
+ * A customer at a table sent dishes to the kitchen from the QR menu.
+ *
+ * The QR flow only ever pushed a WebSocket event, which reaches a device whose
+ * app is open and holding a live socket — and no further. Backgrounded, the OS
+ * suspends that socket, so an order placed while the counter phone was locked
+ * arrived nowhere until someone opened the app. This is the wake-up, the same
+ * way an online order gets one.
+ *
+ * Visible (a real `notification` block) and aimed at owners and cashiers, who
+ * work the counter. The kitchen gets its own silent data ping instead — see
+ * sendKitchenNotification — because its screen is already open in front of it.
+ *
+ * @param {object} pool
+ * @param {object} sql
+ * @param {string} businessId
+ * @param {{ tableLabel: string, dinerName?: string|null, total: number,
+ *           itemCount: number }} order
+ */
+async function sendTableOrderNotification(pool, sql, businessId, order = {}) {
+  const messaging = getMessaging();
+  if (!messaging) return;
+
+  let tokens;
+  try {
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .query(`
+        SELECT ft.token
+        FROM fcm_tokens ft
+        JOIN users u ON u.id = ft.user_id
+        WHERE ft.business_id = @business_id AND u.role IN ('owner', 'cashier')
+      `);
+    tokens = result.recordset.map((r) => r.token);
+  } catch (err) {
+    console.error('[FCM] Failed to fetch table-order tokens:', err.message);
+    return;
+  }
+  if (tokens.length === 0) return;
+
+  const parts = [
+    `${order.itemCount} item${order.itemCount === 1 ? '' : 's'}`,
+    `Rs.${order.total}`,
+  ];
+  if (order.dinerName) parts.push(order.dinerName);
+
+  const message = {
+    notification: {
+      title: order.tableLabel ? `New order — ${order.tableLabel}` : 'New table order',
+      body: parts.join(' · '),
+    },
+    // Distinct type so the app can refresh the TABLES view rather than the
+    // online-order queue, which has nothing to do with this order.
+    data: { type: 'table_order', table: order.tableLabel || '' },
+    android: {
+      priority: 'high',
+      notification: {
+        // Shares the orders channel: to a shop owner these are the same class
+        // of alert, and a second channel would be a second thing to mute.
+        channelId: 'online_orders',
+        priority: 'high',
+        sound: 'default',
+        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+      },
+    },
+    apns: { payload: { aps: { sound: 'default' } } },
+    tokens,
+  };
+
+  try {
+    const response = await messaging.sendEachForMulticast(message);
+    const staleTokens = [];
+    response.responses.forEach((r, i) => {
+      if (!r.success) {
+        const code = r.error?.errorInfo?.code;
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token'
+        ) {
+          staleTokens.push(tokens[i]);
+        } else if (r.error) {
+          console.error('[FCM] Table order send error:', r.error.message);
+        }
+      }
+    });
+    for (const token of staleTokens) {
+      try {
+        await pool.request()
+          .input('token', sql.NVarChar(500), token)
+          .query(`DELETE FROM fcm_tokens WHERE token = @token`);
+      } catch (_) {}
+    }
+  } catch (err) {
+    console.error('[FCM] table order multicast error:', err.message);
+  }
+}
+
 module.exports = {
   sendLowStockNotification,
   sendKitchenNotification,
   sendKitchenStatusChanged,
   sendOnlineOrderNotification,
+  sendTableOrderNotification,
 };

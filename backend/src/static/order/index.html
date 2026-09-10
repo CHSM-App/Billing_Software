@@ -105,26 +105,42 @@
     .item .info { flex: 1; min-width: 0; }
     .item .name { font-weight: 600; font-size: 15px; letter-spacing: -0.2px; }
     .item .price { color: var(--brand); font-weight: 700; font-size: 14px; margin-top: 3px; }
-    .variants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .variants button { border: 1px solid var(--line); background: var(--surface-variant);
-      border-radius: var(--r-sm); padding: 6px 12px; font-size: 13px; color: var(--text);
-      font-family: inherit; font-weight: 500; transition: all .18s ease; }
-    .variants button.sel { border-color: var(--brand); background: var(--brand-light);
-      color: var(--brand-dark); font-weight: 600; }
+    /* Every size on its own row with its own price and its own +, matching the
+       online store page. A diner ordering two sizes of the same drink adds both
+       without going back, and nothing hides behind a selection step. */
+    .vrows { margin-top: 8px; display: flex; flex-direction: column; }
+    .vrow { display: flex; align-items: center; gap: 10px; padding: 7px 0;
+      border-top: 1px solid var(--line); }
+    .vrow:first-child { border-top: none; padding-top: 3px; }
+    .vrow .vlabel { flex: 1; min-width: 0; font-size: 13px; font-weight: 500; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vrow .vprice { flex: 0 0 auto; font-size: 13.5px; font-weight: 700; color: var(--brand); }
+    /* Rows get their own stepper, so it must not inherit the block margin the
+       card-level one carries. */
+    .vrow .stepper { margin-top: 0; gap: 8px; }
+    .vrow .stepper button { width: 30px; height: 30px; font-size: 18px; }
+    /* The row + is a compact square, not the wide "Add" pill — six of those
+       stacked would be a wall of buttons. Padding/width from .stepper .add are
+       both overridden here. */
+    .vrow .stepper .add { width: 32px; height: 32px; padding: 0; font-size: 20px;
+      font-weight: 400; }
     .stepper { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
     .stepper button { width: 34px; height: 34px; border-radius: var(--r-sm); border: none; font-size: 20px;
       background: var(--brand); color: #fff; line-height: 1; font-family: inherit;
       box-shadow: 0 2px 6px rgba(79,70,229,.25); transition: transform .12s ease; }
     .stepper button:active { transform: scale(.92); }
     .stepper button:disabled { opacity: .35; box-shadow: none; }
-    .stepper .qty { min-width: 22px; text-align: center; font-weight: 700; font-size: 15px; }
+    /* Typeable, so ordering 12 of something is one entry rather than twelve taps. */
+    .stepper .qty { width: 46px; height: 34px; text-align: center; font-weight: 700;
+      font-size: 15px; border: 1px solid var(--line); border-radius: var(--r-sm);
+      background: var(--card); color: var(--text); font-family: inherit; padding: 0;
+      -moz-appearance: textfield; appearance: textfield; }
+    .stepper .qty::-webkit-outer-spin-button,
+    .stepper .qty::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .stepper .qty:focus { outline: none; border-color: var(--brand); background: var(--brand-light); }
+    .vrow .stepper .qty { width: 40px; height: 30px; font-size: 14px; }
     .stepper .add { width: auto; padding: 0 18px; height: 36px; border-radius: var(--r-sm); font-size: 14px;
       font-weight: 600; letter-spacing: 0.2px; }
-    /* Sized item with nothing picked: reads as an instruction, not a dead
-       button. Beats .stepper button:disabled on specificity, so it keeps full
-       opacity instead of being greyed into looking broken. */
-    .stepper .add.need-size { background: var(--surface-variant); color: var(--brand-dark);
-      border: 1px dashed var(--brand); box-shadow: none; opacity: 1; }
     .cart-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--brand-grad);
       color: #fff; padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;
       box-shadow: 0 -4px 20px rgba(79,70,229,.25); z-index: 30; }
@@ -231,7 +247,6 @@
 
     var menu = [];            // items
     var cart = {};            // key -> { item_id, variant_id, name, price, qty }
-    var selVariant = {};      // item_id -> variant_id
     var activeCat = null;
     // null = no major picked = show everything. There is no "All" chip; tapping
     // the lit chip again clears the filter.
@@ -293,12 +308,33 @@
       $('cartBar').classList.add('hidden');
     }
 
+    // Mirrors MAX_LINE_QTY in src/menuPricing.js, which rejects the whole order
+    // above it — the box must not accept a number that bounces at checkout.
+    var MAX_QTY = 50;
+
     function keyOf(itemId, variantId) { return itemId + '::' + (variantId || ''); }
 
-    // An item sold through sizes has NO sellable base price — items.price is
-    // NULL for exactly that case — so it cannot be added until a size is picked.
-    function needsSize(item) {
-      return !!(item.variants && item.variants.length) && !selVariant[item.id];
+    // The add/quantity control, used both for a whole unsized dish and for each
+    // size row. `price == null` means the menu has no usable price for this line
+    // — the server refuses it (menuPricing.js), so it is shown disabled rather
+    // than offered and then rejected.
+    function stepperHtml(k, itemId, variantId, price, wide) {
+      var inCart = cart[k];
+      if (inCart) {
+        return '<button data-dec="' + k + '" aria-label="One less">−</button>' +
+          '<input class="qty" type="number" inputmode="numeric" min="1" max="' + MAX_QTY +
+          '" step="1" value="' + inCart.qty + '" data-qty="' + k + '" aria-label="Quantity" />' +
+          '<button data-inc="' + k + '" aria-label="One more">+</button>';
+      }
+      // A row's button is a 32px square, so the reason goes in the title rather
+      // than the label — "Unavailable" would be clipped to a letter and a half.
+      if (price == null) {
+        return '<button class="add" disabled title="Not available">' +
+          (wide ? 'Unavailable' : '+') + '</button>';
+      }
+      return '<button class="add" data-add="' + k + '" data-item="' + itemId + '"' +
+        (variantId ? ' data-vid="' + variantId + '"' : '') +
+        (wide ? '' : ' aria-label="Add"') + '>' + (wide ? 'Add' : '+') + '</button>';
     }
 
     // null when the item has no usable price of its own, so callers can tell
@@ -339,13 +375,6 @@
         document.title = data.shop_name + ' — Table ' + data.table_number;
         if (data.shop_logo) { $('logo').src = data.shop_logo; $('logo').style.display = 'block'; }
         menu = data.items || [];
-        // With a single variant there is nothing to choose, so pick it for the
-        // customer instead of making them tap it before "Add" uses the right price.
-        menu.forEach(function (i) {
-          if (i.variants && i.variants.length === 1 && !selVariant[i.id]) {
-            selVariant[i.id] = i.variants[0].id;
-          }
-        });
         renderMajors();
         renderCats();
         render();
@@ -527,34 +556,27 @@
       groups.forEach(function (g) {
         if (g.title) html += '<div class="section-title"' + (g.cat ? ' id="' + sectionId(g.cat) + '" data-cat="' + esc(g.cat) + '"' : '') + '>' + esc(g.title) + (g.cat ? '<span class="cnt">' + g.items.length + '</span>' : '') + '</div>';
         g.items.forEach(function (item) {
-        var vSel = selVariant[item.id] || null;
-        var price = unitPrice(item, vSel);
-        var k = keyOf(item.id, vSel);
-        var inCart = cart[k];
+        var price = unitPrice(item, null);
+        var k = keyOf(item.id, null);
         html += '<div class="item">';
         if (item.image_url) html += '<img src="' + esc(item.image_url) + '" alt="' +
           esc(item.name) + '" data-img="' + esc(item.image_url) + '" data-name="' + esc(item.name) + '" />';
         html += '<div class="info"><div class="name">' + esc(item.name) + '</div>' +
-          '<div class="price">' + priceLabel(item, vSel) + '</div>';
+          '<div class="price">' + priceLabel(item, null) + '</div>';
         if (item.variants && item.variants.length) {
-          html += '<div class="variants">' + item.variants.map(function (v) {
-            return '<button data-item="' + item.id + '" data-variant="' + v.id + '" class="' +
-              (v.id === vSel ? 'sel' : '') + '">' + esc(v.label) + '</button>';
+          // One row per size, each independently addable. The cart is already
+          // keyed on item+variant, so two sizes of one dish never collide.
+          html += '<div class="vrows">' + item.variants.map(function (v) {
+            var vk = keyOf(item.id, v.id);
+            var vp = unitPrice(item, v.id);
+            return '<div class="vrow"><span class="vlabel">' + esc(v.label) + '</span>' +
+              '<span class="vprice">' + (vp == null ? '—' : rupee(vp)) + '</span>' +
+              '<span class="stepper">' + stepperHtml(vk, item.id, v.id, vp, false) + '</span></div>';
           }).join('') + '</div>';
-        }
-        html += '<div class="stepper">';
-        if (inCart) {
-          html += '<button data-dec="' + k + '">−</button><span class="qty">' + inCart.qty +
-            '</span><button data-inc="' + k + '">+</button>';
-        } else if (needsSize(item)) {
-          // No Add until a size is chosen. The server refuses a sized item with
-          // no size anyway (menuPricing.js), so offering it here could only ever
-          // end in a rejected order.
-          html += '<button class="add need-size" disabled>Select a size</button>';
         } else {
-          html += '<button class="add" data-add="' + k + '" data-item="' + item.id + '">Add</button>';
+          html += '<div class="stepper">' + stepperHtml(k, item.id, null, price, true) + '</div>';
         }
-        html += '</div></div></div>';
+        html += '</div></div>';
         });
       });
       main.innerHTML = html;
@@ -570,16 +592,12 @@
           openLightbox(im.getAttribute('data-img'), im.getAttribute('data-name'));
         };
       });
-      Array.prototype.forEach.call(document.querySelectorAll('[data-variant]'), function (b) {
-        b.onclick = function () {
-          selVariant[b.getAttribute('data-item')] = b.getAttribute('data-variant');
-          render();
-        };
-      });
       Array.prototype.forEach.call(document.querySelectorAll('[data-add]'), function (b) {
         b.onclick = function () {
           var itemId = b.getAttribute('data-item');
-          var vSel = selVariant[itemId] || null;
+          // The size comes off the button pressed, so there is no selected-size
+          // state to keep in sync with what is on screen.
+          var vSel = b.getAttribute('data-vid') || null;
           var item = menu.find(function (x) { return x.id === itemId; });
           var k = keyOf(itemId, vSel);
           cart[k] = { item_id: itemId, variant_id: vSel, name: item.name +
@@ -589,7 +607,33 @@
         };
       });
       Array.prototype.forEach.call(document.querySelectorAll('[data-inc]'), function (b) {
-        b.onclick = function () { cart[b.getAttribute('data-inc')].qty++; render(); };
+        b.onclick = function () {
+          var line = cart[b.getAttribute('data-inc')];
+          if (line.qty < MAX_QTY) line.qty++;
+          render();
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('[data-qty]'), function (inp) {
+        var k = inp.getAttribute('data-qty');
+        // While typing, update the cart and the total bar ONLY. A full render()
+        // rebuilds the list and destroys this input mid-keystroke, taking the
+        // caret and the on-screen keyboard with it.
+        inp.oninput = function () {
+          var n = parseInt(inp.value, 10);
+          if (!cart[k] || isNaN(n) || n < 1) return;   // '' mid-edit: settle on blur
+          if (n > MAX_QTY) { n = MAX_QTY; inp.value = String(n); }
+          cart[k].qty = n;
+          renderCart();
+        };
+        inp.onblur = function () {
+          var n = parseInt(inp.value, 10);
+          if (!cart[k]) return;
+          if (isNaN(n) || n < 1) delete cart[k];        // cleared = remove the line
+          else cart[k].qty = Math.min(n, MAX_QTY);
+          render();
+        };
+        inp.onkeydown = function (e) { if (e.key === 'Enter') inp.blur(); };
+        inp.onfocus = function () { inp.select(); };
       });
       Array.prototype.forEach.call(document.querySelectorAll('[data-dec]'), function (b) {
         b.onclick = function () {

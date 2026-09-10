@@ -23,7 +23,7 @@ const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { serializeCharges } = require('../charges');
-const { taxOnLines } = require('../menuPricing');
+const { taxOnLines, netOfLines } = require('../menuPricing');
 const audit = require('../audit');
 
 const router = express.Router();
@@ -180,7 +180,7 @@ router.post('/:id/accept', requireAuth, canDecide, async (req, res) => {
     // order. This used to be written as a literal 0, which under-billed every
     // accepted online order by exactly its GST and left the books claiming a
     // taxable sale had no tax on it.
-    const subtotal = round2(lines.reduce((s, l) => s + Number(l.line_total), 0));
+    const subtotal = netOfLines(lines);
     const taxAmount = taxOnLines(lines);
     const total = round2(subtotal + taxAmount + deliveryCharge);
 

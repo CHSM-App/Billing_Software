@@ -665,3 +665,49 @@ describe('menu price === amount collected', () => {
     expect(res.body.items[0].price_inclusive_tax).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// bill_items.line_total is GROSS everywhere (routes/bills.js builds it that
+// way), and the recompute a staff edit triggers derives a bill's tax as
+// SUM(line_total - quantity * unit_price). The public flows used to write a NET
+// line_total, making that difference zero — so editing a bill built from a
+// customer order silently erased its GST.
+// ---------------------------------------------------------------------------
+describe('customer lines store a GROSS line_total', () => {
+  test('line_total carries the tax; unit_price stays net', async () => {
+    const { inputsSeen } = wirePlaceOrder({
+      item: { ...catalogItem, price: 105, tax_rate: 5, price_inclusive_tax: true, gst_enabled: true },
+    });
+    const res = await request(app)
+      .post(`/store/${STORE_TOKEN}`)
+      .set(storeAuth())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 2 }], name: 'Ramesh', fulfilment: 'pickup' });
+
+    expect(res.status).toBe(201);
+    const line = inputsSeen.find((i) => i.line_total !== undefined);
+    expect(line.unit_price).toBeCloseTo(100, 6);   // net
+    expect(line.line_total).toBeCloseTo(210, 2);   // 2 x 105 gross
+    // The difference is the tax a staff edit will re-derive — non-zero is the
+    // whole point of this test.
+    expect(line.line_total - line.quantity * line.unit_price).toBeCloseTo(10, 2);
+
+    // And the order's own money still adds up: net subtotal + tax = gross.
+    const ins = inputsSeen.find((i) => i.subtotal !== undefined);
+    expect(ins.subtotal).toBe(200);
+    expect(ins.total).toBe(210);
+  });
+
+  test('with GST off there is no tax, so gross equals net', async () => {
+    const { inputsSeen } = wirePlaceOrder({
+      item: { ...catalogItem, price: 50, tax_rate: 10, price_inclusive_tax: true, gst_enabled: false },
+    });
+    await request(app)
+      .post(`/store/${STORE_TOKEN}`)
+      .set(storeAuth())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 2 }], name: 'Ramesh', fulfilment: 'pickup' });
+
+    const line = inputsSeen.find((i) => i.line_total !== undefined);
+    expect(line.line_total).toBeCloseTo(100, 2);
+    expect(line.line_total - line.quantity * line.unit_price).toBeCloseTo(0, 6);
+  });
+});

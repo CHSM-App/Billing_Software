@@ -39,6 +39,16 @@ class NotificationService {
   /// and jumps to the Online orders queue.
   final ValueNotifier<int> onlineOrderTap = ValueNotifier<int>(0);
 
+  /// Ticks when a QR table-order push arrives. The shell listens and refreshes
+  /// the tables + open-drafts views.
+  ///
+  /// The WebSocket already broadcasts the same change, but only reaches a
+  /// device whose app is open — the OS suspends the socket on backgrounding, so
+  /// an order placed at a table while the counter phone was locked used to
+  /// surface only when somebody next opened the app. This push is the path that
+  /// works when the socket cannot.
+  final ValueNotifier<int> tableOrderPing = ValueNotifier<int>(0);
+
   /// A tap that arrived before anything was listening. A COLD launch from the
   /// notification lands here: the tap is handled during init(), long before the
   /// shell exists to hear the notifier, so the shell claims it on mount instead.
@@ -83,6 +93,9 @@ class NotificationService {
         kitchenPing.value++;
       } else if (type == 'online_order') {
         onlineOrderPing.value++;
+        _showOnlineOrder(message);
+      } else if (type == 'table_order') {
+        tableOrderPing.value++;
         _showOnlineOrder(message);
       }
     });
@@ -163,8 +176,11 @@ class NotificationService {
     try {
       await _local.show(
         // A stable-ish id from the order number so the same order re-pushed
-        // replaces its notification instead of stacking a duplicate.
-        (message.data['order_number'] ?? '').hashCode,
+        // replaces its notification instead of stacking a duplicate. A table
+        // order has no order number — it merges into the table's running
+        // draft — so its table is what identifies it, and a second round from
+        // the same table replaces the first rather than stacking.
+        (message.data['order_number'] ?? message.data['table'] ?? '').hashCode,
         n?.title ?? 'New online order',
         n?.body ?? '',
         const NotificationDetails(

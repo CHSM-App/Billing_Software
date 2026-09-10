@@ -168,7 +168,14 @@ async function priceLines(makeRequest, businessId, lines) {
       quantity: l.quantity,
       unit_price: unitPrice,
       tax_rate: taxRate,
-      line_total: +(unitPrice * l.quantity).toFixed(2),
+      // GROSS — qty x net PLUS this line's tax, which is what bill_items.
+      // line_total means everywhere else (routes/bills.js builds it the same
+      // way). These rows are copied verbatim into bill_items when an order is
+      // accepted, and the recompute staff edits trigger derives a bill's tax as
+      // SUM(line_total - quantity * unit_price). Writing a NET line_total made
+      // that difference zero, so the moment anyone edited a bill built from a
+      // customer order, its entire GST silently vanished.
+      line_total: +(unitPrice * l.quantity * (1 + (taxRate || 0) / 100)).toFixed(2),
     });
   }
   return priced;
@@ -188,6 +195,19 @@ async function priceLines(makeRequest, businessId, lines) {
  * @param {Array<{unit_price: number, quantity: number, tax_rate: number|null}>} lines
  * @returns {number} tax to 2dp
  */
+/**
+ * The NET (pre-tax) sum of priced lines — what `subtotal` means on both bills
+ * and online_orders.
+ *
+ * Deliberately not SUM(line_total): that is gross, so summing it would put the
+ * tax into the subtotal and then add it again as tax_amount.
+ */
+function netOfLines(lines) {
+  const total = lines.reduce((s, l) =>
+    s + (Number(l.unit_price) || 0) * (Number(l.quantity) || 0), 0);
+  return +total.toFixed(2);
+}
+
 function taxOnLines(lines) {
   const total = lines.reduce((s, l) =>
     s + (Number(l.unit_price) || 0) * (Number(l.quantity) || 0)
@@ -211,6 +231,6 @@ function grossUnitPrice(price, taxRate, inclusive, gstEnabled) {
 }
 
 module.exports = {
-  cleanLines, priceLines, taxOnLines, grossUnitPrice,
+  cleanLines, priceLines, taxOnLines, netOfLines, grossUnitPrice,
   MAX_LINE_QTY, MAX_LINES_PER_ORDER,
 };

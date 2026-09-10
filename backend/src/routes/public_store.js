@@ -36,7 +36,7 @@ const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
-const { cleanLines, priceLines, taxOnLines, grossUnitPrice } = require('../menuPricing');
+const { cleanLines, priceLines, taxOnLines, netOfLines, grossUnitPrice } = require('../menuPricing');
 const { publicTokenSecret } = require('../auth');
 const { otpSendLimiter, otpVerifyLimiter, publicPageLimiter: storeLimiter } = require('../middleware/rateLimiter');
 const { sendOnlineOrderNotification } = require('../fcm');
@@ -437,7 +437,7 @@ router.post('/:token', storeLimiter, async (req, res) => {
     // so the tax has to be added back for the customer to be charged the price
     // the menu quoted. Delivery is not part of the taxable base — same rule the
     // staff biller applies to additional charges.
-    const subtotal = round2(priced.reduce((s, l) => s + l.line_total, 0));
+    const subtotal = netOfLines(priced);
     const taxAmount = taxOnLines(priced);
     const deliveryCharge = fulfilment === 'delivery' ? round2(cfg.delivery_charge) : 0;
     const total = round2(subtotal + taxAmount + deliveryCharge);

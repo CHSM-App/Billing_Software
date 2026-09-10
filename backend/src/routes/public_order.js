@@ -37,6 +37,7 @@ const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
 const { cleanLines, priceLines } = require('../menuPricing');
 const { publicTokenSecret } = require('../auth');
+const { sendTableOrderNotification, sendKitchenNotification } = require('../fcm');
 const { otpSendLimiter, otpVerifyLimiter, publicPageLimiter: orderLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
@@ -78,6 +79,8 @@ async function resolveTable(qrToken) {
   if (!row.self_order_enabled) return null;
   return row;
 }
+
+const round2 = (n) => +(Number(n) || 0).toFixed(2);
 
 // Public receipt token for the bill (same scheme as the POS bills route):
 // 16 URL-safe base62 chars, unguessable.
@@ -476,15 +479,25 @@ router.post('/:qrToken', orderLimiter, async (req, res) => {
         `);
     }
 
-    // Recompute bill totals from ALL its lines (staff + customer).
+    // Recompute bill totals from ALL its lines (staff + customer), using the
+    // same shape routes/bills.js uses when staff edit a draft: subtotal is the
+    // NET sum and the tax is the gap between each line's gross line_total and
+    // its net, so both paths agree on a bill they both write to. tax_amount was
+    // previously pinned at 0 here, which showed the table an untaxed total for
+    // the whole meal until someone finalized the bill.
     await transaction.request()
       .input('bill_id', sql.UniqueIdentifier, draft.id)
       .query(`
-        UPDATE bills
-        SET subtotal = agg.sub, total = agg.sub + b.charges_amount, tax_amount = 0
+        UPDATE b
+        SET subtotal   = agg.sub,
+            tax_amount = agg.tax,
+            total      = agg.sub + agg.tax + b.charges_amount
         FROM bills b
         CROSS APPLY (
-          SELECT ISNULL(SUM(line_total), 0) AS sub FROM bill_items WHERE bill_id = @bill_id
+          SELECT
+            ISNULL(CAST(SUM(bi.quantity * bi.unit_price) AS DECIMAL(18,4)), 0) AS sub,
+            ISNULL(ROUND(SUM(bi.line_total - bi.quantity * bi.unit_price), 2), 0) AS tax
+          FROM bill_items bi WHERE bi.bill_id = @bill_id
         ) agg
         WHERE b.id = @bill_id
       `);
@@ -492,9 +505,31 @@ router.post('/:qrToken', orderLimiter, async (req, res) => {
     await transaction.commit();
 
     // Live refresh: kitchen (new dishes), tables (now occupied), drafts list.
+    // A WebSocket only reaches a device whose app is OPEN — the OS suspends the
+    // socket the moment it is backgrounded — so this alone left an order placed
+    // at a table invisible until someone picked the phone up. The pushes below
+    // are what actually wake a device, exactly as the online store does it.
     broadcast(table.business_id, { type: 'kitchen' });
     broadcast(table.business_id, { type: 'tables' });
     broadcast(table.business_id, { type: 'drafts' });
+
+    // Fire-and-forget: a notification that fails must never fail the order the
+    // customer has already been told was placed.
+    const tableLabel = `Table ${table.table_number}`;
+    sendTableOrderNotification(pool, sql, table.business_id, {
+      tableLabel,
+      dinerName: name || null,
+      total: round2(priced.reduce((s, l) => s + l.line_total, 0)),
+      itemCount: priced.reduce((s, l) => s + l.quantity, 0),
+    }).catch((e) => logger.error({ err: e }, 'table order notification failed'));
+
+    // Silent data ping for the kitchen's own devices, so its queue refreshes
+    // even when its screen has been backgrounded. Written long ago and never
+    // wired up to anything until now.
+    sendKitchenNotification(pool, sql, table.business_id, {
+      isNew: true,
+      tableLabel,
+    }).catch((e) => logger.error({ err: e }, 'kitchen notification failed'));
 
     return res.status(201).json({ success: true, bill_number: draft.bill_number });
   } catch (err) {
