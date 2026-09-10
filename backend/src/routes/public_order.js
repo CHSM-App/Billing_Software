@@ -37,7 +37,7 @@ const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
 const { cleanLines, priceLines } = require('../menuPricing');
 const { publicTokenSecret } = require('../auth');
-const { otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
+const { otpSendLimiter, otpVerifyLimiter, publicPageLimiter: orderLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -55,15 +55,6 @@ try {
 // Distinct from the staff access-token key — see publicTokenSecret in src/auth.js.
 const ORDER_SECRET = publicTokenSecret('order');
 const ORDER_TOKEN_TTL = '4h';            // roughly the length of a dine-in visit
-
-// A brisk limiter so a leaked link can't be used to hammer the endpoints.
-const orderLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests. Please slow down.' },
-});
 
 // ---------------------------------------------------------------------------
 // Helpers

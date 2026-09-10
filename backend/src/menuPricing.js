@@ -174,4 +174,43 @@ async function priceLines(makeRequest, businessId, lines) {
   return priced;
 }
 
-module.exports = { cleanLines, priceLines, MAX_LINE_QTY, MAX_LINES_PER_ORDER };
+/**
+ * GST payable on priced lines.
+ *
+ * unit_price is always the NET rate and tax_rate is already null wherever GST
+ * is off, so this is simply each line's own rate applied to its own net value.
+ *
+ * Customer-facing totals used to omit this entirely: an order was billed at
+ * subtotal + delivery with no tax term, and the bill written on acceptance
+ * carried tax_amount = 0. A Rs.105 MRP item at 5% therefore showed Rs.105 on
+ * the menu and collected Rs.100 — the shop ate the GST on every online order.
+ *
+ * @param {Array<{unit_price: number, quantity: number, tax_rate: number|null}>} lines
+ * @returns {number} tax to 2dp
+ */
+function taxOnLines(lines) {
+  const total = lines.reduce((s, l) =>
+    s + (Number(l.unit_price) || 0) * (Number(l.quantity) || 0)
+        * ((Number(l.tax_rate) || 0) / 100), 0);
+  return +total.toFixed(2);
+}
+
+/**
+ * What a customer is actually charged per unit — the net rate plus its own tax.
+ *
+ * The menu must quote this, not items.price: an MRP price already contains the
+ * tax so it is unchanged, but a tax-EXCLUSIVE price does not, and quoting it
+ * raw would advertise Rs.50 for something that rings up at Rs.55.
+ */
+function grossUnitPrice(price, taxRate, inclusive, gstEnabled) {
+  if (price == null) return null;
+  const rate = gstEnabled ? (Number(taxRate) || 0) : 0;
+  if (rate === 0) return +Number(price).toFixed(2);
+  if (inclusive) return +Number(price).toFixed(2);   // already tax-in
+  return +(Number(price) * (1 + rate / 100)).toFixed(2);
+}
+
+module.exports = {
+  cleanLines, priceLines, taxOnLines, grossUnitPrice,
+  MAX_LINE_QTY, MAX_LINES_PER_ORDER,
+};

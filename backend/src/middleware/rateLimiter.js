@@ -176,6 +176,23 @@ const deletionLimiter = rateLimit({
   skipSuccessfulRequests: false,
 });
 
+// The public customer pages (/store/:token, /order/:qrToken) — 30 per IP per
+// minute. A brisk ceiling so a shared shop link cannot be used to hammer the
+// endpoints, while staying far above a customer browsing a menu.
+//
+// Declared here rather than inline in the routes so it can be swapped out the
+// same way as every other limiter: as a route-local const it was invisible to
+// the test stub, and a suite exercising a storefront tripped its own limit
+// partway through with a 429 that looked like a product bug.
+const publicPageLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' },
+  handler: onLimitReached,
+});
+
 // ─── OTP limiters, keyed on the PHONE rather than the IP ────────────────────
 //
 // An OTP is per-phone, so the only key that actually bounds an attack on one is
@@ -236,4 +253,4 @@ const demoLimiter = rateLimit({
   handler: onLimitReached,
 });
 
-module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter };
+module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter, publicPageLimiter };

@@ -36,9 +36,9 @@ const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
-const { cleanLines, priceLines } = require('../menuPricing');
+const { cleanLines, priceLines, taxOnLines, grossUnitPrice } = require('../menuPricing');
 const { publicTokenSecret } = require('../auth');
-const { otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
+const { otpSendLimiter, otpVerifyLimiter, publicPageLimiter: storeLimiter } = require('../middleware/rateLimiter');
 const { sendOnlineOrderNotification } = require('../fcm');
 
 const router = express.Router();
@@ -65,14 +65,6 @@ const MAX_ADDRESS_LEN = 500;
 const MAX_NOTE_LEN = 500;
 const MAX_TXN_LEN = 64;
 
-// A brisk limiter so a shared link can't be used to hammer the endpoints.
-const storeLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests. Please slow down.' },
-});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -197,10 +189,12 @@ router.get('/:token/menu', storeLimiter, async (req, res) => {
     const itemsResult = await pool.request()
       .input('business_id', sql.UniqueIdentifier, store.business_id)
       .query(`
-        SELECT id, name, major_category, category, price, tax_rate, image_url
-        FROM items
-        WHERE business_id = @business_id AND is_active = 1
-        ORDER BY major_category ASC, category ASC, name ASC
+        SELECT i.id, i.name, i.major_category, i.category, i.price, i.tax_rate,
+               i.price_inclusive_tax, i.image_url, b.gst_enabled
+        FROM items i
+        JOIN businesses b ON b.id = i.business_id
+        WHERE i.business_id = @business_id AND i.is_active = 1
+        ORDER BY i.major_category ASC, i.category ASC, i.name ASC
       `);
 
     const items = itemsResult.recordset;
@@ -217,6 +211,19 @@ router.get('/:token/menu', storeLimiter, async (req, res) => {
       const byItem = {};
       for (const v of vResult.recordset) (byItem[v.item_id] ||= []).push(v);
       for (const it of items) it.variants = byItem[it.id] || [];
+    }
+
+    // Quote TAX-IN prices: what the page shows is what checkout collects.
+    // An MRP price is unchanged; a tax-exclusive one has its GST added here,
+    // because it used to advertise the bare net rate and then bill more.
+    // gst_enabled and price_inclusive_tax are stripped afterwards — the page
+    // needs the number, not the shop's tax configuration.
+    for (const it of items) {
+      const gross = (p) => grossUnitPrice(p, it.tax_rate, it.price_inclusive_tax, it.gst_enabled);
+      it.price = gross(it.price);
+      for (const v of (it.variants || [])) v.price = gross(v.price);
+      delete it.gst_enabled;
+      delete it.price_inclusive_tax;
     }
 
     return res.json({
@@ -426,9 +433,14 @@ router.post('/:token', storeLimiter, async (req, res) => {
     );
 
     // Money. The delivery charge comes from the business row, NOT the request.
+    // subtotal is the NET sum (unit_price is net everywhere, as in bill_items),
+    // so the tax has to be added back for the customer to be charged the price
+    // the menu quoted. Delivery is not part of the taxable base — same rule the
+    // staff biller applies to additional charges.
     const subtotal = round2(priced.reduce((s, l) => s + l.line_total, 0));
+    const taxAmount = taxOnLines(priced);
     const deliveryCharge = fulfilment === 'delivery' ? round2(cfg.delivery_charge) : 0;
-    const total = round2(subtotal + deliveryCharge);
+    const total = round2(subtotal + taxAmount + deliveryCharge);
     // What the shop REQUIRES up front. Stays the advance whatever the customer
     // chooses to pay, so "did they meet the shop's condition?" has one answer.
     const amountDue = round2((total * cfg.advance_percent) / 100);

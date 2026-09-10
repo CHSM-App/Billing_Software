@@ -6,6 +6,10 @@ const { makeDbMock } = require('../helpers/db');
 const { mockPool, mockRequest, mockTransaction } = makeDbMock();
 
 jest.mock('../../src/db', () => mockPool);
+// The storefront's 30/min per-IP ceiling is real and this suite exercises the
+// same endpoints well past it; without this the later tests 429 on the limiter
+// rather than reaching the code under test.
+jest.mock('../../src/middleware/rateLimiter', () => require('../helpers/noRateLimit'));
 // The OTP path talks to an external WhatsApp API; the tests care about the order
 // rules, not the delivery of a code.
 jest.mock('../../src/whatsapp', () => ({
@@ -203,8 +207,10 @@ describe('POST /store/:token — pricing is server-side', () => {
   });
 
   test('an MRP (tax-inclusive) price is stored back-calculated to the net rate', async () => {
-    // 105 gross at 5% GST -> 100 net, so the subtotal the customer is shown does
-    // not grow again when staff finalize the bill and tax is added on top.
+    // 105 gross at 5% GST -> 100 net stored on the line, because bill_items
+    // holds net rates everywhere. The customer is still charged the full 105:
+    // the tax is added back into the order total rather than dropped, which is
+    // what used to make the shop collect 100 for a 105 item.
     const { inputsSeen } = wirePlaceOrder({
       item: { ...catalogItem, price: 105, tax_rate: 5, price_inclusive_tax: true },
     });
@@ -215,9 +221,9 @@ describe('POST /store/:token — pricing is server-side', () => {
       .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
 
     expect(res.status).toBe(201);
-    expect(res.body.total).toBe(100);
+    expect(res.body.total).toBe(105);            // the MRP, not the net rate
     const lineInsert = inputsSeen.find((i) => i.line_total !== undefined);
-    expect(lineInsert.unit_price).toBeCloseTo(100, 6);
+    expect(lineInsert.unit_price).toBeCloseTo(100, 6);  // net, as bill_items stores it
   });
 
   test('with GST off an MRP price is charged as-is, not stripped', async () => {
@@ -599,5 +605,63 @@ describe('GET /store/:token/orders', () => {
     expect(res.body.orders[0].items).toHaveLength(1);
     // Scoped to the token's phone, not to anything the caller could supply.
     expect(mockRequest.inputs.phone).toBe('9876543210');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The number on the menu must be the number the customer pays. Online orders
+// used to total the NET sum with no tax term, so a tax-inclusive MRP collected
+// less than it advertised and the accepted bill recorded tax_amount = 0.
+// ---------------------------------------------------------------------------
+describe('menu price === amount collected', () => {
+  const order = async (item) => {
+    const { inputsSeen } = wirePlaceOrder({ item });
+    const res = await request(app)
+      .post(`/store/${STORE_TOKEN}`)
+      .set(storeAuth())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], name: 'Ramesh', fulfilment: 'pickup' });
+    expect(res.status).toBe(201);
+    return { res, inputsSeen };
+  };
+
+  test('MRP (inclusive) with GST on: menu Rs.105 -> collect Rs.105, tax split out', async () => {
+    const { res, inputsSeen } = await order({
+      ...catalogItem, price: 105, tax_rate: 5, price_inclusive_tax: true, gst_enabled: true,
+    });
+    expect(res.body.total).toBe(105);              // was 100 — the shop ate the GST
+    const ins = inputsSeen.find((i) => i.subtotal !== undefined);
+    expect(ins.subtotal).toBe(100);                // net, as bill_items stores it
+    expect(ins.total).toBe(105);
+  });
+
+  test('exclusive with GST on: net Rs.100 + 5% -> collect Rs.105', async () => {
+    const { res } = await order({
+      ...catalogItem, price: 100, tax_rate: 5, price_inclusive_tax: false, gst_enabled: true,
+    });
+    expect(res.body.total).toBe(105);
+  });
+
+  test('GST off: the leftover rate is ignored entirely', async () => {
+    const { res } = await order({
+      ...catalogItem, price: 50, tax_rate: 10, price_inclusive_tax: true, gst_enabled: false,
+    });
+    expect(res.body.total).toBe(50);
+  });
+
+  test('the menu quotes tax-in, so an exclusive price is not advertised bare', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [store()], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{
+        ...catalogItem, price: 100, tax_rate: 5, price_inclusive_tax: false,
+        gst_enabled: true, category: 'Drinks',
+      }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app).get(`/store/${STORE_TOKEN}/menu`);
+    expect(res.status).toBe(200);
+    expect(res.body.items[0].price).toBe(105);
+    // The shop's tax configuration is not the customer's business.
+    expect(res.body.items[0].gst_enabled).toBeUndefined();
+    expect(res.body.items[0].price_inclusive_tax).toBeUndefined();
   });
 });

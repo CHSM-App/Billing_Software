@@ -23,6 +23,7 @@ const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { serializeCharges } = require('../charges');
+const { taxOnLines } = require('../menuPricing');
 const audit = require('../audit');
 
 const router = express.Router();
@@ -174,8 +175,14 @@ router.post('/:id/accept', requireAuth, canDecide, async (req, res) => {
     // it is folded into total but is NOT part of the taxable base.
     const deliveryCharge = round2(order.delivery_charge);
     const charges = deliveryCharge > 0 ? [{ name: 'Delivery', amount: deliveryCharge }] : [];
+    // The lines carry net rates and their own tax_rate (null wherever GST is
+    // off), so the bill's tax is recomputed from them rather than stored on the
+    // order. This used to be written as a literal 0, which under-billed every
+    // accepted online order by exactly its GST and left the books claiming a
+    // taxable sale had no tax on it.
     const subtotal = round2(lines.reduce((s, l) => s + Number(l.line_total), 0));
-    const total = round2(subtotal + deliveryCharge);
+    const taxAmount = taxOnLines(lines);
+    const total = round2(subtotal + taxAmount + deliveryCharge);
 
     // The bill has NO table: an online order is a takeaway/delivery order, so it
     // surfaces in the table-less "Open Orders" queue (GET /api/bills/drafts).
@@ -185,6 +192,7 @@ router.post('/:id/accept', requireAuth, canDecide, async (req, res) => {
       .input('customer_name', sql.NVarChar(200), order.customer_name)
       .input('customer_phone', sql.NVarChar(20), order.customer_phone)
       .input('subtotal', sql.Decimal(10, 2), subtotal)
+      .input('tax_amount', sql.Decimal(10, 2), taxAmount)
       .input('charges_amount', sql.Decimal(10, 2), deliveryCharge)
       .input('additional_charges', sql.NVarChar(sql.MAX), serializeCharges(charges))
       .input('total', sql.Decimal(10, 2), total)
@@ -196,7 +204,7 @@ router.post('/:id/accept', requireAuth, canDecide, async (req, res) => {
                            payment_mode, status, created_by_user_id, receipt_token)
         OUTPUT INSERTED.id, INSERTED.bill_number
         VALUES (@business_id, @bill_number, NULL, @customer_name, @customer_phone,
-                @subtotal, 0, @charges_amount, @additional_charges, @total,
+                @subtotal, @tax_amount, @charges_amount, @additional_charges, @total,
                 'cash', 'draft', @created_by, @receipt_token)
       `);
     const bill = billRes.recordset[0];
