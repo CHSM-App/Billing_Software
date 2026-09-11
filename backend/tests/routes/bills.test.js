@@ -589,6 +589,54 @@ describe('PUT /api/bills/:id/finalize', () => {
       .set(authHeader());
     expect(res.status).toBe(404);
   });
+
+  // A held bill stores the mode it was PARKED with. Reopening it and settling
+  // by a different tender has to overwrite that, or history, reports and the
+  // credit ledger all keep reporting the original one.
+  test('settling a held bill records the mode it was actually paid with', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({
+        recordset: [{ id: BILL_ID, table_id: null, bill_number: 'INV-0001',
+                      payment_mode: 'upi' }],
+        rowsAffected: [1],
+      })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .put(`/api/bills/${BILL_ID}/finalize`)
+      .set(authHeader())
+      .send({ payment_mode: 'upi' });
+
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.payment_mode).toBe('upi');
+  });
+
+  test('omitting the mode keeps whatever the draft already had', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({
+        recordset: [{ id: BILL_ID, table_id: null, bill_number: 'INV-0001' }],
+        rowsAffected: [1],
+      })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .put(`/api/bills/${BILL_ID}/finalize`)
+      .set(authHeader());
+
+    expect(res.status).toBe(200);
+    // null → the SQL falls back to the stored mode via COALESCE.
+    expect(mockRequest.inputs.payment_mode).toBeNull();
+  });
+
+  test('rejects a payment mode that is not a real tender', async () => {
+    const res = await request(app)
+      .put(`/api/bills/${BILL_ID}/finalize`)
+      .set(authHeader())
+      .send({ payment_mode: 'bitcoin' });
+    expect(res.status).toBe(400);
+  });
 });
 
 // ------------------------------------------------------------------

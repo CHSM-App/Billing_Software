@@ -10,6 +10,10 @@ const { sendBillLink, normalisePhone } = require('../whatsapp');
 const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
+
+// Shared by create and finalize so a mode accepted when a bill is parked is
+// still accepted when it is settled.
+const validPaymentModes = ['cash', 'upi', 'card', 'credit', 'other'];
 const { stripBillPrefix } = require('../billNumber');
 const { parseAdditionalCharges, serializeCharges, attachCharges } = require('../charges');
 
@@ -451,7 +455,6 @@ router.post('/', requireAuth, async (req, res) => {
   if (!payment_mode) {
     return res.status(400).json({ error: 'payment_mode is required' });
   }
-  const validPaymentModes = ['cash', 'upi', 'card', 'credit', 'other'];
   if (!validPaymentModes.includes(payment_mode)) {
     return res.status(400).json({ error: `payment_mode must be one of: ${validPaymentModes.join(', ')}` });
   }
@@ -1124,6 +1127,16 @@ router.get('/:id', requireAuth, async (req, res) => {
 
 // PUT /api/bills/:id/finalize
 router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
+  // The mode money was ACTUALLY taken in, which is only known now. A held bill
+  // stores whatever was selected when it was parked, and reopening it to settle
+  // by UPI used to keep the original 'cash' — so history, reports and the
+  // credit ledger all reported the wrong tender. Optional: callers that do not
+  // send it keep the stored mode, which is what every offline-queued finalize
+  // relies on.
+  const { payment_mode } = req.body || {};
+  if (payment_mode !== undefined && !validPaymentModes.includes(payment_mode)) {
+    return res.status(400).json({ error: `payment_mode must be one of: ${validPaymentModes.join(', ')}` });
+  }
   try {
     await poolConnect;
     // The app finalizes a bill in two steps: create as draft, then finalize.
@@ -1133,10 +1146,16 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
     const result = await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+      .input('payment_mode', sql.NVarChar(20), payment_mode ?? null)
       .query(`
         UPDATE bills
         SET status = 'finalized',
-            payment_status = CASE WHEN payment_mode = 'credit' THEN 'unpaid' ELSE 'paid' END
+            payment_mode = COALESCE(@payment_mode, payment_mode),
+            -- Derived from the INCOMING mode, not the stored one: switching a
+            -- held bill to credit has to make it unpaid, or it never reaches
+            -- the Credit tab.
+            payment_status = CASE WHEN COALESCE(@payment_mode, payment_mode) = 'credit'
+                                  THEN 'unpaid' ELSE 'paid' END
         OUTPUT INSERTED.id, INSERTED.table_id, INSERTED.bill_number,
                INSERTED.payment_mode, INSERTED.customer_name, INSERTED.customer_phone
         WHERE id = @id AND business_id = @business_id AND status = 'draft'

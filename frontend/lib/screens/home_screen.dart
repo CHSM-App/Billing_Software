@@ -1489,6 +1489,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // a table-less "open order": clear the cart so the screen is ready for the
       // next order, and let the Open Orders tab surface the saved draft.
       ref.read(cartProvider.notifier).clear();
+      // The customer belongs to the draft that was just parked, not to whatever
+      // is rung up next. Left behind, the next walk-in's bill quietly inherited
+      // the previous customer's name and phone — and with it their receipt and,
+      // on a credit sale, their udhaari. The offline branch above has always
+      // cleared these; this one did not.
+      _customerNameController.clear();
+      _customerPhoneController.clear();
       _discountPctController.clear();
       _discountAmtController.clear();
       _clearCharges();
@@ -2158,7 +2165,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
           additionalCharges: additionalCharges,
         );
-        result = await finalizeBill(widget.activeBillId!);
+        // The mode selected NOW, not the one the draft was parked with.
+        result = await finalizeBill(widget.activeBillId!,
+            paymentMode: _paymentMode);
       } else {
         final draft = await createBill({
           'items': _cartPayload,
@@ -2174,7 +2183,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           if (additionalCharges.isNotEmpty)
             'additional_charges': additionalCharges,
         });
-        result = await finalizeBill(draft['id']);
+        result = await finalizeBill(draft['id'], paymentMode: _paymentMode);
       }
       final bill = Bill.fromJson(result);
 

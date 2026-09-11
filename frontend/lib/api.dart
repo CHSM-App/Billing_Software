@@ -874,8 +874,18 @@ Future<Map<String, dynamic>> settleCreditBills(
   ));
 }
 
-Future<Map<String, dynamic>> finalizeBill(String id) async {
-  return _parse(await _authPut(Uri.parse('$baseUrl/bills/$id/finalize')));
+/// Settle a draft bill.
+///
+/// [paymentMode] is the tender money was actually taken in. A held bill stores
+/// whatever was picked when it was parked, so reopening it and settling by a
+/// different mode has to say so here — otherwise history, reports and the
+/// credit ledger all keep reporting the original one. Omitted, the stored mode
+/// stands.
+Future<Map<String, dynamic>> finalizeBill(String id, {String? paymentMode}) async {
+  return _parse(await _authPut(
+    Uri.parse('$baseUrl/bills/$id/finalize'),
+    body: paymentMode != null ? jsonEncode({'payment_mode': paymentMode}) : null,
+  ));
 }
 
 Future<Map<String, dynamic>> addItemsToBill(String id, List<Map<String, dynamic>> items) async {
