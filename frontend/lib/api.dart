@@ -7,7 +7,6 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-
 const String baseUrl = 'https://vittam.vengurlatech.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';

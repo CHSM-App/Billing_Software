@@ -41,7 +41,12 @@ router.get('/', requireAuth, async (req, res) => {
         -- The caller's role AS IT IS NOW, not as their 8-hour access token
         -- claims. This endpoint is hit on every app open/resume, so it is where
         -- a device finds out its role was changed underneath it.
-        (SELECT u.role FROM users u WHERE u.id = @user_id) AS current_role
+        (SELECT u.role FROM users u WHERE u.id = @user_id) AS current_role,
+        -- COUNT, not the column: a deleted user yields 0 rather than NULL, so
+        -- "disabled" and "gone" are the same definite answer and neither can be
+        -- mistaken for "unknown".
+        (SELECT COUNT(*) FROM users u
+          WHERE u.id = @user_id AND u.is_active = 1) AS user_ok
       FROM subscriptions s
       JOIN businesses b ON b.id = s.business_id
       WHERE s.business_id = @business_id
@@ -93,6 +98,9 @@ router.get('/', requireAuth, async (req, res) => {
       // Null when the user row is gone (deleted staff) — the client treats
       // any mismatch with its cached role, including null, as "log out".
       current_role: sub.current_role ?? null,
+      // False once an owner disables OR deletes the account. A device already
+      // holding a valid access token has no other way to learn it was cut off.
+      account_active: sub.user_ok > 0,
       is_trial: !!sub.is_trial,
       verified_at: new Date().toISOString()
     });

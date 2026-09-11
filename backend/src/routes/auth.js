@@ -389,6 +389,14 @@ router.post('/login', loginLimiter, async (req, res) => {
 
     const row = userResult.recordset[0];
 
+    // A disabled staff account is refused before the PIN is even checked: the
+    // owner revoked access, and "wrong PIN" would send them to reset it instead
+    // of asking why.
+    if (row.is_active === false || row.is_active === 0) {
+      return res.status(403).json({ error: 'account_disabled',
+        message: 'This account has been disabled. Please contact the owner.' });
+    }
+
     if (!row.is_verified) {
       return res.status(403).json({ error: 'Your account is pending verification. Please wait.' });
     }

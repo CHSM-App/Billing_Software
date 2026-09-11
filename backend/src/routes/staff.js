@@ -120,7 +120,7 @@ router.get('/', requireAuth, ownerOnly, async (req, res) => {
     const result = await pool.request()
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, phone, role, created_at
+        SELECT id, business_id, name, phone, role, is_active, created_at
         FROM users
         WHERE business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})
         ORDER BY created_at ASC
@@ -200,9 +200,9 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
 
 // PUT /api/staff/:id
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
-  const { name, phone, pin, role } = req.body;
+  const { name, phone, pin, role, is_active } = req.body;
 
-  if (!name && !phone && !pin && !role) {
+  if (!name && !phone && !pin && !role && is_active === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   if (role && !MANAGED_ROLES.includes(role)) {
@@ -254,11 +254,18 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       sets.push('role = @role');
       request.input('role', sql.NVarChar(20), role);
     }
+    // Disabling is the way to revoke access for someone who cannot be deleted
+    // because they have billing history. Re-enabling is the same call with true.
+    if (is_active !== undefined) {
+      sets.push('is_active = @is_active');
+      request.input('is_active', sql.Bit, is_active ? 1 : 0);
+    }
 
     const result = await request.query(`
       UPDATE users
       SET ${sets.join(', ')}
-      OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.phone, INSERTED.role, INSERTED.created_at
+      OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.phone, INSERTED.role,
+             INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id AND role IN (${MANAGED_ROLES_SQL})
     `);
 
@@ -272,7 +279,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     // So end the session instead. Revoking the refresh tokens stops it being
     // renewed, and the broadcast tells every device of this business to re-check
     // who it is right now — only the one whose role actually moved acts on it.
-    if (role && updated) {
+    if ((role || is_active === false) && updated) {
       await pool.request()
         .input('user_id', sql.UniqueIdentifier, updated.id)
         .query(`UPDATE refresh_tokens SET revoked = 1
@@ -286,6 +293,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     if (phone) changes.phone = phone;
     if (pin)   changes.pin_changed = true;
     if (role)  changes.role  = role;
+    if (is_active !== undefined) changes.is_active = is_active;
 
     audit.logStaffUpdated(
       { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },

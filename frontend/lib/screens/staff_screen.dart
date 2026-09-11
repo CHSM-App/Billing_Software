@@ -108,6 +108,47 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
     }
   }
 
+  /// Turn a staff account off (or back on).
+  ///
+  /// This is how access is revoked for anyone who cannot be deleted — a staff
+  /// member who has ever created a bill is kept on purpose so the financial
+  /// history stays intact, which until now left the owner with no way to stop
+  /// them logging in at all. Disabling ends their session immediately and
+  /// refuses the next login.
+  Future<void> _setActive(Map<String, dynamic> member, bool active) async {
+    final name = '${member['name']}';
+    if (!active) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Disable account?'),
+          content: Text(
+              '$name will be signed out now and will not be able to log in '
+              'until you enable the account again. Their past bills are kept.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(context.l10n.commonCancel)),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Disable',
+                  style: TextStyle(color: AppColors.error)),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    try {
+      await updateStaff(member['id'], {'is_active': active});
+      if (!mounted) return;
+      _showSnack(active ? '$name can log in again' : '$name has been disabled');
+      _loadStaff();
+    } on ApiException catch (e) {
+      if (mounted) _showSnack(sanitizeUiErrorMessage(e), isError: true);
+    }
+  }
+
   void _showSnack(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
@@ -205,7 +246,12 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
   }
 
   Widget _buildStaffCard(AppLocalizations l10n, Map<String, dynamic> m) {
-    return AppCard(
+    // Absent on a server that has not run migration 043 — treated as active
+    // there, so the list does not render every member as disabled.
+    final active = m['is_active'] != false;
+    return Opacity(
+      opacity: active ? 1 : 0.55,
+      child: AppCard(
       onTap: () => _showStaffForm(member: m),
       child: Row(
         children: [
@@ -234,6 +280,22 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
                     ),
                     const SizedBox(width: AppSpacing.space8),
                     _RoleBadge(role: m['role'] ?? 'cashier'),
+                    if (!active) ...[
+                      const SizedBox(width: AppSpacing.space8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: AppColors.errorLight,
+                          borderRadius: BorderRadius.circular(AppRadius.small),
+                        ),
+                        child: const Text('DISABLED',
+                            style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.error)),
+                      ),
+                    ],
                   ],
                 ),
                 Text(m['phone'],
@@ -246,6 +308,17 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
               ],
             ),
           ),
+          // Revoking access, and the only route to it for a staff member who
+          // has billing history and therefore cannot be deleted.
+          IconButton(
+            icon: Icon(
+                active ? Icons.block_outlined : Icons.check_circle_outline,
+                color: active ? AppColors.warning : AppColors.success,
+                size: 20),
+            onPressed: () => _setActive(m, !active),
+            visualDensity: VisualDensity.compact,
+            tooltip: active ? 'Disable account' : 'Enable account',
+          ),
           IconButton(
             icon: const Icon(Icons.delete_outline,
                 color: AppColors.error, size: 20),
@@ -254,6 +327,7 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
             tooltip: l10n.commonRemove,
           ),
         ],
+      ),
       ),
     );
   }

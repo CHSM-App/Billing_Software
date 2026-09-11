@@ -177,11 +177,23 @@ class _MainShellState extends ConsumerState<MainShell>
       // captain kept the Kitchen screen and kept taking orders. Sign them out;
       // the next login issues a token with the right role. A null server role
       // (their user row is gone) counts as changed for the same reason.
+      //
+      // Three ways this session is no longer valid, all ending the same way:
+      //   * the role moved           — currentRole differs from the cached one
+      //   * the account was disabled — accountActive is false
+      //   * the user was deleted     — currentRole comes back null
+      // The null case was previously skipped, so a deleted staff member kept
+      // working until their token expired.
       final sessionRole = ref.read(sessionProvider).valueOrNull?.userRole;
-      if (status.currentRole != null &&
-          sessionRole != null &&
-          sessionRole.isNotEmpty &&
-          status.currentRole != sessionRole) {
+      final hadSession = sessionRole != null && sessionRole.isNotEmpty;
+      // A null currentRole means "we did not hear from the server" — an offline
+      // check returns exactly that — so it must never count as a change, or
+      // losing signal would sign everyone out. Deletion is covered by
+      // accountActive instead, which the server answers definitively.
+      final roleChanged = hadSession &&
+          status.currentRole != null &&
+          status.currentRole != sessionRole;
+      if (hadSession && (!status.accountActive || roleChanged)) {
         await ref.read(sessionProvider.notifier).clear();
         if (!mounted) return;
         Navigator.of(context).pushAndRemoveUntil(
