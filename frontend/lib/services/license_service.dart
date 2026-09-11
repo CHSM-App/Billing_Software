@@ -50,6 +50,15 @@ class LicenseStatus {
   /// a corrupted or expired local session.
   final bool sessionInvalid;
 
+  /// The caller's role as the SERVER sees it right now, or null when offline
+  /// (nothing was fetched) or the user row is gone.
+  ///
+  /// A role lives inside the 8-hour access token and is never re-checked, so a
+  /// kitchen user demoted to captain kept the Kitchen screen — and kept taking
+  /// orders — until that token expired. Callers compare this with the cached
+  /// session role and end the session when they differ.
+  final String? currentRole;
+
   const LicenseStatus(
     this.state, {
     this.daysUntilExpiry,
@@ -57,6 +66,7 @@ class LicenseStatus {
     this.expiresAt,
     this.allowOnlineStore = true,
     this.sessionInvalid = false,
+    this.currentRole,
   });
 }
 
@@ -134,6 +144,7 @@ class LicenseService {
       final allowMobile  = data['allow_mobile']  as bool? ?? true;
       final allowDesktop = data['allow_desktop'] as bool? ?? true;
       final allowOnlineStore = data['allow_online_store'] as bool? ?? true;
+      final currentRole = data['current_role'] as String?;
 
       // Save to secure storage
       await Future.wait([
@@ -165,6 +176,7 @@ class LicenseService {
         allowMobile:     allowMobile,
         allowDesktop:    allowDesktop,
         allowOnlineStore: allowOnlineStore,
+        currentRole: currentRole,
       );
 
       // If server says blocked, clear local cache so offline fallback also blocks
@@ -311,6 +323,7 @@ class LicenseService {
     bool allowMobile = true,
     bool allowDesktop = true,
     bool allowOnlineStore = true,
+    String? currentRole,
   }) {
     // Device-access entitlement — checked first because it's independent of the
     // subscription's time/status. "Desktop" = Windows native or web; everything
@@ -347,7 +360,7 @@ class LicenseService {
       final daysUntilExpiry = expiresAt.difference(now).inDays;
       return LicenseStatus(LicenseState.allowed,
           daysUntilExpiry: daysUntilExpiry, expiresAt: expiresAt,
-          allowOnlineStore: allowOnlineStore);
+          allowOnlineStore: allowOnlineStore, currentRole: currentRole);
     }
 
     final totalAllowed = maxOfflineDays + gracePeriodDays;
@@ -356,7 +369,7 @@ class LicenseService {
       final graceDaysRemaining = totalAllowed - offlineDays;
       return LicenseStatus(LicenseState.grace,
           graceDaysRemaining: graceDaysRemaining, expiresAt: expiresAt,
-          allowOnlineStore: allowOnlineStore);
+          allowOnlineStore: allowOnlineStore, currentRole: currentRole);
     }
 
     // Exceeded offline limit + grace — hard block

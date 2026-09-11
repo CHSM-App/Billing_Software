@@ -5,7 +5,7 @@
 CREATE TABLE businesses (
     id               UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
     name             NVARCHAR(200)    NOT NULL,
-    business_type    NVARCHAR(50)     NOT NULL, -- 'retail', 'restaurant_with_tables', 'restaurant_no_tables'
+    business_type    NVARCHAR(50)     NOT NULL, -- 'retail', 'restaurant_with_tables'  (takeaway-only retired in migration 041)
     address          NVARCHAR(500)    NULL,
     phone            NVARCHAR(20)     NOT NULL,
     inventory_enabled    BIT          NOT NULL DEFAULT 0,

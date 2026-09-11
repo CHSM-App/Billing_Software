@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
+const { broadcast } = require('../realtime');
 const audit = require('../audit');
 
 const router = express.Router();
@@ -262,6 +263,22 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     `);
 
     const updated = result.recordset[0];
+
+    // A role lives inside the access token, which is valid for 8 hours and is
+    // never re-checked against the database. Demoting a kitchen user to captain
+    // therefore changed nothing for the device already holding that token: it
+    // kept the Kitchen screen and kept taking orders until the token expired.
+    //
+    // So end the session instead. Revoking the refresh tokens stops it being
+    // renewed, and the broadcast tells every device of this business to re-check
+    // who it is right now — only the one whose role actually moved acts on it.
+    if (role && updated) {
+      await pool.request()
+        .input('user_id', sql.UniqueIdentifier, updated.id)
+        .query(`UPDATE refresh_tokens SET revoked = 1
+                WHERE user_id = @user_id AND revoked = 0`);
+      broadcast(req.user.business_id, { type: 'staff' });
+    }
 
     // Build a changes summary — never log the PIN hash
     const changes = {};

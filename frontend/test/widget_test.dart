@@ -46,7 +46,7 @@ void main() {
       final json = {
         'id': 'biz-2',
         'name': 'No Address Shop',
-        'business_type': 'restaurant_no_tables',
+        'business_type': 'restaurant_with_tables',
         'address': null,
         'inventory_enabled': false,
         'has_barcode_scanner': false,

@@ -133,6 +133,11 @@ class _MainShellState extends ConsumerState<MainShell>
       case 'credit':
         ref.read(creditCustomersProvider.notifier).refreshSilently();
         break;
+      case 'staff':
+        // An owner changed someone's role. Every device of this business hears
+        // it; only the one whose own role moved is signed out.
+        _recheckDeviceAccess();
+        break;
       case 'store':
         // A customer placed an order, or another device accepted/rejected one.
         ref.read(onlineOrdersProvider.notifier).refreshSilently();
@@ -164,6 +169,28 @@ class _MainShellState extends ConsumerState<MainShell>
       // next login.
       await ref.read(sessionProvider.notifier).refresh();
       if (!mounted) return;
+
+      // The role this device is running as, versus the role the server says it
+      // has right now. They differ when an owner changed it mid-session — and
+      // until this check existed, nothing noticed: the role lives in an 8-hour
+      // access token that is never re-read, so a kitchen user demoted to
+      // captain kept the Kitchen screen and kept taking orders. Sign them out;
+      // the next login issues a token with the right role. A null server role
+      // (their user row is gone) counts as changed for the same reason.
+      final sessionRole = ref.read(sessionProvider).valueOrNull?.userRole;
+      if (status.currentRole != null &&
+          sessionRole != null &&
+          sessionRole.isNotEmpty &&
+          status.currentRole != sessionRole) {
+        await ref.read(sessionProvider.notifier).clear();
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (_) => false,
+        );
+        return;
+      }
+
       if (status.state == LicenseState.blockedDevice) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(

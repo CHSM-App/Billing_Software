@@ -408,9 +408,20 @@ async function fetchBill(billId, businessId) {
              b.total, b.round_off, b.payment_mode, b.status,
              b.payment_status, b.settled_at, b.settled_payment_mode,
              b.created_by_user_id, b.created_at, b.receipt_token,
-             t.table_number
+             t.table_number,
+             -- Payment the CUSTOMER already made online, for a bill that began
+             -- life as an online-store order. Joined rather than copied onto
+             -- the bill: online_orders is where it is recorded, and a join also
+             -- surfaces it for orders accepted before this shipped.
+             o.order_number AS online_order_number,
+             o.fulfilment   AS online_fulfilment,
+             o.address      AS online_address,
+             o.paid_amount  AS online_paid_amount,
+             o.payment_txn_id AS online_payment_txn_id,
+             o.payment_status AS online_payment_status
       FROM bills b
       LEFT JOIN tables t ON t.id = b.table_id
+      LEFT JOIN online_orders o ON o.bill_id = b.id
       WHERE b.id = @id AND b.business_id = @business_id
     `);
 
@@ -906,8 +917,18 @@ router.get('/drafts', requireAuth, async (req, res) => {
         SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
                b.total, b.round_off, b.payment_mode, b.status,
-               b.created_by_user_id, b.created_at, b.receipt_token
+               b.created_by_user_id, b.created_at, b.receipt_token,
+               -- See the single-bill query above: an accepted online order
+               -- carries its advance and UPI reference here, which is what the
+               -- counter needs before handing a delivery over.
+               o.order_number AS online_order_number,
+               o.fulfilment   AS online_fulfilment,
+               o.address      AS online_address,
+               o.paid_amount  AS online_paid_amount,
+               o.payment_txn_id AS online_payment_txn_id,
+               o.payment_status AS online_payment_status
         FROM bills b
+        LEFT JOIN online_orders o ON o.bill_id = b.id
         WHERE b.business_id = @business_id
           AND b.status = 'draft'
           AND b.table_id IS NULL

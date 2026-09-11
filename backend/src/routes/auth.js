@@ -13,7 +13,10 @@ const { uniqueStoreToken } = require('../storeToken');
 
 const router = express.Router();
 
-const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables', 'restaurant_no_tables'];
+// A restaurant always runs with tables. The takeaway-only variant was retired in
+// migration 041, which converted the businesses that still carried it — so this
+// list is also what stops a new one being created.
+const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables'];
 
 // Starter catalog seeded into every new business so the item list isn't empty
 // on first login. Picked by business_type; restaurant types share one menu.
@@ -28,13 +31,6 @@ const STARTER_ITEMS = {
     { name: 'Basmati Rice',        category: 'Grocery',    price: 120, unit: 'kg',    stock_quantity: 25 },
   ],
   restaurant_with_tables: [
-    { name: 'Paneer Butter Masala', category: 'Main Course', price: 220, unit: 'plate' },
-    { name: 'Veg Biryani',          category: 'Rice',        price: 180, unit: 'plate' },
-    { name: 'Butter Naan',          category: 'Breads',      price: 40,  unit: 'piece' },
-    { name: 'Masala Papad',         category: 'Starters',    price: 30,  unit: 'piece' },
-    { name: 'Cold Coffee',          category: 'Beverages',   price: 90,  unit: 'glass' },
-  ],
-  restaurant_no_tables: [
     { name: 'Paneer Butter Masala', category: 'Main Course', price: 220, unit: 'plate' },
     { name: 'Veg Biryani',          category: 'Rice',        price: 180, unit: 'plate' },
     { name: 'Butter Naan',          category: 'Breads',      price: 40,  unit: 'piece' },

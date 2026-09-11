@@ -439,6 +439,20 @@ class Bill {
   final DateTime createdAt;
   final List<BillItem> items;
 
+  /// Set only on a bill that began life as an online-store order: the advance
+  /// the customer already paid and the UPI reference they typed. Both live on
+  /// the ORDER, not the bill, and are joined in by the API — which also means
+  /// orders accepted before this shipped show their details too.
+  ///
+  /// The counter needs these before handing a delivery over: without them a
+  /// prepaid order looks unpaid and gets charged in full a second time.
+  final double onlinePaidAmount;
+  final String? onlinePaymentTxnId;
+  final String? onlineOrderNumber;
+
+  /// True when money was taken online for this bill.
+  bool get hasOnlinePrepayment => onlinePaidAmount > 0;
+
   /// True when this is a credit bill that hasn't been settled yet.
   bool get isUnpaidCredit => paymentStatus == 'unpaid';
 
@@ -472,6 +486,11 @@ class Bill {
     required this.createdByUserId,
     required this.createdAt,
     required this.items,
+    // Absent on every bill that did not come from the online store, and on the
+    // lighter bill shapes the credit endpoints return.
+    this.onlinePaidAmount = 0.0,
+    this.onlinePaymentTxnId,
+    this.onlineOrderNumber,
   });
 
   factory Bill.fromJson(Map<String, dynamic> j) => Bill(
@@ -502,6 +521,10 @@ class Bill {
         paymentStatus: j['payment_status'] ?? 'paid',
         createdByUserId: j['created_by_user_id'] ?? '',
         createdAt: DateTime.parse(j['created_at']),
+        onlinePaidAmount:
+            double.tryParse('${j['online_paid_amount'] ?? 0}') ?? 0.0,
+        onlinePaymentTxnId: j['online_payment_txn_id'] as String?,
+        onlineOrderNumber: j['online_order_number'] as String?,
         items: (j['items'] as List? ?? []).map((i) => BillItem.fromJson(i)).toList(),
       );
 }

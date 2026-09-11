@@ -230,10 +230,12 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
           title: Text(l10n.kitchenTitle),
           automaticallyImplyLeading: false,
           actions: [
-            // Shortcut for the device that actually prints the tickets. The
-            // owner has the same screen under Settings → Kitchen printing, so
-            // it is only clutter on their view of the queue.
-            if (ref.watch(userRoleProvider) != 'owner')
+            // The pass printer belongs to the kitchen station, so this is the
+            // ONLY way into its settings and only the kitchen sees it. Owners,
+            // cashiers and servers can all watch this queue, but none of them
+            // is standing at the printer being configured — and the Settings
+            // entry that used to duplicate this is gone.
+            if (ref.watch(userRoleProvider) == 'kitchen')
               IconButton(
                 icon: const Icon(Icons.print_outlined),
                 tooltip: 'Kitchen printing',
@@ -494,6 +496,38 @@ class _OrderCard extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
+          // The customer's instruction for this order ("no onions", "less
+          // spicy"). Deliberately loud — it is the one thing on the card the
+          // kitchen has to read rather than tick, and it used to never arrive
+          // here at all.
+          Builder(builder: (_) {
+            final note = (order['notes'] as String?)?.trim() ?? '';
+            if (note.isEmpty) return const SizedBox.shrink();
+            return Container(
+              width: double.infinity,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              color: AppColors.warning.withValues(alpha: 0.12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.sticky_note_2_outlined,
+                      size: 14, color: AppColors.warning),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      note,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
           // Shrink-wrapped list so the card's height follows its dish count.
           Column(
             mainAxisSize: MainAxisSize.min,
@@ -634,13 +668,6 @@ class _ItemTileState extends State<_ItemTile>
             Expanded(
               child: Row(
                 children: [
-                  // Customer self-orders (from the table QR) get a badge so the
-                  // kitchen knows the diner ordered it, not a waiter.
-                  if (item['source'] == 'customer') ...[
-                    const Icon(Icons.qr_code_2,
-                        size: 15, color: AppColors.primary),
-                    const SizedBox(width: 4),
-                  ],
                   Flexible(
                     child: Text(
                       '${item['item_name']}'

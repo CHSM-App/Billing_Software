@@ -197,15 +197,19 @@ router.post('/:id/accept', requireAuth, canDecide, async (req, res) => {
       .input('additional_charges', sql.NVarChar(sql.MAX), serializeCharges(charges))
       .input('total', sql.Decimal(10, 2), total)
       .input('created_by', sql.UniqueIdentifier, req.user.user_id)
+      // The customer's note travels with the order onto the bill, so the
+      // kitchen and the KOT can show it. It used to be read from online_orders
+      // and then dropped here, which is why a "no onions" never reached anyone.
+      .input('notes', sql.NVarChar(500), order.note || null)
       .input('receipt_token', sql.NVarChar(16), generateReceiptToken())
       .query(`
         INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
                            subtotal, tax_amount, charges_amount, additional_charges, total,
-                           payment_mode, status, created_by_user_id, receipt_token)
+                           payment_mode, status, created_by_user_id, receipt_token, notes)
         OUTPUT INSERTED.id, INSERTED.bill_number
         VALUES (@business_id, @bill_number, NULL, @customer_name, @customer_phone,
                 @subtotal, @tax_amount, @charges_amount, @additional_charges, @total,
-                'cash', 'draft', @created_by, @receipt_token)
+                'cash', 'draft', @created_by, @receipt_token, @notes)
       `);
     const bill = billRes.recordset[0];
 

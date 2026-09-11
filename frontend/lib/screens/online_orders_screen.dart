@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -47,9 +48,43 @@ class OnlineOrdersScreen extends ConsumerWidget {
   }
 }
 
-class _OnlineOrdersBody extends ConsumerWidget {
+class _OnlineOrdersBody extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_OnlineOrdersBody> createState() => _OnlineOrdersBodyState();
+}
+
+class _OnlineOrdersBodyState extends ConsumerState<_OnlineOrdersBody> {
+  Timer? _poll;
+
+  /// Fallback poll while this queue is on screen.
+  ///
+  /// A new order is normally pushed here the instant it lands — a WebSocket
+  /// 'store' event, plus an FCM message for when the app is backgrounded. But
+  /// neither is guaranteed: the socket can be silently dead (a dropped
+  /// connection the OS never reports, an access token that expired mid-session,
+  /// a network that came back without waking it), and the owner then sits on a
+  /// queue that only updates when they pull to refresh — which is exactly the
+  /// complaint this exists to answer. Whoever is LOOKING at the queue gets it
+  /// re-read every 15s regardless, which costs one small request a minute and
+  /// removes "did it not arrive, or did the screen not update?" as a question.
+  /// Silent, so it never replaces the visible list with a spinner or an error.
+  @override
+  void initState() {
+    super.initState();
+    _poll = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!mounted) return;
+      ref.read(onlineOrdersProvider.notifier).refreshSilently();
+    });
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final l10n = context.l10n;
     final async = ref.watch(onlineOrdersProvider);
 

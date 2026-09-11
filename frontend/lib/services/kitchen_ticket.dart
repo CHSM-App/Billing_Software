@@ -111,6 +111,21 @@ class KitchenTicket {
       }
     }
 
+    // The customer's instruction for the whole order. Printed under the dishes
+    // and boxed by rules so it cannot be mistaken for one — a chef reading a
+    // ticket top to bottom has to see "NO ONIONS" before plating, and until now
+    // an online-store note never reached the kitchen, let alone the paper.
+    final note = '${order['notes'] ?? ''}'.trim();
+    if (note.isNotEmpty) {
+      rows.add(ReceiptRow.rule());
+      rows.add(ReceiptRow.cols([
+        ReceiptCell('NOTE', align: TextAlign.left, widthFraction: 1),
+      ], size: _adminSize, bold: true));
+      rows.add(ReceiptRow.cols([
+        ReceiptCell(note, align: TextAlign.left, widthFraction: 1),
+      ], size: _dishSize, bold: true));
+    }
+
     rows.add(ReceiptRow.rule());
     final count = lines.fold<double>(0, (s, it) => s + _num(it['quantity']));
     rows.add(

@@ -32,6 +32,9 @@ router.get('/orders', requireAuth, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT b.id, b.bill_number, b.table_id, b.customer_name, b.created_at,
+               -- The customer's instruction ("no onions", "extra spicy"). The
+               -- kitchen is the one place that has to act on it.
+               b.notes,
                t.table_number
         FROM bills b
         LEFT JOIN tables t ON t.id = b.table_id AND t.business_id = b.business_id

@@ -24,6 +24,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const request = pool.request();
     request.input('business_id', sql.UniqueIdentifier, req.user.business_id);
+    request.input('user_id', sql.UniqueIdentifier, req.user.user_id);
 
     const result = await request.query(`
       SELECT
@@ -36,7 +37,11 @@ router.get('/', requireAuth, async (req, res) => {
         s.allow_online_store,
         s.is_trial,
         s.updated_at,
-        b.store_enabled
+        b.store_enabled,
+        -- The caller's role AS IT IS NOW, not as their 8-hour access token
+        -- claims. This endpoint is hit on every app open/resume, so it is where
+        -- a device finds out its role was changed underneath it.
+        (SELECT u.role FROM users u WHERE u.id = @user_id) AS current_role
       FROM subscriptions s
       JOIN businesses b ON b.id = s.business_id
       WHERE s.business_id = @business_id
@@ -85,6 +90,9 @@ router.get('/', requireAuth, async (req, res) => {
       // the DB, or on another device reaches this device without a re-login.
       store_enabled: !!sub.store_enabled &&
         (sub.allow_online_store == null ? true : !!sub.allow_online_store),
+      // Null when the user row is gone (deleted staff) — the client treats
+      // any mismatch with its cached role, including null, as "log out".
+      current_role: sub.current_role ?? null,
       is_trial: !!sub.is_trial,
       verified_at: new Date().toISOString()
     });

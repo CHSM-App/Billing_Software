@@ -174,6 +174,34 @@ class _DraftCard extends StatelessWidget {
                           .bodySmall
                           ?.copyWith(color: AppColors.textSecondary),
                     ),
+                    // Money already taken online, and the reference to check it
+                    // against. Shown here rather than only in the online queue
+                    // because THIS is the screen someone opens to settle the
+                    // bill or hand a delivery over — and a prepaid order that
+                    // looks unpaid gets charged in full a second time.
+                    if (draft.hasOnlinePrepayment) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(Icons.verified_outlined,
+                              size: 13, color: AppColors.success),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              'Paid online ₹${draft.onlinePaidAmount.toStringAsFixed(2)}'
+                              '${draft.onlinePaymentTxnId != null && draft.onlinePaymentTxnId!.isNotEmpty ? ' · ${draft.onlinePaymentTxnId}' : ''}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.success,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

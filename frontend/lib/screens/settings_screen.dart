@@ -22,7 +22,6 @@ import 'printer_test_screen.dart'
     if (dart.library.html) 'printer_test_screen_web.dart';
 import 'printer_test_windows_screen.dart'
     if (dart.library.html) 'printer_test_windows_screen_web.dart';
-import 'kitchen_print_settings_screen.dart';
 import 'staff_screen.dart';
 import 'business_profile_screen.dart';
 import 'marathi_print_test_screen.dart';
@@ -154,6 +153,7 @@ class _SettingsContentState extends State<_SettingsContent>
   Widget build(BuildContext context) {
     final session = widget.session;
     final isOwner = session.userRole == 'owner';
+    final isKitchen = session.userRole == 'kitchen';
     final l10n = context.l10n;
     final language = widget.ref.watch(localeProvider);
 
@@ -357,7 +357,13 @@ class _SettingsContentState extends State<_SettingsContent>
                       onTap: () => showLanguagePicker(context),
                     ),
 
-                    if (!kIsWeb) ...[
+                    // Hidden from the kitchen: a chef never prints a bill, and
+                    // the one printer they DO care about — the pass printer —
+                    // is already on the Kitchen screen's own app bar, which is
+                    // their home screen. Showing it here too was a second route
+                    // to the same place plus a bill-printer setting they have
+                    // no use for.
+                    if (!kIsWeb && !isKitchen) ...[
                       const SizedBox(height: AppSpacing.space24),
                       _sectionLabel(context, l10n.settingsSectionHardware),
                       const SizedBox(height: AppSpacing.space8),
@@ -373,26 +379,12 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const PrinterSetupScreen()),
                         ),
                       ),
-                      // The pass printer and its auto-print switch. Only a
-                      // restaurant has a kitchen to print tickets to, so this
-                      // is gated the same way the Kitchen tab itself is.
-                      if (session.businessType == 'restaurant_with_tables' ||
-                          session.businessType == 'restaurant_no_tables') ...[
-                        const SizedBox(height: AppSpacing.space8),
-                        _buildNavCard(
-                          context,
-                          icon: Icons.soup_kitchen_outlined,
-                          iconColor: const Color(0xFFEA580C),
-                          title: 'Kitchen printing',
-                          subtitle: 'Kitchen printer, roll width and auto-print',
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    const KitchenPrintSettingsScreen()),
-                          ),
-                        ),
-                      ],
+                      // Kitchen printing deliberately does NOT appear here. The
+                      // pass printer belongs to the kitchen station, not to
+                      // whoever happens to be holding the owner's phone, and
+                      // its one entry point is the Kitchen screen's app bar
+                      // (kitchen_screen.dart) — where the person who can see
+                      // the printer is standing.
                       // const SizedBox(height: AppSpacing.space8),
                       // _buildNavCard(
                       //   context,

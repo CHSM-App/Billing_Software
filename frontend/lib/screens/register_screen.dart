@@ -37,12 +37,16 @@ class _RegisterScreenState extends State<RegisterScreen>
   bool get _isRestaurant => _businessType == 'restaurant';
 
   /// The value the API expects. The picker uses a plain 'restaurant' label, but
-  /// the server only accepts 'retail' | 'restaurant_with_tables' |
-  /// 'restaurant_no_tables' — sending the raw 'restaurant' was rejected as an
-  /// invalid business_type. Table management can be turned on later in Settings,
-  /// so a new restaurant starts in the no-tables mode.
+  /// the server only accepts 'retail' | 'restaurant_with_tables' — sending the
+  /// raw 'restaurant' is rejected as an invalid business_type.
+  ///
+  /// Every restaurant now starts WITH tables. The takeaway-only variant was
+  /// retired (migration 041 converted the shops that had it), so this is the
+  /// one restaurant value there is. A restaurant that does not seat anyone
+  /// simply defines no tables, which is the same state sign-up left it in
+  /// before — it just no longer needs a second business type to say so.
   String get _apiBusinessType =>
-      _businessType == 'restaurant' ? 'restaurant_no_tables' : _businessType;
+      _businessType == 'restaurant' ? 'restaurant_with_tables' : _businessType;
   bool _inventoryEnabled = false;
   bool _isLoading = false;
   String? _errorMessage;
