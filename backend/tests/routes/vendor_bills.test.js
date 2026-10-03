@@ -186,3 +186,63 @@ describe('DELETE /api/vendor-bills/:id — stock reversal', () => {
     expect(stockUpdates()).toHaveLength(0);
   });
 });
+
+describe('vendor bills — stock batches', () => {
+  const batchInserts = () => calls.filter((c) => /INSERT INTO stock_batches/.test(c.sql));
+
+  test('each received line creates a batch carrying its cost and batch number', async () => {
+    mockRequest.recordset = [universalRow()];
+
+    const res = await request(app)
+      .post('/api/vendor-bills')
+      .set(authHeader())
+      .send(validBody({ batch_no: ' L1 ' }));
+
+    expect(res.status).toBe(201);
+    const inserts = batchInserts();
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].inputs).toMatchObject({
+      item_id: ITEM_ID, vendor_bill_id: BILL_ID, batch_no: 'L1', unit_cost: 50, qty: 5,
+    });
+    // Untracked stock gets no batch.
+    expect(inserts[0].sql).toMatch(/stock_quantity IS NOT NULL/);
+  });
+
+  test('the bill-level discount is spread into the batch cost', async () => {
+    mockRequest.recordset = [universalRow()];
+
+    const res = await request(app)
+      .post('/api/vendor-bills')
+      .set(authHeader())
+      .send({ ...validBody(), discount_amount: 50 });
+
+    expect(res.status).toBe(201);
+    // 250 subtotal, 50 off → every unit costs 80% of its 50 rate.
+    expect(batchInserts()[0].inputs.unit_cost).toBeCloseTo(40);
+  });
+
+  test('no batch when inventory is off', async () => {
+    mockRequest.recordset = [universalRow({ inventoryEnabled: 0 })];
+
+    const res = await request(app)
+      .post('/api/vendor-bills')
+      .set(authHeader())
+      .send(validBody());
+
+    expect(res.status).toBe(201);
+    expect(batchInserts()).toHaveLength(0);
+  });
+
+  test('deleting a purchase removes its batches', async () => {
+    mockRequest.recordset = [universalRow()];
+
+    const res = await request(app)
+      .delete(`/api/vendor-bills/${BILL_ID}`)
+      .set(authHeader());
+
+    expect(res.status).toBe(200);
+    const del = calls.filter((c) => /DELETE FROM stock_batches WHERE vendor_bill_id/.test(c.sql));
+    expect(del).toHaveLength(1);
+    expect(del[0].inputs.vendor_bill_id).toBe(BILL_ID);
+  });
+});

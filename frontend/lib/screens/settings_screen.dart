@@ -30,6 +30,7 @@ import 'conflict_resolution_screen.dart';
 import 'history_screen.dart';
 import 'reports_screen.dart';
 import 'vendor_bills_screen.dart';
+import 'stock_batches_screen.dart';
 import 'expenses_screen.dart';
 import 'store_settings_screen.dart';
 import '../services/offline_service.dart';
@@ -233,6 +234,21 @@ class _SettingsContentState extends State<_SettingsContent>
                         ),
                       ),
                       const SizedBox(height: AppSpacing.space8),
+                      if (widget.ref.watch(inventoryEnabledProvider)) ...[
+                        _buildNavCard(
+                          context,
+                          icon: Icons.inventory_2_outlined,
+                          iconColor: const Color(0xFFB45309),
+                          title: l10n.stockBatchesTitle,
+                          subtitle: l10n.stockBatchesSubtitle,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const StockBatchesScreen()),
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.space8),
+                      ],
                       _buildNavCard(
                         context,
                         icon: Icons.account_balance_wallet_outlined,

@@ -181,6 +181,7 @@ class SyncService {
           .map((li) => {
                 'item_id':  li['item_id'],
                 if (li['variant_id'] != null) 'variant_id': li['variant_id'],
+                if (li['batch_id'] != null) 'batch_id': li['batch_id'],
                 'quantity': li['quantity'],
               })
           .toList(),
@@ -230,6 +231,7 @@ class SyncService {
           .map((li) => {
                 'item_id':  li['item_id'],
                 if (li['variant_id'] != null) 'variant_id': li['variant_id'],
+                if (li['batch_id'] != null) 'batch_id': li['batch_id'],
                 'quantity': li['quantity'],
               })
           .toList(),

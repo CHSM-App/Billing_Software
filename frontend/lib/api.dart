@@ -1041,6 +1041,10 @@ Future<List<dynamic>> getVendorBills(
   return _parse(await _authGet(uri));
 }
 
+/// Open stock batches, oldest first (owner only).
+Future<List<dynamic>> getStockBatches() async =>
+    _parse(await _authGet(Uri.parse('$baseUrl/stock-batches')));
+
 Future<Map<String, dynamic>> getVendorBill(String id) async =>
     Map<String, dynamic>.from(
         _parse(await _authGet(Uri.parse('$baseUrl/vendor-bills/$id'))) as Map);

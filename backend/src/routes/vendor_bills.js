@@ -2,6 +2,7 @@ const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const { netUnitPrice } = require('../money');
+const { receiveBatches, removeBillBatches, trimExcess } = require('../batches');
 const audit = require('../audit');
 const logger = require('../logger');
 
@@ -213,6 +214,22 @@ async function applyLineStock(transaction, businessId, li, sign) {
                 AND stock_quantity IS NOT NULL`);
   }
   // No target -> a service/freight line; nothing to move.
+}
+
+// A batch's unit cost is the line's net rate less its share of the bill-level
+// discount — the same discountedNet/subtotal ratio computeTotals scales tax by.
+const costFactor = (t) => (t.subtotal > 0 ? (t.subtotal - t.discount) / t.subtotal : 1);
+
+// After a purchase's batches are removed/replaced, pull every touched item or
+// size back in line with its stock total (see batches.trimExcess).
+async function trimTargets(transaction, businessId, lineSets) {
+  const seen = new Set();
+  for (const li of lineSets.flat()) {
+    const key = li.variant_id || li.item_id;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    await trimExcess(transaction, businessId, li);
+  }
 }
 
 const HEADER_COLS = `
@@ -551,6 +568,8 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
         for (const li of totals.lines) {
           await applyLineStock(transaction, req.user.business_id, li, +1);
         }
+        await receiveBatches(transaction, req.user.business_id, billId,
+          head.invoiceDate, totals.lines, costFactor(totals));
       }
 
       await transaction.commit();
@@ -605,6 +624,10 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
         await transaction.rollback();
         return res.status(400).json({ error: targetError });
       }
+
+      // Its batches are rebuilt from the new lines below. Bill lines already
+      // sold from them keep their cost snapshot.
+      await removeBillBatches(transaction, req.params.id);
 
       // Reverse whatever stock this bill previously added, but only if it was
       // actually applied — inventory may have been off when it was created.
@@ -696,7 +719,12 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
         for (const li of totals.lines) {
           await applyLineStock(transaction, req.user.business_id, li, +1);
         }
+        await receiveBatches(transaction, req.user.business_id, req.params.id,
+          head.invoiceDate, totals.lines, costFactor(totals));
       }
+      // Rebuilt batches start full; whatever was already sold off the old ones
+      // comes back off here.
+      await trimTargets(transaction, req.user.business_id, [before.lines, totals.lines]);
 
       await transaction.commit();
 
@@ -746,6 +774,8 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
           await applyLineStock(transaction, req.user.business_id, li, -1);
         }
       }
+      await removeBillBatches(transaction, req.params.id);
+      await trimTargets(transaction, req.user.business_id, [before.lines]);
 
       const del = await transaction.request()
         .input('id', sql.UniqueIdentifier, req.params.id)

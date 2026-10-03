@@ -141,6 +141,7 @@ class OpenDraftsNotifier extends AsyncNotifier<List<Bill>> {
                 billId: localId,
                 itemId: li['item_id'] as String,
                 variantId: li['variant_id'] as String?,
+                batchId: li['batch_id'] as String?,
                 itemName: li['item_name'] as String? ?? '',
                 quantity: (li['quantity'] as num).toDouble(),
                 unitPrice: (li['unit_price'] as num).toDouble(),

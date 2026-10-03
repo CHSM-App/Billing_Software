@@ -7,15 +7,22 @@ class CartNotifier extends Notifier<List<CartEntry>> {
   @override
   List<CartEntry> build() => [];
 
-  /// Cart key for an item + optional variant — mirrors [CartEntry.key].
-  static String keyFor(String itemId, [String? variantId]) =>
-      variantId == null ? itemId : '$itemId:$variantId';
+  /// Cart key for an item + optional variant + optional batch — mirrors
+  /// [CartEntry.key].
+  static String keyFor(String itemId, [String? variantId, String? batchId]) =>
+      CartEntry.keyOf(itemId, variantId, batchId);
 
   /// Stock available for a line — the variant's own count when the item is
-  /// sold by size, otherwise the item's. Null means "not tracked", which is
-  /// not the same as zero.
-  static double? _stockOf(Item item, ItemVariant? variant) =>
-      variant != null ? variant.stockQuantity : item.stockQuantity;
+  /// sold by size, otherwise the item's; narrowed to the chosen batch, or to
+  /// the opening stock outside every batch. Null means "not tracked", which
+  /// is not the same as zero.
+  static double? _stockOf(CartEntry e) {
+    final stock = e.variant != null ? e.variant!.stockQuantity : e.item.stockQuantity;
+    if (stock == null) return null;
+    if (e.batch != null) return e.batch!.qtyRemaining;
+    final batches = e.variant != null ? e.variant!.batches : e.item.batches;
+    return batches.isEmpty ? stock : StockBatch.openingQty(stock, batches);
+  }
 
   /// The available stock for [key] when the cart now holds MORE than that, or
   /// null when there is nothing to warn about.
@@ -35,15 +42,16 @@ class CartNotifier extends Notifier<List<CartEntry>> {
     if (!ref.read(inventoryEnabledProvider)) return null;
     final idx = state.indexWhere((e) => e.key == key);
     if (idx < 0) return null;
-    final stock = _stockOf(state[idx].item, state[idx].variant);
+    final stock = _stockOf(state[idx]);
     if (stock == null || state[idx].quantity <= stock) return null;
     return stock;
   }
 
-  /// Add one unit of an item (optionally a specific variant/size). Same
-  /// item+variant stacks; a different variant of the same item is a new line.
-  void addItem(Item item, {ItemVariant? variant}) {
-    final k = variant == null ? item.id : '${item.id}:${variant.id}';
+  /// Add one unit of an item (optionally a specific variant/size and stock
+  /// batch). Same item+variant+batch stacks; a different variant or batch of
+  /// the same item is a new line.
+  void addItem(Item item, {ItemVariant? variant, StockBatch? batch}) {
+    final k = keyFor(item.id, variant?.id, batch?.id);
     final idx = state.indexWhere((e) => e.key == k);
     if (idx >= 0) {
       state = [
@@ -51,7 +59,10 @@ class CartNotifier extends Notifier<List<CartEntry>> {
           i == idx ? state[i].copyWith(quantity: state[i].quantity + 1) : state[i]
       ];
     } else {
-      state = [...state, CartEntry(item: item, variant: variant, quantity: 1)];
+      state = [
+        ...state,
+        CartEntry(item: item, variant: variant, batch: batch, quantity: 1),
+      ];
     }
   }
 
@@ -133,8 +144,25 @@ class CartNotifier extends Notifier<List<CartEntry>> {
           price: bi.unitPrice,
         );
       }
-      return CartEntry(item: catalogItem, variant: variant, quantity: bi.quantity);
+      return CartEntry(
+        item: catalogItem,
+        variant: variant,
+        batch: _batchFor(bi.batchId, variant?.batches ?? catalogItem.batches),
+        quantity: bi.quantity,
+      );
     });
+  }
+
+  /// The line's batch from the catalog. A batch this very draft emptied is no
+  /// longer listed as open, so it is rebuilt from the id alone — the id is
+  /// all the server needs to keep selling from it.
+  static StockBatch? _batchFor(String? batchId, List<StockBatch> open) {
+    if (batchId == null) return null;
+    final id = batchId.toLowerCase();
+    for (final b in open) {
+      if (b.id.toLowerCase() == id) return b;
+    }
+    return StockBatch(id: batchId, receivedDate: '', qtyRemaining: 0);
   }
 
   static String _labelFromName(String itemName) {

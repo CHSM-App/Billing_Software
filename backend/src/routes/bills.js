@@ -10,6 +10,9 @@ const { sendBillLink, normalisePhone } = require('../whatsapp');
 const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
+const {
+  loadBatchMap, batchFields, takeFromBatch, returnToBatch, trimExcess,
+} = require('../batches');
 
 // Shared by create and finalize so a mode accepted when a bill is parked is
 // still accepted when it is settled.
@@ -216,11 +219,16 @@ async function loadRecipeMap(transaction, businessId, items) {
 // Atomically decrement stock for one line item. When the line references a
 // variant, the variant's stock is the target; otherwise the item's. Returns
 // true if a row was updated (or stock is untracked/NULL), false on shortfall.
+//
+// The line's chosen batch (li.batch_id) is drawn down in the same step, with
+// its own >= guard. A line with no batch sells opening stock; trimExcess then
+// keeps the batches from claiming more than the total that is left.
 async function decrementLineStock(transaction, businessId, li, itemMap, variantMap) {
+  let r;
   if (li.variant_id) {
     const variant = variantMap[li.variant_id];
     if (!variant || variant.stock_quantity == null) return true; // untracked
-    const r = await transaction.request()
+    r = await transaction.request()
       .input('variant_id', sql.UniqueIdentifier, li.variant_id)
       .input('qty', sql.Decimal(10, 2), li.quantity)
       .query(`
@@ -228,19 +236,22 @@ async function decrementLineStock(transaction, businessId, li, itemMap, variantM
         SET stock_quantity = stock_quantity - @qty
         WHERE id = @variant_id AND stock_quantity >= @qty
       `);
-    return r.rowsAffected[0] > 0;
+  } else {
+    if (itemMap[li.item_id].stock_quantity == null) return true; // untracked
+    r = await transaction.request()
+      .input('item_id', sql.UniqueIdentifier, li.item_id)
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .input('qty', sql.Decimal(10, 2), li.quantity)
+      .query(`
+        UPDATE items
+        SET stock_quantity = stock_quantity - @qty
+        WHERE id = @item_id AND business_id = @business_id AND stock_quantity >= @qty
+      `);
   }
-  if (itemMap[li.item_id].stock_quantity == null) return true; // untracked
-  const r = await transaction.request()
-    .input('item_id', sql.UniqueIdentifier, li.item_id)
-    .input('business_id', sql.UniqueIdentifier, businessId)
-    .input('qty', sql.Decimal(10, 2), li.quantity)
-    .query(`
-      UPDATE items
-      SET stock_quantity = stock_quantity - @qty
-      WHERE id = @item_id AND business_id = @business_id AND stock_quantity >= @qty
-    `);
-  return r.rowsAffected[0] > 0;
+  if (r.rowsAffected[0] === 0) return false;
+  if (li.batch_id) return takeFromBatch(transaction, li);
+  await trimExcess(transaction, businessId, li);
+  return true;
 }
 
 // Build the list of stock shortfalls for a set of line items, aggregating
@@ -248,7 +259,7 @@ async function decrementLineStock(transaction, businessId, li, itemMap, variantM
 // are summed. Covers all three line kinds plus recipe raw materials. Returns an
 // array of { item_name, requested, available, ... } — empty when everything fits.
 // This is an early check; the atomic guarded UPDATEs remain the true gate.
-function checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap) {
+function checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap, batchMap) {
   // Requested amount per target key; available amount per target key.
   const requested = {};   // key -> amount
   const available = {};    // key -> amount (null = untracked)
@@ -267,6 +278,15 @@ function checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap) {
     } else {
       const key = `item:${li.item_id}`;
       setAvail(key, itemMap[li.item_id]?.stock_quantity ?? null, li.item_name);
+      requested[key] = (requested[key] || 0) + parseFloat(li.quantity);
+    }
+
+    // The chosen batch must hold the quantity too, not just the total.
+    if (li.batch_id && batchMap) {
+      const key = `batch:${li.batch_id}`;
+      const b = batchMap[String(li.batch_id).toLowerCase()];
+      setAvail(key, b ? b.qty_remaining : null,
+        b && b.batch_no ? `${li.item_name} (Batch ${b.batch_no})` : li.item_name);
       requested[key] = (requested[key] || 0) + parseFloat(li.quantity);
     }
 
@@ -319,8 +339,10 @@ async function decrementRecipe(transaction, li, recipeMap) {
 
 // Restore stock for a line item (used when voiding/replacing bill items).
 // Mirrors decrementLineStock: variants restore the variant count, plain lines
-// the item count. Also restores any recipe raw materials consumed by the line.
+// the item count. Also restores any recipe raw materials consumed by the line,
+// and the line's batch when it was sold from one.
 async function restoreLineStock(transaction, businessId, li) {
+  await returnToBatch(transaction, li);
   if (li.variant_id) {
     await transaction.request()
       .input('variant_id', sql.UniqueIdentifier, li.variant_id)
@@ -435,7 +457,7 @@ async function fetchBill(billId, businessId) {
   const itemsResult = await pool.request()
     .input('bill_id', sql.UniqueIdentifier, billId)
     .query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total,
+      SELECT id, bill_id, item_id, variant_id, batch_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total,
              kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id = @bill_id
@@ -581,6 +603,16 @@ router.post('/', requireAuth, async (req, res) => {
         return res.status(400).json({ error: missingVariant });
       }
 
+      // The batch each line is sold from. Ignored with inventory off: nothing
+      // is drawn down then, so a later void must not put anything back.
+      const batches = inventoryEnabled
+        ? await loadBatchMap(transaction, req.user.business_id, items)
+        : { map: null, error: null };
+      if (batches.error) {
+        await transaction.rollback();
+        return res.status(400).json({ error: batches.error });
+      }
+
       // Recipe rows (raw materials) for any items that consume them.
       const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
 
@@ -610,6 +642,7 @@ router.post('/', requireAuth, async (req, res) => {
           tax_rate: taxRate,
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat(lineTotal.toFixed(2)),
+          ...batchFields(i, batches.map),
         };
       });
       subtotal = parseFloat(subtotal.toFixed(2));
@@ -660,7 +693,7 @@ router.post('/', requireAuth, async (req, res) => {
       }
 
       if (inventoryEnabled) {
-        const insufficient = checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap);
+        const insufficient = checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap, batches.map);
         if (insufficient.length > 0) {
           await transaction.rollback();
           return res.status(409).json({
@@ -731,11 +764,13 @@ router.post('/', requireAuth, async (req, res) => {
             .input(`unit_price${i}`, sql.Decimal(12, 4), li.unit_price)
             .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
-            .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i})`;
+            .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total)
+            .input(`batch_id${i}`, sql.UniqueIdentifier, li.batch_id)
+            .input(`unit_cost${i}`, sql.Decimal(12, 4), li.unit_cost);
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @batch_id${i}, @unit_cost${i})`;
         });
         await insertReq.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, batch_id, unit_cost)
           VALUES ${rows.join(', ')}
         `);
       }
@@ -1286,6 +1321,14 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         return res.status(400).json({ error: missingVariant2 });
       }
 
+      const batches = inventoryEnabled
+        ? await loadBatchMap(transaction, req.user.business_id, items)
+        : { map: null, error: null };
+      if (batches.error) {
+        await transaction.rollback();
+        return res.status(400).json({ error: batches.error });
+      }
+
       const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
 
       const lineItems = items.map((i) => {
@@ -1307,6 +1350,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           tax_rate: taxRate,
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
+          ...batchFields(i, batches.map),
         };
       });
 
@@ -1316,7 +1360,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         requested2[stockKey2(li)] = (requested2[stockKey2(li)] || 0) + li.quantity;
       }
       if (inventoryEnabled) {
-        const insufficient2 = checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap);
+        const insufficient2 = checkInsufficientStock(lineItems, itemMap, variantMap, recipeMap, batches.map);
         if (insufficient2.length > 0) {
           await transaction.rollback();
           return res.status(409).json({ error: 'Insufficient stock', items: insufficient2 });
@@ -1337,11 +1381,13 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
             .input(`unit_price${i}`, sql.Decimal(12, 4), li.unit_price)
             .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
-            .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i})`;
+            .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total)
+            .input(`batch_id${i}`, sql.UniqueIdentifier, li.batch_id)
+            .input(`unit_cost${i}`, sql.Decimal(12, 4), li.unit_cost);
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @batch_id${i}, @unit_cost${i})`;
         });
         await insertReq2.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, batch_id, unit_cost)
           VALUES ${rows2.join(', ')}
         `);
       }
@@ -1531,6 +1577,14 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         return res.status(400).json({ error: missingVariant3 });
       }
 
+      const batches = inventoryEnabled
+        ? await loadBatchMap(transaction, req.user.business_id, items)
+        : { map: null, error: null };
+      if (batches.error) {
+        await transaction.rollback();
+        return res.status(400).json({ error: batches.error });
+      }
+
       const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
 
       const lineItems = items.map((i) => {
@@ -1552,6 +1606,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           tax_rate: taxRate,
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
+          ...batchFields(i, batches.map),
         };
       });
 
@@ -1568,7 +1623,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       // the checkboxes would reset — see the kitchen-status carry-over below).
       const oldItemsResult = await transaction.request()
         .input('bill_id', sql.UniqueIdentifier, req.params.id)
-        .query('SELECT item_id, variant_id, item_name, quantity, unit_price, kitchen_status, kitchen_done_at FROM bill_items WHERE bill_id = @bill_id');
+        .query('SELECT item_id, variant_id, batch_id, item_name, quantity, unit_price, kitchen_status, kitchen_done_at FROM bill_items WHERE bill_id = @bill_id');
       previousLineItems = oldItemsResult.recordset;
 
       // Build a per-dish pool of prior kitchen statuses keyed by identity
@@ -1628,11 +1683,13 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
             .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total)
             .input(`kitchen_status${i}`, sql.NVarChar(20), k.kitchen_status)
-            .input(`kitchen_done_at${i}`, sql.DateTime2, k.kitchen_done_at);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @kitchen_status${i}, @kitchen_done_at${i})`;
+            .input(`kitchen_done_at${i}`, sql.DateTime2, k.kitchen_done_at)
+            .input(`batch_id${i}`, sql.UniqueIdentifier, li.batch_id)
+            .input(`unit_cost${i}`, sql.Decimal(12, 4), li.unit_cost);
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @kitchen_status${i}, @kitchen_done_at${i}, @batch_id${i}, @unit_cost${i})`;
         });
         await insertReq3.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, kitchen_status, kitchen_done_at)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, kitchen_status, kitchen_done_at, batch_id, unit_cost)
           VALUES ${rows3.join(', ')}
         `);
       }
@@ -1801,7 +1858,7 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
       if (bill.inventory_enabled) {
         const lineItems = await transaction.request()
           .input('bill_id', sql.UniqueIdentifier, req.params.id)
-          .query('SELECT item_id, variant_id, item_name, quantity FROM bill_items WHERE bill_id = @bill_id AND (item_id IS NOT NULL OR variant_id IS NOT NULL)');
+          .query('SELECT item_id, variant_id, batch_id, item_name, quantity FROM bill_items WHERE bill_id = @bill_id AND (item_id IS NOT NULL OR variant_id IS NOT NULL)');
 
         for (const li of lineItems.recordset) {
           await restoreLineStock(transaction, req.user.business_id, li);
