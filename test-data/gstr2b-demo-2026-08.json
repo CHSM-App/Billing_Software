@@ -1,0 +1,183 @@
+{
+  "chksum": "DEMOFILE0000000000000000000000000000000000000000000000000000DEMO",
+  "data": {
+    "gstin": "27ABCDE1234F1Z8",
+    "rtnprd": "082026",
+    "version": "1.0",
+    "gendt": "14-09-2026",
+    "docdata": {
+      "b2b": [
+        {
+          "ctin": "27AAAAA0000K1Z4",
+          "trdnm": "Shreyans Traders",
+          "supfildt": "11-09-2026",
+          "supprd": "082026",
+          "inv": [
+            {
+              "inum": "INV001",
+              "idt": "22-08-2026",
+              "val": 41300.00,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "",
+              "diffprcnt": 1,
+              "srctyp": "e-Invoice",
+              "irn": "DEMOIRN0000000000000000000000000000000000000000000000000000001",
+              "irngendate": "22-08-2026",
+              "itms": [
+                {
+                  "num": 1,
+                  "itm_det": {
+                    "rt": 18.00,
+                    "txval": 35000.00,
+                    "iamt": 6300.00,
+                    "camt": 0.00,
+                    "samt": 0.00,
+                    "csamt": 0.00
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "27BBBBB1111B1Z5",
+          "trdnm": "Konkan Fresh Supplies",
+          "supfildt": "10-09-2026",
+          "supprd": "082026",
+          "inv": [
+            {
+              "inum": "KFS-0455",
+              "idt": "08-08-2026",
+              "val": 12600.00,
+              "pos": "27",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "",
+              "diffprcnt": 1,
+              "srctyp": "e-Invoice",
+              "itms": [
+                {
+                  "num": 1,
+                  "itm_det": {
+                    "rt": 5.00,
+                    "txval": 8000.00,
+                    "iamt": 0.00,
+                    "camt": 200.00,
+                    "samt": 200.00,
+                    "csamt": 0.00
+                  }
+                },
+                {
+                  "num": 2,
+                  "itm_det": {
+                    "rt": 12.00,
+                    "txval": 4000.00,
+                    "iamt": 0.00,
+                    "camt": 240.00,
+                    "samt": 240.00,
+                    "csamt": 0.00
+                  }
+                }
+              ]
+            },
+            {
+              "inum": "KFS-0478",
+              "idt": "19-08-2026",
+              "val": 5900.00,
+              "pos": "27",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "",
+              "diffprcnt": 1,
+              "srctyp": "e-Invoice",
+              "itms": [
+                {
+                  "num": 1,
+                  "itm_det": {
+                    "rt": 18.00,
+                    "txval": 5000.00,
+                    "iamt": 0.00,
+                    "camt": 450.00,
+                    "samt": 450.00,
+                    "csamt": 0.00
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "29CCCCC2222C1Z6",
+          "trdnm": "Deccan Beverages Pvt Ltd",
+          "supfildt": "12-09-2026",
+          "supprd": "082026",
+          "inv": [
+            {
+              "inum": "DB/2026/1180",
+              "idt": "27-08-2026",
+              "val": 33040.00,
+              "pos": "27",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "",
+              "diffprcnt": 1,
+              "srctyp": "e-Invoice",
+              "itms": [
+                {
+                  "num": 1,
+                  "itm_det": {
+                    "rt": 18.00,
+                    "txval": 28000.00,
+                    "iamt": 5040.00,
+                    "camt": 0.00,
+                    "samt": 0.00,
+                    "csamt": 0.00
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "27DDDDD3333D1Z7",
+          "trdnm": "Sahyadri Packaging",
+          "supfildt": "09-09-2026",
+          "supprd": "082026",
+          "inv": [
+            {
+              "inum": "SP-0091",
+              "idt": "05-08-2026",
+              "val": 4720.00,
+              "pos": "27",
+              "rev": "N",
+              "itcavl": "N",
+              "rsn": "Others",
+              "diffprcnt": 1,
+              "srctyp": "e-Invoice",
+              "itms": [
+                {
+                  "num": 1,
+                  "itm_det": {
+                    "rt": 18.00,
+                    "txval": 4000.00,
+                    "iamt": 0.00,
+                    "camt": 360.00,
+                    "samt": 360.00,
+                    "csamt": 0.00
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "b2ba": [],
+      "cdnr": [],
+      "cdnra": [],
+      "isd": [],
+      "impg": []
+    }
+  }
+}
