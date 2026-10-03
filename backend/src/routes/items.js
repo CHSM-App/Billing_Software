@@ -1013,3 +1013,4 @@ router.put('/:id/variants/:variantId/recipe', requireAuth, ownerOnly, async (req
 });
 
 module.exports = router;
+module.exports.VALID_UNITS = VALID_UNITS;

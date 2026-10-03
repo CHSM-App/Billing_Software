@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
+const logger = require('../logger');
 
 const router = Router();
 
@@ -105,6 +106,7 @@ router.get('/', requireAuth, async (req, res) => {
       verified_at: new Date().toISOString()
     });
   } catch (err) {
+    logger.error({ err }, 'License check error');
     return res.status(500).json({ error: 'Server error' });
   }
 });

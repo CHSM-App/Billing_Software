@@ -26,6 +26,8 @@ const path = require('path');
 const fs = require('fs');
 const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
+const { validateNumber, validateText, validateEnum } = require('../validate');
+const { VALID_UNITS } = require('./items');
 
 const router = express.Router();
 
@@ -338,4 +340,208 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
   }
 });
 
+// ---------------------------------------------------------------------------
+// Item Excel import. The dashboard reads the sheet in the browser (SheetJS) and
+// posts one object per spreadsheet row:
+//   { row, major_category, category, name, unit, price, tax_rate,
+//     price_inclusive_tax, hsn_code, barcode, stock_quantity, low_stock_threshold,
+//     variant_label, variant_price, variant_barcode, variant_stock,
+//     variant_low_stock_threshold }
+// Rows sharing an Item Name with a Variant Name form ONE item with sizes; the
+// item-level fields are read from its first row. Mirrors the rules of
+// POST /api/items + POST /api/items/:id/variants.
+// ---------------------------------------------------------------------------
+const YES = ['yes', 'y', 'true', '1'];
+
+function blank(v) { return v === undefined || v === null || String(v).trim() === ''; }
+function txt(v) { return blank(v) ? null : String(v).trim(); }
+function num(v) { return blank(v) ? null : parseFloat(v); }
+
+/// Groups + validates raw rows. Pure (no DB) so it can be unit-tested.
+/// Returns { items, errors } — errors are "Row N: …" strings.
+function parseImportRows(rows) {
+  const errors = [];
+  const groups = new Map(); // lower(name) -> [row, ...]
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { items: [], errors: ['The sheet has no item rows'] };
+  }
+  for (const r of rows) {
+    const name = txt(r.name);
+    if (!name) { errors.push(`Row ${r.row}: Item Name is required`); continue; }
+    const key = name.toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+
+  const items = [];
+  for (const group of groups.values()) {
+    const f = group[0];
+    const at = `Row ${f.row}`;
+    const unit = txt(f.unit) ? txt(f.unit).toLowerCase() : 'piece';
+    const sized = group.some((r) => !blank(r.variant_label));
+    const bad = validateText(f.name, 'Item Name', 200)
+      || validateText(f.major_category, 'Major Category', 100)
+      || validateText(f.category, 'Category', 100)
+      || validateText(f.hsn_code, 'HSN Code', 10)
+      || validateEnum(unit, 'Unit', VALID_UNITS)
+      || validateNumber(f.tax_rate, 'Tax Rate', { max: 100 })
+      || (sized ? null : validateNumber(f.price, 'Price')
+        || validateText(f.barcode, 'Barcode', 100)
+        || validateNumber(f.stock_quantity, 'Stock Quantity')
+        || validateNumber(f.low_stock_threshold, 'Low Stock Alert'));
+    if (bad) { errors.push(`${at}: ${bad}`); continue; }
+
+    const item = {
+      row: f.row,
+      name: txt(f.name),
+      major_category: txt(f.major_category),
+      category: txt(f.category),
+      unit,
+      tax_rate: num(f.tax_rate),
+      price_inclusive_tax: YES.includes(String(f.price_inclusive_tax ?? '').trim().toLowerCase()),
+      hsn_code: txt(f.hsn_code),
+      // A sized item owns no price/barcode/stock — its variants carry them.
+      price: sized ? null : num(f.price),
+      barcode: sized ? null : txt(f.barcode),
+      stock_quantity: sized ? null : num(f.stock_quantity),
+      low_stock_threshold: sized ? null : (num(f.low_stock_threshold) ?? 50),
+      variants: [],
+    };
+
+    if (!sized) {
+      if (group.length > 1) {
+        errors.push(`Row ${group[1].row}: "${item.name}" appears more than once (fill Variant Name for sizes)`);
+      } else if (item.price == null) {
+        errors.push(`${at}: Price is required for "${item.name}" (or add variants)`);
+      } else {
+        items.push(item);
+      }
+      continue;
+    }
+
+    const labels = new Set();
+    const vBarcodes = new Set();
+    let ok = true;
+    group.forEach((r, i) => {
+      const label = txt(r.variant_label);
+      const vBad = (label ? null : `"${item.name}" has variants — Variant Name is required on every row`)
+        || validateText(label, 'Variant Name', 50)
+        || validateNumber(r.variant_price, 'Variant Price')
+        || (blank(r.variant_price) ? 'Variant Price is required' : null)
+        || validateText(r.variant_barcode, 'Variant Barcode', 100)
+        || validateNumber(r.variant_stock, 'Variant Stock')
+        || validateNumber(r.variant_low_stock_threshold, 'Variant Low Stock Alert')
+        || (labels.has(label.toLowerCase()) ? `Variant "${label}" is repeated for "${item.name}"` : null)
+        || (txt(r.variant_barcode) && vBarcodes.has(txt(r.variant_barcode))
+          ? `Variant Barcode ${txt(r.variant_barcode)} is repeated for "${item.name}"` : null);
+      if (vBad) { errors.push(`Row ${r.row}: ${vBad}`); ok = false; return; }
+      labels.add(label.toLowerCase());
+      if (txt(r.variant_barcode)) vBarcodes.add(txt(r.variant_barcode));
+      item.variants.push({
+        label,
+        price: num(r.variant_price),
+        barcode: txt(r.variant_barcode),
+        stock_quantity: num(r.variant_stock),
+        low_stock_threshold: num(r.variant_low_stock_threshold),
+        sort_order: i,
+      });
+    });
+    if (ok) items.push(item);
+  }
+
+  // Item barcodes are unique per business (UQ_items_business_barcode).
+  const seen = new Map();
+  for (const it of items) {
+    if (!it.barcode) continue;
+    if (seen.has(it.barcode)) errors.push(`Row ${it.row}: Barcode ${it.barcode} is already used on row ${seen.get(it.barcode)}`);
+    else seen.set(it.barcode, it.row);
+  }
+  return { items, errors };
+}
+
+// POST /admin/api/businesses/:id/items/import — { rows: [...] }
+// All-or-nothing: any error → 400 with the full error list, nothing inserted.
+router.post('/api/businesses/:id/items/import', requireAdmin, express.json({ limit: '5mb' }), async (req, res) => {
+  const businessId = req.params.id;
+  const { items, errors } = parseImportRows((req.body || {}).rows);
+  if (errors.length) return res.status(400).json({ error: 'Fix the rows below and upload again', errors });
+
+  try {
+    await poolConnect;
+    const bizCheck = await pool.request()
+      .input('id', sql.UniqueIdentifier, businessId)
+      .query(`SELECT id FROM businesses WHERE id = @id`);
+    if (bizCheck.recordset.length === 0) {
+      return res.status(404).json({ error: 'Business not found' });
+    }
+
+    // Same duplicate rules as the app: active item names, business-wide barcodes.
+    const existing = await pool.request()
+      .input('id', sql.UniqueIdentifier, businessId)
+      .query(`SELECT LOWER(LTRIM(RTRIM(name))) AS name, barcode, is_active
+              FROM items WHERE business_id = @id`);
+    const names = new Set(existing.recordset.filter((r) => r.is_active).map((r) => r.name));
+    const barcodes = new Set(existing.recordset.filter((r) => r.barcode).map((r) => r.barcode));
+    const dbErrors = [];
+    for (const it of items) {
+      if (names.has(it.name.toLowerCase())) dbErrors.push(`Row ${it.row}: An item named "${it.name}" already exists`);
+      if (it.barcode && barcodes.has(it.barcode)) dbErrors.push(`Row ${it.row}: Barcode ${it.barcode} is already used by another item`);
+    }
+    if (dbErrors.length) return res.status(400).json({ error: 'Fix the rows below and upload again', errors: dbErrors });
+
+    const tx = pool.transaction();
+    await tx.begin();
+    let variantCount = 0;
+    try {
+      for (const it of items) {
+        const ins = await tx.request()
+          .input('business_id', sql.UniqueIdentifier, businessId)
+          .input('name', sql.NVarChar(200), it.name)
+          .input('barcode', sql.NVarChar(100), it.barcode)
+          .input('major_category', sql.NVarChar(100), it.major_category)
+          .input('category', sql.NVarChar(100), it.category)
+          .input('price', sql.Decimal(10, 2), it.price)
+          .input('tax_rate', sql.Decimal(5, 2), it.tax_rate)
+          .input('price_inclusive_tax', sql.Bit, it.price_inclusive_tax ? 1 : 0)
+          .input('hsn_code', sql.NVarChar(10), it.hsn_code)
+          .input('stock_quantity', sql.Decimal(10, 2), it.stock_quantity)
+          .input('unit', sql.NVarChar(20), it.unit)
+          .input('low_stock_threshold', sql.Decimal(10, 2), it.low_stock_threshold)
+          .query(`
+            INSERT INTO items (business_id, name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, low_stock_threshold)
+            OUTPUT INSERTED.id
+            VALUES (@business_id, @name, @barcode, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @low_stock_threshold)
+          `);
+        const itemId = ins.recordset[0].id;
+        for (const v of it.variants) {
+          await tx.request()
+            .input('item_id', sql.UniqueIdentifier, itemId)
+            .input('label', sql.NVarChar(50), v.label)
+            .input('price', sql.Decimal(10, 2), v.price)
+            .input('barcode', sql.NVarChar(100), v.barcode)
+            .input('stock_quantity', sql.Decimal(10, 2), v.stock_quantity)
+            .input('low_stock_threshold', sql.Decimal(10, 2), v.low_stock_threshold)
+            .input('sort_order', sql.Int, v.sort_order)
+            .query(`
+              INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, sort_order)
+              VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @sort_order)
+            `);
+          variantCount++;
+        }
+      }
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback();
+      throw err;
+    }
+
+    logger.info({ businessId, items: items.length, variants: variantCount, admin: req.admin.sub }, 'admin item import');
+    return res.json({ ok: true, items: items.length, variants: variantCount });
+  } catch (err) {
+    logger.error({ err }, 'admin item import error');
+    return res.status(500).json({ error: 'Failed to import items' });
+  }
+});
+
 module.exports = router;
+module.exports.parseImportRows = parseImportRows;

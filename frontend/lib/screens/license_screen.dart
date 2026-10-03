@@ -85,7 +85,11 @@ class _LicenseBlockedScreenState extends ConsumerState<LicenseBlockedScreen> {
         // string from LicenseService (e.g. "Server error (500): …" or a socket/
         // handshake message), which is confusing to end users. rawError is still
         // used above to detect session expiry (401); it's just not surfaced.
-        _errorMessage = _messageForState(l10n, status.state);
+        // The server answered (e.g. 500) — we're online, so "still offline"
+        // would be a lie; say verification failed instead.
+        _errorMessage = rawError != null && rawError.startsWith('Server error')
+            ? l10n.licenseMsgVerifyFailed
+            : _messageForState(l10n, status.state);
       });
     } catch (e) {
       if (!mounted) return;

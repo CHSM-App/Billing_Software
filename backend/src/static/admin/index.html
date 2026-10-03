@@ -147,6 +147,8 @@
     <span class="stat" id="counts"></span>
     <div class="spacer"></div>
     <input class="search" id="search" placeholder="Search name / phone / owner…"/>
+    <button class="ghost" id="demoBtn">Demo Item Excel</button>
+    <button class="ghost" id="importBtn">Import Items</button>
     <button class="ghost" id="refreshBtn">Refresh</button>
     <button class="ghost" id="logoutBtn">Log out</button>
   </header>
@@ -267,7 +269,35 @@
   </div>
 </aside>
 
+<!-- ===== Item import drawer ===== -->
+<aside class="drawer" id="iDrawer">
+  <div class="drawer-head">
+    <div style="flex:1">
+      <h2>Import Items from Excel</h2>
+      <div class="biz-sub">One row per item. Items with sizes: one row per variant, same Item Name.</div>
+    </div>
+    <button class="x" id="iClose">&times;</button>
+  </div>
+  <div class="drawer-body">
+    <div class="field">
+      <label>Business</label>
+      <select id="iBiz"></select>
+    </div>
+    <div class="field">
+      <label>Excel file (.xlsx / .xls / .csv)</label>
+      <input type="file" id="iFile" accept=".xlsx,.xls,.csv"/>
+    </div>
+    <button class="ghost" id="iDemo" style="width:100%">Download demo Excel (10 sample items)</button>
+    <div class="drawer-msg" id="iMsg" style="white-space:pre-wrap"></div>
+  </div>
+  <div class="drawer-foot">
+    <button class="cancel-btn" id="iCancel">Cancel</button>
+    <button class="save-btn" id="iUpload">Upload items</button>
+  </div>
+</aside>
+
 <div id="toast"></div>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
 <script>
 (function(){
@@ -456,7 +486,7 @@
     $('overlay').classList.add('open');
     $('drawer').classList.add('open');
   }
-  function closeDrawer(){ $('overlay').classList.remove('open'); $('drawer').classList.remove('open'); current=null; }
+  function closeDrawer(){ $('overlay').classList.remove('open'); $('drawer').classList.remove('open'); $('iDrawer').classList.remove('open'); current=null; }
   $('dClose').addEventListener('click', closeDrawer);
   $('dCancel').addEventListener('click', closeDrawer);
   $('overlay').addEventListener('click', closeDrawer);
@@ -488,6 +518,132 @@
     }).catch(function(err){
       $('dMsg').className='drawer-msg bad'; $('dMsg').textContent=err.message;
     }).finally(function(){ btn.disabled=false; });
+  });
+
+  // ---- Item Excel import ----
+  // Header text <-> field sent to POST /admin/api/businesses/:id/items/import.
+  var COLS = [
+    ['Major Category','major_category'], ['Category','category'], ['Item Name','name'],
+    ['Unit','unit'], ['Price','price'], ['Tax Rate %','tax_rate'],
+    ['Price Includes Tax','price_inclusive_tax'], ['HSN Code','hsn_code'], ['Barcode','barcode'],
+    ['Stock Quantity','stock_quantity'], ['Low Stock Alert','low_stock_threshold'],
+    ['Variant Name','variant_label'], ['Variant Price','variant_price'], ['Variant Barcode','variant_barcode'],
+    ['Variant Stock','variant_stock'], ['Variant Low Stock Alert','variant_low_stock_threshold']
+  ];
+  // Barcodes / HSN are strings so Excel keeps them as text (no 8.9E+12, no lost leading 0).
+  var DEMO = [
+    ['Indian','Starters','Paneer Tikka','plate',220,5,'No','9963','','','','','','','',''],
+    ['Chinese','Chinese Starters','Chicken 65','plate','',5,'No','9963','','','','Half',180,'','',''],
+    ['Chinese','Chinese Starters','Chicken 65','plate','',5,'No','9963','','','','Full',280,'','',''],
+    ['Beverages','Hot Drinks','Masala Tea','piece','',5,'Yes','9963','','','','Regular',20,'','',''],
+    ['Beverages','Hot Drinks','Masala Tea','piece','',5,'Yes','9963','','','','Large',30,'','',''],
+    ['Beverages','Cold Drinks','Cola 500ml','bottle',40,18,'Yes','2202','8901000000017',120,20,'','','','',''],
+    ['Grocery','Rice & Grains','Basmati Rice','kg',95,5,'Yes','1006','8901000000024',250,25,'','','','',''],
+    ['Grocery','Oils','Sunflower Oil','litre','',5,'Yes','1512','','','','1 Litre',160,'8901000000031',80,10],
+    ['Grocery','Oils','Sunflower Oil','litre','',5,'Yes','1512','','','','5 Litre',750,'8901000000048',30,5],
+    ['Dairy','Butter & Cheese','Salted Butter 100g','packet',56,12,'Yes','0405','8901000000055',60,10,'','','','',''],
+    ['Bakery','Cakes','Chocolate Cake','piece','',5,'Yes','1905','','','','500 g',350,'8901000000062',8,2],
+    ['Bakery','Cakes','Chocolate Cake','piece','',5,'Yes','1905','','','','1 kg',650,'8901000000079',5,2],
+    ['Clothing',"Men's Wear",'Cotton T-Shirt','piece','',5,'Yes','6109','','','','S',399,'8901000000086',25,5],
+    ['Clothing',"Men's Wear",'Cotton T-Shirt','piece','',5,'Yes','6109','','','','M',399,'8901000000093',40,5],
+    ['Clothing',"Men's Wear",'Cotton T-Shirt','piece','',5,'Yes','6109','','','','L',449,'8901000000109',40,5],
+    ['Clothing',"Men's Wear",'Cotton T-Shirt','piece','',5,'Yes','6109','','','','XL',449,'8901000000116',20,5],
+    ['Stationery','Notebooks','Ruled Notebook 172 Pages','piece',45,12,'Yes','4820','8901000000123',200,30,'','','','','']
+  ];
+  var UNITS = 'piece, kg, g, litre, ml, metre, dozen, plate, packet, box, bottle, pair, set, bundle, bag, sqft, ton, quintal, roll';
+  var HELP = [
+    ['Column','Required','Notes'],
+    ['Major Category','No','Top-level group, e.g. Chinese, Grocery'],
+    ['Category','No','Minor / sub category, e.g. Chinese Starters'],
+    ['Item Name','Yes','Must be unique. For variants repeat the same name on each variant row'],
+    ['Unit','No','One of: '+UNITS+'. Default piece'],
+    ['Price','Yes (no variants)','Leave blank when the item has variants'],
+    ['Tax Rate %','No','GST %, e.g. 0, 5, 12, 18, 28'],
+    ['Price Includes Tax','No','Yes / No. Default No'],
+    ['HSN Code','No','Up to 10 characters'],
+    ['Barcode','No','Unique per business. Leave blank when the item has variants'],
+    ['Stock Quantity','No','Blank = stock not tracked. Leave blank when the item has variants'],
+    ['Low Stock Alert','No','Default 50. Leave blank when the item has variants'],
+    ['Variant Name','For variants','Size name, e.g. Half / Full, S / M / L. One row per variant'],
+    ['Variant Price','For variants','Price of this variant'],
+    ['Variant Barcode','No','Unique within the item'],
+    ['Variant Stock','No','Blank = stock not tracked'],
+    ['Variant Low Stock Alert','No','Alert level for this variant'],
+    ['','',''],
+    ['Upload is all-or-nothing: if any row has an error nothing is imported and every error is listed.','','']
+  ];
+
+  function downloadDemo(){
+    if(!window.XLSX){ toast('Excel library failed to load — check internet connection', true); return; }
+    var wb = XLSX.utils.book_new();
+    var ws = XLSX.utils.aoa_to_sheet([COLS.map(function(c){ return c[0]; })].concat(DEMO));
+    ws['!cols'] = COLS.map(function(c){ return { wch: Math.max(c[0].length + 2, 14) }; });
+    XLSX.utils.book_append_sheet(wb, ws, 'Items');
+    var hs = XLSX.utils.aoa_to_sheet(HELP);
+    hs['!cols'] = [{wch:24},{wch:18},{wch:90}];
+    XLSX.utils.book_append_sheet(wb, hs, 'Instructions');
+    XLSX.writeFile(wb, 'vittam_items_demo.xlsx');
+  }
+  $('demoBtn').addEventListener('click', downloadDemo);
+  $('iDemo').addEventListener('click', downloadDemo);
+
+  function openImport(){
+    $('iBiz').innerHTML = all.map(function(b){
+      return '<option value="'+b.id+'">'+esc(b.name)+' ('+esc(b.phone)+')</option>';
+    }).join('');
+    $('iFile').value = ''; $('iMsg').textContent = '';
+    $('overlay').classList.add('open'); $('iDrawer').classList.add('open');
+  }
+  $('importBtn').addEventListener('click', openImport);
+  $('iClose').addEventListener('click', closeDrawer);
+  $('iCancel').addEventListener('click', closeDrawer);
+
+  function readRows(file){
+    return file.arrayBuffer().then(function(buf){
+      var wb = XLSX.read(buf);
+      var ws = wb.Sheets['Items'] || wb.Sheets[wb.SheetNames[0]];
+      var byHeader = {};
+      COLS.forEach(function(c){ byHeader[c[0].toLowerCase()] = c[1]; });
+      return XLSX.utils.sheet_to_json(ws, { defval: '' }).map(function(o){
+        var r = { row: o.__rowNum__ + 1 };
+        Object.keys(o).forEach(function(h){
+          var k = byHeader[h.trim().toLowerCase()];
+          if(k) r[k] = typeof o[h] === 'string' ? o[h].trim() : o[h];
+        });
+        return r;
+      }).filter(function(r){
+        return COLS.some(function(c){ return r[c[1]] !== undefined && r[c[1]] !== ''; });
+      });
+    });
+  }
+
+  $('iUpload').addEventListener('click', function(){
+    var file = $('iFile').files[0], bizId = $('iBiz').value, msg = $('iMsg');
+    if(!bizId){ msg.className='drawer-msg bad'; msg.textContent='Pick a business.'; return; }
+    if(!file){ msg.className='drawer-msg bad'; msg.textContent='Choose an Excel file.'; return; }
+    if(!window.XLSX){ msg.className='drawer-msg bad'; msg.textContent='Excel library failed to load — check internet connection.'; return; }
+    var btn = $('iUpload'); btn.disabled = true; msg.className='drawer-msg'; msg.textContent='Uploading…';
+    readRows(file).then(function(rows){
+      return fetch('/admin/api/businesses/'+bizId+'/items/import', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
+        body: JSON.stringify({ rows: rows })
+      }).then(function(r){
+        if(r.status === 401){ logout(); throw new Error('Session expired — please sign in again.'); }
+        return r.json().catch(function(){ return {}; }).then(function(d){
+          if(!r.ok) throw new Error((d.error || 'Import failed') + (d.errors ? '\n\n' + d.errors.join('\n') : ''));
+          return d;
+        });
+      });
+    }).then(function(d){
+      msg.className='drawer-msg ok';
+      msg.textContent='Imported '+d.items+' items ('+d.variants+' variants).';
+      toast('Imported '+d.items+' items');
+      $('iFile').value = '';
+      load();
+    }).catch(function(err){
+      msg.className='drawer-msg bad'; msg.textContent=err.message;
+    }).finally(function(){ btn.disabled = false; });
   });
 
   // ---- Boot ----
