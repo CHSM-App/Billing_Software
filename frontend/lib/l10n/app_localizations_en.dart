@@ -2088,6 +2088,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get staffRoleServer => 'Captain';
 
   @override
+  String get staffRoleFrontDesk => 'Front Desk';
+
+  @override
   String get staffRoleKitchen => 'Kitchen Chef';
 
   @override

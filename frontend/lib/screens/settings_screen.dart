@@ -154,6 +154,9 @@ class _SettingsContentState extends State<_SettingsContent>
     final session = widget.session;
     final isOwner = session.userRole == 'owner';
     final isKitchen = session.userRole == 'kitchen';
+    // Captain / Front Desk only saves orders — it never finalizes, so it has
+    // no bills of its own to look back on and nothing to print.
+    final isServer = session.userRole == 'server';
     final l10n = context.l10n;
     final language = widget.ref.watch(localeProvider);
 
@@ -181,8 +184,8 @@ class _SettingsContentState extends State<_SettingsContent>
                     _buildProfileCard(context, session, isOwner),
                     const SizedBox(height: AppSpacing.space24),
 
-                    // Activity — History (all roles except kitchen chef).
-                    if (session.userRole != 'kitchen') ...[
+                    // Activity — History (not for kitchen chef or captain/front desk).
+                    if (!isKitchen && !isServer) ...[
                       _sectionLabel(context, l10n.settingsSectionActivity),
                       const SizedBox(height: AppSpacing.space8),
                       _buildNavCard(
@@ -363,7 +366,7 @@ class _SettingsContentState extends State<_SettingsContent>
                     // their home screen. Showing it here too was a second route
                     // to the same place plus a bill-printer setting they have
                     // no use for.
-                    if (!kIsWeb && !isKitchen) ...[
+                    if (!kIsWeb && !isKitchen && !isServer) ...[
                       const SizedBox(height: AppSpacing.space24),
                       _sectionLabel(context, l10n.settingsSectionHardware),
                       const SizedBox(height: AppSpacing.space8),

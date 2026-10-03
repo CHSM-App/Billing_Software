@@ -715,6 +715,7 @@
   "staffRoleCashier": "Cashier",
   "staffRoleWaiter": "Waiter",
   "staffRoleServer": "Captain",
+  "staffRoleFrontDesk": "Front Desk",
   "staffRoleKitchen": "Kitchen Chef",
   "staffAddKitchen": "Add Kitchen Chef",
   "staffSectionWaiters": "WAITERS & CASHIERS",

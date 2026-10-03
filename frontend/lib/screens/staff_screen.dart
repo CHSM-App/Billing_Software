@@ -27,8 +27,9 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
       final role = (m['role'] as String? ?? 'cashier');
       // Match both the raw role value and its localized label so users can
       // search "cashier", "server", "kitchen" or "Captain", "कॅशियर", etc.
-      // The stored value stays 'server' — only the label users see is Captain.
-      final roleLabel = _roleLabel(l10n, role).toLowerCase();
+      // The stored value stays 'server' — only the label users see is Captain
+      // (restaurants) or Front Desk (retail).
+      final roleLabel = _roleLabel(l10n, role, _isRestaurant).toLowerCase();
       return name.contains(q) ||
           phone.contains(q) ||
           role.toLowerCase().contains(q) ||
@@ -36,11 +37,11 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
     }).toList();
   }
 
-  static String _roleLabel(AppLocalizations l10n, String role) => switch (role) {
-        'kitchen' => l10n.staffRoleKitchen,
-        'server' => l10n.staffRoleServer,
-        _ => l10n.staffRoleCashier,
-      };
+  bool get _isRestaurant {
+    final businessType = ref.read(businessTypeProvider);
+    return businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
+  }
 
   @override
   void initState() {
@@ -66,14 +67,11 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
   }
 
   void _showStaffForm({Map<String, dynamic>? member, String? initialRole}) {
-    final businessType = ref.read(businessTypeProvider);
-    final allowKitchen = businessType == 'restaurant_with_tables' ||
-        businessType == 'restaurant_no_tables';
     showDialog(
       context: context,
       builder: (_) => _StaffFormDialog(
         member: member,
-        allowKitchen: allowKitchen,
+        isRestaurant: _isRestaurant,
         initialRole: initialRole,
         onSaved: _loadStaff,
       ),
@@ -279,7 +277,9 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
                           style: Theme.of(context).textTheme.titleMedium),
                     ),
                     const SizedBox(width: AppSpacing.space8),
-                    _RoleBadge(role: m['role'] ?? 'cashier'),
+                    _RoleBadge(
+                        role: m['role'] ?? 'cashier',
+                        isRestaurant: _isRestaurant),
                     if (!active) ...[
                       const SizedBox(width: AppSpacing.space8),
                       Container(
@@ -333,31 +333,37 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
   }
 }
 
-/// Small colored pill showing a staff member's role (Cashier / Captain /
-/// Kitchen).
+/// Label for a stored role. 'server' is the save-only role: Captain at a
+/// restaurant, Front Desk at a retail shop.
+String _roleLabel(AppLocalizations l10n, String role, bool isRestaurant) =>
+    switch (role) {
+      'kitchen' => l10n.staffRoleKitchen,
+      'server' => isRestaurant ? l10n.staffRoleServer : l10n.staffRoleFrontDesk,
+      _ => l10n.staffRoleCashier,
+    };
+
+/// Small colored pill showing a staff member's role (Cashier / Captain or
+/// Front Desk / Kitchen).
 class _RoleBadge extends StatelessWidget {
   final String role;
-  const _RoleBadge({required this.role});
+  final bool isRestaurant;
+  const _RoleBadge({required this.role, required this.isRestaurant});
 
   @override
   Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final String label;
+    final label = _roleLabel(context.l10n, role, isRestaurant);
     final Color color;
     final Color bg;
     switch (role) {
       case 'kitchen':
-        label = l10n.staffRoleKitchen;
         color = AppColors.warning;
         bg = AppColors.warningLight;
         break;
       case 'server':
-        label = l10n.staffRoleServer;
         color = AppColors.accent;
         bg = AppColors.accentLight;
         break;
       default:
-        label = l10n.staffRoleCashier;
         color = AppColors.primary;
         bg = AppColors.primaryLight;
     }
@@ -378,13 +384,13 @@ class _RoleBadge extends StatelessWidget {
 
 class _StaffFormDialog extends StatefulWidget {
   final Map<String, dynamic>? member;
-  final bool allowKitchen;
+  final bool isRestaurant;
   final String? initialRole;
   final VoidCallback onSaved;
 
   const _StaffFormDialog({
     this.member,
-    this.allowKitchen = false,
+    this.isRestaurant = false,
     this.initialRole,
     required this.onSaved,
   });
@@ -503,37 +509,38 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
                 ),
                 const SizedBox(height: AppSpacing.space12),
               ],
-              // Role picker. Retail shops only need cashiers, so the picker
-              // shows for restaurants: Cashier (bills + payment), Captain
-              // (takes orders), Kitchen (Kitchen Display).
-              if (widget.allowKitchen) ...[
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(l10n.staffRole,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600)),
-                ),
-                const SizedBox(height: AppSpacing.space8),
-                SegmentedButton<String>(
-                  segments: [
-                    ButtonSegment(
-                        value: 'cashier', label: Text(l10n.staffRoleCashier)),
-                    ButtonSegment(
-                        value: 'server', label: Text(l10n.staffRoleServer)),
+              // Role picker: Cashier (bills + payment) and the save-only role
+              // 'server' (Captain at restaurants, Front Desk in retail).
+              // Restaurants also get Kitchen (Kitchen Display).
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(l10n.staffRole,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: AppSpacing.space8),
+              SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(
+                      value: 'cashier', label: Text(l10n.staffRoleCashier)),
+                  ButtonSegment(
+                      value: 'server',
+                      label: Text(
+                          _roleLabel(l10n, 'server', widget.isRestaurant))),
+                  if (widget.isRestaurant)
                     ButtonSegment(
                         value: 'kitchen', label: Text(l10n.staffRoleKitchen)),
-                  ],
-                  selected: {
-                    const {'cashier', 'server', 'kitchen'}.contains(_role)
-                        ? _role
-                        : 'cashier'
-                  },
-                  onSelectionChanged: (s) =>
-                      setState(() => _role = s.first),
-                ),
-                const SizedBox(height: AppSpacing.space12),
-              ],
+                ],
+                selected: {
+                  _role == 'server' ||
+                          (_role == 'kitchen' && widget.isRestaurant)
+                      ? _role
+                      : 'cashier'
+                },
+                onSelectionChanged: (s) => setState(() => _role = s.first),
+              ),
+              const SizedBox(height: AppSpacing.space12),
               AppTextField(
                 label: l10n.staffName,
                 controller: _nameCtrl,

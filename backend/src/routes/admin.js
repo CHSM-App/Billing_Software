@@ -461,7 +461,8 @@ function parseImportRows(rows) {
 
 // POST /admin/api/businesses/:id/items/import — { rows: [...] }
 // All-or-nothing: any error → 400 with the full error list, nothing inserted.
-router.post('/api/businesses/:id/items/import', requireAdmin, express.json({ limit: '5mb' }), async (req, res) => {
+// Body limit (5mb) is set in server.js — the global JSON parser runs first.
+router.post('/api/businesses/:id/items/import', requireAdmin, async (req, res) => {
   const businessId = req.params.id;
   const { items, errors } = parseImportRows((req.body || {}).rows);
   if (errors.length) return res.status(400).json({ error: 'Fix the rows below and upload again', errors });

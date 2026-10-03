@@ -49,6 +49,10 @@ class ReceiptOutput {
     String? footerNote,
     required ReceiptLabels labels,
   }) async {
+    // A draft (held order / open table) is not a bill yet — its lines and
+    // total can still change — so it must never leave the shop as a receipt.
+    // Guarded here, the one place every print path goes through.
+    bills = bills.where((b) => b.status != 'draft').toList();
     if (bills.isEmpty) return;
     final size = await getPaperSize();
 

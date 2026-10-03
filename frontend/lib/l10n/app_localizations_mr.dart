@@ -2096,6 +2096,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get staffRoleServer => 'कॅप्टन';
 
   @override
+  String get staffRoleFrontDesk => 'फ्रंट डेस्क';
+
+  @override
   String get staffRoleKitchen => 'किचन शेफ';
 
   @override

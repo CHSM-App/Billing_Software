@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
@@ -12,6 +14,7 @@ import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/whatsapp_mark.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -93,7 +96,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         bill: bill,
         userRole: userRole,
         businessName: businessName,
-        onVoided: () => ref.invalidate(billsProvider),
+        onChanged: () => ref.invalidate(billsProvider),
       ),
     );
   }
@@ -406,13 +409,14 @@ class _BillDetailDialog extends StatelessWidget {
   final Bill bill;
   final String userRole;
   final String businessName;
-  final VoidCallback onVoided;
+  /// Reloads the history list — after a void, or after a typed phone was saved.
+  final VoidCallback onChanged;
 
   const _BillDetailDialog({
     required this.bill,
     required this.userRole,
     required this.businessName,
-    required this.onVoided,
+    required this.onChanged,
   });
 
   Future<void> _void(BuildContext context) async {
@@ -439,11 +443,60 @@ class _BillDetailDialog extends StatelessWidget {
       await voidBill(bill.id);
       if (!context.mounted) return;
       Navigator.pop(context);
-      onVoided();
+      onChanged();
     } on ApiException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error),
       );
+    }
+  }
+
+  /// Re-sends the receipt over WhatsApp. A bill settled without a phone asks
+  /// for one first; the backend stores it on the bill.
+  Future<void> _whatsApp(BuildContext context) async {
+    final l10n = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    void snack(String msg, {bool error = false}) => messenger.showSnackBar(
+        SnackBar(
+            content: Text(msg),
+            backgroundColor: error ? AppColors.error : null));
+
+    String? typedPhone;
+    if (bill.customerPhone?.trim().isNotEmpty != true) {
+      typedPhone = await showDialog<String>(
+          context: context, builder: (_) => const _PhonePromptDialog());
+      if (typedPhone == null || !context.mounted) return;
+    }
+    Navigator.pop(context);
+
+    try {
+      final data = await whatsAppBill(bill.id, phone: typedPhone);
+      if (typedPhone != null) onChanged(); // bill now carries the phone
+      // Paid API mode: the backend already sent it.
+      if (data['mode'] == 'api') {
+        snack(l10n.billingWhatsappSent);
+        return;
+      }
+      final phone = (data['phone'] ?? '').toString();
+      final text = Uri.encodeComponent((data['message'] ?? '').toString());
+      for (final uri in [
+        Uri.parse('whatsapp://send?phone=$phone&text=$text'),
+        Uri.parse('https://wa.me/$phone?text=$text'),
+      ]) {
+        try {
+          if (await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+            return;
+          }
+        } catch (_) {
+          // try the next candidate
+        }
+      }
+      snack(l10n.billingWhatsappFailed, error: true);
+    } on ApiException catch (e) {
+      snack(l10n.billingWhatsappFailedWithError(sanitizeUiErrorMessage(e)),
+          error: true);
+    } catch (_) {
+      snack(l10n.billingWhatsappFailed, error: true);
     }
   }
 
@@ -560,6 +613,8 @@ class _BillDetailDialog extends StatelessWidget {
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(l10n.commonClose)),
+        // A draft is an unsettled order — nothing to reprint yet.
+        if (bill.status != 'draft')
         TextButton(
           onPressed: () async {
             Navigator.pop(context);
@@ -606,6 +661,14 @@ class _BillDetailDialog extends StatelessWidget {
           },
           child: Text(l10n.historyReprint),
         ),
+        // Only a settled bill goes to the customer: a draft can still change
+        // and a voided bill is no longer owed.
+        if (bill.status == 'finalized')
+          TextButton.icon(
+            onPressed: () => _whatsApp(context),
+            icon: const WhatsAppMark(size: 18),
+            label: Text(l10n.billingWhatsapp),
+          ),
         if (userRole == 'owner' && bill.status != 'voided')
           TextButton(
             onPressed: () => _void(context),
@@ -637,6 +700,65 @@ class _BillDetailDialog extends StatelessWidget {
                   )),
         ],
       ),
+    );
+  }
+}
+
+/// Asks for the customer's 10-digit phone before a WhatsApp send. Pops the
+/// number, or null on cancel.
+class _PhonePromptDialog extends StatefulWidget {
+  const _PhonePromptDialog();
+
+  @override
+  State<_PhonePromptDialog> createState() => _PhonePromptDialogState();
+}
+
+class _PhonePromptDialogState extends State<_PhonePromptDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final phone = _controller.text.trim();
+    if (!RegExp(r'^\d{10}$').hasMatch(phone)) {
+      setState(() => _error = context.l10n.billingPhoneInvalid);
+      return;
+    }
+    Navigator.pop(context, phone);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      title: Text(l10n.billingWhatsappNeedsPhone),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.phone,
+        maxLength: 10,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: InputDecoration(
+          labelText: l10n.billingCustomerPhoneLabel,
+          errorText: _error,
+        ),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonCancel)),
+        TextButton.icon(
+          onPressed: _submit,
+          icon: const WhatsAppMark(size: 18),
+          label: Text(l10n.billingWhatsapp),
+        ),
+      ],
     );
   }
 }

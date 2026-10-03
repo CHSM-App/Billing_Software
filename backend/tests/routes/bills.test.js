@@ -729,7 +729,7 @@ describe('POST /api/bills/send-whatsapp', () => {
   });
 
   test('returns 400 when bill has no customer phone', async () => {
-    mockRequest.recordset = [{ receipt_token: 'tok', customer_phone: null, bill_number: 'INV-0001', shop_name: 'Shop' }];
+    mockRequest.recordset = [{ receipt_token: 'tok', status: 'finalized', customer_phone: null, bill_number: 'INV-0001', shop_name: 'Shop' }];
     const res = await request(app)
       .post('/api/bills/send-whatsapp')
       .set(authHeader())
@@ -739,7 +739,7 @@ describe('POST /api/bills/send-whatsapp', () => {
   });
 
   test('returns 400 for invalid phone number', async () => {
-    mockRequest.recordset = [{ receipt_token: 'tok', customer_phone: 'bad', bill_number: 'INV-0001', shop_name: 'Shop' }];
+    mockRequest.recordset = [{ receipt_token: 'tok', status: 'finalized', customer_phone: 'bad', bill_number: 'INV-0001', shop_name: 'Shop' }];
     normalisePhone.mockReturnValue(null);
     const res = await request(app)
       .post('/api/bills/send-whatsapp')
@@ -752,6 +752,7 @@ describe('POST /api/bills/send-whatsapp', () => {
   test('sends WhatsApp and returns success', async () => {
     mockRequest.recordset = [{
       receipt_token: 'tok123',
+      status: 'finalized',
       customer_phone: '9876543210',
       bill_number: 'INV-0001',
       shop_name: 'My Shop',
@@ -771,6 +772,7 @@ describe('POST /api/bills/send-whatsapp', () => {
   test('returns skipped when WhatsApp is disabled', async () => {
     mockRequest.recordset = [{
       receipt_token: 'tok123',
+      status: 'finalized',
       customer_phone: '9876543210',
       bill_number: 'INV-0001',
       shop_name: 'My Shop',
@@ -785,6 +787,30 @@ describe('POST /api/bills/send-whatsapp', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(false);
     expect(res.body.skipped).toBe(true);
+  });
+
+  test('refuses a draft bill', async () => {
+    mockRequest.recordset = [{ receipt_token: 'tok', status: 'draft', customer_phone: '9876543210', bill_number: 'D-1', shop_name: 'Shop' }];
+    const res = await request(app)
+      .post('/api/bills/send-whatsapp')
+      .set(authHeader())
+      .send({ bill_id: BILL_ID });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/settled/);
+    expect(sendBillLink).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/bills/:id/whatsapp', () => {
+  test('refuses a draft bill and does not save a typed phone', async () => {
+    mockRequest.recordset = [{ receipt_token: 'tok', status: 'draft', customer_phone: null, bill_number: 'D-1', shop_name: 'Shop', whatsapp_mode: 'deeplink' }];
+    const res = await request(app)
+      .post(`/api/bills/${BILL_ID}/whatsapp`)
+      .set(authHeader())
+      .send({ phone: '9876543210' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/settled/);
+    expect(mockRequest.query).toHaveBeenCalledTimes(1); // the SELECT only — no UPDATE
   });
 });
 

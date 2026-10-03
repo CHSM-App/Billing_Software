@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
@@ -157,22 +158,53 @@ class _DraftCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w600),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.space8),
+                        Text(
+                          '₹${(draft.total - draft.discountAmount).toStringAsFixed(2)}',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      l10n.openOrdersItemCount(itemCount.toInt()),
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: AppColors.textSecondary),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            l10n.openOrdersItemCount(itemCount.toInt()),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(color: AppColors.textSecondary),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.space8),
+                        Text(
+                          DateFormat('dd MMM yyyy, hh:mm a')
+                              .format(draft.createdAt.toLocal()),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ],
                     ),
                     // Money already taken online, and the reference to check it
                     // against. Shown here rather than only in the online queue
@@ -205,15 +237,6 @@ class _DraftCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: AppSpacing.space8),
-              Text(
-                '₹${(draft.total - draft.discountAmount).toStringAsFixed(2)}',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const Icon(Icons.chevron_right, color: AppColors.textDisabled),
             ],
           ),
         ),

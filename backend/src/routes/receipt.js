@@ -32,7 +32,7 @@ router.get('/:token', async (req, res) => {
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
         LEFT JOIN tables t ON t.id = b.table_id
-        WHERE b.receipt_token = @token AND b.status != 'voided'
+        WHERE b.receipt_token = @token AND b.status = 'finalized'
       `);
 
     if (row.recordset.length === 0) {

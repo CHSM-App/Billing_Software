@@ -1859,7 +1859,7 @@ router.post('/send-whatsapp', requireAuth, whatsappLimiter, async (req, res) => 
       .input('id',          sql.UniqueIdentifier, bill_id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT b.receipt_token, b.customer_phone, b.bill_number,
+        SELECT b.receipt_token, b.customer_phone, b.bill_number, b.status,
                bs.name AS shop_name
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
@@ -1871,6 +1871,10 @@ router.post('/send-whatsapp', requireAuth, whatsappLimiter, async (req, res) => 
     }
 
     const { receipt_token, customer_phone, bill_number, shop_name } = row.recordset[0];
+    // Only a settled bill is sent — a draft's lines/total can still change.
+    if (row.recordset[0].status !== 'finalized') {
+      return res.status(400).json({ error: 'Only a settled bill can be sent' });
+    }
 
     if (!customer_phone) {
       return res.status(400).json({ error: 'This bill has no customer phone number' });
@@ -1912,7 +1916,7 @@ router.get('/:id/whatsapp-text', requireAuth, async (req, res) => {
       .input('id',          sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT b.receipt_token, b.customer_phone, b.bill_number,
+        SELECT b.receipt_token, b.customer_phone, b.bill_number, b.status,
                bs.name AS shop_name
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
@@ -1924,6 +1928,10 @@ router.get('/:id/whatsapp-text', requireAuth, async (req, res) => {
     }
 
     const { receipt_token, customer_phone, bill_number, shop_name } = row.recordset[0];
+    // Only a settled bill is sent — a draft's lines/total can still change.
+    if (row.recordset[0].status !== 'finalized') {
+      return res.status(400).json({ error: 'Only a settled bill can be sent' });
+    }
 
     if (!customer_phone) {
       return res.status(400).json({ error: 'This bill has no customer phone number' });
@@ -1962,7 +1970,7 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
       .input('id',          sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT b.receipt_token, b.customer_phone, b.bill_number,
+        SELECT b.receipt_token, b.customer_phone, b.bill_number, b.status,
                bs.name AS shop_name, bs.whatsapp_mode
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
@@ -1973,8 +1981,29 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
       return res.status(404).json({ error: 'Bill not found' });
     }
 
-    const { receipt_token, customer_phone, bill_number, shop_name, whatsapp_mode } =
-      row.recordset[0];
+    const { receipt_token, bill_number, shop_name, whatsapp_mode } = row.recordset[0];
+    let { customer_phone } = row.recordset[0];
+    // Only a settled bill is sent — a draft's lines/total can still change.
+    if (row.recordset[0].status !== 'finalized') {
+      return res.status(400).json({ error: 'Only a settled bill can be sent' });
+    }
+
+    // A bill settled without a number (re-sent from History): the cashier types
+    // one in now. Saved on the bill so the next send/receipt already has it.
+    // Ignored when the bill has a phone — this only fills a gap.
+    if (!customer_phone && req.body && req.body.phone != null) {
+      const typed = String(req.body.phone).trim();
+      if (!/^\d{10}$/.test(typed)) {
+        return res.status(400).json({ error: 'Customer phone must be 10 digits' });
+      }
+      await pool.request()
+        .input('id',          sql.UniqueIdentifier, req.params.id)
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('phone',       sql.NVarChar(20),     typed)
+        .query(`UPDATE bills SET customer_phone = @phone
+                WHERE id = @id AND business_id = @business_id AND customer_phone IS NULL`);
+      customer_phone = typed;
+    }
 
     if (!customer_phone) {
       return res.status(400).json({ error: 'This bill has no customer phone number' });

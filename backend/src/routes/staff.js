@@ -18,7 +18,8 @@ function ownerOnly(req, res, next) {
 // Staff roles this endpoint can create/manage:
 //   'cashier' = finalizes bills, takes payment, can be voided by owner
 //   'server'  = takes/builds orders (draft bills) and sends them to the kitchen;
-//               cannot finalize or collect payment
+//               cannot finalize or collect payment. Labelled "Captain" for
+//               restaurants and "Front Desk" for retail (UI only)
 //   'kitchen' = kitchen chef (Kitchen Display)
 // Owners are managed elsewhere.
 const MANAGED_ROLES = ['cashier', 'server', 'kitchen'];

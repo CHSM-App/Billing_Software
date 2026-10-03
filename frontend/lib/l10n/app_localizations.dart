@@ -3760,6 +3760,12 @@ abstract class AppLocalizations {
   /// **'Captain'**
   String get staffRoleServer;
 
+  /// No description provided for @staffRoleFrontDesk.
+  ///
+  /// In en, this message translates to:
+  /// **'Front Desk'**
+  String get staffRoleFrontDesk;
+
   /// No description provided for @staffRoleKitchen.
   ///
   /// In en, this message translates to:

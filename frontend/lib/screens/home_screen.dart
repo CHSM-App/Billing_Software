@@ -3538,8 +3538,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // When GST is enabled, the tax is shown split as CGST + SGST (each half)
       // in the totals summary below, mirroring the printed receipt.
       final gstEnabled = ref.watch(gstEnabledProvider);
-      // A server takes/builds orders and sends them to the kitchen but cannot
-      // finalize or take payment — hide the finalize (WhatsApp/Print) actions.
+      // A server (Captain / Front Desk in retail) takes/builds orders and
+      // saves them but cannot finalize or take payment — hide the finalize
+      // (WhatsApp/Print) actions.
       final canFinalize = ref.watch(userRoleProvider) != 'server';
       // Printer reachability no longer changes any label here — it only picks
       // which finish the default settle runs, read at that moment in _settle.

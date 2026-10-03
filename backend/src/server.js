@@ -169,6 +169,9 @@ app.use(pinoHttp({
   },
 }));
 
+// Admin item import posts a whole spreadsheet — past the 100kb default. Parsed
+// here first so the global parser below skips it (body already read).
+app.use('/admin/api/businesses/:id/items/import', bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.json());
 
 // Health check — registered BEFORE the global rate limiter, deliberately, and

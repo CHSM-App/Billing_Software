@@ -7,7 +7,7 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.8:5000/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
           
@@ -530,8 +530,13 @@ Future<Map<String, dynamic>> getBillWhatsAppText(String billId) async {
 /// whatsapp_mode:
 ///   - 'api'      → it already sent the template; returns { mode:'api', sent:true }.
 ///   - 'deeplink' → returns { mode:'deeplink', phone, message } to open WhatsApp.
-Future<Map<String, dynamic>> whatsAppBill(String billId) async {
-  final data = _parse(await _authPost(Uri.parse('$baseUrl/bills/$billId/whatsapp')));
+/// [phone] fills in a bill saved without one (and is stored on it); ignored
+/// when the bill already has a phone.
+Future<Map<String, dynamic>> whatsAppBill(String billId, {String? phone}) async {
+  final data = _parse(await _authPost(
+    Uri.parse('$baseUrl/bills/$billId/whatsapp'),
+    body: phone == null ? null : jsonEncode({'phone': phone}),
+  ));
   return Map<String, dynamic>.from(data as Map);
 }
 
