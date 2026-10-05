@@ -65,6 +65,13 @@ class BillingApp extends ConsumerWidget {
       // Rebuilt on language change — Marathi swaps the type scale to a
       // Devanagari-capable font.
       theme: buildAppTheme(language.code),
+      // A large phone-wide font setting (common on cashier phones) blew every
+      // screen up until the cart and totals no longer fit. Allow a little
+      // enlargement for readability, but not past 1.1×.
+      builder: (context, child) => MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.1,
+        child: child!,
+      ),
       locale: language.locale,
       supportedLocales: AppLocalizations.supportedLocales,
       localizationsDelegates: AppLocalizations.localizationsDelegates,

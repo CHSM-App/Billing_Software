@@ -154,6 +154,9 @@ ThemeData buildAppTheme(String languageCode) {
 
 ThemeData _themeData() => ThemeData(
   useMaterial3: true,
+  // Denser controls so a phone shows more of the cart/list at once.
+  visualDensity: VisualDensity.compact,
+  iconTheme: const IconThemeData(size: 20),
   scaffoldBackgroundColor: AppColors.background,
   colorScheme: const ColorScheme.light(
     primary: AppColors.primary,
@@ -168,49 +171,49 @@ ThemeData _themeData() => ThemeData(
   ),
   textTheme: AppFont.textTheme().copyWith(
     displayLarge: AppFont.style(
-      fontSize: 30,
+      fontSize: 26,
       fontWeight: FontWeight.w800,
       color: AppColors.textPrimary,
       letterSpacing: -0.5,
       height: 1.2,
     ),
     headlineMedium: AppFont.style(
-      fontSize: 22,
+      fontSize: 20,
       fontWeight: FontWeight.w700,
       color: AppColors.textPrimary,
       letterSpacing: -0.3,
     ),
     titleLarge: AppFont.style(
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: FontWeight.w600,
       color: AppColors.textPrimary,
       letterSpacing: -0.2,
     ),
     titleMedium: AppFont.style(
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: FontWeight.w600,
       color: AppColors.textPrimary,
     ),
     bodyLarge: AppFont.style(
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: FontWeight.w400,
       color: AppColors.textPrimary,
       height: 1.5,
     ),
     bodyMedium: AppFont.style(
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: FontWeight.w400,
       color: AppColors.textPrimary,
       height: 1.5,
     ),
     bodySmall: AppFont.style(
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: FontWeight.w400,
       color: AppColors.textSecondary,
       height: 1.4,
     ),
     labelLarge: AppFont.style(
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: FontWeight.w600,
       color: AppColors.textPrimary,
       letterSpacing: 0.3,
@@ -221,13 +224,14 @@ ThemeData _themeData() => ThemeData(
     foregroundColor: AppColors.textPrimary,
     elevation: 0,
     scrolledUnderElevation: 0,
+    toolbarHeight: 50,
     titleTextStyle: AppFont.style(
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: FontWeight.w700,
       color: AppColors.textPrimary,
       letterSpacing: -0.2,
     ),
-    iconTheme: const IconThemeData(color: AppColors.textPrimary, size: 22),
+    iconTheme: const IconThemeData(color: AppColors.textPrimary, size: 20),
     shape: const Border(bottom: BorderSide(color: AppColors.border, width: 1)),
   ),
   elevatedButtonTheme: ElevatedButtonThemeData(
@@ -236,12 +240,12 @@ ThemeData _themeData() => ThemeData(
       foregroundColor: Colors.white,
       elevation: 0,
       shadowColor: Colors.transparent,
-      minimumSize: const Size(double.infinity, 52),
+      minimumSize: const Size(double.infinity, 44),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.all(Radius.circular(AppRadius.medium)),
       ),
       textStyle: AppFont.style(
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.2,
       ),
@@ -251,12 +255,12 @@ ThemeData _themeData() => ThemeData(
     style: OutlinedButton.styleFrom(
       foregroundColor: AppColors.primary,
       side: const BorderSide(color: AppColors.primary, width: 1.5),
-      minimumSize: const Size(double.infinity, 52),
+      minimumSize: const Size(double.infinity, 44),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.all(Radius.circular(AppRadius.medium)),
       ),
       textStyle: AppFont.style(
-        fontSize: 15,
+        fontSize: 14,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.2,
       ),
@@ -266,7 +270,7 @@ ThemeData _themeData() => ThemeData(
     style: TextButton.styleFrom(
       foregroundColor: AppColors.primary,
       textStyle: AppFont.style(
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: FontWeight.w600,
       ),
     ),
@@ -274,9 +278,10 @@ ThemeData _themeData() => ThemeData(
   inputDecorationTheme: InputDecorationTheme(
     filled: true,
     fillColor: AppColors.surfaceVariant,
+    isDense: true,
     contentPadding: const EdgeInsets.symmetric(
-      horizontal: AppSpacing.space16,
-      vertical: AppSpacing.space16,
+      horizontal: AppSpacing.space12,
+      vertical: AppSpacing.space12,
     ),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(AppRadius.small),
@@ -299,20 +304,20 @@ ThemeData _themeData() => ThemeData(
       borderSide: const BorderSide(color: AppColors.error, width: 2),
     ),
     labelStyle: AppFont.style(
-      fontSize: 14,
+      fontSize: 13,
       color: AppColors.textSecondary,
       fontWeight: FontWeight.w500,
     ),
     hintStyle: AppFont.style(
-      fontSize: 14,
+      fontSize: 13,
       color: AppColors.textDisabled,
     ),
     errorStyle: AppFont.style(
-      fontSize: 12,
+      fontSize: 11,
       color: AppColors.error,
     ),
     floatingLabelStyle: AppFont.style(
-      fontSize: 13,
+      fontSize: 12,
       color: AppColors.primary,
       fontWeight: FontWeight.w600,
     ),
@@ -329,8 +334,8 @@ ThemeData _themeData() => ThemeData(
   chipTheme: ChipThemeData(
     backgroundColor: AppColors.surfaceVariant,
     selectedColor: AppColors.primaryLight,
-    labelStyle: AppFont.style(fontSize: 13, fontWeight: FontWeight.w500),
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+    labelStyle: AppFont.style(fontSize: 12, fontWeight: FontWeight.w500),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(AppRadius.small),
     ),
@@ -339,7 +344,7 @@ ThemeData _themeData() => ThemeData(
     behavior: SnackBarBehavior.floating,
     backgroundColor: const Color(0xFF0F172A),
     contentTextStyle: AppFont.style(
-      fontSize: 14,
+      fontSize: 13,
       color: Colors.white,
       fontWeight: FontWeight.w500,
     ),
@@ -356,12 +361,12 @@ ThemeData _themeData() => ThemeData(
       borderRadius: BorderRadius.circular(AppRadius.large),
     ),
     titleTextStyle: AppFont.style(
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: FontWeight.w700,
       color: AppColors.textPrimary,
     ),
     contentTextStyle: AppFont.style(
-      fontSize: 14,
+      fontSize: 13,
       color: AppColors.textSecondary,
       height: 1.5,
     ),
@@ -398,9 +403,9 @@ ThemeData _themeData() => ThemeData(
     }),
     iconTheme: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.selected)) {
-        return const IconThemeData(color: AppColors.primary, size: 22);
+        return const IconThemeData(color: AppColors.primary, size: 20);
       }
-      return const IconThemeData(color: AppColors.textSecondary, size: 22);
+      return const IconThemeData(color: AppColors.textSecondary, size: 20);
     }),
     elevation: 0,
     surfaceTintColor: Colors.transparent,
@@ -408,9 +413,9 @@ ThemeData _themeData() => ThemeData(
   navigationRailTheme: NavigationRailThemeData(
     backgroundColor: AppColors.surface,
     indicatorColor: AppColors.primaryLight,
-    selectedIconTheme: const IconThemeData(color: AppColors.primary, size: 22),
+    selectedIconTheme: const IconThemeData(color: AppColors.primary, size: 20),
     unselectedIconTheme:
-        const IconThemeData(color: AppColors.textSecondary, size: 22),
+        const IconThemeData(color: AppColors.textSecondary, size: 20),
     selectedLabelTextStyle: AppFont.style(
       color: AppColors.primary,
       fontSize: 12,

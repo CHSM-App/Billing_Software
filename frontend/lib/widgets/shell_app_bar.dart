@@ -31,7 +31,7 @@ class ShellAppBar extends StatelessWidget {
         children: [
           SizedBox(height: topPadding),
           SizedBox(
-            height: kToolbarHeight,
+            height: 50, // matches appBarTheme.toolbarHeight
             child: Row(
               children: [
                 if (leading != null)

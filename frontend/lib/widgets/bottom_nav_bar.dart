@@ -17,7 +17,7 @@ class AppBottomNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 58,
+      height: 54,
       child: Row(
         children: List.generate(items.length, (i) {
           final item = items[i];
@@ -39,7 +39,7 @@ class AppBottomNavBar extends StatelessWidget {
                     ),
                     child: Icon(
                       selected ? item.iconFilled : item.iconOutlined,
-                      size: 22,
+                      size: 20,
                       color: selected ? AppColors.primary : AppColors.textSecondary,
                     ),
                   ),
