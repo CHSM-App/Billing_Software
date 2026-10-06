@@ -85,7 +85,6 @@ class SalesReportExport {
     b.writeln(_row(['Discount Given', _money(summary.totalDiscount)]));
     b.writeln(_row(['Tax Collected', _money(summary.totalTax)]));
     b.writeln(_row(['Average Bill', _money(summary.avgBill)]));
-    b.writeln(_row(['Cost of Goods', _money(summary.costOfGoods)]));
     b.writeln(_row(['Expenses', _money(summary.totalExpenses)]));
     b.writeln(_row(['Net Profit', _money(summary.netProfit)]));
     b.writeln();
@@ -217,7 +216,6 @@ class SalesReportExport {
                 _stat('Discount', _money(summary.totalDiscount)),
                 _stat('Tax', _money(summary.totalTax)),
                 _stat('Avg Bill', _money(summary.avgBill)),
-                _stat('Cost of Goods', _money(summary.costOfGoods)),
                 _stat('Expenses', _money(summary.totalExpenses)),
                 _stat('Net Profit', _money(summary.netProfit)),
               ],

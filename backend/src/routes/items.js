@@ -5,7 +5,6 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const audit = require('../audit');
-const { trimExcess } = require('../batches');
 const {
   MAX_DECIMAL_12_4,
   validateNumber,
@@ -93,10 +92,7 @@ async function nameTaken(businessId, name, excludeId = null) {
 }
 
 
-// Also attaches each item's and size's open stock batches (oldest first) as
-// `batches`, which the billing screen offers for the cashier to pick from.
-// Purchase cost is included only when [showCost] — owners only.
-async function attachVariants(businessId, itemRows, showCost = false) {
+async function attachVariants(businessId, itemRows) {
   if (itemRows.length === 0) return itemRows;
   const ids = itemRows.map((r) => r.id);
   const request = pool.request().input('business_id', sql.UniqueIdentifier, businessId);
@@ -118,33 +114,8 @@ async function attachVariants(businessId, itemRows, showCost = false) {
   for (const v of result.recordset) {
     (byItem[v.item_id] = byItem[v.item_id] || []).push(v);
   }
-  // Every open batch of the business in one query — a shop's open batches
-  // are few, and this avoids a second IN list the size of the catalogue.
-  const batchResult = await pool.request()
-    .input('business_id', sql.UniqueIdentifier, businessId)
-    .query(`
-      SELECT id, item_id, variant_id, batch_no, received_date, qty_remaining, unit_cost
-      FROM stock_batches
-      WHERE business_id = @business_id AND qty_remaining > 0
-      ORDER BY received_date, created_at
-    `);
-  const batchesOf = {};
-  for (const b of batchResult.recordset || []) {
-    const owner = b.variant_id || b.item_id;
-    if (!owner) continue;
-    (batchesOf[owner] = batchesOf[owner] || []).push({
-      id: b.id,
-      batch_no: b.batch_no,
-      received_date: b.received_date instanceof Date
-        ? b.received_date.toISOString().slice(0, 10) : b.received_date,
-      qty_remaining: parseFloat(b.qty_remaining),
-      ...(showCost ? { unit_cost: parseFloat(b.unit_cost) } : {}),
-    });
-  }
   for (const row of itemRows) {
     row.variants = byItem[row.id] || [];
-    row.batches = batchesOf[row.id] || [];
-    for (const v of row.variants) v.batches = batchesOf[v.id] || [];
   }
   return itemRows;
 }
@@ -284,15 +255,15 @@ router.get('/', requireAuth, async (req, res) => {
         const row = variantMatch.recordset[0];
         const matchedVariantId = row.matched_variant_id;
         delete row.matched_variant_id;
-        await attachVariants(req.user.business_id, [row], req.user.role === 'owner');
+        await attachVariants(req.user.business_id, [row]);
         row.matched_variant_id = matchedVariantId;
         return res.json(row);
       }
-      await attachVariants(req.user.business_id, result.recordset, req.user.role === 'owner');
+      await attachVariants(req.user.business_id, result.recordset);
       return res.json(result.recordset[0]);
     }
 
-    await attachVariants(req.user.business_id, result.recordset, req.user.role === 'owner');
+    await attachVariants(req.user.business_id, result.recordset);
     return res.json(result.recordset);
   } catch (err) {
     logger.error({ err }, 'Get items error');
@@ -316,7 +287,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: 'Item not found' });
     }
-    await attachVariants(req.user.business_id, result.recordset, req.user.role === 'owner');
+    await attachVariants(req.user.business_id, result.recordset);
     return res.json(result.recordset[0]);
   } catch (err) {
     logger.error({ err }, 'Get item error');
@@ -412,7 +383,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
     // client's Item.fromJson defaults it to [], which is the same shape that
     // made a sized item look plain and bill at its base price — see the note on
     // PUT /:id below.
-    await attachVariants(req.user.business_id, [created], req.user.role === 'owner');
+    await attachVariants(req.user.business_id, [created]);
 
     return res.status(201).json(created);
   } catch (err) {
@@ -552,17 +523,13 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     `);
 
     const updated = result.recordset[0];
-    // A hand-set count below what the batches hold writes off the oldest.
-    if (stock_quantity !== undefined) {
-      await trimExcess(pool, req.user.business_id, { item_id: req.params.id });
-    }
     // Attach the item's sizes. Without this the response has NO `variants` key,
     // so the client's Item.fromJson defaults it to [] and the updated item lands
     // in the billing list looking like a plain item — tapping it then bills the
     // base price instead of opening the size picker (Chicken 65: base 230 when
     // the real sizes are half 180 / Full 280). Every other item-returning
     // endpoint already does this; this one was the odd one out.
-    await attachVariants(req.user.business_id, [updated], req.user.role === 'owner');
+    await attachVariants(req.user.business_id, [updated]);
     const actor = { user_id: req.user.user_id, user_name: req.user.name || null };
 
     if (price !== undefined && parseFloat(price) !== parseFloat(before.price)) {
@@ -819,9 +786,6 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
 
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: 'Variant not found' });
-    }
-    if (stock_quantity !== undefined) {
-      await trimExcess(pool, req.user.business_id, { variant_id: req.params.variantId });
     }
     return res.json(result.recordset[0]);
   } catch (err) {

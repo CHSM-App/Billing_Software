@@ -107,8 +107,6 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                   const SizedBox(height: 16),
                   _buildPeriodSalesSection(l10n, filter),
                   const SizedBox(height: 16),
-                  _buildProfit(l10n, summary),
-                  const SizedBox(height: 16),
                   if (summary.topItems.isNotEmpty) ...[
                     _buildTopItems(l10n, summary),
                     const SizedBox(height: 16),
@@ -606,48 +604,6 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     );
   }
 
-  // ── Profit & loss ───────────────────────────────────────────────────────────
-  // Sales less the purchase cost of the batches sold from, less expenses.
-  Widget _buildProfit(AppLocalizations l10n, ReportSummary s) {
-    Widget line(String label, double value, {bool bold = false}) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
-          child: Row(children: [
-            Expanded(
-                child: Text(label,
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
-                        color: AppColors.textPrimary))),
-            Text('₹${_amt.format(value)}',
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
-                    color: bold && value < 0
-                        ? AppColors.error
-                        : AppColors.textPrimary)),
-          ]),
-        );
-    return _SectionCard(
-      title: l10n.reportsProfitTitle,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          line(l10n.reportsSales, s.netSales),
-          line(l10n.reportsCostOfGoods, -s.costOfGoods),
-          line(l10n.reportsExpenses, -s.totalExpenses),
-          const Divider(height: 16),
-          line(l10n.reportsNetProfit, s.netProfit, bold: true),
-          if (s.uncostedQty > 0) ...[
-            const SizedBox(height: 8),
-            Text(l10n.reportsUncostedQty(formatQty(s.uncostedQty)),
-                style: const TextStyle(
-                    fontSize: 12, color: AppColors.textSecondary)),
-          ],
-        ],
-      ),
-    );
-  }
-
   // ── Top selling items ───────────────────────────────────────────────────────
   Widget _buildTopItems(AppLocalizations l10n, ReportSummary s) {
     final items = s.topItems.length > 5 ? s.topItems.sublist(0, 5) : s.topItems;
@@ -671,13 +627,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                               fontWeight: FontWeight.w600,
                               color: AppColors.textPrimary)),
                       const SizedBox(height: 2),
-                      Text(
-                          [
-                            l10n.reportsSoldCount(items[i].qtySold.toInt()),
-                            if (items[i].profit != null)
-                              l10n.reportsItemProfit(
-                                  _amt.format(items[i].profit!)),
-                          ].join(' · '),
+                      Text(l10n.reportsSoldCount(items[i].qtySold.toInt()),
                           style: const TextStyle(
                               fontSize: 12, color: AppColors.textSecondary)),
                     ],

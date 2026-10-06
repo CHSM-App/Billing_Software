@@ -323,14 +323,12 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
     final selected = await showStockTargetPicker(context, candidates);
     if (selected == null || !mounted) return;
     setState(() {
-      for (final s in selected) {
-        _addRow(
-          name: s.name,
-          unit: s.unit,
-          currentStock: s.currentStock,
-          lowStockThreshold: s.lowStockThreshold,
-        );
-      }
+      _addRow(
+        name: selected.name,
+        unit: selected.unit,
+        currentStock: selected.currentStock,
+        lowStockThreshold: selected.lowStockThreshold,
+      );
     });
   }
 

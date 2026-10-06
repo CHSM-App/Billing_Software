@@ -300,7 +300,6 @@ class _LineDraft {
   final TextEditingController price;
   final TextEditingController rate;
   final TextEditingController hsn;
-  final TextEditingController batchNo;
   String? itemId;
   String? variantId;
   String? rawMaterialId;
@@ -319,7 +318,6 @@ class _LineDraft {
     String price = '',
     String rate = '',
     String hsn = '',
-    String batchNo = '',
     this.itemId,
     this.variantId,
     this.rawMaterialId,
@@ -328,8 +326,7 @@ class _LineDraft {
         qty = TextEditingController(text: qty),
         price = TextEditingController(text: price),
         rate = TextEditingController(text: rate),
-        hsn = TextEditingController(text: hsn),
-        batchNo = TextEditingController(text: batchNo) {
+        hsn = TextEditingController(text: hsn) {
     _linkedName = isLinked ? this.name.text : null;
     this.name.addListener(_onNameChanged);
   }
@@ -348,17 +345,12 @@ class _LineDraft {
     price.dispose();
     rate.dispose();
     hsn.dispose();
-    batchNo.dispose();
   }
 
   /// Whether this line is tied to a stock target. Only linked lines move
   /// inventory on the server; a free-text line is a service/freight charge.
   bool get isLinked =>
       itemId != null || variantId != null || rawMaterialId != null;
-
-  /// Item and size lines become a stock batch the cashier sells from; raw
-  /// materials and freight lines don't.
-  bool get receivesBatch => itemId != null || variantId != null;
 
   /// Ties the line to [t]: sets the single target id, the display name and
   /// unit, and pre-fills HSN / GST % from the item when the user hasn't typed
@@ -415,8 +407,6 @@ class _LineDraft {
         'unit_price': unitPrice,
         if (taxRate != null) 'tax_rate': taxRate,
         if (hsn.text.trim().isNotEmpty) 'hsn_code': hsn.text.trim(),
-        if (receivesBatch && batchNo.text.trim().isNotEmpty)
-          'batch_no': batchNo.text.trim(),
       };
 }
 
@@ -627,7 +617,6 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           price: (_n(m['unit_price']) * _n(m['quantity'])).toStringAsFixed(2),
           rate: m['tax_rate'] == null ? '' : _n(m['tax_rate']).toString(),
           hsn: m['hsn_code']?.toString() ?? '',
-          batchNo: m['batch_no']?.toString() ?? '',
           itemId: m['item_id']?.toString(),
           variantId: m['variant_id']?.toString(),
           rawMaterialId: m['raw_material_id']?.toString(),
@@ -1075,27 +1064,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           ),
         ]),
         const SizedBox(height: 8),
-        // Batch no. only for lines that receive an item or size — those are
-        // the ones that become a stock batch. Linking changes the name, so
-        // listening to it is enough to show/hide the field.
-        AnimatedBuilder(
-          animation: l.name,
-          builder: (_, __) => Row(children: [
-            Expanded(
-              child: AppTextField(
-                  label: context.l10n.purchaseFieldHsnOptional,
-                  controller: l.hsn),
-            ),
-            if (l.receivesBatch) ...[
-              const SizedBox(width: 8),
-              Expanded(
-                child: AppTextField(
-                    label: context.l10n.vendorBillBatchNo,
-                    controller: l.batchNo),
-              ),
-            ],
-          ]),
-        ),
+        AppTextField(
+            label: context.l10n.purchaseFieldHsnOptional, controller: l.hsn),
         const SizedBox(height: 6),
         // AppTextField exposes no onChanged, so the live line total tracks the
         // controllers directly.

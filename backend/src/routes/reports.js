@@ -13,36 +13,6 @@ function ownerOnly(req, res, next) {
   next();
 }
 
-// Cost of goods sold over a period: each finalized bill line's quantity × the
-// cost of the batch it was sold from (bill_items.unit_cost, migration 044).
-// uncosted_qty counts tracked-stock units sold from opening stock, which has no
-// purchase cost — so the owner knows the profit figure leaves those out.
-async function costOfGoods(businessId, fromDt, toDt) {
-  const r = await pool.request()
-    .input('business_id', sql.UniqueIdentifier, businessId)
-    .input('from_dt',     sql.DateTime2,        fromDt)
-    .input('to_dt',       sql.DateTime2,        toDt)
-    .query(`
-      SELECT
-        ISNULL(SUM(bi.quantity * bi.unit_cost), 0) AS cost_of_goods,
-        ISNULL(SUM(CASE WHEN bi.unit_cost IS NULL AND bs.inventory_enabled = 1
-                         AND COALESCE(v.stock_quantity, i.stock_quantity) IS NOT NULL
-                   THEN bi.quantity ELSE 0 END), 0) AS uncosted_qty
-      FROM bill_items bi
-      JOIN bills b ON b.id = bi.bill_id
-      JOIN businesses bs ON bs.id = b.business_id
-      LEFT JOIN items i ON i.id = bi.item_id
-      LEFT JOIN item_variants v ON v.id = bi.variant_id
-      WHERE b.business_id = @business_id AND b.status = 'finalized'
-        AND b.created_at >= @from_dt AND b.created_at < @to_dt
-    `);
-  const row = r.recordset[0] || {};
-  return {
-    costOfGoods: parseFloat(parseFloat(row.cost_of_goods || 0).toFixed(2)),
-    uncostedQty: parseFloat(row.uncosted_qty || 0),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // GET /api/reports/today?date=YYYY-MM-DD
 //
@@ -63,7 +33,7 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
 
     const { start, end } = dayRange(dateStr);
 
-    const [billResult, expenseResult, cogs] = await Promise.all([
+    const [billResult, expenseResult] = await Promise.all([
       // Sargable range on DATETIME2 — no CAST() wrapping the column.
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -97,7 +67,6 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
           FROM expenses
           WHERE business_id = @business_id AND expense_date = @expense_date
         `),
-      costOfGoods(req.user.business_id, start, end),
     ]);
 
     const bill      = billResult.recordset[0];
@@ -115,9 +84,7 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
       total_discount:  discount,
       total_round_off: roundOff,
       total_expenses:  expenses,
-      cost_of_goods:   cogs.costOfGoods,
-      uncosted_qty:    cogs.uncostedQty,
-      net_profit:      parseFloat((netRevenue - expenses - cogs.costOfGoods).toFixed(2)),
+      net_profit:      parseFloat((netRevenue - expenses).toFixed(2)),
       by_payment_mode: {
         cash:   parseFloat(bill.cash),
         upi:    parseFloat(bill.upi),
@@ -153,7 +120,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
 
     const { start: fromDt, end: toDt } = dateRange(fromStr, toStr);
 
-    const [billResult, expenseResult, dailyResult, expCatResult, payModeResult, topItemsResult, recentBillsResult, cogs] = await Promise.all([
+    const [billResult, expenseResult, dailyResult, expCatResult, payModeResult, topItemsResult, recentBillsResult] = await Promise.all([
       // Sargable DATETIME2 range for bills.created_at
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -220,8 +187,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
           SELECT d.day,
                  ISNULL(b.revenue,  0) AS revenue,
                  ISNULL(e.expenses, 0) AS expenses,
-                 ISNULL(c.cogs,     0) AS cost_of_goods,
-                 ISNULL(b.revenue,  0) - ISNULL(e.expenses, 0) - ISNULL(c.cogs, 0) AS profit
+                 ISNULL(b.revenue,  0) - ISNULL(e.expenses, 0) AS profit
           FROM (
             SELECT CAST(created_at AS DATE) AS day
             FROM bills
@@ -247,15 +213,6 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
               AND expense_date >= @from_date AND expense_date <= @to_date
             GROUP BY expense_date
           ) e ON e.day = d.day
-          LEFT JOIN (
-            SELECT CAST(b.created_at AS DATE) AS day, SUM(bi.quantity * bi.unit_cost) AS cogs
-            FROM bill_items bi
-            JOIN bills b ON b.id = bi.bill_id
-            WHERE b.business_id = @business_id AND b.status = 'finalized'
-              AND b.created_at >= @from_dt AND b.created_at < @to_dt
-              AND bi.unit_cost IS NOT NULL
-            GROUP BY CAST(b.created_at AS DATE)
-          ) c ON c.day = d.day
           ORDER BY d.day
         `),
       pool.request()
@@ -298,9 +255,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
                  SUM(bi.quantity) AS qty_sold,
                  SUM(bi.line_total * CASE WHEN b.subtotal > 0
                        THEN (b.subtotal - ISNULL(b.discount_amount, 0)) / b.subtotal
-                       ELSE 1 END) AS revenue,
-                 -- NULL when no line of this item carried a batch cost.
-                 SUM(bi.quantity * bi.unit_cost) AS cost
+                       ELSE 1 END) AS revenue
           FROM bill_items bi
           JOIN bills b ON b.id = bi.bill_id
           WHERE b.business_id = @business_id AND b.status = 'finalized'
@@ -323,7 +278,6 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
             AND b.created_at >= @from_dt AND b.created_at < @to_dt
           ORDER BY b.created_at DESC
         `),
-      costOfGoods(req.user.business_id, fromDt, toDt),
     ]);
 
     const bill      = billResult.recordset[0];
@@ -343,9 +297,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
       total_round_off: parseFloat(bill.total_round_off),
       total_tax:       parseFloat(bill.total_tax),
       total_expenses:  expenses,
-      cost_of_goods:   cogs.costOfGoods,
-      uncosted_qty:    cogs.uncostedQty,
-      net_profit:      parseFloat((netRevenue - expenses - cogs.costOfGoods).toFixed(2)),
+      net_profit:      parseFloat((netRevenue - expenses).toFixed(2)),
       by_payment_mode: {
         cash:   parseFloat(bill.cash),
         upi:    parseFloat(bill.upi),
@@ -357,7 +309,6 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         day:      r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day),
         revenue:  parseFloat(r.revenue),
         expenses: parseFloat(r.expenses),
-        cost_of_goods: parseFloat(r.cost_of_goods),
         profit:   parseFloat(r.profit),
       })),
       expenses_by_category: expCatResult.recordset.map((r) => ({
@@ -373,8 +324,6 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         item_name: r.item_name,
         qty_sold:  parseFloat(r.qty_sold),
         revenue:   parseFloat(r.revenue),
-        cost:      r.cost != null ? parseFloat(r.cost) : null,
-        profit:    r.cost != null ? parseFloat((r.revenue - r.cost).toFixed(2)) : null,
       })),
       recent_bills: recentBillsResult.recordset.map((r) => ({
         bill_number:     r.bill_number,

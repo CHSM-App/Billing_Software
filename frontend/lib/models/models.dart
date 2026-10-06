@@ -61,66 +61,6 @@ class Business {
       );
 }
 
-/// One purchase's worth of an item or size, with its own cost (backend
-/// migration 044). The cashier picks which batch a line is sold from.
-///
-/// Stock not covered by any batch is "opening stock" — what existed before
-/// batches, or was added by hand. The picker offers it as a null choice.
-class StockBatch {
-  final String id;
-  final String? batchNo;
-  final String receivedDate; // YYYY-MM-DD
-  final double qtyRemaining;
-
-  /// Net purchase cost per unit. Only sent to owners; null for staff.
-  final double? unitCost;
-
-  const StockBatch({
-    required this.id,
-    this.batchNo,
-    required this.receivedDate,
-    required this.qtyRemaining,
-    this.unitCost,
-  });
-
-  factory StockBatch.fromJson(Map<String, dynamic> j) => StockBatch(
-        id: j['id'] as String,
-        batchNo: j['batch_no'] as String?,
-        receivedDate: (j['received_date'] ?? '').toString(),
-        qtyRemaining: double.parse(j['qty_remaining'].toString()),
-        unitCost: j['unit_cost'] != null
-            ? double.parse(j['unit_cost'].toString())
-            : null,
-      );
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'batch_no': batchNo,
-        'received_date': receivedDate,
-        'qty_remaining': qtyRemaining,
-        if (unitCost != null) 'unit_cost': unitCost,
-      };
-
-  static List<StockBatch> listFrom(dynamic raw) => (raw as List? ?? [])
-      .map((b) => StockBatch.fromJson(Map<String, dynamic>.from(b as Map)))
-      .toList();
-
-  /// Stock left outside every batch, or null when stock isn't tracked.
-  static double? openingQty(double? stock, List<StockBatch> batches) {
-    if (stock == null) return null;
-    final held = batches.fold(0.0, (s, b) => s + b.qtyRemaining);
-    final open = stock - held;
-    return open > 0.0001 ? open : 0;
-  }
-
-  /// What the cashier can sell from: opening stock (as null) when any is left,
-  /// then each open batch, oldest first — the server already sends them so.
-  static List<StockBatch?> options(double? stock, List<StockBatch> batches) => [
-        if ((openingQty(stock, batches) ?? 0) > 0) null,
-        ...batches.where((b) => b.qtyRemaining > 0),
-      ];
-}
-
 /// A sellable variant of an item (e.g. a size S/M/L/XL) with its own stock and
 /// optional price. When [price] is null the parent item's price applies.
 class ItemVariant {
@@ -134,9 +74,6 @@ class ItemVariant {
   final int sortOrder;
   final bool isActive;
 
-  /// Open stock batches of this size, oldest first.
-  final List<StockBatch> batches;
-
   ItemVariant({
     required this.id,
     required this.itemId,
@@ -147,7 +84,6 @@ class ItemVariant {
     this.lowStockThreshold,
     this.sortOrder = 0,
     this.isActive = true,
-    this.batches = const [],
   });
 
   factory ItemVariant.fromJson(Map<String, dynamic> j) => ItemVariant(
@@ -162,7 +98,6 @@ class ItemVariant {
         lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         isActive: j['is_active'] == true || j['is_active'] == 1,
-        batches: StockBatch.listFrom(j['batches']),
       );
 
   bool get isLowStock =>
@@ -211,9 +146,6 @@ class Item {
   final List<ItemVariant> variants;
   final bool isActive;
 
-  /// Open stock batches of the item itself (not its sizes), oldest first.
-  final List<StockBatch> batches;
-
   /// Customer-facing dish photo URL. Only populated by the owner-only Menu
   /// Photos endpoints; the billing/items list leaves this null so photos never
   /// load during billing.
@@ -236,7 +168,6 @@ class Item {
     this.variants = const [],
     required this.isActive,
     this.imageUrl,
-    this.batches = const [],
   });
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
@@ -260,7 +191,6 @@ class Item {
             .toList(),
         isActive: j['is_active'] == true || j['is_active'] == 1,
         imageUrl: j['image_url'] as String?,
-        batches: StockBatch.listFrom(j['batches']),
       );
 
   /// Whether this item is sold by a divisible measure (kg, g, litre, ...)
@@ -290,7 +220,6 @@ class Item {
         variants: newVariants,
         isActive: isActive,
         imageUrl: imageUrl,
-        batches: batches,
       );
 
   bool get isLowStock =>
@@ -372,9 +301,6 @@ class BillItem {
   final String billId;
   final String? itemId;
   final String? variantId;
-
-  /// The stock batch this line is sold from; null = opening stock / untracked.
-  final String? batchId;
   final String itemName;
   final double quantity;
   final double unitPrice;
@@ -387,7 +313,6 @@ class BillItem {
     required this.billId,
     this.itemId,
     this.variantId,
-    this.batchId,
     required this.itemName,
     required this.quantity,
     required this.unitPrice,
@@ -404,7 +329,6 @@ class BillItem {
         billId: j['bill_id'] ?? '',
         itemId: j['item_id'],
         variantId: j['variant_id'],
-        batchId: j['batch_id'] as String?,
         itemName: j['item_name'],
         quantity: double.parse(j['quantity'].toString()),
         unitPrice: double.parse(j['unit_price'].toString()),
@@ -724,13 +648,6 @@ class ReportSummary {
   final double totalDiscount;
   final double totalTax;
   final double totalExpenses;
-
-  /// Purchase cost of what was sold — each line × its batch's cost.
-  final double costOfGoods;
-
-  /// Tracked units sold from opening stock, which has no purchase cost and so
-  /// is missing from [costOfGoods].
-  final double uncostedQty;
   final double netProfit;
   final Map<String, double> byPaymentMode;
   final List<DailyReport> daily;
@@ -747,8 +664,6 @@ class ReportSummary {
     this.totalDiscount = 0.0,
     required this.totalTax,
     required this.totalExpenses,
-    this.costOfGoods = 0.0,
-    this.uncostedQty = 0.0,
     required this.netProfit,
     required this.byPaymentMode,
     required this.daily,
@@ -783,8 +698,6 @@ class ReportSummary {
           : 0.0,
       totalTax: double.parse(j['total_tax'].toString()),
       totalExpenses: double.parse(j['total_expenses'].toString()),
-      costOfGoods: double.tryParse('${j['cost_of_goods']}') ?? 0.0,
-      uncostedQty: double.tryParse('${j['uncosted_qty']}') ?? 0.0,
       netProfit: double.parse(j['net_profit'].toString()),
       byPaymentMode: bpm.map((k, v) => MapEntry(k, double.parse(v.toString()))),
       daily: (j['daily'] as List? ?? []).map((d) => DailyReport.fromJson(d)).toList(),
@@ -806,20 +719,12 @@ class TopItem {
   final double qtySold;
   final double revenue;
 
-  /// Revenue less batch cost; null when none of it was sold from a batch.
-  final double? profit;
-
-  TopItem(
-      {required this.itemName,
-      required this.qtySold,
-      required this.revenue,
-      this.profit});
+  TopItem({required this.itemName, required this.qtySold, required this.revenue});
 
   factory TopItem.fromJson(Map<String, dynamic> j) => TopItem(
         itemName: j['item_name'] ?? '',
         qtySold: double.parse((j['qty_sold'] ?? 0).toString()),
         revenue: double.parse((j['revenue'] ?? 0).toString()),
-        profit: double.tryParse('${j['profit']}'),
       );
 }
 

@@ -3,33 +3,13 @@ import 'models.dart';
 class CartEntry {
   final Item item;
   final ItemVariant? variant;
-
-  /// The stock batch this line sells from; null = opening stock, or an item
-  /// that has no batches at all.
-  final StockBatch? batch;
   final double quantity;
 
-  const CartEntry(
-      {required this.item, this.variant, this.batch, required this.quantity});
+  const CartEntry({required this.item, this.variant, required this.quantity});
 
-  /// Stable key identifying this line: item + optional variant + optional
-  /// batch. Two sizes, or two batches, of the same item are distinct lines;
-  /// the same size from the same batch stacks.
-  String get key => keyOf(item.id, variant?.id, batch?.id);
-
-  static String keyOf(String itemId, [String? variantId, String? batchId]) {
-    final base = variantId == null ? itemId : '$itemId:$variantId';
-    return batchId == null ? base : '$base#$batchId';
-  }
-
-  /// Short label for the chosen batch, e.g. "L1" or "12 Sep" — null when
-  /// the line has no batch.
-  String? get batchLabel => batch == null ? null : batchLabelOf(batch!);
-
-  static String batchLabelOf(StockBatch b) {
-    if (b.batchNo != null && b.batchNo!.isNotEmpty) return b.batchNo!;
-    return b.receivedDate;
-  }
+  /// Stable key identifying this line: item + optional variant. Two sizes of
+  /// the same item are distinct lines; the same size stacks.
+  String get key => variant == null ? item.id : '${item.id}:${variant!.id}';
 
   /// Price as STORED on the item or variant — net or gross depending on
   /// [Item.priceInclusiveTax]. Use [netPrice] for arithmetic; this is the raw
@@ -94,7 +74,6 @@ class CartEntry {
     return CartEntry(
       item: item ?? this.item,
       variant: variant ?? this.variant,
-      batch: batch,
       quantity: quantity ?? this.quantity,
     );
   }

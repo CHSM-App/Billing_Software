@@ -90,6 +90,8 @@ class OfflineService {
     final path = join(await getDatabasesPath(), 'billing_offline.db');
     _db = await openDatabase(
       path,
+      // 13 was the paused stock-batches build (see STOCK_BATCHES.md). Kept so
+      // a device that ran it never opens its DB at a lower version.
       version: 13,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
@@ -196,8 +198,6 @@ class OfflineService {
         -- 'piece', 'kg', 'litre', ... Drives decimal-quantity entry; without it
         -- a weighed item billed offline could only be sold in whole units.
         unit           TEXT    NOT NULL DEFAULT 'piece',
-        -- Open stock batches (JSON list), so the batch picker works offline.
-        batches_json   TEXT,
         is_active      INTEGER NOT NULL DEFAULT 1,
         cached_at      INTEGER NOT NULL
       )
@@ -225,8 +225,7 @@ class OfflineService {
         stock_quantity      REAL,
         low_stock_threshold REAL,
         sort_order          INTEGER NOT NULL DEFAULT 0,
-        is_active           INTEGER NOT NULL DEFAULT 1,
-        batches_json        TEXT
+        is_active           INTEGER NOT NULL DEFAULT 1
       )
     ''');
     await db.execute(
@@ -325,27 +324,6 @@ class OfflineService {
       await db.execute('DROP TABLE IF EXISTS cached_items');
       await _createItemCacheTable(db);
     }
-    if (oldVersion < 13) {
-      // v12 → v13: items and sizes carry their open stock batches so the
-      // cashier can pick one offline. A table rebuilt by the v12 step above
-      // already has the column, hence the check.
-      for (final table in ['cached_items', 'cached_variants']) {
-        final cols = await db.rawQuery('PRAGMA table_info($table)');
-        if (!cols.any((c) => c['name'] == 'batches_json')) {
-          await db.execute('ALTER TABLE $table ADD COLUMN batches_json TEXT');
-        }
-      }
-    }
-  }
-
-  /// Batches stored as JSON in the item/size cache; empty when absent.
-  static List<StockBatch> _batchesFrom(Object? raw) {
-    if (raw is! String || raw.isEmpty) return const [];
-    try {
-      return StockBatch.listFrom(jsonDecode(raw));
-    } catch (_) {
-      return const [];
-    }
   }
 
   /// Cache of bills and drafts fetched FROM the server.
@@ -404,7 +382,6 @@ class OfflineService {
           'price_inclusive_tax': item.priceInclusiveTax ? 1 : 0,
           'stock_quantity': item.stockQuantity,
           'unit': item.unit,
-          'batches_json': jsonEncode(item.batches.map((b) => b.toJson()).toList()),
           'is_active': item.isActive ? 1 : 0,
           'cached_at': now,
         });
@@ -420,7 +397,6 @@ class OfflineService {
             'low_stock_threshold': v.lowStockThreshold,
             'sort_order': v.sortOrder,
             'is_active': v.isActive ? 1 : 0,
-            'batches_json': jsonEncode(v.batches.map((b) => b.toJson()).toList()),
           });
         }
       }
@@ -705,7 +681,6 @@ class OfflineService {
           : null,
       unit: (row['unit'] as String?) ?? 'piece',
       isActive: (row['is_active'] as int) == 1,
-      batches: _batchesFrom(row['batches_json']),
     );
   }
 
@@ -724,7 +699,6 @@ class OfflineService {
           : null,
       sortOrder: (row['sort_order'] as int?) ?? 0,
       isActive: (row['is_active'] as int) == 1,
-      batches: _batchesFrom(row['batches_json']),
     );
   }
 
@@ -946,7 +920,6 @@ class OfflineService {
         billId: localId,
         itemId: li['item_id'] as String?,
         variantId: li['variant_id'] as String?,
-        batchId: li['batch_id'] as String?,
         itemName: (li['item_name'] ?? '') as String,
         quantity: (li['quantity'] as num?)?.toDouble() ?? 0,
         unitPrice: (li['unit_price'] as num?)?.toDouble() ?? 0,

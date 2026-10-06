@@ -116,11 +116,11 @@ StockTarget? findStockTargetByName(List<StockTarget> targets, String name) {
   return null;
 }
 
-/// Opens the searchable bottom sheet and returns the ticked targets, or null
+/// Opens the searchable bottom sheet and returns the chosen target, or null
 /// when dismissed.
-Future<List<StockTarget>?> showStockTargetPicker(
+Future<StockTarget?> showStockTargetPicker(
     BuildContext context, List<StockTarget> candidates) {
-  return showModalBottomSheet<List<StockTarget>>(
+  return showModalBottomSheet<StockTarget>(
     context: context,
     isScrollControlled: true,
     builder: (ctx) => _StockTargetPickerSheet(candidates: candidates),
@@ -145,8 +145,6 @@ class _StockTargetPickerSheet extends StatefulWidget {
 class _StockTargetPickerSheetState extends State<_StockTargetPickerSheet> {
   final _searchCtrl = TextEditingController();
   String _query = '';
-  // Survives search changes, so ticks made under one query stay ticked.
-  final Set<StockTarget> _selected = {};
 
   @override
   void dispose() {
@@ -191,34 +189,16 @@ class _StockTargetPickerSheetState extends State<_StockTargetPickerSheet> {
                       itemCount: filtered.length,
                       itemBuilder: (_, i) {
                         final r = filtered[i];
-                        return CheckboxListTile(
-                          controlAffinity: ListTileControlAffinity.leading,
-                          value: _selected.contains(r),
+                        return ListTile(
                           title: Text(r.name),
                           subtitle: r.currentStock != null
                               ? Text(
                                   'In stock: ${_fmtQty(r.currentStock!)} ${r.unit}')
                               : null,
-                          onChanged: (on) => setState(() =>
-                              on! ? _selected.add(r) : _selected.remove(r)),
+                          onTap: () => Navigator.pop(context, r),
                         );
                       },
                     ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: PrimaryButton(
-                  text: _selected.isEmpty
-                      ? 'Select items'
-                      : 'Add ${_selected.length} item${_selected.length == 1 ? '' : 's'}',
-                  icon: Icons.add,
-                  onPressed: _selected.isEmpty
-                      ? null
-                      : () => Navigator.pop(context, _selected.toList()),
-                ),
-              ),
             ),
           ]),
         ),

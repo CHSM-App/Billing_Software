@@ -15,7 +15,6 @@ import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/whatsapp_mark.dart';
-import '../widgets/batch_picker.dart';
 import '../widgets/stock_target_picker.dart' show isRestaurantBusiness;
 import '../widgets/skeletons.dart';
 import '../services/printer_service.dart';
@@ -1159,84 +1158,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _revealVariantItem(item);
       return;
     }
-    _addToCart(item, variant);
-  }
-
-  // ── Stock batches ─────────────────────────────────────────────────────────
-  // With inventory on, every add asks which batch the unit comes from when
-  // there is a real choice (two or more of: opening stock, open batches). One
-  // or no choice adds straight away. Each batch is its own cart line.
-
-  List<StockBatch?> _batchOptions(Item item, ItemVariant? variant) {
-    if (!ref.read(inventoryEnabledProvider)) return const [];
-    return variant != null
-        ? StockBatch.options(variant.stockQuantity, variant.batches)
-        : StockBatch.options(item.stockQuantity, item.batches);
-  }
-
-  /// The batch the next unit comes from; null when the cashier dismissed the
-  /// picker. `(batch: null)` = opening stock or no batches at all.
-  Future<BatchChoice?> _chooseBatch(Item item, ItemVariant? variant) async {
-    final options = _batchOptions(item, variant);
-    if (options.length < 2) return (batch: options.firstOrNull);
-    return showBatchPicker(
-      context,
-      title: variant == null ? item.name : '${item.name} (${variant.label})',
-      options: options,
-      openingQty: variant != null
-          ? StockBatch.openingQty(variant.stockQuantity, variant.batches)
-          : StockBatch.openingQty(item.stockQuantity, item.batches),
-    );
-  }
-
-  /// Add one unit of [item] / [variant], from a batch the cashier picks.
-  Future<void> _addToCart(Item item, [ItemVariant? variant]) async {
-    final choice = await _chooseBatch(item, variant);
-    if (choice == null || !mounted) return;
-    final batch = choice.batch;
     _cartChange(
-      CartNotifier.keyFor(item.id, variant?.id, batch?.id),
-      () => ref
-          .read(cartProvider.notifier)
-          .addItem(item, variant: variant, batch: batch),
+      CartNotifier.keyFor(item.id, variant?.id),
+      () => ref.read(cartProvider.notifier).addItem(item, variant: variant),
     );
-  }
-
-  /// This item's / size's cart lines, one per batch.
-  List<CartEntry> _linesOf(Item item, ItemVariant? variant) => ref
-      .read(cartProvider)
-      .where((e) => e.item.id == item.id && e.variant?.id == variant?.id)
-      .toList();
-
-  /// −1 from the grid: take it off the line added last, so the grid never
-  /// has to ask which batch to remove from.
-  void _removeOneFromCart(Item item, [ItemVariant? variant]) {
-    final lines = _linesOf(item, variant);
-    if (lines.isEmpty) return;
-    ref.read(cartProvider.notifier).changeQty(lines.last.key, -1);
-  }
-
-  /// A typed quantity from the grid. With the item spread over several batch
-  /// lines there is no single line to set, so that edit belongs in the cart.
-  Future<void> _setQtyInCart(Item item, ItemVariant? variant, double qty) async {
-    final lines = _linesOf(item, variant);
-    if (lines.length > 1) {
-      _showSnack(context.l10n.billingEditBatchInCart, isError: true);
-      return;
-    }
-    String key;
-    if (lines.isEmpty) {
-      if (qty <= 0) return;
-      final choice = await _chooseBatch(item, variant);
-      if (choice == null || !mounted) return;
-      key = CartNotifier.keyFor(item.id, variant?.id, choice.batch?.id);
-      ref
-          .read(cartProvider.notifier)
-          .addItem(item, variant: variant, batch: choice.batch);
-    } else {
-      key = lines.first.key;
-    }
-    _cartChange(key, () => ref.read(cartProvider.notifier).setQty(key, qty));
   }
 
   List<Map<String, dynamic>> get _cartPayload {
@@ -1245,7 +1170,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         .map((e) => {
               'item_id': e.item.id,
               if (e.variant != null) 'variant_id': e.variant!.id,
-              if (e.batch != null) 'batch_id': e.batch!.id,
               'quantity': e.quantity,
             })
         .toList();
@@ -1387,7 +1311,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         return {
           'item_id': e.item.id,
           'variant_id': e.variant?.id,
-          'batch_id': e.batch?.id,
           'item_name': e.displayName,
           'quantity': e.quantity,
           'unit_price': e.netPrice(gstEnabled),
@@ -1461,7 +1384,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   billId: localId,
                   itemId: li['item_id'] as String,
                   variantId: li['variant_id'] as String?,
-                  batchId: li['batch_id'] as String?,
                   itemName: li['item_name'] as String,
                   quantity: (li['quantity'] as double),
                   unitPrice: (li['unit_price'] as double),
@@ -2483,7 +2405,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         return {
           'item_id': e.item.id,
           'variant_id': e.variant?.id,
-          'batch_id': e.batch?.id,
           'item_name': e.displayName,
           'quantity': e.quantity,
           'unit_price': e.netPrice(gstEnabled),
@@ -2558,7 +2479,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   billId: localId,
                   itemId: li['item_id'] as String,
                   variantId: li['variant_id'] as String?,
-                  batchId: li['batch_id'] as String?,
                   itemName: li['item_name'] as String,
                   quantity: (li['quantity'] as double),
                   unitPrice: (li['unit_price'] as double),
@@ -2637,7 +2557,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         billId: 'preview',
         itemId: e.item.id,
         variantId: e.variant?.id,
-        batchId: e.batch?.id,
         itemName: e.displayName,
         quantity: e.quantity,
         unitPrice: e.netPrice(gstEnabled),
@@ -3485,45 +3404,56 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               // A variant parent can't map one stepper to several sizes, so
               // every qty action on it (+/−/set/tap) unfolds its size rows in
               // place instead; the size rows carry the real steppers.
-              // + goes through _addToCart, which asks for the stock batch
-              // when there is a choice and stacks onto that batch's line.
               onAdd: (item) {
                 if (item.hasVariants) {
                   _toggleVariantItem(item);
                 } else {
-                  _addToCart(item);
+                  _cartChange(CartNotifier.keyFor(item.id),
+                      () => ref.read(cartProvider.notifier).addItem(item));
                 }
               },
               onDecrement: (item) {
                 if (item.hasVariants) {
                   _toggleVariantItem(item);
                 } else {
-                  _removeOneFromCart(item);
+                  ref
+                      .read(cartProvider.notifier)
+                      .changeQty(CartNotifier.keyFor(item.id), -1);
                 }
               },
               onIncrement: (item) {
                 if (item.hasVariants) {
                   _toggleVariantItem(item);
                 } else {
-                  _addToCart(item);
+                  final key = CartNotifier.keyFor(item.id);
+                  _cartChange(key,
+                      () => ref.read(cartProvider.notifier).changeQty(key, 1));
                 }
               },
               onSetQty: (item, qty) {
                 if (item.hasVariants) {
                   _toggleVariantItem(item);
                 } else {
-                  _setQtyInCart(item, null, qty);
+                  final key = CartNotifier.keyFor(item.id);
+                  _cartChange(key,
+                      () => ref.read(cartProvider.notifier).setQty(key, qty));
                 }
               },
-              onVariantAdd: (item, v) => _addToCart(item, v),
-              onVariantDelta: (item, v, delta) {
-                if (delta > 0) {
-                  _addToCart(item, v);
-                } else {
-                  _removeOneFromCart(item, v);
-                }
-              },
-              onVariantSetQty: (item, v, qty) => _setQtyInCart(item, v, qty),
+              onVariantAdd: (item, v) => _cartChange(
+                  CartNotifier.keyFor(item.id, v.id),
+                  () => ref
+                      .read(cartProvider.notifier)
+                      .addItem(item, variant: v)),
+              onVariantDelta: (item, v, delta) => _cartChange(
+                  CartNotifier.keyFor(item.id, v.id),
+                  () => ref
+                      .read(cartProvider.notifier)
+                      .changeQty(CartNotifier.keyFor(item.id, v.id), delta)),
+              onVariantSetQty: (item, v, qty) => _cartChange(
+                  CartNotifier.keyFor(item.id, v.id),
+                  () => ref
+                      .read(cartProvider.notifier)
+                      .setQty(CartNotifier.keyFor(item.id, v.id), qty)),
             ),
           ));
         },
@@ -4658,13 +4588,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
-                if (entry.batchLabel != null)
-                  Text(context.l10n.batchLabel(entry.batchLabel!),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.textSecondary,
-                          ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
                 Text(
                   // Net (pre-tax) line amount — tax is shown in the totals below.
                   '₹${entry.lineNet(ref.read(gstEnabledProvider)).toStringAsFixed(2)}',
@@ -5547,9 +5470,8 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
 
   /// A size row unfolded beneath its parent — same stepper/swipe as any row.
   Widget _sizeRow(Item parent, ItemVariant v, Color accent) {
-    // Summed over the size's batch lines.
     final qty = widget.cart
-        .where((e) => e.item.id == parent.id && e.variant?.id == v.id)
+        .where((e) => e.key == CartNotifier.keyFor(parent.id, v.id))
         .fold(0.0, (s, e) => s + e.quantity);
     return _ExcelItemRow(
       index: 0,
