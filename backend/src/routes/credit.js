@@ -4,6 +4,7 @@ const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { attachCharges } = require('../charges');
+const { canonicalPhone, billPhoneMatch } = require('../customers');
 
 const router = express.Router();
 
@@ -21,8 +22,14 @@ const VALID_PAYMENT_MODES = ['cash', 'upi', 'card', 'other'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // GET /api/credit/customers
-// Debtor list for the Credit tab: one row per customer (grouped by phone),
-// with their outstanding total and unpaid-bill count. Most-owed first.
+// Debtor list for the Credit tab: one row per customer, with their outstanding
+// total and unpaid-bill count. Most-owed first.
+//
+// Grouped by the CANONICAL number (migration 047): the billing app saves
+// 9876543210 while the online store saves 919876543210 — the same person must
+// be one debtor, not two. customer_phone is returned in that 10-digit form;
+// the bills/summary routes below accept it (or any format) and match every
+// stored variant.
 router.get('/customers', requireAuth, async (req, res) => {
   try {
     await poolConnect;
@@ -30,7 +37,7 @@ router.get('/customers', requireAuth, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT
-          b.customer_phone                              AS customer_phone,
+          dbo.canonical_phone(b.customer_phone)         AS customer_phone,
           MAX(b.customer_name)                          AS customer_name,
           COUNT(*)                                      AS unpaid_count,
           SUM(b.total - b.discount_amount)              AS outstanding,
@@ -39,7 +46,7 @@ router.get('/customers', requireAuth, async (req, res) => {
         WHERE b.business_id = @business_id
           AND b.payment_status = 'unpaid'
           AND b.status = 'finalized'
-        GROUP BY b.customer_phone
+        GROUP BY dbo.canonical_phone(b.customer_phone)
         ORDER BY outstanding DESC
       `);
     return res.json(result.recordset);
@@ -53,7 +60,7 @@ router.get('/customers', requireAuth, async (req, res) => {
 // All unpaid credit bills for one customer (by phone), newest first, each with
 // its line items so the client can preview/merge them.
 router.get('/customers/:phone/bills', requireAuth, async (req, res) => {
-  const phone = req.params.phone;
+  const phone = canonicalPhone(req.params.phone);
   if (!phone) return res.status(400).json({ error: 'phone is required' });
 
   try {
@@ -69,7 +76,7 @@ router.get('/customers/:phone/bills', requireAuth, async (req, res) => {
                b.created_at, b.receipt_token
         FROM bills b
         WHERE b.business_id = @business_id
-          AND b.customer_phone = @phone
+          AND ${billPhoneMatch('@phone')}
           AND b.payment_status = 'unpaid'
           AND b.status = 'finalized'
         ORDER BY b.created_at DESC
@@ -106,7 +113,7 @@ router.get('/customers/:phone/bills', requireAuth, async (req, res) => {
 // screen to show "previous credit due" as the cashier types the customer's
 // number. Returns the total, count and the unpaid bill ids (to settle later).
 router.get('/customers/:phone/summary', requireAuth, async (req, res) => {
-  const phone = req.params.phone;
+  const phone = canonicalPhone(req.params.phone);
   if (!phone) return res.status(400).json({ error: 'phone is required' });
 
   try {
@@ -115,12 +122,12 @@ router.get('/customers/:phone/summary', requireAuth, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .input('phone',       sql.NVarChar(20),     phone)
       .query(`
-        SELECT id, total - discount_amount AS due
-        FROM bills
-        WHERE business_id = @business_id
-          AND customer_phone = @phone
-          AND payment_status = 'unpaid'
-          AND status = 'finalized'
+        SELECT b.id, b.total - b.discount_amount AS due
+        FROM bills b
+        WHERE b.business_id = @business_id
+          AND ${billPhoneMatch('@phone')}
+          AND b.payment_status = 'unpaid'
+          AND b.status = 'finalized'
       `);
     const rows = result.recordset;
     const outstanding = rows.reduce((s, r) => s + Number(r.due), 0);

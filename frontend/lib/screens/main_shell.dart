@@ -122,6 +122,9 @@ class _MainShellState extends ConsumerState<MainShell>
         break;
       case 'tables':
         ref.read(tablesProvider.notifier).refreshSilently();
+        // Table orders are listed in Open Orders too, and their saves only
+        // broadcast 'tables'.
+        ref.read(openDraftsProvider.notifier).refreshSilently();
         break;
       case 'drafts':
         ref.read(openDraftsProvider.notifier).refreshSilently();
@@ -288,11 +291,12 @@ class _MainShellState extends ConsumerState<MainShell>
     final l10n = context.l10n;
     final isRestaurant = businessType == 'restaurant_with_tables' ||
         businessType == 'restaurant_no_tables';
-
     // Kitchen chef only sees the Kitchen Display and Settings (for logout /
     // language). No billing, items, reports or history.
     if (userRole == 'kitchen') {
       return [
+        // No ready-count badge here: the chef marks dishes ready, it is the
+        // floor staff who need telling.
         NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu,
             l10n.navKitchen, const KitchenScreen()),
         NavItem(Icons.person_outline, Icons.person, l10n.navProfile,
@@ -320,8 +324,10 @@ class _MainShellState extends ConsumerState<MainShell>
             l10n.navOrders, const OrdersScreen(showTables: false)),
       // Waiters and owners at a restaurant can watch the kitchen queue.
       if (isRestaurant)
+        // Red count: dishes ready and waiting to be served.
         NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu,
-            l10n.navKitchen, const KitchenScreen()),
+            l10n.navKitchen, const KitchenScreen(),
+            badge: ref.watch(kitchenReadyCountProvider)),
       // History, Reports and Expenses moved into the Profile screen.
       NavItem(Icons.person_outline, Icons.person, l10n.navProfile,
           const SettingsScreen()),
@@ -330,6 +336,10 @@ class _MainShellState extends ConsumerState<MainShell>
 
   void _onNav(int i) {
     if (i == _index) return;
+    // Opening the Kitchen tab reloads its queue (and so the badge count).
+    if (i < _navItems.length && _navItems[i].screen is KitchenScreen) {
+      NotificationService.instance.pingKitchen();
+    }
     setState(() => _index = i);
   }
 
@@ -503,8 +513,8 @@ class _MainShellState extends ConsumerState<MainShell>
         leading: const SizedBox(height: AppSpacing.space8),
         destinations: items.map((item) {
           return NavigationRailDestination(
-            icon: Icon(item.iconOutlined),
-            selectedIcon: Icon(item.iconFilled),
+            icon: item.badged(Icon(item.iconOutlined)),
+            selectedIcon: item.badged(Icon(item.iconFilled)),
             label: Text(item.label),
             padding: const EdgeInsets.symmetric(vertical: 4),
           );

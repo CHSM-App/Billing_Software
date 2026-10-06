@@ -250,6 +250,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         gstEnabled: business['gst_enabled'] == true,
         roundOffEnabled: business['round_off_enabled'] == true,
         storeEnabled: business['store_enabled'] == true,
+        customersEnabled: business['allow_customers'] != false,
       );
       // Cache GST invoice details so the thermal receipt can print GSTIN offline.
       await saveGstProfile(

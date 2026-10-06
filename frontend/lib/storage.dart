@@ -1,6 +1,9 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'services/secure_store_backup_stub.dart'
+    if (dart.library.io) 'services/secure_store_backup_io.dart' as backup;
 
 /// Print paper-size options and helpers. The stored value is one of these
 /// string constants; `mm58`/`mm80` print thermal ESC/POS, `a5`/`a4` generate a
@@ -22,6 +25,82 @@ class PaperSizes {
 }
 
 // ---------------------------------------------------------------------------
+// SecureStore — the ONE FlutterSecureStorage the app uses, with every call
+// run strictly one after another.
+//
+// Why: on Windows, flutter_secure_storage keeps every key in a single DPAPI-
+// encrypted file, and each write is load-whole-file → change one key →
+// rewrite-whole-file, with no locking. Two overlapping calls (the license
+// cache writes 8 keys at once; login writes both tokens at once; API calls
+// read the token meanwhile) either lose each other's keys, or a read lands on
+// a half-written file — which the plugin treats as corrupt and DELETES,
+// wiping the tokens. Next launch finds no session: "logged out on restart".
+// Serializing all access through one queue removes the race on every
+// platform; the cost is microseconds per call. A kill mid-write is handled by
+// the backup in secure_store_backup_io.dart.
+// ---------------------------------------------------------------------------
+
+class SecureStore {
+  SecureStore._();
+  static final SecureStore instance = SecureStore._();
+
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+    wOptions: WindowsOptions(),
+  );
+
+  Future<void> _tail = Future.value();
+  bool _checkedLive = false;
+
+  /// Runs [op] after every previously queued call has finished. A failing call
+  /// is reported to its own caller only and never blocks the queue.
+  ///
+  /// Serializing alone is not enough on Windows: the app can still be killed
+  /// mid-write, tearing the file (see secure_store_backup_io.dart). So a call
+  /// that fails is retried once from the last good backup, and every write
+  /// refreshes that backup.
+  Future<T> _serial<T>(Future<T> Function() op, {bool mutates = false}) {
+    final result = _tail.then((_) async {
+      if (!_checkedLive) {
+        _checkedLive = true;
+        // A torn file deleted by the plugin on an earlier run.
+        if (await backup.liveMissing()) await backup.restore('file missing');
+      }
+      T value;
+      try {
+        value = await op();
+      } catch (e) {
+        if (!await backup.restore(e)) rethrow;
+        value = await op();
+      }
+      if (mutates) {
+        try {
+          await backup.snapshot();
+        } catch (e) {
+          debugPrint('[SECURE] backup failed: $e'); // never fail the write
+        }
+      }
+      return value;
+    });
+    _tail = result.then<void>((_) {}, onError: (_) {});
+    return result;
+  }
+
+  Future<String?> read({required String key}) =>
+      _serial(() => _storage.read(key: key));
+
+  Future<void> write({required String key, required String value}) =>
+      _serial(() => _storage.write(key: key, value: value), mutates: true);
+
+  Future<void> delete({required String key}) =>
+      _serial(() => _storage.delete(key: key), mutates: true);
+
+  Future<void> deleteAll() =>
+      _serial(() => _storage.deleteAll(), mutates: true);
+}
+
+// ---------------------------------------------------------------------------
 // AuthStorage — single access point for all session persistence.
 //
 // Security split:
@@ -39,11 +118,7 @@ class AuthStorage {
   AuthStorage._();
   static final AuthStorage instance = AuthStorage._();
 
-  static const _secure = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-    wOptions: WindowsOptions(),
-  );
+  static final _secure = SecureStore.instance;
 
   // Secure storage keys
   static const _keyAccessToken  = 'access_token';
@@ -64,6 +139,9 @@ class AuthStorage {
   // whether to poll the online-order queue at all, without a profile fetch
   // (which is owner-only — a cashier could never answer the question).
   static const _keyStoreEnabled     = 'store_enabled';
+  // Admin entitlement for Customers & campaigns (subscriptions.allow_customers).
+  // Absent on sessions saved before it existed — read as enabled.
+  static const _keyCustomersEnabled = 'customers_enabled';
   // Cached GST invoice details, refreshed whenever the business profile is
   // fetched — used so the thermal receipt can print GSTIN even offline.
   static const _keyGstNumber        = 'gst_number';
@@ -115,6 +193,7 @@ class AuthStorage {
     bool gstEnabled = false,
     bool roundOffEnabled = false,
     bool storeEnabled = false,
+    bool customersEnabled = true,
   }) async {
     // Tokens go to secure storage
     await Future.wait([
@@ -136,6 +215,7 @@ class AuthStorage {
       prefs.setBool(_keyGstEnabled, gstEnabled),
       prefs.setBool(_keyRoundOffEnabled, roundOffEnabled),
       prefs.setBool(_keyStoreEnabled, storeEnabled),
+      prefs.setBool(_keyCustomersEnabled, customersEnabled),
     ]);
   }
 
@@ -169,6 +249,11 @@ class AuthStorage {
   Future<void> updateStoreEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyStoreEnabled, enabled);
+  }
+
+  Future<void> updateCustomersEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyCustomersEnabled, enabled);
   }
 
   /// Cache the GST invoice details from the business profile so the thermal
@@ -344,10 +429,12 @@ class AuthStorage {
     return prefs.getString(_keyUserId);
   }
 
+  /// The session as the app sees it — prefs only. Deliberately does NOT touch
+  /// secure storage: whether someone is logged in must not hinge on a token
+  /// read succeeding at startup (requests read the token themselves).
   Future<Map<String, dynamic>> getSession() async {
     final prefs = await SharedPreferences.getInstance();
     return {
-      'token'            : await _secure.read(key: _keyAccessToken),
       'user_id'          : prefs.getString(_keyUserId),
       'user_name'        : prefs.getString(_keyUserName),
       'user_role'        : prefs.getString(_keyUserRole),
@@ -359,6 +446,7 @@ class AuthStorage {
       'gst_enabled'      : prefs.getBool(_keyGstEnabled) ?? false,
       'round_off_enabled': prefs.getBool(_keyRoundOffEnabled) ?? false,
       'store_enabled'    : prefs.getBool(_keyStoreEnabled) ?? false,
+      'customers_enabled': prefs.getBool(_keyCustomersEnabled) ?? true,
     };
   }
 
@@ -407,6 +495,7 @@ Future<void> saveSession({
   bool gstEnabled = false,
   bool roundOffEnabled = false,
   bool storeEnabled = false,
+  bool customersEnabled = true,
 }) => AuthStorage.instance.saveSession(
       accessToken: accessToken,
       refreshToken: refreshToken,
@@ -421,6 +510,7 @@ Future<void> saveSession({
       gstEnabled: gstEnabled,
       roundOffEnabled: roundOffEnabled,
       storeEnabled: storeEnabled,
+      customersEnabled: customersEnabled,
     );
 
 Future<void> updateBusinessName(String name)   => AuthStorage.instance.updateBusinessName(name);
@@ -454,6 +544,7 @@ Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHa
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);
 Future<void>    updateRoundOffEnabled(bool e)  => AuthStorage.instance.updateRoundOffEnabled(e);
 Future<void>    updateStoreEnabled(bool e)     => AuthStorage.instance.updateStoreEnabled(e);
+Future<void>    updateCustomersEnabled(bool e) => AuthStorage.instance.updateCustomersEnabled(e);
 Future<void>    saveGstProfile({String? gstNumber, String? businessAddress, String? businessPhone, String? defaultSacCode, String? fssaiNumber}) =>
     AuthStorage.instance.saveGstProfile(gstNumber: gstNumber, businessAddress: businessAddress, businessPhone: businessPhone, defaultSacCode: defaultSacCode, fssaiNumber: fssaiNumber);
 Future<Map<String, String>> getGstProfile()    => AuthStorage.instance.getGstProfile();

@@ -376,7 +376,7 @@ router.post('/login', loginLimiter, async (req, res) => {
                b.phone AS business_phone,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
                b.round_off_enabled, b.store_enabled,
-               s.allow_mobile, s.allow_desktop, s.allow_online_store
+               s.allow_mobile, s.allow_desktop, s.allow_online_store, s.allow_customers
         FROM users u
         JOIN businesses b ON u.business_id = b.id
         LEFT JOIN subscriptions s ON s.business_id = u.business_id
@@ -522,6 +522,9 @@ router.post('/login', loginLimiter, async (req, res) => {
         // fail on a flaky network. NULL (no subscription) defaults to allowed.
         allow_mobile: row.allow_mobile == null ? true : !!row.allow_mobile,
         allow_desktop: row.allow_desktop == null ? true : !!row.allow_desktop,
+        // Admin entitlement for the owner's Customers & campaigns screen
+        // (migration 048). NULL (no subscription row yet) reads as allowed.
+        allow_customers: row.allow_customers == null ? true : !!row.allow_customers,
       },
     });
   } catch (err) {

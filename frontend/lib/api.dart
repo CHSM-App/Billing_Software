@@ -806,7 +806,10 @@ Future<void> deleteStorePaymentQr() async {
 
 /// Active orders (draft bills) with per-item kitchen status.
 Future<List<dynamic>> getKitchenOrders() async {
-  return _parse(await _authGet(Uri.parse('$baseUrl/kitchen/orders')));
+  // statuses=delivered: this app understands 'delivered' (older versions get
+  // it reported as 'ready' — see routes/kitchen.js).
+  return _parse(await _authGet(
+      Uri.parse('$baseUrl/kitchen/orders?statuses=delivered')));
 }
 
 /// Mark a single dish 'ready' or back to 'pending'.
@@ -866,6 +869,57 @@ Future<List<dynamic>> getCreditCustomerBills(String phone) async {
 Future<Map<String, dynamic>> getCreditSummary(String phone) async {
   final data = _parse(await _authGet(Uri.parse(
       '$baseUrl/credit/customers/${Uri.encodeComponent(phone)}/summary')));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+// ---------------------------------------------------------------------------
+// Customers & campaigns (owner only)
+// ---------------------------------------------------------------------------
+
+/// One page of customers matching [params] (q, min_visits, max_visits,
+/// min_spend, max_spend, recency, offers, sort, dir, limit, offset). Returns
+/// { items, total, total_all, total_eligible, offset, limit }; limit=0 gives
+/// just the counts.
+Future<Map<String, dynamic>> getCustomers(Map<String, String> params) async {
+  final data = _parse(await _authGet(
+      Uri.parse('$baseUrl/customers').replace(queryParameters: params)));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+/// Ids of every customer matching [params] who can be messaged — "Select all"
+/// across pages without loading them.
+Future<List<String>> getCustomerIds(Map<String, String> params) async {
+  final data = _parse(await _authGet(
+      Uri.parse('$baseUrl/customers/ids').replace(queryParameters: params)));
+  return ((data as Map)['ids'] as List).map((e) => e.toString()).toList();
+}
+
+/// One page of a customer's finalized bills, newest first, each with line
+/// items. Returns { items, total, offset, limit }.
+Future<Map<String, dynamic>> getCustomerBills(String customerId,
+    {int offset = 0, int limit = 20}) async {
+  final data = _parse(await _authGet(Uri.parse(
+          '$baseUrl/customers/$customerId/bills')
+      .replace(queryParameters: {'offset': '$offset', 'limit': '$limit'})));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+/// Stop (or resume) sending offers to a customer.
+Future<void> setCustomerOptOut(String customerId, bool optedOut) async {
+  _parse(await _authPut(
+    Uri.parse('$baseUrl/customers/$customerId/opt-out'),
+    body: jsonEncode({'opted_out': optedOut}),
+  ));
+}
+
+/// Queues [message] to the given customers over WhatsApp. Returns
+/// { queued, skipped, will_deliver }.
+Future<Map<String, dynamic>> sendCustomerMessage(
+    List<String> customerIds, String message) async {
+  final data = _parse(await _authPost(
+    Uri.parse('$baseUrl/customers/message'),
+    body: jsonEncode({'customer_ids': customerIds, 'message': message}),
+  ));
   return Map<String, dynamic>.from(data as Map);
 }
 

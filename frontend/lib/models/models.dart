@@ -557,6 +557,54 @@ class CreditCustomer {
       );
 }
 
+/// A row of the owner's Customers screen. Counts/spend are computed by the
+/// server from finalized bills.
+class Customer {
+  final String id;
+  final String? name;
+  final String phone;
+  final bool optedOut;
+  final int billCount;
+  final double totalSpend;
+  final DateTime? lastVisit;
+
+  Customer({
+    required this.id,
+    required this.name,
+    required this.phone,
+    required this.optedOut,
+    required this.billCount,
+    required this.totalSpend,
+    this.lastVisit,
+  });
+
+  /// Name, or the phone when no name was ever recorded.
+  String get displayName =>
+      (name != null && name!.trim().isNotEmpty) ? name!.trim() : phone;
+
+  Customer copyWith({bool? optedOut}) => Customer(
+        id: id,
+        name: name,
+        phone: phone,
+        optedOut: optedOut ?? this.optedOut,
+        billCount: billCount,
+        totalSpend: totalSpend,
+        lastVisit: lastVisit,
+      );
+
+  factory Customer.fromJson(Map<String, dynamic> j) => Customer(
+        id: j['id'] as String,
+        name: j['name'] as String?,
+        phone: j['phone'] as String? ?? '',
+        optedOut: j['opted_out'] == true,
+        billCount: (j['bill_count'] as num?)?.toInt() ?? 0,
+        totalSpend: double.parse((j['total_spend'] ?? 0).toString()),
+        lastVisit: j['last_visit'] != null
+            ? DateTime.tryParse(j['last_visit'].toString())
+            : null,
+      );
+}
+
 class Expense {
   final String id;
   final String category;

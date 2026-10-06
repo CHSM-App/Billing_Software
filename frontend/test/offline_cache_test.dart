@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:Vittam/models/models.dart';
@@ -22,9 +24,16 @@ Item _item(String id, {bool isActive = true, String? major}) => Item(
     );
 
 void main() {
-  setUpAll(() {
+  setUpAll(() async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+    // A private folder, never the default: on desktop the default databases
+    // path is relative to the working directory, which for `flutter test` is
+    // the same frontend/ folder `flutter run` uses — so these tests (which
+    // delete the DB and rebuild it with only the cache tables) were wiping
+    // the developer's real offline DB and breaking the next app start.
+    final dir = await Directory.systemTemp.createTemp('vittam_offline_test');
+    await databaseFactory.setDatabasesPath(dir.path);
   });
 
   setUp(() async {

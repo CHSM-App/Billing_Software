@@ -11,15 +11,26 @@ import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
 import 'home_screen.dart';
 
-/// The "Open Orders" queue: table-less draft bills a server saved from the
-/// billing page. Tapping one opens it pre-loaded in the billing screen where a
+/// The "Open Orders" queue: every draft bill — saved from the billing page or
+/// at a table. Tapping one opens it pre-loaded in the billing screen where a
 /// cashier/owner finalizes it (or a server edits and re-saves it).
 class OpenDraftsScreen extends ConsumerWidget {
   /// When true, embedded inside the Orders tab's TabBarView — the parent
   /// [OrdersScreen] supplies the shared app bar, so render only the list body.
   final bool embedded;
 
-  const OpenDraftsScreen({super.key, this.embedded = false});
+  /// Search text from the Orders page header; empty shows every order.
+  final String query;
+
+  const OpenDraftsScreen({super.key, this.embedded = false, this.query = ''});
+
+  /// What the header search matches on: table, customer name, phone, bill no.
+  static String _haystack(Bill b) => [
+        b.tableNumber,
+        b.customerName,
+        b.customerPhone,
+        b.billNumber,
+      ].whereType<String>().join(' ').toLowerCase();
 
   void _openDraft(BuildContext context, WidgetRef ref, Bill draft) {
     // Start from a clean cart; HomeScreen loads the draft's items itself.
@@ -27,7 +38,10 @@ class OpenDraftsScreen extends ConsumerWidget {
     Navigator.push(
       context,
       MaterialPageRoute(
+        // A table order opens as that table, so settling it frees the table.
         builder: (_) => HomeScreen(
+          tableId: draft.tableId,
+          tableNumber: draft.tableNumber,
           activeBillId: draft.id,
           activeBillFuture: Future.value(draft),
         ),
@@ -98,17 +112,34 @@ class OpenDraftsScreen extends ConsumerWidget {
             ),
           );
         }
+        final q = query.trim().toLowerCase();
+        final shown = q.isEmpty
+            ? drafts
+            : drafts.where((d) => _haystack(d).contains(q)).toList();
         return RefreshIndicator(
           onRefresh: () => ref.read(openDraftsProvider.notifier).reload(),
-          child: ListView.separated(
-            padding: const EdgeInsets.all(AppSpacing.space12),
-            itemCount: drafts.length,
-            separatorBuilder: (_, __) =>
-                const SizedBox(height: AppSpacing.space8),
-            itemBuilder: (context, i) => _DraftCard(
-                draft: drafts[i],
-                onTap: () => _openDraft(context, ref, drafts[i])),
-          ),
+          child: shown.isEmpty
+              ? ListView(children: [
+                  const SizedBox(height: 80),
+                  Center(
+                    child: Text(
+                      l10n.openOrdersNoMatches,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(color: AppColors.textSecondary),
+                    ),
+                  ),
+                ])
+              : ListView.separated(
+                  padding: const EdgeInsets.all(AppSpacing.space12),
+                  itemCount: shown.length,
+                  separatorBuilder: (_, __) =>
+                      const SizedBox(height: AppSpacing.space8),
+                  itemBuilder: (context, i) => _DraftCard(
+                      draft: shown[i],
+                      onTap: () => _openDraft(context, ref, shown[i])),
+                ),
         );
       },
     );
@@ -125,10 +156,14 @@ class _DraftCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final itemCount = draft.items.fold<double>(0, (s, it) => s + it.quantity);
-    final title = (draft.customerName != null &&
-            draft.customerName!.trim().isNotEmpty)
-        ? draft.customerName!.trim()
-        : l10n.openOrdersBillNumber(draft.billNumber);
+    final hasName =
+        draft.customerName != null && draft.customerName!.trim().isNotEmpty;
+    final title = draft.tableNumber != null
+        ? l10n.tablesTableLabel(draft.tableNumber!) +
+            (hasName ? ' · ${draft.customerName!.trim()}' : '')
+        : hasName
+            ? draft.customerName!.trim()
+            : l10n.openOrdersBillNumber(draft.billNumber);
 
     return Card(
       margin: EdgeInsets.zero,
@@ -150,7 +185,10 @@ class _DraftCard extends StatelessWidget {
                   color: AppColors.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(AppRadius.small),
                 ),
-                child: const Icon(Icons.receipt_long_outlined,
+                child: Icon(
+                    draft.tableId != null
+                        ? Icons.table_restaurant_outlined
+                        : Icons.receipt_long_outlined,
                     color: AppColors.primary),
               ),
               const SizedBox(width: AppSpacing.space12),

@@ -211,7 +211,216 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get openOrdersEmpty =>
-      'No open orders. Saved drafts without a table appear here.';
+      'No open orders. Saved drafts and table orders appear here.';
+
+  @override
+  String get openOrdersSearchHint => 'Search table, name, phone, bill no.…';
+
+  @override
+  String get openOrdersNoMatches => 'No open orders match your search.';
+
+  @override
+  String get customersTitle => 'Customers';
+
+  @override
+  String get customersSubtitle => 'Customer list, visits and WhatsApp offers';
+
+  @override
+  String get customersSearchHint => 'Search name or phone';
+
+  @override
+  String get customersSortBy => 'Sort by';
+
+  @override
+  String get customersSortSpend => 'Total spend';
+
+  @override
+  String get customersSortVisits => 'Number of visits';
+
+  @override
+  String get customersSortRecent => 'Last visit date';
+
+  @override
+  String get customersSortName => 'Name';
+
+  @override
+  String get customersSortHighLow => 'High to low';
+
+  @override
+  String get customersSortLowHigh => 'Low to high';
+
+  @override
+  String get customersSortAZ => 'A to Z';
+
+  @override
+  String get customersSortZA => 'Z to A';
+
+  @override
+  String get customersSortMostVisits => 'Most visits first';
+
+  @override
+  String get customersSortFewestVisits => 'Fewest visits first';
+
+  @override
+  String get customersSortNewest => 'Newest first';
+
+  @override
+  String get customersSortOldest => 'Oldest first';
+
+  @override
+  String get customersFilters => 'Filters';
+
+  @override
+  String get customersFilterReset => 'Reset';
+
+  @override
+  String get customersFilterVisits => 'Visits';
+
+  @override
+  String get customersFilterSpend => 'Total spend';
+
+  @override
+  String get customersFilterMin => 'Min';
+
+  @override
+  String get customersFilterMax => 'Max';
+
+  @override
+  String get customersFilterLastVisit => 'Last visit';
+
+  @override
+  String get customersFilterOffers => 'Offers';
+
+  @override
+  String get customersRecencyAny => 'Any time';
+
+  @override
+  String customersRecencyWithin(int days) {
+    return 'In last $days days';
+  }
+
+  @override
+  String customersRecencyInactive(int days) {
+    return 'Not in $days+ days';
+  }
+
+  @override
+  String get customersOffersAll => 'All';
+
+  @override
+  String get customersOffersAllowed => 'Receiving offers';
+
+  @override
+  String get customersOffersOptedOut => 'Opted out';
+
+  @override
+  String customersShowResults(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Show $count customers',
+      one: 'Show 1 customer',
+      zero: 'No customers match',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String customersResultCount(int shown, int total) {
+    return '$shown of $total customers';
+  }
+
+  @override
+  String customersSelectAllCount(int count) {
+    return 'Select all ($count)';
+  }
+
+  @override
+  String get customersClearAll => 'Clear all';
+
+  @override
+  String get customersApply => 'Apply';
+
+  @override
+  String customersChipVisits(String range) {
+    return 'Visits: $range';
+  }
+
+  @override
+  String customersChipSpend(String range) {
+    return 'Spend: $range';
+  }
+
+  @override
+  String customersBills(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bills',
+      one: '1 bill',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String customersLastVisit(String date) {
+    return 'Last visit $date';
+  }
+
+  @override
+  String get customersOptedOut => 'Opted out';
+
+  @override
+  String get customersOptedOutNote => 'This customer won\'t receive offers.';
+
+  @override
+  String get customersStopOffers => 'Stop offers';
+
+  @override
+  String get customersAllowOffers => 'Allow offers';
+
+  @override
+  String customersSelected(int count) {
+    return '$count selected';
+  }
+
+  @override
+  String get customersNext => 'Next';
+
+  @override
+  String get customersEmpty =>
+      'No customers yet. Customers appear here once a bill is saved with their phone number.';
+
+  @override
+  String get customersNoMatches => 'No customers match.';
+
+  @override
+  String get customersNoBills => 'No bills yet.';
+
+  @override
+  String customersComposeTitle(int count) {
+    return 'Message $count customers';
+  }
+
+  @override
+  String get customersComposeHint => 'Type your offer or announcement…';
+
+  @override
+  String customersComposePreview(String shop) {
+    return 'Sent on WhatsApp as: \"Message from $shop: …\"';
+  }
+
+  @override
+  String get customersSend => 'Send';
+
+  @override
+  String customersSending(int queued, int skipped) {
+    return 'Sending to $queued customers ($skipped skipped)';
+  }
+
+  @override
+  String get customersNotDelivering =>
+      'Saved, but WhatsApp offers aren\'t set up yet — the messages were not delivered.';
 
   @override
   String openOrdersBillNumber(String number) {
@@ -257,6 +466,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get kitchenMarkCompleted => 'Mark as Completed';
+
+  @override
+  String get kitchenDelivered => 'Delivered';
+
+  @override
+  String get kitchenReadyOnly => 'Ready to serve';
+
+  @override
+  String get kitchenNoReadyItems => 'No dishes waiting to be served.';
 
   @override
   String get kitchenJustNow => 'Just now';
@@ -1627,16 +1845,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tablesNoTablesYet => 'No tables yet';
-
-  @override
-  String get tablesBilledOrderBody =>
-      'This table has a billed order. What would you like to do?';
-
-  @override
-  String get tablesMarkPaidEmpty => 'Mark as Paid / Empty';
-
-  @override
-  String get tablesVoidBill => 'Void Bill';
 
   @override
   String get tablesTableNumberLabel => 'Table number (e.g. T1, A2)';

@@ -15,7 +15,8 @@ import '../theme/app_theme.dart';
 ///   • [SkeletonWrapper] — wraps arbitrary [ShimmerBox]es in one shimmer sweep.
 /// Page skeletons:
 ///   • [BillingSkeleton], [ItemsSkeleton], [OrdersListSkeleton],
-///     [TablesSkeleton], [KitchenSkeleton].
+///     [TablesSkeleton], [KitchenSkeleton], [CustomersSkeleton],
+///     [CustomerBillsSkeleton].
 
 /// A single shimmering placeholder block. Must live under a [SkeletonWrapper]
 /// (or another Shimmer) to actually animate.
@@ -270,6 +271,135 @@ class KitchenSkeleton extends StatelessWidget {
         physics: const NeverScrollableScrollPhysics(),
         children: List.generate(4, (_) => const _KitchenTicket()),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Customers (CustomersScreen) — toolbar + customer rows; a customer's bills
+// ---------------------------------------------------------------------------
+
+/// First load of the Customers page: search · filter · sort, the count line,
+/// then customer rows (checkbox, name + phone/last visit, spend + bills).
+class CustomersSkeleton extends StatelessWidget {
+  const CustomersSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SkeletonWrapper(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+        physics: const NeverScrollableScrollPhysics(),
+        children: [
+          const Row(children: [
+            Expanded(child: ShimmerBox(height: 40, radius: AppRadius.medium)),
+            SizedBox(width: 8),
+            ShimmerBox(width: 40, height: 40, radius: 20),
+            SizedBox(width: 8),
+            ShimmerBox(width: 40, height: 40, radius: 20),
+          ]),
+          const SizedBox(height: 14),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                ShimmerBox(width: 120, height: 12),
+                ShimmerBox(width: 90, height: 12),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          ...List.generate(7, (_) => const CustomerRowSkeleton()),
+        ],
+      ),
+    );
+  }
+}
+
+/// One placeholder customer row. Also used, wrapped in a [SkeletonWrapper],
+/// as the "loading the next page" footer of the list.
+class CustomerRowSkeleton extends StatelessWidget {
+  const CustomerRowSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+      ),
+      child: const Row(children: [
+        ShimmerBox(width: 20, height: 20, radius: 4), // checkbox
+        SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ShimmerBox(width: 130, height: 14),
+              SizedBox(height: 8),
+              ShimmerBox(width: 190, height: 11),
+            ],
+          ),
+        ),
+        SizedBox(width: 12),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          ShimmerBox(width: 64, height: 14),
+          SizedBox(height: 8),
+          ShimmerBox(width: 44, height: 10),
+        ]),
+      ]),
+    );
+  }
+}
+
+/// A customer's bill list while it loads (the header above it is real).
+class CustomerBillsSkeleton extends StatelessWidget {
+  final int rows;
+  const CustomerBillsSkeleton({super.key, this.rows = 7});
+
+  @override
+  Widget build(BuildContext context) {
+    return SkeletonWrapper(
+      child: ListView(
+        padding: const EdgeInsets.all(12),
+        physics: const NeverScrollableScrollPhysics(),
+        shrinkWrap: rows < 7,
+        children: List.generate(rows, (_) => const BillRowSkeleton()),
+      ),
+    );
+  }
+}
+
+/// One placeholder bill row: number + date line on the left, amount right.
+class BillRowSkeleton extends StatelessWidget {
+  const BillRowSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+      ),
+      child: const Row(children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ShimmerBox(width: 90, height: 14),
+              SizedBox(height: 8),
+              ShimmerBox(width: 170, height: 11),
+            ],
+          ),
+        ),
+        SizedBox(width: 12),
+        ShimmerBox(width: 70, height: 16),
+      ]),
     );
   }
 }

@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../api.dart';
 import '../storage.dart';
 import '../utils/platform_utils.dart' show isDesktopDevice;
@@ -83,11 +82,10 @@ class LicenseService {
   LicenseService._();
   static final LicenseService instance = LicenseService._();
 
-  static const _secure = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-    wOptions: WindowsOptions(),
-  );
+  // The shared, serialized store — never a second FlutterSecureStorage. On
+  // Windows both would write the same file, and this cache's 8 parallel writes
+  // were racing (and wiping) the login tokens. See [SecureStore].
+  static final _secure = SecureStore.instance;
 
   // Keys in secure storage
   static const _keyStatus           = 'lic_status';
@@ -171,6 +169,10 @@ class LicenseService {
       // (older backend) → leave the cached value alone rather than guessing.
       if (data['store_enabled'] is bool) {
         await updateStoreEnabled(data['store_enabled'] as bool);
+      }
+      // Same for the admin's Customers & campaigns switch (migration 048).
+      if (data['allow_customers'] is bool) {
+        await updateCustomersEnabled(data['allow_customers'] as bool);
       }
 
       final result = _evaluate(

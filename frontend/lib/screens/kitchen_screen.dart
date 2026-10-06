@@ -15,9 +15,16 @@ import '../services/printer_service.dart';
 import '../storage.dart';
 import 'kitchen_print_settings_screen.dart';
 
+/// Dishes the kitchen has marked ready that nobody has delivered yet — the red
+/// count on the Kitchen nav icon. Written by [KitchenScreen] on every reload;
+/// the screen lives in the shell's IndexedStack and reloads on each realtime
+/// 'kitchen' event, so the count stays live without a manual refresh.
+final kitchenReadyCountProvider = StateProvider<int>((_) => 0);
+
 /// Kitchen Display for restaurants. Shows active orders (draft bills) with each
-/// dish, letting the kitchen chef tick dishes as ready. Refreshes immediately
-/// when a kitchen push notification (FCM) arrives.
+/// dish, letting the kitchen chef tick dishes as ready and the floor staff mark
+/// ready dishes delivered. Refreshes immediately when a kitchen push
+/// notification (FCM) arrives.
 class KitchenScreen extends ConsumerStatefulWidget {
   const KitchenScreen({super.key});
 
@@ -33,6 +40,8 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
   // Item ids currently being toggled — disables the tile to avoid double taps.
   final Set<String> _busy = {};
   late final TabController _tabController;
+  // Pending tab filter: only dishes that are ready and still to be served.
+  bool _readyOnly = false;
 
   // Order ids seen on the last load. When a reload reveals an id not in this
   // set, a genuinely new order has arrived and we chime — but only while this
@@ -128,6 +137,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
         _loading = false;
         _error = null;
       });
+      _publishReadyCount();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -137,23 +147,53 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
     }
   }
 
+  void _publishReadyCount() {
+    var n = 0;
+    for (final o in _orders) {
+      for (final i in (o['items'] as List)) {
+        if (i['kitchen_status'] == 'ready') n++;
+      }
+    }
+    ref.read(kitchenReadyCountProvider.notifier).state = n;
+  }
+
+  /// The status a tap moves [item] to for this user, or null when they cannot
+  /// touch it. Mirrors the server's rules in routes/kitchen.js: the chef ticks
+  /// pending <-> ready; everyone else marks a ready dish delivered (or undoes).
+  static String? nextStatus(String role, Map<String, dynamic> item) {
+    final current = item['kitchen_status'] as String? ?? 'pending';
+    if (role == 'kitchen') {
+      return switch (current) {
+        'pending' => 'ready',
+        'ready' => 'pending',
+        _ => null,
+      };
+    }
+    return switch (current) {
+      'ready' => 'delivered',
+      'delivered' => 'ready',
+      _ => null,
+    };
+  }
+
   Future<void> _toggle(Map<String, dynamic> item) async {
-    // Only the kitchen chef may mark dishes ready; others have a read-only view.
-    if (ref.read(userRoleProvider) != 'kitchen') return;
+    final next = nextStatus(ref.read(userRoleProvider), item);
+    if (next == null) return;
     final id = item['id'] as String;
     if (_busy.contains(id)) return;
     final current = item['kitchen_status'] as String? ?? 'pending';
-    final next = current == 'ready' ? 'pending' : 'ready';
 
     setState(() {
       _busy.add(id);
       item['kitchen_status'] = next; // optimistic
     });
+    _publishReadyCount();
     try {
       await markKitchenItem(id, next);
     } catch (e) {
       if (mounted) {
         setState(() => item['kitchen_status'] = current); // revert
+        _publishReadyCount();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content: Text(sanitizeUiErrorMessage(e)),
@@ -177,16 +217,17 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
   }
 
   // "Mark as Completed" ticks every not-yet-ready dish in the order at once,
-  // so the whole card becomes all_ready and the next load shifts it from the
-  // Pending tab to the Completed tab. If a new dish is later added to this
-  // same order (e.g. the table orders more), that dish starts pending again,
-  // all_ready flips back to false, and the order reappears in Pending — no
-  // separate "completed" flag to get out of sync with the dishes themselves.
+  // so the whole card turns green (cooked). The order only moves to the
+  // Completed tab once floor staff have delivered every dish (server-computed
+  // all_delivered). If a new dish is later added to this same order (e.g. the
+  // table orders more), that dish starts pending again, all_delivered flips back to
+  // false, and the order reappears in Pending — no separate "completed" flag to
+  // get out of sync with the dishes themselves.
   Future<void> _markOrderCompleted(Map<String, dynamic> order) async {
     if (ref.read(userRoleProvider) != 'kitchen') return;
     final items = (order['items'] as List).cast<Map<String, dynamic>>();
     final pendingItems =
-        items.where((i) => i['kitchen_status'] != 'ready').toList();
+        items.where((i) => i['kitchen_status'] == 'pending').toList();
     if (pendingItems.isEmpty) return;
 
     final ids = pendingItems.map((i) => i['id'] as String).toList();
@@ -220,6 +261,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final readyCount = ref.watch(kitchenReadyCountProvider);
     // ShellAppBar, not Scaffold.appBar: this screen is a tab inside the shell's
     // IndexedStack, where AppBar's Scaffold-dependent layout does not render —
     // which is why the bar (and everything in it) was invisible here.
@@ -243,6 +285,17 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
                   builder: (_) => const KitchenPrintSettingsScreen(),
                 )),
               ),
+            _ReadyToServeToggle(
+              count: readyCount,
+              selected: _readyOnly,
+              tooltip: l10n.kitchenReadyOnly,
+              onTap: () {
+                setState(() => _readyOnly = !_readyOnly);
+                // The filter lives on Pending — jump there if switched on
+                // from Completed so the result is actually visible.
+                if (_readyOnly) _tabController.animateTo(0);
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.refresh),
               tooltip: l10n.commonRefresh,
@@ -252,7 +305,11 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
           bottom: TabBar(
             controller: _tabController,
             tabs: [
-              Tab(text: l10n.kitchenTabPending),
+              // Renamed while filtered so it is obvious the list is cut down.
+              Tab(
+                  text: _readyOnly
+                      ? l10n.kitchenReadyOnly
+                      : l10n.kitchenTabPending),
               Tab(text: l10n.kitchenTabCompleted),
             ],
           ),
@@ -273,18 +330,21 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
                       children: [
                         RefreshIndicator(
                           onRefresh: () => _load(),
-                          child: _buildOrderGrid(
-                            _orders
-                                .where((o) => o['all_ready'] != true)
-                                .toList(),
-                            l10n.kitchenNoPendingOrders,
-                          ),
+                          child: _readyOnly
+                              ? _buildOrderGrid(
+                                  _readyToServe(), l10n.kitchenNoReadyItems)
+                              : _buildOrderGrid(
+                                  _orders
+                                      .where((o) => o['all_delivered'] != true)
+                                      .toList(),
+                                  l10n.kitchenNoPendingOrders,
+                                ),
                         ),
                         RefreshIndicator(
                           onRefresh: () => _load(),
                           child: _buildOrderGrid(
                             _orders
-                                .where((o) => o['all_ready'] == true)
+                                .where((o) => o['all_delivered'] == true)
                                 .toList(),
                             l10n.kitchenNoCompletedOrders,
                           ),
@@ -295,6 +355,21 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
       ]),
     );
   }
+
+  /// The "Ready to serve" filter: every order (fully-cooked ones included —
+  /// those still hold dishes to take out) cut down to its ready,
+  /// not-yet-delivered dishes; orders left with none are dropped. Item maps are shared with [_orders], so taps on the
+  /// filtered view update the real data.
+  List<Map<String, dynamic>> _readyToServe() => [
+        for (final o in _orders)
+          if ((o['items'] as List).any((i) => i['kitchen_status'] == 'ready'))
+            {
+              ...o,
+              'items': (o['items'] as List)
+                  .where((i) => i['kitchen_status'] == 'ready')
+                  .toList(),
+            },
+      ];
 
   Widget _buildOrderGrid(
       List<Map<String, dynamic>> orders, String emptyMessage) {
@@ -310,7 +385,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
       );
     }
 
-    final canEdit = ref.read(userRoleProvider) == 'kitchen';
+    final role = ref.read(userRoleProvider);
     return LayoutBuilder(builder: (context, constraints) {
       const spacing = AppSpacing.space8;
       const padding = AppSpacing.space12;
@@ -345,7 +420,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
             sequence: i + 1,
             label: _orderLabel(order),
             busy: _busy,
-            canEdit: canEdit,
+            role: role,
             onToggle: _toggle,
             onMarkCompleted: _markOrderCompleted,
           ),
@@ -375,6 +450,63 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
   }
 }
 
+/// Header pill that filters Pending down to dishes waiting to be served: a
+/// bell plus the live ready count. Outlined when off, solid green when on.
+class _ReadyToServeToggle extends StatelessWidget {
+  final int count;
+  final bool selected;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _ReadyToServeToggle({
+    required this.count,
+    required this.selected,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? Colors.white : AppColors.success;
+    return Tooltip(
+      message: tooltip,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Material(
+          color: selected ? AppColors.success : Colors.transparent,
+          shape: StadiumBorder(
+              side: BorderSide(color: AppColors.success, width: 1.5)),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                      selected
+                          ? Icons.room_service
+                          : Icons.room_service_outlined,
+                      size: 18,
+                      color: fg),
+                  const SizedBox(width: 5),
+                  Text(
+                    '$count',
+                    style: TextStyle(
+                        color: fg, fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Order-age label for a kitchen card: "Just now" (<1 min), "N min ago"
 /// (<1 hr), and the local clock time (e.g. "02:45 PM") once an hour or more has
 /// passed. [createdAtIso] is the UTC ISO timestamp from the API.
@@ -394,7 +526,7 @@ class _OrderCard extends StatelessWidget {
   final int sequence;
   final String label;
   final Set<String> busy;
-  final bool canEdit;
+  final String role;
   final Future<void> Function(Map<String, dynamic>) onToggle;
   final Future<void> Function(Map<String, dynamic>) onMarkCompleted;
 
@@ -403,7 +535,7 @@ class _OrderCard extends StatelessWidget {
     required this.sequence,
     required this.label,
     required this.busy,
-    required this.canEdit,
+    required this.role,
     required this.onToggle,
     required this.onMarkCompleted,
   });
@@ -412,7 +544,12 @@ class _OrderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final items = (order['items'] as List).cast<Map<String, dynamic>>();
-    final allReady = order['all_ready'] == true;
+    // Every dish cooked (ready or already delivered) — the card goes green with
+    // a READY tag, even while it waits in Pending for delivery.
+    final allReady = items.isNotEmpty &&
+        items.every((i) =>
+            const ['ready', 'delivered'].contains(i['kitchen_status']));
+    final canEdit = role == 'kitchen';
 
     return AppCard(
       padding: EdgeInsets.zero,
@@ -536,7 +673,7 @@ class _OrderCard extends StatelessWidget {
                 if (i > 0) const Divider(height: 1),
                 _ItemTile(
                   item: items[i],
-                  canEdit: canEdit,
+                  role: role,
                   busy: busy,
                   onToggle: onToggle,
                 ),
@@ -547,7 +684,9 @@ class _OrderCard extends StatelessWidget {
           // ticking every dish individually. Ticking the last dish by hand
           // has the same effect — this just moves the order to Completed
           // immediately without needing every dish tapped one by one.
-          if (canEdit && !allReady)
+          if (canEdit &&
+              !allReady &&
+              items.any((i) => i['kitchen_status'] == 'pending'))
             Padding(
               padding: const EdgeInsets.all(AppSpacing.space8),
               child: SizedBox(
@@ -577,16 +716,17 @@ class _OrderCard extends StatelessWidget {
 /// A single dish row in an order card. Stateful so it can play a smooth
 /// scale-in animation on the green "ready" circle the moment a dish is marked
 /// complete — visible to every role (chef, owner, waiter), not just a
-/// strikethrough. The chef taps the row to toggle; other roles are read-only.
+/// strikethrough. The chef taps to toggle pending/ready; floor staff tap a
+/// ready dish to mark it delivered (and again to undo).
 class _ItemTile extends StatefulWidget {
   final Map<String, dynamic> item;
-  final bool canEdit;
+  final String role;
   final Set<String> busy;
   final Future<void> Function(Map<String, dynamic>) onToggle;
 
   const _ItemTile({
     required this.item,
-    required this.canEdit,
+    required this.role,
     required this.busy,
     required this.onToggle,
   });
@@ -601,7 +741,9 @@ class _ItemTileState extends State<_ItemTile>
   late final Animation<double> _scale;
   late bool _ready;
 
-  bool get _isReady => widget.item['kitchen_status'] == 'ready';
+  // Delivered is still "done" in the kitchen's eyes: greyed, no pop.
+  bool get _isReady =>
+      const ['ready', 'delivered'].contains(widget.item['kitchen_status']);
 
   @override
   void initState() {
@@ -647,14 +789,22 @@ class _ItemTileState extends State<_ItemTile>
     final qtyLabel =
         qty == qty.roundToDouble() ? qty.toInt().toString() : qty.toString();
 
+    final delivered = item['kitchen_status'] == 'delivered';
+
     // Compact custom row instead of ListTile, which forces a ~48px min height
     // even when dense. This packs more dishes into each card.
-    final enabled = widget.canEdit && !widget.busy.contains(id);
+    final enabled =
+        _KitchenScreenState.nextStatus(widget.role, item) != null &&
+            !widget.busy.contains(id);
     return InkWell(
       onTap: enabled ? () => widget.onToggle(item) : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
-        color: ready ? AppColors.successLight : Colors.transparent,
+        color: delivered
+            ? AppColors.background
+            : ready
+                ? AppColors.successLight
+                : Colors.transparent,
         padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.space8, vertical: 6),
         child: Row(
@@ -664,7 +814,7 @@ class _ItemTileState extends State<_ItemTile>
             // owners and waiters watching the queue see completion clearly —
             // not just a thin strikethrough. When not ready: the chef sees an
             // empty tick target; read-only roles see nothing.
-            _buildLeading(ready),
+            _buildLeading(ready, delivered),
             Expanded(
               child: Row(
                 children: [
@@ -677,7 +827,6 @@ class _ItemTileState extends State<_ItemTile>
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: ready ? FontWeight.w500 : FontWeight.normal,
-                        decoration: ready ? TextDecoration.lineThrough : null,
                         color: ready
                             ? AppColors.textSecondary
                             : AppColors.textPrimary,
@@ -687,6 +836,16 @@ class _ItemTileState extends State<_ItemTile>
                 ],
               ),
             ),
+            if (delivered) ...[
+              const SizedBox(width: 6),
+              Text(
+                context.l10n.kitchenDelivered,
+                style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textSecondary),
+              ),
+            ],
             const SizedBox(width: 6),
             Text(
               '× $qtyLabel',
@@ -698,10 +857,24 @@ class _ItemTileState extends State<_ItemTile>
     );
   }
 
-  /// The leading indicator: a green filled circle with a white check when
-  /// ready (animated), otherwise an empty tick outline for the chef and a
-  /// blank spacer for read-only roles.
-  Widget _buildLeading(bool ready) {
+  /// The leading indicator: a grey double-tick once delivered, a green filled
+  /// circle with a white check when ready (animated), otherwise an empty tick
+  /// outline for the chef and a blank spacer for everyone else.
+  Widget _buildLeading(bool ready, bool delivered) {
+    if (delivered) {
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: Container(
+          width: 20,
+          height: 20,
+          decoration: const BoxDecoration(
+            color: AppColors.textSecondary,
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.done_all, size: 13, color: Colors.white),
+        ),
+      );
+    }
     if (ready) {
       return Padding(
         padding: const EdgeInsets.only(right: 6),
@@ -721,7 +894,7 @@ class _ItemTileState extends State<_ItemTile>
     }
     // Not ready: the chef gets a tappable empty circle; other roles get a
     // matching-width spacer so text stays aligned across rows.
-    if (widget.canEdit) {
+    if (widget.role == 'kitchen') {
       return const Padding(
         padding: EdgeInsets.only(right: 6),
         child: Icon(Icons.radio_button_unchecked,

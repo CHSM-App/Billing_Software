@@ -71,16 +71,8 @@ class TablesNotifier extends AsyncNotifier<List<TableModel>> {
     _patchTableFull(tableId, status: 'occupied', activeBillId: effectiveBillId);
   }
 
-  /// Optimistically reflect a table order that was just finalized (paid): mark
-  /// it 'billed' and drop its cached draft. The tables screen then offers the
-  /// "mark paid / empty" options for that table. Reconciled by a later refresh.
-  void applyFinalized(String tableId, {String? billId}) {
-    if (billId != null) _billCache.remove(billId);
-    _patchTableFull(tableId, status: 'billed');
-  }
-
-  /// Optimistically reflect a table that was just released (draft voided / paid
-  /// & emptied): mark it 'empty' and drop its cached draft, so the Tables screen
+  /// Optimistically reflect a table that was just released (draft voided or
+  /// bill finalized): mark it 'empty' and drop its cached draft, so the Tables screen
   /// updates instantly. Reconciled by a later refresh.
   void applyTableReleased(String tableId, {String? billId}) {
     if (billId != null) _billCache.remove(billId);

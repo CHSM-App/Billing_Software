@@ -58,108 +58,52 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
   }
 
   void _onTableTap(TableModel table) async {
-    final userRole = ref.read(userRoleProvider);
+    // Finalizing a table's bill frees it straight away, so every table opens
+    // the same way. (A legacy 'billed' row has no active bill and opens empty.)
+    // The cart is shared across all billing screens (retail Billing tab and
+    // each table). Always start a table session from a clean cart: an empty
+    // table opens empty; an occupied table's draft is loaded fresh below.
+    ref.read(cartProvider.notifier).clear();
 
-    if (table.status == 'billed') {
-      _showBilledOptions(table, userRole);
-      return;
-    }
-    if (table.status == 'empty' || table.status == 'occupied') {
-      // The cart is shared across all billing screens (retail Billing tab and
-      // each table). Always start a table session from a clean cart: an empty
-      // table opens empty; an occupied table's draft is loaded fresh below.
-      ref.read(cartProvider.notifier).clear();
+    // Retrieve from cache — populated when tables were last fetched.
+    final cachedBill = ref
+        .read(tablesProvider.notifier)
+        .cachedBill(table.activeBillId);
 
-      // Retrieve from cache — populated when tables were last fetched.
-      final cachedBill = ref
-          .read(tablesProvider.notifier)
-          .cachedBill(table.activeBillId);
-
-      await Navigator.push(
-        context,
-        PageRouteBuilder(
-          transitionDuration: const Duration(milliseconds: 120),
-          reverseTransitionDuration: const Duration(milliseconds: 120),
-          pageBuilder: (_, __, ___) => HomeScreen(
-            tableId: table.id,
-            tableNumber: table.tableNumber,
-            activeBillId: table.activeBillId,
-            activeBillFuture: cachedBill != null
-                ? Future.value(cachedBill)
-                : table.activeBillId != null
-                    ? getBill(table.activeBillId!)
-                        .then<Bill?>((d) => Bill.fromJson(d))
-                        .catchError((_) => null)
-                    : null,
-          ),
-          transitionsBuilder: (_, animation, __, child) =>
-              FadeTransition(opacity: animation, child: child),
+    await Navigator.push(
+      context,
+      PageRouteBuilder(
+        transitionDuration: const Duration(milliseconds: 120),
+        reverseTransitionDuration: const Duration(milliseconds: 120),
+        pageBuilder: (_, __, ___) => HomeScreen(
+          tableId: table.id,
+          tableNumber: table.tableNumber,
+          activeBillId: table.activeBillId,
+          activeBillFuture: cachedBill != null
+              ? Future.value(cachedBill)
+              : table.activeBillId != null
+                  ? getBill(table.activeBillId!)
+                      .then<Bill?>((d) => Bill.fromJson(d))
+                      .catchError((_) => null)
+                  : null,
         ),
-      );
-
-      // Back from the table screen: clear the borrowed cart so a table draft's
-      // items never leak into the standalone Billing tab (both share the same
-      // cartProvider, and the Billing tab stays alive in the shell's
-      // IndexedStack). This runs on every exit path — save, finalize, or back.
-      if (!mounted) return;
-      ref.read(cartProvider.notifier).clear();
-
-      // We intentionally do NOT refresh tables here. Saving a draft pops this
-      // screen immediately (optimistic) while the create/update commits in the
-      // background; a refresh fired now would race that uncommitted write and
-      // could momentarily flip the table back to empty. _saveDraft runs its own
-      // refreshSilently() once the write commits, keeping the list correct.
-    }
-  }
-
-  void _showBilledOptions(TableModel table, String userRole) {
-    final l10n = context.l10n;
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(l10n.tablesTableLabel(table.tableNumber)),
-        content: Text(l10n.tablesBilledOrderBody),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(l10n.commonCancel)),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _markTableEmpty(table);
-            },
-            child: Text(l10n.tablesMarkPaidEmpty),
-          ),
-          if (table.activeBillId != null)
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                await _voidTableBill(table);
-              },
-              child: Text(l10n.tablesVoidBill,
-                  style: const TextStyle(color: AppColors.error)),
-            ),
-        ],
+        transitionsBuilder: (_, animation, __, child) =>
+            FadeTransition(opacity: animation, child: child),
       ),
     );
-  }
 
-  Future<void> _markTableEmpty(TableModel table) async {
-    try {
-      await ref.read(tablesProvider.notifier).updateStatus(table.id, 'empty');
-    } on ApiException catch (e) {
-      _showSnack(e.message, isError: true);
-    }
-  }
+    // Back from the table screen: clear the borrowed cart so a table draft's
+    // items never leak into the standalone Billing tab (both share the same
+    // cartProvider, and the Billing tab stays alive in the shell's
+    // IndexedStack). This runs on every exit path — save, finalize, or back.
+    if (!mounted) return;
+    ref.read(cartProvider.notifier).clear();
 
-  Future<void> _voidTableBill(TableModel table) async {
-    if (table.activeBillId == null) return;
-    try {
-      await voidBill(table.activeBillId!);
-      ref.invalidate(tablesProvider);
-    } on ApiException catch (e) {
-      _showSnack(e.message, isError: true);
-    }
+    // We intentionally do NOT refresh tables here. Saving a draft pops this
+    // screen immediately (optimistic) while the create/update commits in the
+    // background; a refresh fired now would race that uncommitted write and
+    // could momentarily flip the table back to empty. _saveDraft runs its own
+    // refreshSilently() once the write commits, keeping the list correct.
   }
 
   Future<void> _addTable() async {

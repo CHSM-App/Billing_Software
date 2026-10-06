@@ -211,6 +211,7 @@ app.use('/api/items', require('./routes/items'));
 app.use('/api/raw-materials', require('./routes/raw_materials'));
 app.use('/api/bills', require('./routes/bills'));
 app.use('/api/credit', require('./routes/credit'));
+app.use('/api/customers', require('./routes/customers'));
 app.use('/receipt',  require('./routes/receipt'));
 app.use('/order',    require('./routes/public_order'));
 app.use('/store',    require('./routes/public_store'));

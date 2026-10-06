@@ -247,6 +247,10 @@
       <span>Allow online store</span>
       <label class="switch"><input type="checkbox" id="fOnlineStore"/><span class="slider"></span></label>
     </div>
+    <div class="toggle-row">
+      <span>Allow customers &amp; WhatsApp offers</span>
+      <label class="switch"><input type="checkbox" id="fCustomers"/><span class="slider"></span></label>
+    </div>
 
     <div class="section-label">Messaging &amp; Verification</div>
     <div class="field">
@@ -479,6 +483,7 @@
     $('fMobile').checked = sub.allow_mobile !== false;
     $('fDesktop').checked = sub.allow_desktop !== false;
     $('fOnlineStore').checked = sub.allow_online_store !== false;
+    $('fCustomers').checked = sub.allow_customers !== false;
     $('fWhatsapp').value = b.whatsapp_mode || 'deeplink';
     $('fVerified').checked = !!b.is_verified;
     $('dMsg').textContent = '';
@@ -505,6 +510,7 @@
       allow_mobile: $('fMobile').checked,
       allow_desktop: $('fDesktop').checked,
       allow_online_store: $('fOnlineStore').checked,
+      allow_customers: $('fCustomers').checked,
       is_trial: $('fTrial').checked,
       whatsapp_mode: $('fWhatsapp').value,
       is_verified: $('fVerified').checked

@@ -17,6 +17,9 @@ class SessionData {
   /// queue and shows its tab at all.
   final bool storeEnabled;
 
+  /// Vittam admin allows this business the Customers & campaigns screen.
+  final bool customersEnabled;
+
   const SessionData({
     required this.userId,
     required this.userName,
@@ -29,6 +32,7 @@ class SessionData {
     required this.gstEnabled,
     required this.roundOffEnabled,
     required this.storeEnabled,
+    this.customersEnabled = true,
   });
 
   static SessionData empty() => const SessionData(
@@ -57,6 +61,7 @@ class SessionData {
         gstEnabled: m['gst_enabled'] == true,
         roundOffEnabled: m['round_off_enabled'] == true,
         storeEnabled: m['store_enabled'] == true,
+        customersEnabled: m['customers_enabled'] != false,
       );
 }
 

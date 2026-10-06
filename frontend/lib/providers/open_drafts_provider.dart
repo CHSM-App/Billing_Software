@@ -4,8 +4,9 @@ import '../models/models.dart';
 import '../services/offline_service.dart';
 import '../storage.dart';
 
-/// Table-less draft bills — the "Open Orders" queue. A server saves these from
-/// the billing page; a cashier/owner opens one to finalize it. The Open Orders
+/// Every open draft bill, table or not — the "Open Orders" queue. A server
+/// saves these from the billing page or a table; a cashier/owner opens one to
+/// finalize it. The Open Orders
 /// tab is only shown while this list is non-empty (see [hasOpenDraftsProvider]).
 ///
 /// Drafts saved while offline live in the local [OfflineService] queue and are
@@ -95,13 +96,10 @@ class OpenDraftsNotifier extends AsyncNotifier<List<Bill>> {
     state = AsyncData(current.where((b) => b.id != draftId).toList());
   }
 
-  /// Reads queued offline drafts (table-less only) and rebuilds them as [Bill]s.
+  /// Reads queued offline drafts and rebuilds them as [Bill]s.
   Future<List<Bill>> _localDrafts() async {
     final rows = await OfflineService.instance.getAllDrafts();
-    return rows
-        .where((r) => r['table_id'] == null) // table drafts live on Tables
-        .map(_rowToBill)
-        .toList();
+    return rows.map(_rowToBill).toList();
   }
 
   /// Merge server drafts with local queued drafts, de-duplicating by id (a
@@ -156,7 +154,7 @@ final openDraftsProvider =
     AsyncNotifierProvider<OpenDraftsNotifier, List<Bill>>(
         OpenDraftsNotifier.new);
 
-/// Whether any table-less drafts currently exist. Drives whether the Open
+/// Whether any open drafts currently exist. Drives whether the Open
 /// Orders tab appears in the shell. Defaults to false until the list loads.
 final hasOpenDraftsProvider = Provider<bool>((ref) =>
     (ref.watch(openDraftsProvider).valueOrNull ?? const []).isNotEmpty);

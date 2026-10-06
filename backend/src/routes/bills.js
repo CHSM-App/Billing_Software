@@ -16,6 +16,7 @@ const { computeRoundOff, netUnitPrice } = require('../money');
 const validPaymentModes = ['cash', 'upi', 'card', 'credit', 'other'];
 const { stripBillPrefix } = require('../billNumber');
 const { parseAdditionalCharges, serializeCharges, attachCharges } = require('../charges');
+const { upsertCustomer, syncCustomers, canonicalPhone, billPhoneMatch } = require('../customers');
 
 // Base URL used in receipt links — no trailing slash
 const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
@@ -742,7 +743,8 @@ router.post('/', requireAuth, async (req, res) => {
 
       // Update table status if table_id provided
       if (table_id) {
-        const tableStatus = billStatus === 'draft' ? 'occupied' : 'billed';
+        // A bill settled straight away frees the table — no "mark paid" step.
+        const tableStatus = billStatus === 'draft' ? 'occupied' : 'empty';
         await transaction.request()
           .input('table_id', sql.UniqueIdentifier, table_id)
           .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -778,6 +780,10 @@ router.post('/', requireAuth, async (req, res) => {
       }
 
       await transaction.commit();
+
+      // The bill is saved — keep the customers table in step. Not awaited and
+      // never throws (customers.js), so it cannot affect this sale.
+      upsertCustomer(req.user.business_id, customer_phone, customer_name);
 
       // Collect stock targets that just crossed below their threshold (stock was
       // above before, at/below after). Bundle into one notification. For variant
@@ -907,9 +913,9 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // GET /api/bills/drafts
-// Open orders that are NOT attached to a table — the "Open Orders" queue. A
-// server can build these on the billing page; a cashier/owner picks them up and
-// finalizes them. Table drafts are excluded (those live on the Tables screen).
+// Every open order — the "Open Orders" queue. A server can build these on the
+// billing page or at a table; a cashier/owner picks them up and finalizes them.
+// Table drafts carry table_number so the list can label them.
 // Declared before '/:id' so the literal path wins the route match.
 router.get('/drafts', requireAuth, async (req, res) => {
   try {
@@ -929,12 +935,13 @@ router.get('/drafts', requireAuth, async (req, res) => {
                o.address      AS online_address,
                o.paid_amount  AS online_paid_amount,
                o.payment_txn_id AS online_payment_txn_id,
-               o.payment_status AS online_payment_status
+               o.payment_status AS online_payment_status,
+               t.table_number
         FROM bills b
         LEFT JOIN online_orders o ON o.bill_id = b.id
+        LEFT JOIN tables t ON t.id = b.table_id AND t.business_id = b.business_id
         WHERE b.business_id = @business_id
           AND b.status = 'draft'
-          AND b.table_id IS NULL
         ORDER BY b.created_at DESC
       `);
 
@@ -1031,10 +1038,13 @@ router.get('/charges/suggestions', requireAuth, async (req, res) => {
 // Past customers of this business, for the billing screen's name/phone
 // autocomplete. Matches on either field so one endpoint serves both inputs.
 //
-// A customer is not a table here - they exist only as the name/phone recorded
-// on past bills - so this aggregates those bills. The most recent name wins
-// (people correct a typo on a later visit), and results are ordered by visit
-// count so a regular appears before a one-off.
+// Reads the `customers` table (migration 046), which the bill routes keep in
+// step after each commit, with a throttled catch-up sync for anything missed.
+// The name is the customer's latest one (people correct a typo on a later
+// visit); visits are counted from bills so a regular appears before a one-off.
+//
+// The response shape is unchanged from when this scanned bills directly, so
+// installed apps keep working without an update.
 //
 // Not owner-gated: a cashier taking an order needs it. It exposes nothing the
 // cashier cannot already see on the bill history.
@@ -1048,46 +1058,36 @@ router.get('/customers/search', requireAuth, async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 20);
 
     // Digits-only copy so "98765 43210", "+91 9876543210" and "9876543210"
-    // all match the same stored number.
-    const digits = q.replace(/\D/g, '');
+    // all match the same stored number. customers.phone is canonical 10-digit,
+    // so a typed full "919876543210" is reduced the same way.
+    const rawDigits = q.replace(/\D/g, '');
+    const digits = rawDigits.length > 10 ? canonicalPhone(rawDigits) : rawDigits;
+
+    // Catch-up sync in the background (throttled) — never on the typing path.
+    // Every bill save already upserts its customer, so this only mops up
+    // stragglers, which then show from the next keystroke.
+    syncCustomers(req.user.business_id)
+      .catch((err) => logger.warn({ err }, 'customer sync before search failed'));
 
     const result = await pool.request()
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .input('name_like', sql.NVarChar(200), `%${q}%`)
       .input('phone_like', sql.NVarChar(20), digits ? `%${digits}%` : '~no~match~')
       .query(`
-        WITH matched AS (
-          -- Every phone that has at least one bill matching the query.
-          SELECT DISTINCT customer_phone
-          FROM bills
-          WHERE business_id = @business_id
-            AND customer_phone IS NOT NULL
-            AND LTRIM(RTRIM(customer_phone)) <> ''
-            AND (customer_name LIKE @name_like OR customer_phone LIKE @phone_like)
-        )
         SELECT TOP (${limit})
-          -- Prefer the most recent name that MATCHES what was typed; fall back
-          -- to the most recent name otherwise. Showing an unrelated name for
-          -- the same phone (the person used two names) would look like a bug
-          -- in an autocomplete: you type "Sh" and get back "Sagar".
-          (SELECT TOP 1 b2.customer_name FROM bills b2
-            WHERE b2.business_id = @business_id
-              AND b2.customer_phone = b.customer_phone
-              AND b2.customer_name IS NOT NULL
-              AND LTRIM(RTRIM(b2.customer_name)) <> ''
-            ORDER BY
-              CASE WHEN b2.customer_name LIKE @name_like THEN 0 ELSE 1 END,
-              b2.created_at DESC)          AS customer_name,
-          b.customer_phone,
-          -- Count ALL of that phone's bills, not just the matching rows: a
-          -- name search would otherwise under-report a regular's visit count.
-          COUNT(*)                         AS visits,
-          MAX(b.created_at)                AS last_bill_at
-        FROM bills b
-        INNER JOIN matched m ON m.customer_phone = b.customer_phone
-        WHERE b.business_id = @business_id
-        GROUP BY b.customer_phone
-        ORDER BY COUNT(*) DESC, MAX(b.created_at) DESC`);
+          c.name             AS customer_name,
+          c.phone            AS customer_phone,
+          v.visits,
+          v.last_bill_at
+        FROM customers c
+        OUTER APPLY (
+          SELECT COUNT(*) AS visits, MAX(b.created_at) AS last_bill_at
+          FROM bills b
+          WHERE b.business_id = c.business_id AND ${billPhoneMatch('c.phone')}
+        ) v
+        WHERE c.business_id = @business_id
+          AND (c.name LIKE @name_like OR c.phone LIKE @phone_like)
+        ORDER BY v.visits DESC, v.last_bill_at DESC`);
 
     // The same person often appears as 9876543210 and 919876543210. Collapse on
     // the last 10 digits so the list does not offer the same customer twice.
@@ -1182,7 +1182,7 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
         .input('table_id', sql.UniqueIdentifier, tableId)
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          UPDATE tables SET status = 'billed'
+          UPDATE tables SET status = 'empty'
           WHERE id = @table_id AND business_id = @business_id
         `);
     }
@@ -1587,9 +1587,11 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         const bucket = kitchenPool[dishKey(li)];
         if (bucket && bucket.length > 0) {
           const prev = bucket.shift();
-          // If the waiter increased the quantity of an already-ready dish, the
-          // extra portions still need cooking — send it back to pending.
-          if (prev.kitchen_status === 'ready' && parseFloat(li.quantity) > prev.quantity) {
+          // If the waiter increased the quantity of an already-ready (or
+          // delivered) dish, the extra portions still need cooking — send it
+          // back to pending.
+          if (['ready', 'delivered'].includes(prev.kitchen_status) &&
+              parseFloat(li.quantity) > prev.quantity) {
             return { kitchen_status: 'pending', kitchen_done_at: null };
           }
           return { kitchen_status: prev.kitchen_status, kitchen_done_at: prev.kitchen_done_at };
@@ -1726,6 +1728,12 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
     }
 
     const bill = await fetchBill(req.params.id, req.user.business_id);
+
+    // After commit, not awaited — see customers.js. Uses the stored bill so a
+    // name-only edit still knows the phone.
+    if (setCustomerName || setCustomerPhone) {
+      upsertCustomer(req.user.business_id, bill.customer_phone, bill.customer_name);
+    }
 
     audit.logBillItemsUpdated(
       { user_id: req.user.user_id, user_name: req.user.name || null },
@@ -1970,7 +1978,7 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
       .input('id',          sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT b.receipt_token, b.customer_phone, b.bill_number, b.status,
+        SELECT b.receipt_token, b.customer_phone, b.customer_name, b.bill_number, b.status,
                bs.name AS shop_name, bs.whatsapp_mode
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
@@ -2003,6 +2011,7 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
         .query(`UPDATE bills SET customer_phone = @phone
                 WHERE id = @id AND business_id = @business_id AND customer_phone IS NULL`);
       customer_phone = typed;
+      upsertCustomer(req.user.business_id, typed, row.recordset[0].customer_name);
     }
 
     if (!customer_phone) {

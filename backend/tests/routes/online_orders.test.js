@@ -4,6 +4,12 @@ const { makeDbMock } = require('../helpers/db');
 const { mockPool, mockRequest, mockTransaction } = makeDbMock();
 
 jest.mock('../../src/db', () => mockPool);
+// Fire-and-forget after commit; see bills.test.js.
+jest.mock('../../src/customers', () => ({
+  ...jest.requireActual('../../src/customers'),
+  upsertCustomer: jest.fn(() => Promise.resolve()),
+  syncCustomers: jest.fn(() => Promise.resolve()),
+}));
 
 const app = require('../../src/server');
 const { authHeader } = require('../helpers/auth');

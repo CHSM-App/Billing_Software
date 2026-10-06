@@ -36,6 +36,7 @@ const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
 const { cleanLines, priceLines } = require('../menuPricing');
+const { upsertCustomer } = require('../customers');
 const { publicTokenSecret } = require('../auth');
 const { sendTableOrderNotification, sendKitchenNotification } = require('../fcm');
 const { otpSendLimiter, otpVerifyLimiter, publicPageLimiter: orderLimiter } = require('../middleware/rateLimiter');
@@ -503,6 +504,9 @@ router.post('/:qrToken', orderLimiter, async (req, res) => {
       `);
 
     await transaction.commit();
+
+    // Not awaited, never throws — see customers.js.
+    upsertCustomer(table.business_id, payload.phone, name);
 
     // Live refresh: kitchen (new dishes), tables (now occupied), drafts list.
     // A WebSocket only reaches a device whose app is OPEN — the OS suspends the

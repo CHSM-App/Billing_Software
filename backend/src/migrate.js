@@ -259,7 +259,10 @@ async function cmdDown(pool, targetVersion) {
     .filter((m) => {
       if (targetVersion && m.version <= targetVersion.padStart(3, '0')) return false;
       return true;
-    });
+    })
+    // No target = only the last applied one, as documented at the top. A bare
+    // `down` used to roll back every migration.
+    .slice(0, targetVersion ? undefined : 1);
 
   if (toRollback.length === 0) {
     console.log('Nothing to roll back.');

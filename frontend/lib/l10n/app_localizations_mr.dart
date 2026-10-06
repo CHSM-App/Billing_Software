@@ -211,7 +211,216 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get openOrdersEmpty =>
-      'कोणत्याही खुल्या ऑर्डर नाहीत. टेबलशिवाय जतन केलेले ड्राफ्ट येथे दिसतात.';
+      'कोणत्याही खुल्या ऑर्डर नाहीत. जतन केलेले ड्राफ्ट आणि टेबल ऑर्डर येथे दिसतात.';
+
+  @override
+  String get openOrdersSearchHint => 'टेबल, नाव, मोबाइल, बिल क्रमांक शोधा…';
+
+  @override
+  String get openOrdersNoMatches => 'शोधाशी जुळणारी कोणतीही खुली ऑर्डर नाही.';
+
+  @override
+  String get customersTitle => 'ग्राहक';
+
+  @override
+  String get customersSubtitle => 'ग्राहक यादी, भेटी आणि WhatsApp ऑफर';
+
+  @override
+  String get customersSearchHint => 'नाव किंवा मोबाइल शोधा';
+
+  @override
+  String get customersSortBy => 'क्रमवारी';
+
+  @override
+  String get customersSortSpend => 'एकूण खर्च';
+
+  @override
+  String get customersSortVisits => 'भेटींची संख्या';
+
+  @override
+  String get customersSortRecent => 'शेवटच्या भेटीची तारीख';
+
+  @override
+  String get customersSortName => 'नाव';
+
+  @override
+  String get customersSortHighLow => 'जास्त ते कमी';
+
+  @override
+  String get customersSortLowHigh => 'कमी ते जास्त';
+
+  @override
+  String get customersSortAZ => 'A ते Z';
+
+  @override
+  String get customersSortZA => 'Z ते A';
+
+  @override
+  String get customersSortMostVisits => 'जास्त भेटी आधी';
+
+  @override
+  String get customersSortFewestVisits => 'कमी भेटी आधी';
+
+  @override
+  String get customersSortNewest => 'नवीन आधी';
+
+  @override
+  String get customersSortOldest => 'जुने आधी';
+
+  @override
+  String get customersFilters => 'फिल्टर';
+
+  @override
+  String get customersFilterReset => 'रीसेट';
+
+  @override
+  String get customersFilterVisits => 'भेटी';
+
+  @override
+  String get customersFilterSpend => 'एकूण खर्च';
+
+  @override
+  String get customersFilterMin => 'किमान';
+
+  @override
+  String get customersFilterMax => 'कमाल';
+
+  @override
+  String get customersFilterLastVisit => 'शेवटची भेट';
+
+  @override
+  String get customersFilterOffers => 'ऑफर';
+
+  @override
+  String get customersRecencyAny => 'कधीही';
+
+  @override
+  String customersRecencyWithin(int days) {
+    return 'मागील $days दिवसांत';
+  }
+
+  @override
+  String customersRecencyInactive(int days) {
+    return '$days+ दिवस आले नाहीत';
+  }
+
+  @override
+  String get customersOffersAll => 'सर्व';
+
+  @override
+  String get customersOffersAllowed => 'ऑफर सुरू';
+
+  @override
+  String get customersOffersOptedOut => 'ऑफर बंद';
+
+  @override
+  String customersShowResults(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ग्राहक दाखवा',
+      one: '1 ग्राहक दाखवा',
+      zero: 'एकही ग्राहक जुळत नाही',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String customersResultCount(int shown, int total) {
+    return '$total पैकी $shown ग्राहक';
+  }
+
+  @override
+  String customersSelectAllCount(int count) {
+    return 'सर्व निवडा ($count)';
+  }
+
+  @override
+  String get customersClearAll => 'सर्व काढा';
+
+  @override
+  String get customersApply => 'लागू करा';
+
+  @override
+  String customersChipVisits(String range) {
+    return 'भेटी: $range';
+  }
+
+  @override
+  String customersChipSpend(String range) {
+    return 'खर्च: $range';
+  }
+
+  @override
+  String customersBills(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count बिले',
+      one: '1 बिल',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String customersLastVisit(String date) {
+    return 'शेवटची भेट $date';
+  }
+
+  @override
+  String get customersOptedOut => 'ऑफर बंद';
+
+  @override
+  String get customersOptedOutNote => 'या ग्राहकाला ऑफर पाठवल्या जाणार नाहीत.';
+
+  @override
+  String get customersStopOffers => 'ऑफर बंद करा';
+
+  @override
+  String get customersAllowOffers => 'ऑफर सुरू करा';
+
+  @override
+  String customersSelected(int count) {
+    return '$count निवडले';
+  }
+
+  @override
+  String get customersNext => 'पुढे';
+
+  @override
+  String get customersEmpty =>
+      'अजून ग्राहक नाहीत. मोबाइल नंबरसह बिल जतन केल्यावर ग्राहक येथे दिसतील.';
+
+  @override
+  String get customersNoMatches => 'जुळणारे ग्राहक नाहीत.';
+
+  @override
+  String get customersNoBills => 'अजून बिले नाहीत.';
+
+  @override
+  String customersComposeTitle(int count) {
+    return '$count ग्राहकांना संदेश';
+  }
+
+  @override
+  String get customersComposeHint => 'तुमची ऑफर किंवा माहिती लिहा…';
+
+  @override
+  String customersComposePreview(String shop) {
+    return 'WhatsApp वर असे जाईल: \"Message from $shop: …\"';
+  }
+
+  @override
+  String get customersSend => 'पाठवा';
+
+  @override
+  String customersSending(int queued, int skipped) {
+    return '$queued ग्राहकांना पाठवत आहे ($skipped वगळले)';
+  }
+
+  @override
+  String get customersNotDelivering =>
+      'जतन केले, पण WhatsApp ऑफर अजून सेट केलेल्या नाहीत — संदेश पोहोचले नाहीत.';
 
   @override
   String openOrdersBillNumber(String number) {
@@ -258,6 +467,15 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get kitchenMarkCompleted => 'पूर्ण झाले म्हणून चिन्हांकित करा';
+
+  @override
+  String get kitchenDelivered => 'दिले';
+
+  @override
+  String get kitchenReadyOnly => 'वाढण्यास तयार';
+
+  @override
+  String get kitchenNoReadyItems => 'वाढण्यासाठी कोणताही पदार्थ तयार नाही.';
 
   @override
   String get kitchenJustNow => 'आत्ताच';
@@ -1633,16 +1851,6 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get tablesNoTablesYet => 'अजून टेबल नाहीत';
-
-  @override
-  String get tablesBilledOrderBody =>
-      'या टेबलचे बिल झाले आहे. तुम्हाला काय करायचे आहे?';
-
-  @override
-  String get tablesMarkPaidEmpty => 'पैसे मिळाले / टेबल रिकामे करा';
-
-  @override
-  String get tablesVoidBill => 'बिल रद्द करा';
 
   @override
   String get tablesTableNumberLabel => 'टेबल क्रमांक (उदा. T1, A2)';

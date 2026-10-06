@@ -27,6 +27,7 @@ import 'business_profile_screen.dart';
 import 'marathi_print_test_screen.dart';
 import 'raster_lab_screen.dart';
 import 'conflict_resolution_screen.dart';
+import 'customers_screen.dart';
 import 'history_screen.dart';
 import 'reports_screen.dart';
 import 'vendor_bills_screen.dart';
@@ -219,6 +220,23 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const ReportsScreen()),
                         ),
                       ),
+                      // Only when Vittam admin has the feature on for this
+                      // business (on by default; refreshed on every app open).
+                      if (session.customersEnabled) ...[
+                        const SizedBox(height: AppSpacing.space8),
+                        _buildNavCard(
+                          context,
+                          icon: Icons.people_alt_outlined,
+                          iconColor: const Color(0xFF7C3AED),
+                          title: l10n.customersTitle,
+                          subtitle: l10n.customersSubtitle,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const CustomersScreen()),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: AppSpacing.space8),
                       _buildNavCard(
                         context,

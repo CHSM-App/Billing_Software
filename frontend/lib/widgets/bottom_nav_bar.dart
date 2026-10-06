@@ -37,11 +37,11 @@ class AppBottomNavBar extends StatelessWidget {
                       color: selected ? AppColors.primaryLight : Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(
+                    child: item.badged(Icon(
                       selected ? item.iconFilled : item.iconOutlined,
                       size: 20,
                       color: selected ? AppColors.primary : AppColors.textSecondary,
-                    ),
+                    )),
                   ),
                   const SizedBox(height: 2),
                   Text(

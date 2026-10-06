@@ -2225,10 +2225,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         unawaited(saveBillPrefix(bill.billNumber.substring(0, dash)));
       }
       if (!mounted) return;
-      // Optimistically flip the table to 'billed' so the Tables screen reflects
-      // the finalized order the instant we pop, before the reconcile fetch.
+      // A settled table is free again — optimistically empty it so the Tables
+      // screen reflects that the instant we pop, before the reconcile fetch.
       if (widget.tableId != null) {
-        ref.read(tablesProvider.notifier).applyFinalized(
+        ref.read(tablesProvider.notifier).applyTableReleased(
               widget.tableId!,
               billId: widget.activeBillId ?? bill.id,
             );
@@ -2245,11 +2245,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // too meant two history fetches per settle.
       // Reconcile table state with the server after the finalize commits.
       unawaited(ref.read(tablesProvider.notifier).refreshSilently());
-      // A just-finalized table-less draft leaves the Open Orders queue — refresh
-      // it so the completed order drops off the list.
-      if (widget.tableId == null) {
-        unawaited(ref.read(openDraftsProvider.notifier).refreshSilently());
-      }
+      // A just-finalized draft (table or not) leaves the Open Orders queue —
+      // refresh it so the completed order drops off the list.
+      unawaited(ref.read(openDraftsProvider.notifier).refreshSilently());
       // A finalized order is no longer a draft, so it leaves the kitchen queue —
       // ping so the Kitchen screen drops it immediately.
       NotificationService.instance.pingKitchen();

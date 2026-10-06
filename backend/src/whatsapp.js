@@ -470,4 +470,60 @@ async function sendDemoRequest({ name, mobile, businessType, date, time, current
     : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
 }
 
-module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendOnboardingAlert, sendDemoRequest }
+// ─────────────────────────────────────────────────────────────────────────────
+// sendCampaignMessage — an owner's offer/announcement to one customer
+//
+// Template variables: {1} shop_name  {2} message  (a Meta-approved MARKETING
+// template, e.g. "Message from {1}: {2}" — set WHATSAPP_TPL_CAMPAIGN).
+//
+// Never throws — returns { sent, skipped?, error?, campaignId? } so the caller
+// can log every recipient.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Sample is comma-separated, so a comma inside the text would shift it into a
+// third variable; and Meta rejects newlines/tabs inside a template variable.
+// U+201A looks like a comma to a reader and is not one to the parser.
+function campaignText(v) {
+  return String(v ?? '')
+    .replace(/,/g, '‚')
+    .replace(/\s*[\r\n\t]+\s*/g, ' · ')
+    .replace(/ {4,}/g, '   ')
+    .trim()
+}
+
+async function sendCampaignMessage({ phone, shopName, message }) {
+  const CAMPAIGN_TEMPLATE = process.env.WHATSAPP_TPL_CAMPAIGN || ''
+  const normPhone = normalisePhone(phone)
+  if (!normPhone) return { sent: false, error: 'Invalid phone number' }
+
+  if (!ENABLED) {
+    logger.info(`[WhatsApp] Disabled — campaign message to ${normPhone} skipped`)
+    return { sent: false, skipped: true, error: 'WhatsApp sending is disabled' }
+  }
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    return { sent: false, skipped: true, error: 'API token not configured' }
+  }
+  if (!CAMPAIGN_TEMPLATE || CAMPAIGN_TEMPLATE.startsWith('REPLACE')) {
+    return { sent: false, skipped: true, error: 'Campaign template not configured' }
+  }
+
+  let result
+  try {
+    result = await postForm('/whatsapp/SendMessage', {
+      ApiToken:     API_TOKEN,
+      TemplateId:   CAMPAIGN_TEMPLATE,
+      QuickNumber:  normPhone,
+      Sample:       [campaignText(shopName), campaignText(message)].join(','),
+      CampaignName: 'customer_campaign',
+    })
+  } catch (err) {
+    return { sent: false, error: err.message }
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  return success
+    ? { sent: true, campaignId: result.ReturnData }
+    : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
+}
+
+module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendOnboardingAlert, sendDemoRequest, sendCampaignMessage, campaignText }

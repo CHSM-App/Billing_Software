@@ -27,9 +27,16 @@ Future<Widget> resolveStartupDestination(
   WidgetRef ref, {
   required void Function(LicenseStatus licenseStatus) onLicenseUnblocked,
 }) async {
-  // Reset any bills/drafts stuck in 'syncing' from a previous crash
-  await OfflineService.instance.resetStaleSyncing();
-  await OfflineService.instance.resetStaleSyncingDrafts();
+  // Reset any bills/drafts stuck in 'syncing' from a previous crash.
+  // Housekeeping only — it must never decide where the user lands. When it
+  // threw (offline DB unopenable or missing a table), the splash's catch-all
+  // sent a perfectly logged-in user to the login screen on every start.
+  try {
+    await OfflineService.instance.resetStaleSyncing();
+    await OfflineService.instance.resetStaleSyncingDrafts();
+  } catch (e) {
+    debugPrint('[STARTUP] offline cleanup skipped: $e');
+  }
 
   // checkReachable, not a plain 200-only health check: a 429 means the server
   // ANSWERED, so the shop is online. Reading it as offline pushed a merely

@@ -92,7 +92,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     final businessName = ref.read(businessNameProvider);
     showDialog(
       context: context,
-      builder: (_) => _BillDetailDialog(
+      builder: (_) => BillDetailDialog(
         bill: bill,
         userRole: userRole,
         businessName: businessName,
@@ -405,14 +405,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 // ---------------------------------------------------------------------------
 // Bill detail dialog
 // ---------------------------------------------------------------------------
-class _BillDetailDialog extends StatelessWidget {
+class BillDetailDialog extends StatelessWidget {
   final Bill bill;
   final String userRole;
   final String businessName;
   /// Reloads the history list — after a void, or after a typed phone was saved.
   final VoidCallback onChanged;
 
-  const _BillDetailDialog({
+  const BillDetailDialog({
     required this.bill,
     required this.userRole,
     required this.businessName,

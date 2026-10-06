@@ -27,6 +27,7 @@ const fs = require('fs');
 const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
 const { validateNumber, validateText, validateEnum } = require('../validate');
+const { forgetCustomersAccess } = require('../customers');
 const { VALID_UNITS } = require('./items');
 
 const router = express.Router();
@@ -148,6 +149,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
         s.allow_mobile      AS allow_mobile,
         s.allow_desktop     AS allow_desktop,
         s.allow_online_store AS allow_online_store,
+        s.allow_customers   AS allow_customers,
         (SELECT COUNT(*) FROM users su
            WHERE su.business_id = b.id
              AND su.role IN (${MANAGED_ROLES_SQL})) AS staff_count,
@@ -184,6 +186,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
         allow_mobile:      !!r.allow_mobile,
         allow_desktop:     !!r.allow_desktop,
         allow_online_store: r.allow_online_store == null ? true : !!r.allow_online_store,
+        allow_customers:   r.allow_customers == null ? true : !!r.allow_customers,
       },
       staff_count:       r.staff_count,
       bill_count:        r.bill_count,
@@ -201,7 +204,8 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
 // PUT /admin/api/businesses/:id — update a business's subscription + flags.
 // Body may include any of:
 //   status, expires_at, max_offline_days, grace_period_days,
-//   max_staff, allow_mobile, allow_desktop, allow_online_store (-> subscriptions, upserted)
+//   max_staff, allow_mobile, allow_desktop, allow_online_store, allow_customers
+//                                              (-> subscriptions, upserted)
 //   whatsapp_mode, is_verified                  (-> businesses)
 // Only the provided fields are changed. Mirrors the /api/license/admin/activate
 // MERGE so a business with no subscription row still gets one created.
@@ -210,7 +214,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
   const businessId = req.params.id;
   const {
     status, expires_at, max_offline_days, grace_period_days,
-    max_staff, allow_mobile, allow_desktop, allow_online_store, is_trial,
+    max_staff, allow_mobile, allow_desktop, allow_online_store, allow_customers, is_trial,
     whatsapp_mode, is_verified,
   } = req.body || {};
 
@@ -264,7 +268,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
 
     // ── subscription fields (upsert via MERGE) ──────────────────────────────
     const subProvided = [status, expires_at, max_offline_days, grace_period_days,
-      max_staff, allow_mobile, allow_desktop, allow_online_store, is_trial]
+      max_staff, allow_mobile, allow_desktop, allow_online_store, allow_customers, is_trial]
       .some((v) => v !== undefined);
 
     if (subProvided) {
@@ -273,7 +277,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
       const cur = await pool.request()
         .input('id', sql.UniqueIdentifier, businessId)
         .query(`SELECT status, expires_at, max_offline_days, grace_period_days,
-                       max_staff, allow_mobile, allow_desktop, allow_online_store, is_trial
+                       max_staff, allow_mobile, allow_desktop, allow_online_store, allow_customers, is_trial
                 FROM subscriptions WHERE business_id = @id`);
       const c = cur.recordset[0] || {};
 
@@ -286,6 +290,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
       const effAllowMobile     = allow_mobile      !== undefined ? (allow_mobile ? 1 : 0)  : (c.allow_mobile  != null ? c.allow_mobile  : 1);
       const effAllowDesktop    = allow_desktop     !== undefined ? (allow_desktop ? 1 : 0) : (c.allow_desktop != null ? c.allow_desktop : 1);
       const effAllowOnlineStore = allow_online_store !== undefined ? (allow_online_store ? 1 : 0) : (c.allow_online_store != null ? c.allow_online_store : 1);
+      const effAllowCustomers  = allow_customers   !== undefined ? (allow_customers ? 1 : 0)  : (c.allow_customers != null ? c.allow_customers : 1);
       const effIsTrial         = is_trial          !== undefined ? (is_trial ? 1 : 0)      : (c.is_trial      != null ? c.is_trial      : 0);
 
       const mReq = pool.request()
@@ -298,6 +303,7 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
         .input('allow_mobile', sql.Bit, effAllowMobile)
         .input('allow_desktop', sql.Bit, effAllowDesktop)
         .input('allow_online_store', sql.Bit, effAllowOnlineStore)
+        .input('allow_customers', sql.Bit, effAllowCustomers)
         .input('is_trial', sql.Bit, effIsTrial);
 
       await mReq.query(`
@@ -314,14 +320,19 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
             allow_mobile      = @allow_mobile,
             allow_desktop     = @allow_desktop,
             allow_online_store = @allow_online_store,
+            allow_customers   = @allow_customers,
             is_trial          = @is_trial,
             updated_at        = GETUTCDATE()
         WHEN NOT MATCHED THEN
           INSERT (business_id, status, expires_at, max_offline_days, grace_period_days,
-                  max_staff, allow_mobile, allow_desktop, allow_online_store, is_trial)
+                  max_staff, allow_mobile, allow_desktop, allow_online_store, allow_customers, is_trial)
           VALUES (@business_id, @status, @expires_at, @max_offline_days, @grace_period_days,
-                  @max_staff, @allow_mobile, @allow_desktop, @allow_online_store, @is_trial);
+                  @max_staff, @allow_mobile, @allow_desktop, @allow_online_store, @allow_customers, @is_trial);
       `);
+
+      // The Customers routes cache this switch for a minute; make the admin's
+      // change bite immediately.
+      if (allow_customers !== undefined) forgetCustomersAccess(businessId);
 
       // Activating a paid subscription should also verify the business, matching
       // /api/license/admin/activate's behaviour — unless the admin explicitly

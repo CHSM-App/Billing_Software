@@ -45,10 +45,123 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
   final GlobalKey<State<TablesScreen>> _tablesKey =
       GlobalKey<State<TablesScreen>>();
 
+  // Header search for Open Orders — same expanding field as the Billing page.
+  bool _searchExpanded = false;
+  late final AnimationController _searchAnimCtrl;
+  late final Animation<double> _searchAnim;
+  final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _searchAnimCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    _searchAnim =
+        CurvedAnimation(parent: _searchAnimCtrl, curve: Curves.easeInOut);
+    _searchController.addListener(() {
+      setState(() {});
+      // The search filters Open Orders, so typing brings that list forward.
+      final i = _tabs.indexOf(_OrdersTab.openOrders);
+      if (_searchController.text.isNotEmpty &&
+          i >= 0 &&
+          _tabController!.index != i) {
+        _tabController!.animateTo(i);
+      }
+    });
+  }
+
   @override
   void dispose() {
     _tabController?.dispose();
+    _searchAnimCtrl.dispose();
+    _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
+  }
+
+  void _toggleSearch() {
+    setState(() => _searchExpanded = !_searchExpanded);
+    if (_searchExpanded) {
+      _searchAnimCtrl.forward();
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (mounted) _searchFocus.requestFocus();
+      });
+    } else {
+      _searchAnimCtrl.reverse();
+      _searchController.clear();
+      _searchFocus.unfocus();
+    }
+  }
+
+  /// The expanding search field + its search/close toggle, mirroring the
+  /// Billing page's app bar. Sized against the bar's width (not the window's)
+  /// so it never runs under the navigation rail on desktop; leaves room for
+  /// the toggle and the refresh button that share the bar.
+  Widget _buildSearch(AppLocalizations l10n, double barWidth) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedBuilder(
+          animation: _searchAnim,
+          builder: (context, _) {
+            final maxWidth = (barWidth - 128).clamp(0.0, barWidth);
+            return SizedBox(
+              width: _searchAnim.value * maxWidth,
+              height: 40,
+              child: Opacity(
+                opacity: _searchAnim.value,
+                child: TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocus,
+                  decoration: InputDecoration(
+                    hintText: l10n.openOrdersSearchHint,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                      borderSide: const BorderSide(color: AppColors.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                      borderSide: const BorderSide(color: AppColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                      borderSide: const BorderSide(color: AppColors.primary),
+                    ),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 16),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                                minWidth: 32, minHeight: 32),
+                            onPressed: () => _searchController.clear(),
+                          )
+                        : null,
+                  ),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+            );
+          },
+        ),
+        IconButton(
+          icon: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: _searchExpanded
+                ? const Icon(Icons.close, key: ValueKey('close'), size: 20)
+                : const Icon(Icons.search, key: ValueKey('search'), size: 20),
+          ),
+          color: AppColors.textSecondary,
+          tooltip: l10n.openOrdersSearchHint,
+          onPressed: _toggleSearch,
+        ),
+      ],
+    );
   }
 
   /// Rebuild the controller only when the tab SET actually changes, keeping the
@@ -128,7 +241,8 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
       case _OrdersTab.tables:
         return TablesScreen(key: _tablesKey, embedded: true);
       case _OrdersTab.openOrders:
-        return const OpenDraftsScreen(embedded: true);
+        return OpenDraftsScreen(
+            embedded: true, query: _searchController.text);
       case _OrdersTab.credit:
         return const CreditScreen(embedded: true);
       case _OrdersTab.online:
@@ -183,15 +297,28 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
     }
 
     final onTablesTab = _tabs[_tabController!.index] == _OrdersTab.tables;
+    // Search filters Open Orders, so it is offered only while that tab exists.
+    // If the tab disappears mid-search, collapse and clear it.
+    final canSearch = _tabs.contains(_OrdersTab.openOrders);
+    if (!canSearch && _searchExpanded) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _searchExpanded) _toggleSearch();
+      });
+    }
 
     return Scaffold(
       body: Column(
         children: [
-          ShellAppBar(
+          LayoutBuilder(builder: (context, bar) => ShellAppBar(
             // Bottom-bar root tab: never show a back arrow.
             automaticallyImplyLeading: false,
-            title: Text(l10n.navOrders),
+            title: AnimatedOpacity(
+              opacity: _searchExpanded ? 0.0 : 1.0,
+              duration: const Duration(milliseconds: 200),
+              child: Text(l10n.navOrders),
+            ),
             actions: [
+              if (canSearch) _buildSearch(l10n, bar.maxWidth),
               IconButton(
                 icon: const Icon(Icons.refresh_outlined),
                 onPressed: _refresh,
@@ -212,7 +339,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
                   Tab(text: _tabLabel(l10n, t, pendingOnline))
               ],
             ),
-          ),
+          )),
           Expanded(
             child: TabBarView(
               controller: _tabController,

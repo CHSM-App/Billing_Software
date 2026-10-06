@@ -36,6 +36,7 @@ router.get('/', requireAuth, async (req, res) => {
         s.allow_mobile,
         s.allow_desktop,
         s.allow_online_store,
+        s.allow_customers,
         s.is_trial,
         s.updated_at,
         b.store_enabled,
@@ -90,6 +91,9 @@ router.get('/', requireAuth, async (req, res) => {
       // (no admin decision yet) reads as allowed — matches allow_mobile/
       // allow_desktop's own default-open behaviour.
       allow_online_store: sub.allow_online_store == null ? true : !!sub.allow_online_store,
+      // Customers & campaigns entitlement (migration 048) — refreshed on every
+      // open/resume so an admin change reaches the app without a re-login.
+      allow_customers: sub.allow_customers == null ? true : !!sub.allow_customers,
       // Effective online-store switch = the owner's own toggle AND the admin
       // entitlement. /login sends this too, but only once; this endpoint is hit
       // on every app open/resume, so a change made from the admin dashboard, in

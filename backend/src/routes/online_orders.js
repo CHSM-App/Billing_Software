@@ -25,6 +25,7 @@ const { broadcast } = require('../realtime');
 const { serializeCharges } = require('../charges');
 const { taxOnLines, netOfLines } = require('../menuPricing');
 const audit = require('../audit');
+const { upsertCustomer } = require('../customers');
 
 const router = express.Router();
 
@@ -256,6 +257,9 @@ router.post('/:id/accept', requireAuth, canDecide, async (req, res) => {
       `);
 
     await transaction.commit();
+
+    // Not awaited, never throws — see customers.js.
+    upsertCustomer(req.user.business_id, order.customer_phone, order.customer_name);
 
     // Live refresh: the new draft, the kitchen queue, and the store queue itself.
     broadcast(req.user.business_id, { type: 'drafts' });

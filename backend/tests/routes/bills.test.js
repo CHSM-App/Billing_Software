@@ -14,6 +14,14 @@ jest.mock('../../src/whatsapp', () => ({
   normalisePhone: jest.fn((p) => p),
 }));
 
+// Customers table sync is fire-and-forget after commit; left real, its query
+// would race this file's queued DB mocks. Covered in customers.test.js.
+jest.mock('../../src/customers', () => ({
+  ...jest.requireActual('../../src/customers'),
+  upsertCustomer: jest.fn(() => Promise.resolve()),
+  syncCustomers: jest.fn(() => Promise.resolve()),
+}));
+
 // Mock audit module — fire-and-forget, no need to test here
 jest.mock('../../src/audit', () => ({
   logBillCreated: jest.fn(),
@@ -628,6 +636,27 @@ describe('PUT /api/bills/:id/finalize', () => {
     expect(res.status).toBe(200);
     // null → the SQL falls back to the stored mode via COALESCE.
     expect(mockRequest.inputs.payment_mode).toBeNull();
+  });
+
+  // A settled table order frees the table straight away — there is no
+  // "billed, awaiting mark-paid" step any more.
+  test('finalizing a table order sets the table straight to empty', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({
+        recordset: [{ id: BILL_ID, table_id: 'ffffffff-ffff-ffff-ffff-ffffffffffff', bill_number: 'INV-0001' }],
+        rowsAffected: [1],
+      })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .put(`/api/bills/${BILL_ID}/finalize`)
+      .set(authHeader());
+
+    expect(res.status).toBe(200);
+    const tableSql = mockRequest.query.mock.calls[1][0];
+    expect(tableSql).toMatch(/UPDATE tables SET status = 'empty'/);
   });
 
   test('rejects a payment mode that is not a real tender', async () => {

@@ -467,8 +467,344 @@ abstract class AppLocalizations {
   /// No description provided for @openOrdersEmpty.
   ///
   /// In en, this message translates to:
-  /// **'No open orders. Saved drafts without a table appear here.'**
+  /// **'No open orders. Saved drafts and table orders appear here.'**
   String get openOrdersEmpty;
+
+  /// No description provided for @openOrdersSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search table, name, phone, bill no.…'**
+  String get openOrdersSearchHint;
+
+  /// No description provided for @openOrdersNoMatches.
+  ///
+  /// In en, this message translates to:
+  /// **'No open orders match your search.'**
+  String get openOrdersNoMatches;
+
+  /// No description provided for @customersTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Customers'**
+  String get customersTitle;
+
+  /// No description provided for @customersSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer list, visits and WhatsApp offers'**
+  String get customersSubtitle;
+
+  /// No description provided for @customersSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search name or phone'**
+  String get customersSearchHint;
+
+  /// No description provided for @customersSortBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Sort by'**
+  String get customersSortBy;
+
+  /// No description provided for @customersSortSpend.
+  ///
+  /// In en, this message translates to:
+  /// **'Total spend'**
+  String get customersSortSpend;
+
+  /// No description provided for @customersSortVisits.
+  ///
+  /// In en, this message translates to:
+  /// **'Number of visits'**
+  String get customersSortVisits;
+
+  /// No description provided for @customersSortRecent.
+  ///
+  /// In en, this message translates to:
+  /// **'Last visit date'**
+  String get customersSortRecent;
+
+  /// No description provided for @customersSortName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get customersSortName;
+
+  /// No description provided for @customersSortHighLow.
+  ///
+  /// In en, this message translates to:
+  /// **'High to low'**
+  String get customersSortHighLow;
+
+  /// No description provided for @customersSortLowHigh.
+  ///
+  /// In en, this message translates to:
+  /// **'Low to high'**
+  String get customersSortLowHigh;
+
+  /// No description provided for @customersSortAZ.
+  ///
+  /// In en, this message translates to:
+  /// **'A to Z'**
+  String get customersSortAZ;
+
+  /// No description provided for @customersSortZA.
+  ///
+  /// In en, this message translates to:
+  /// **'Z to A'**
+  String get customersSortZA;
+
+  /// No description provided for @customersSortMostVisits.
+  ///
+  /// In en, this message translates to:
+  /// **'Most visits first'**
+  String get customersSortMostVisits;
+
+  /// No description provided for @customersSortFewestVisits.
+  ///
+  /// In en, this message translates to:
+  /// **'Fewest visits first'**
+  String get customersSortFewestVisits;
+
+  /// No description provided for @customersSortNewest.
+  ///
+  /// In en, this message translates to:
+  /// **'Newest first'**
+  String get customersSortNewest;
+
+  /// No description provided for @customersSortOldest.
+  ///
+  /// In en, this message translates to:
+  /// **'Oldest first'**
+  String get customersSortOldest;
+
+  /// No description provided for @customersFilters.
+  ///
+  /// In en, this message translates to:
+  /// **'Filters'**
+  String get customersFilters;
+
+  /// No description provided for @customersFilterReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get customersFilterReset;
+
+  /// No description provided for @customersFilterVisits.
+  ///
+  /// In en, this message translates to:
+  /// **'Visits'**
+  String get customersFilterVisits;
+
+  /// No description provided for @customersFilterSpend.
+  ///
+  /// In en, this message translates to:
+  /// **'Total spend'**
+  String get customersFilterSpend;
+
+  /// No description provided for @customersFilterMin.
+  ///
+  /// In en, this message translates to:
+  /// **'Min'**
+  String get customersFilterMin;
+
+  /// No description provided for @customersFilterMax.
+  ///
+  /// In en, this message translates to:
+  /// **'Max'**
+  String get customersFilterMax;
+
+  /// No description provided for @customersFilterLastVisit.
+  ///
+  /// In en, this message translates to:
+  /// **'Last visit'**
+  String get customersFilterLastVisit;
+
+  /// No description provided for @customersFilterOffers.
+  ///
+  /// In en, this message translates to:
+  /// **'Offers'**
+  String get customersFilterOffers;
+
+  /// No description provided for @customersRecencyAny.
+  ///
+  /// In en, this message translates to:
+  /// **'Any time'**
+  String get customersRecencyAny;
+
+  /// No description provided for @customersRecencyWithin.
+  ///
+  /// In en, this message translates to:
+  /// **'In last {days} days'**
+  String customersRecencyWithin(int days);
+
+  /// No description provided for @customersRecencyInactive.
+  ///
+  /// In en, this message translates to:
+  /// **'Not in {days}+ days'**
+  String customersRecencyInactive(int days);
+
+  /// No description provided for @customersOffersAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get customersOffersAll;
+
+  /// No description provided for @customersOffersAllowed.
+  ///
+  /// In en, this message translates to:
+  /// **'Receiving offers'**
+  String get customersOffersAllowed;
+
+  /// No description provided for @customersOffersOptedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Opted out'**
+  String get customersOffersOptedOut;
+
+  /// No description provided for @customersShowResults.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No customers match} =1{Show 1 customer} other{Show {count} customers}}'**
+  String customersShowResults(int count);
+
+  /// No description provided for @customersResultCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{shown} of {total} customers'**
+  String customersResultCount(int shown, int total);
+
+  /// No description provided for @customersSelectAllCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all ({count})'**
+  String customersSelectAllCount(int count);
+
+  /// No description provided for @customersClearAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear all'**
+  String get customersClearAll;
+
+  /// No description provided for @customersApply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply'**
+  String get customersApply;
+
+  /// No description provided for @customersChipVisits.
+  ///
+  /// In en, this message translates to:
+  /// **'Visits: {range}'**
+  String customersChipVisits(String range);
+
+  /// No description provided for @customersChipSpend.
+  ///
+  /// In en, this message translates to:
+  /// **'Spend: {range}'**
+  String customersChipSpend(String range);
+
+  /// No description provided for @customersBills.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 bill} other{{count} bills}}'**
+  String customersBills(int count);
+
+  /// No description provided for @customersLastVisit.
+  ///
+  /// In en, this message translates to:
+  /// **'Last visit {date}'**
+  String customersLastVisit(String date);
+
+  /// No description provided for @customersOptedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Opted out'**
+  String get customersOptedOut;
+
+  /// No description provided for @customersOptedOutNote.
+  ///
+  /// In en, this message translates to:
+  /// **'This customer won\'t receive offers.'**
+  String get customersOptedOutNote;
+
+  /// No description provided for @customersStopOffers.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop offers'**
+  String get customersStopOffers;
+
+  /// No description provided for @customersAllowOffers.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow offers'**
+  String get customersAllowOffers;
+
+  /// No description provided for @customersSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} selected'**
+  String customersSelected(int count);
+
+  /// No description provided for @customersNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get customersNext;
+
+  /// No description provided for @customersEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No customers yet. Customers appear here once a bill is saved with their phone number.'**
+  String get customersEmpty;
+
+  /// No description provided for @customersNoMatches.
+  ///
+  /// In en, this message translates to:
+  /// **'No customers match.'**
+  String get customersNoMatches;
+
+  /// No description provided for @customersNoBills.
+  ///
+  /// In en, this message translates to:
+  /// **'No bills yet.'**
+  String get customersNoBills;
+
+  /// No description provided for @customersComposeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Message {count} customers'**
+  String customersComposeTitle(int count);
+
+  /// No description provided for @customersComposeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Type your offer or announcement…'**
+  String get customersComposeHint;
+
+  /// No description provided for @customersComposePreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent on WhatsApp as: \"Message from {shop}: …\"'**
+  String customersComposePreview(String shop);
+
+  /// No description provided for @customersSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get customersSend;
+
+  /// No description provided for @customersSending.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending to {queued} customers ({skipped} skipped)'**
+  String customersSending(int queued, int skipped);
+
+  /// No description provided for @customersNotDelivering.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved, but WhatsApp offers aren\'t set up yet — the messages were not delivered.'**
+  String get customersNotDelivering;
 
   /// No description provided for @openOrdersBillNumber.
   ///
@@ -535,6 +871,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Mark as Completed'**
   String get kitchenMarkCompleted;
+
+  /// No description provided for @kitchenDelivered.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivered'**
+  String get kitchenDelivered;
+
+  /// No description provided for @kitchenReadyOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready to serve'**
+  String get kitchenReadyOnly;
+
+  /// No description provided for @kitchenNoReadyItems.
+  ///
+  /// In en, this message translates to:
+  /// **'No dishes waiting to be served.'**
+  String get kitchenNoReadyItems;
 
   /// No description provided for @kitchenJustNow.
   ///
@@ -2979,24 +3333,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No tables yet'**
   String get tablesNoTablesYet;
-
-  /// No description provided for @tablesBilledOrderBody.
-  ///
-  /// In en, this message translates to:
-  /// **'This table has a billed order. What would you like to do?'**
-  String get tablesBilledOrderBody;
-
-  /// No description provided for @tablesMarkPaidEmpty.
-  ///
-  /// In en, this message translates to:
-  /// **'Mark as Paid / Empty'**
-  String get tablesMarkPaidEmpty;
-
-  /// No description provided for @tablesVoidBill.
-  ///
-  /// In en, this message translates to:
-  /// **'Void Bill'**
-  String get tablesVoidBill;
 
   /// No description provided for @tablesTableNumberLabel.
   ///

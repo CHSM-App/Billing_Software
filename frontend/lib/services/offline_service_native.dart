@@ -95,6 +95,12 @@ class OfflineService {
       version: 13,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
+      // Self-heal: _createSchema is all IF NOT EXISTS, so this is a no-op on a
+      // healthy DB but restores any missing table. A DB at the current version
+      // with tables missing (left by an interrupted create, or by a test that
+      // shared this path) otherwise failed every offline query — including
+      // the startup cleanup, which sent a logged-in user to the login screen.
+      onOpen: (db) => _createSchema(db, 13),
     );
   }
 
