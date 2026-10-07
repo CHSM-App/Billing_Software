@@ -124,7 +124,19 @@ describe('POST /api/register', () => {
       .post('/api/register')
       .send({ ...validBody, business_type: 'invalid_type' });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/business_type/i);
+    expect(res.body.error).toMatch(/business type/i);
+  });
+
+  test('folds the retired restaurant_no_tables (sent by app <= v1.1.10) into restaurant_with_tables', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ id: BUSINESS_ID }], rowsAffected: [1] });
+
+    const res = await request(app)
+      .post('/api/register')
+      .send({ ...validBody, business_type: 'restaurant_no_tables' });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.business_type).toBe('restaurant_with_tables');
   });
 
   test('returns 400 for non-4-digit PIN', async () => {

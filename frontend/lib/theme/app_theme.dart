@@ -152,6 +152,50 @@ ThemeData buildAppTheme(String languageCode) {
   return _themeData();
 }
 
+/// Login and OTP keep the roomier sizing from before the app-wide compact
+/// pass: they have few controls, so density buys nothing there.
+ThemeData authTheme(ThemeData t) {
+  TextStyle? fs(TextStyle? s, double size) => s?.copyWith(fontSize: size);
+  final tt = t.textTheme;
+  final input = t.inputDecorationTheme;
+  ButtonStyle? button(ButtonStyle? s) => s?.copyWith(
+        minimumSize: const WidgetStatePropertyAll(Size(double.infinity, 52)),
+        textStyle: WidgetStatePropertyAll(
+            fs(s.textStyle?.resolve(const {}), 15)),
+      );
+  return t.copyWith(
+    visualDensity: VisualDensity.adaptivePlatformDensity,
+    textTheme: tt.copyWith(
+      displayLarge: fs(tt.displayLarge, 30),
+      headlineMedium: fs(tt.headlineMedium, 22),
+      titleLarge: fs(tt.titleLarge, 18),
+      titleMedium: fs(tt.titleMedium, 16),
+      bodyLarge: fs(tt.bodyLarge, 16),
+      bodyMedium: fs(tt.bodyMedium, 14),
+      bodySmall: fs(tt.bodySmall, 12),
+      labelLarge: fs(tt.labelLarge, 14),
+    ),
+    inputDecorationTheme: input.copyWith(
+      isDense: false,
+      contentPadding: const EdgeInsets.all(AppSpacing.space16),
+      labelStyle: fs(input.labelStyle, 14),
+      hintStyle: fs(input.hintStyle, 14),
+      errorStyle: fs(input.errorStyle, 12),
+      floatingLabelStyle: fs(input.floatingLabelStyle, 13),
+    ),
+    elevatedButtonTheme:
+        ElevatedButtonThemeData(style: button(t.elevatedButtonTheme.style)),
+    outlinedButtonTheme:
+        OutlinedButtonThemeData(style: button(t.outlinedButtonTheme.style)),
+    textButtonTheme: TextButtonThemeData(
+      style: t.textButtonTheme.style?.copyWith(
+        textStyle: WidgetStatePropertyAll(
+            fs(t.textButtonTheme.style?.textStyle?.resolve(const {}), 14)),
+      ),
+    ),
+  );
+}
+
 ThemeData _themeData() => ThemeData(
   useMaterial3: true,
   // Denser controls so a phone shows more of the cart/list at once.

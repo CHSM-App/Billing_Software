@@ -223,6 +223,33 @@ class AppLocalizationsMr extends AppLocalizations {
   String get customersTitle => 'ग्राहक';
 
   @override
+  String get exportTitle => 'निर्यात करा';
+
+  @override
+  String get exportChooseFormat => 'या स्वरूपात निर्यात करा';
+
+  @override
+  String get exportExcel => 'एक्सेल';
+
+  @override
+  String get exportPdf => 'PDF';
+
+  @override
+  String get exportChooseAction => 'डाउनलोड किंवा शेअर करा';
+
+  @override
+  String get exportDownload => 'डाउनलोड करा';
+
+  @override
+  String get exportShare => 'शेअर करा';
+
+  @override
+  String get exportSaved => 'जतन केले';
+
+  @override
+  String get exportFailed => 'निर्यात करता आली नाही';
+
+  @override
   String get customersSubtitle => 'ग्राहक यादी, भेटी आणि WhatsApp ऑफर';
 
   @override
@@ -654,7 +681,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get logoutConfirmBody => 'तुम्हाला खात्यातून लॉगआउट करायचे आहे का?';
 
   @override
-  String get businessTypeRetail => 'किरकोळ दुकान';
+  String get businessTypeRetail => 'रिटेल शॉप';
 
   @override
   String get businessTypeRestaurant => 'रेस्टॉरंट';
@@ -2975,6 +3002,10 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get purchasesTitle => 'खरेदी';
+
+  @override
+  String get purchasesSubtitle =>
+      'विक्रेत्यांची बिले, माल आवक आणि इनपुट टॅक्स क्रेडिट';
 
   @override
   String get purchaseListFabShort => 'खरेदी यादी';

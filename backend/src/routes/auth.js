@@ -54,7 +54,6 @@ const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 router.post('/register', registerLimiter, async (req, res) => {
   const {
     business_name,
-    business_type,
     address,
     phone,
     inventory_enabled,
@@ -68,13 +67,20 @@ router.post('/register', registerLimiter, async (req, res) => {
     pan_number,
     fssai_number,
   } = req.body;
+  // App builds up to v1.1.10 still send the retired takeaway type for a
+  // restaurant. Fold it the same way migration 041 did instead of rejecting
+  // sign-ups from apps not yet updated.
+  const business_type = req.body.business_type === 'restaurant_no_tables'
+    ? 'restaurant_with_tables'
+    : req.body.business_type;
 
   // Basic validation
   if (!business_name || !business_type || !phone || !owner_name || !owner_phone || !pin) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
   if (!VALID_BUSINESS_TYPES.includes(business_type)) {
-    return res.status(400).json({ error: `business_type must be one of: ${VALID_BUSINESS_TYPES.join(', ')}` });
+    // Shown verbatim by the app, so plain words — not the stored values.
+    return res.status(400).json({ error: 'Business type must be Retail or Restaurant' });
   }
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });

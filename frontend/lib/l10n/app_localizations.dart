@@ -488,6 +488,60 @@ abstract class AppLocalizations {
   /// **'Customers'**
   String get customersTitle;
 
+  /// No description provided for @exportTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Export'**
+  String get exportTitle;
+
+  /// No description provided for @exportChooseFormat.
+  ///
+  /// In en, this message translates to:
+  /// **'Export as'**
+  String get exportChooseFormat;
+
+  /// No description provided for @exportExcel.
+  ///
+  /// In en, this message translates to:
+  /// **'Excel'**
+  String get exportExcel;
+
+  /// No description provided for @exportPdf.
+  ///
+  /// In en, this message translates to:
+  /// **'PDF'**
+  String get exportPdf;
+
+  /// No description provided for @exportChooseAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Download or share'**
+  String get exportChooseAction;
+
+  /// No description provided for @exportDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get exportDownload;
+
+  /// No description provided for @exportShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get exportShare;
+
+  /// No description provided for @exportSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved'**
+  String get exportSaved;
+
+  /// No description provided for @exportFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not export'**
+  String get exportFailed;
+
   /// No description provided for @customersSubtitle.
   ///
   /// In en, this message translates to:
@@ -5229,6 +5283,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Purchases'**
   String get purchasesTitle;
+
+  /// No description provided for @purchasesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor bills, stock receipts and input tax credit'**
+  String get purchasesSubtitle;
 
   /// No description provided for @purchaseListFabShort.
   ///

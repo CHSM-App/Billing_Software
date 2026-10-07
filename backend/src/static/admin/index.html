@@ -424,7 +424,7 @@
       var wa = '<span class="chip '+(b.whatsapp_mode==='api'?'blue':'gray')+'">'+esc(b.whatsapp_mode)+'</span>';
       var ver = b.is_verified ? '<span class="chip green">yes</span>' : '<span class="chip red">no</span>';
       return '<tr>'
-        + '<td><div class="biz-name">'+esc(b.name)+'</div><div class="biz-sub">'+esc(b.phone)+' &middot; '+esc(b.business_type)+'</div></td>'
+        + '<td><div class="biz-name">'+esc(b.name)+'</div><div class="biz-sub">'+esc(b.phone)+' &middot; '+esc(typeLabel(b.business_type))+'</div></td>'
         + '<td>'+esc(b.owner_name||'—')+'<div class="biz-sub">'+esc(b.owner_phone||'')+'</div></td>'
         + '<td>'+fmtDate(b.created_at)+'</td>'
         + '<td>'+fmtLastActive(b.last_active_at)+'</td>'
@@ -449,6 +449,10 @@
   }
   $('search').addEventListener('input', render);
 
+  // Stored value -> what people call it. The type is still restaurant_with_tables
+  // in the DB, but there is only one kind of restaurant now.
+  function typeLabel(t){ return t==='restaurant_with_tables' ? 'restaurant' : t; }
+
   // ---- Drawer ----
   function toDateInput(s){
     if(!s) return '';
@@ -464,10 +468,10 @@
     if(!current) return;
     var b = current, sub = b.subscription || {};
     $('dName').textContent = b.name;
-    $('dMeta').textContent = b.business_type + ' · ' + b.phone;
+    $('dMeta').textContent = typeLabel(b.business_type) + ' · ' + b.phone;
     $('dOwner').textContent = b.owner_name || '—';
     $('dPhone').textContent = b.owner_phone || '—';
-    $('dType').textContent = b.business_type;
+    $('dType').textContent = typeLabel(b.business_type);
     $('dCreated').textContent = fmtDate(b.created_at);
     $('dLastActive').innerHTML = fmtLastActive(b.last_active_at)
       + (b.last_active_at ? ' <span class="muted">'+esc(new Date(b.last_active_at).toLocaleString('en-IN'))+'</span>' : '');

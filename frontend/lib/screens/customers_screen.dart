@@ -8,8 +8,10 @@ import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
+import '../services/customer_export.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/export_sheet.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
 import 'history_screen.dart' show BillDetailDialog;
@@ -101,6 +103,40 @@ Map<String, String> customerListParams({
       'dir': descending ? 'desc' : 'asc',
     };
 
+// Server page cap for both customer endpoints (PAGE_MAX in customers.js), so
+// exports walk every page in as few requests as possible.
+const _exportPageSize = 100;
+
+/// Date stamp for export file names, e.g. 07-Oct-2026.
+String _fileDate() => DateFormat('dd-MMM-yyyy').format(DateTime.now());
+
+void _exportFailed(BuildContext context, Object e) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text('${context.l10n.exportFailed}: ${sanitizeUiErrorMessage(e)}'),
+    backgroundColor: AppColors.error,
+  ));
+}
+
+/// Top-bar export button (Excel/PDF, then download/share); a spinner while the
+/// file is built.
+class _ExportButton extends StatelessWidget {
+  final bool busy;
+  final VoidCallback? onPressed;
+  const _ExportButton({required this.busy, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: context.l10n.exportTitle,
+        onPressed: busy ? null : onPressed,
+        icon: busy
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.file_download_outlined),
+      );
+}
+
 String _money(double v) =>
     '₹${v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2)}';
 
@@ -169,6 +205,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
   bool _refreshing = false; // new search/filter/sort over an existing list
   bool _loadingMore = false;
   bool _selectingAll = false;
+  bool _exporting = false;
   Object? _error;
   // Bumped on every new query so a late response for an old one is dropped.
   int _requestSeq = 0;
@@ -330,6 +367,43 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
     }
   }
 
+  /// Every customer matching the current search/filters/sort — all pages, not
+  /// just the loaded ones — as Excel or PDF, downloaded or shared.
+  Future<void> _export() async {
+    final choice = await pickExport(context);
+    if (choice == null || !mounted) return;
+    final (format, action) = choice;
+    setState(() => _exporting = true);
+    try {
+      final all = <Customer>[];
+      while (true) {
+        final r = await widget.loadCustomers(
+            {..._params, 'offset': '${all.length}', 'limit': '$_exportPageSize'});
+        final page = _parse(r);
+        all.addAll(page);
+        final total = (r['total'] as num?)?.toInt() ?? all.length;
+        if (page.isEmpty || all.length >= total) break;
+      }
+      final pdf = format == ExportFormat.pdf;
+      final bytes = pdf
+          ? await CustomerExport.customersPdf(all,
+              businessName: ref.read(businessNameProvider))
+          : CustomerExport.customersXlsx(all);
+      if (!mounted) return;
+      await deliverExport(
+        context,
+        action,
+        bytes,
+        'Customers-${_fileDate()}.${pdf ? 'pdf' : 'xlsx'}',
+        pdf ? CustomerExport.pdfMime : CustomerExport.xlsxMime,
+      );
+    } catch (e) {
+      if (mounted) _exportFailed(context, e);
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   Future<void> _openFilters() async {
     final picked = await showModalBottomSheet<CustomerFilter>(
       context: context,
@@ -401,7 +475,13 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
 
     return Scaffold(
       body: Column(children: [
-        ShellAppBar(title: Text(l10n.customersTitle)),
+        ShellAppBar(
+          title: Text(l10n.customersTitle),
+          actions: [
+            if (_totalAll > 0)
+              _ExportButton(busy: _exporting, onPressed: _export),
+          ],
+        ),
         if (showControls) ...[
           _buildToolbar(l10n),
           const SizedBox(height: AppSpacing.space8),
@@ -1222,6 +1302,7 @@ class _CustomerBillsScreenState extends ConsumerState<CustomerBillsScreen> {
   bool _loadingMore = false;
   Object? _error;
   bool _savingOptOut = false;
+  bool _exporting = false;
   final _scroll = ScrollController();
 
   bool get _hasMore => _bills.length < _total;
@@ -1311,6 +1392,44 @@ class _CustomerBillsScreenState extends ConsumerState<CustomerBillsScreen> {
     }
   }
 
+  /// All of this customer's bills — not just the loaded pages — as Excel or
+  /// PDF, downloaded or shared.
+  Future<void> _export() async {
+    final choice = await pickExport(context);
+    if (choice == null || !mounted) return;
+    final (format, action) = choice;
+    setState(() => _exporting = true);
+    try {
+      final all = <Bill>[];
+      while (true) {
+        final r = await widget.loadBills(_customer.id,
+            offset: all.length, limit: _exportPageSize);
+        final page = _parse(r);
+        all.addAll(page);
+        final total = (r['total'] as num?)?.toInt() ?? all.length;
+        if (page.isEmpty || all.length >= total) break;
+      }
+      final pdf = format == ExportFormat.pdf;
+      final bytes = pdf
+          ? await CustomerExport.billsPdf(_customer, all,
+              businessName: ref.read(businessNameProvider))
+          : CustomerExport.billsXlsx(_customer, all);
+      if (!mounted) return;
+      final who = CustomerExport.fileSafe(_customer.displayName);
+      await deliverExport(
+        context,
+        action,
+        bytes,
+        '$who-Bills-${_fileDate()}.${pdf ? 'pdf' : 'xlsx'}',
+        pdf ? CustomerExport.pdfMime : CustomerExport.xlsxMime,
+      );
+    } catch (e) {
+      if (mounted) _exportFailed(context, e);
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   void _openBill(Bill bill) {
     showDialog(
       context: context,
@@ -1330,7 +1449,15 @@ class _CustomerBillsScreenState extends ConsumerState<CustomerBillsScreen> {
     final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       body: Column(children: [
-        ShellAppBar(title: Text(c.displayName)),
+        ShellAppBar(
+          title: Text(c.displayName),
+          actions: [
+            _ExportButton(
+              busy: _exporting,
+              onPressed: _loading || _total == 0 ? null : _export,
+            ),
+          ],
+        ),
         Container(
           width: double.infinity,
           color: AppColors.surface,

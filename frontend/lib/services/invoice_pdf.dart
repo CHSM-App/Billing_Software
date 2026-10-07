@@ -24,7 +24,7 @@ import 'devanagari_raster.dart';
 ///
 /// Only strings that actually contain Devanagari take this detour — English and
 /// numbers stay real, selectable text.
-class _ShapedText {
+class ShapedText {
   /// Oversampling factor. The image is drawn back at 1/[_ppl] of its pixel size,
   /// so it lands at exactly the requested point size but stays sharp when the
   /// PDF is zoomed or printed.
@@ -135,7 +135,7 @@ class InvoicePdf {
     // synchronously, so nothing can be rendered on demand inside it. Sizes and
     // weights here must match the styles the widgets use, since each image is
     // drawn at the size it was shaped for.
-    final shaped = _ShapedText();
+    final shaped = ShapedText();
     await shaped.add(businessName, fontSize: 15, bold: true, maxWidth: 260);
     await shaped.add(address?.replaceAll('\r\n', '\n'), maxWidth: 260);
     await shaped.add(footerNote, maxWidth: 300);
@@ -238,7 +238,7 @@ class InvoicePdf {
   // --- Header box: business (left) | Invoice No/Date (right) --------------
   static pw.Widget _headerBox(String name, String? address, String? phone,
       String? gstin, String? fssai, String billNumber, String dateStr,
-      _ShapedText shaped) {
+      ShapedText shaped) {
     final left = <pw.Widget>[
       shaped.widget(name,
           fontSize: 15,
@@ -313,7 +313,7 @@ class InvoicePdf {
       );
 
   // --- Bill To --------------------------------------------------------------
-  static pw.Widget _billToBox(Bill bill, _ShapedText shaped) {
+  static pw.Widget _billToBox(Bill bill, ShapedText shaped) {
     if ((bill.customerName == null || bill.customerName!.isEmpty) &&
         (bill.customerPhone == null || bill.customerPhone!.isEmpty) &&
         (bill.tableNumber == null || bill.tableNumber!.isEmpty)) {
@@ -356,7 +356,7 @@ class InvoicePdf {
       String Function(BillItem) codeOf,
       double Function(BillItem) lineTaxOf,
       String Function(num) money,
-      _ShapedText shaped) {
+      ShapedText shaped) {
     final headStyle = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
     final cellStyle = const pw.TextStyle(fontSize: 9);
     final anyHsn = showGst && bill.items.any((i) => codeOf(i).isNotEmpty);
@@ -618,7 +618,7 @@ class InvoicePdf {
 
   // --- Footer ---------------------------------------------------------------
   static pw.Widget _footer(
-      String businessName, String? note, _ShapedText shaped) {
+      String businessName, String? note, ShapedText shaped) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.end,
       children: [

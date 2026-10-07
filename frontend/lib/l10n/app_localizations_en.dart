@@ -223,6 +223,33 @@ class AppLocalizationsEn extends AppLocalizations {
   String get customersTitle => 'Customers';
 
   @override
+  String get exportTitle => 'Export';
+
+  @override
+  String get exportChooseFormat => 'Export as';
+
+  @override
+  String get exportExcel => 'Excel';
+
+  @override
+  String get exportPdf => 'PDF';
+
+  @override
+  String get exportChooseAction => 'Download or share';
+
+  @override
+  String get exportDownload => 'Download';
+
+  @override
+  String get exportShare => 'Share';
+
+  @override
+  String get exportSaved => 'Saved';
+
+  @override
+  String get exportFailed => 'Could not export';
+
+  @override
   String get customersSubtitle => 'Customer list, visits and WhatsApp offers';
 
   @override
@@ -2966,6 +2993,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get purchasesTitle => 'Purchases';
+
+  @override
+  String get purchasesSubtitle =>
+      'Vendor bills, stock receipts and input tax credit';
 
   @override
   String get purchaseListFabShort => 'Purchase list';

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
+import '../services/file_export.dart';
 import '../api.dart' as api;
 import '../providers.dart';
 import '../services/sales_report_export.dart';
@@ -190,13 +190,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       } else {
         final bytes = SalesReportExport.buildCsv(
             summary: summary, bills: bills, businessName: business);
-        await Share.shareXFiles(
-          [
-            XFile.fromData(bytes,
-                name: 'Sales-Report-$slug.csv', mimeType: 'text/csv')
-          ],
-          text: 'Sales report $slug',
-        );
+        await shareFile(bytes, 'Sales-Report-$slug.csv', 'text/csv',
+            text: 'Sales report $slug');
       }
     } catch (e) {
       if (mounted) {

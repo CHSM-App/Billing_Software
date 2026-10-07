@@ -114,6 +114,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // (see _autoOpenedFirstCategory) so the cashier can start tapping right
   // away; everything else starts collapsed.
   final Set<String> _expandedCategories = {};
+  // Flat menu (no majors at all): the categories ARE the top level, so they
+  // behave like majors — all open by default, each folded independently.
+  // Tracked inverted, like _collapsedMajors. _expandedCategories is unused then.
+  final Set<String> _collapsedCategories = {};
+  bool get _flatMenu => _tree.isEmpty || _tree.first.major == null;
   // Set once the first category has been auto-opened on initial load so a
   // cashier who deliberately folds it shut is not fought on every rebuild.
   bool _autoOpenedFirstCategory = false;
@@ -460,8 +465,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           byCat[cat]!,
           major: major,
           expanded: searching ||
-              _expandedCategories.contains(
-                  _CategorySection.sectionKey(major, cat)),
+              (major == null
+                  ? !_collapsedCategories.contains(cat)
+                  : _expandedCategories.contains(
+                      _CategorySection.sectionKey(major, cat))),
           openItems: {
             for (final it in byCat[cat]!)
               if (it.hasVariants && _expandedVariantItems.contains(it.id))
@@ -566,10 +573,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// [key] identifies the section, not the bare category name, since the same
   /// category can be open under one major and shut under another.
   void _toggleCategory(String key) {
-    final wasOpen = _expandedCategories.contains(key);
+    final flat = _flatMenu;
+    final wasOpen = flat
+        ? !_collapsedCategories.contains(key)
+        : _expandedCategories.contains(key);
     setState(() {
-      _expandedCategories.clear();
-      if (!wasOpen) _expandedCategories.add(key);
+      if (flat) {
+        wasOpen
+            ? _collapsedCategories.add(key)
+            : _collapsedCategories.remove(key);
+      } else {
+        _expandedCategories.clear();
+        if (!wasOpen) _expandedCategories.add(key);
+      }
     });
     if (wasOpen) {
       // Folded shut: fall back to whichever section sits under the header
@@ -638,6 +654,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // Make sure the scanned item's major is not folded shut. Only this one —
       // the others are left however the cashier had them.
       if (major != null) _collapsedMajors.remove(major);
+      _collapsedCategories.remove(key);
       _expandedCategories
         ..clear()
         ..add(key);
@@ -731,10 +748,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         .any((s) => s.key == key)) {
       return;
     }
-    if (!_expandedCategories.contains(key)) {
-      setState(() => _expandedCategories
-        ..clear()
-        ..add(key));
+    if (_collapsedCategories.contains(key)) {
+      setState(() => _collapsedCategories.remove(key));
       // Offsets depend on which sections are open — wait for the rebuild so
       // _tree reflects the newly opened one before measuring.
       await _nextFrame();

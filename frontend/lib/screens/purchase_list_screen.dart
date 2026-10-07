@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
+import '../services/file_export.dart';
 
 import '../api.dart' as api;
 import '../l10n/l10n_ext.dart';
@@ -169,7 +169,7 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
         ],
       ),
       body: Column(children: [
-        const ShellAppBar(title: Text('Create Purchase List')),
+        ShellAppBar(title: Text(context.l10n.purchaseListFabLong)),
         Expanded(
           child: isRestaurant
               ? _buildBody(
@@ -388,10 +388,8 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
     setState(() => _sharing = true);
     try {
       final bytes = await _buildPdfBytes();
-      await Share.shareXFiles(
-        [XFile.fromData(bytes, name: 'Purchase-list.pdf', mimeType: 'application/pdf')],
-        text: 'Purchase list',
-      );
+      await shareFile(bytes, 'Purchase-list.pdf', 'application/pdf',
+          text: 'Purchase list');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

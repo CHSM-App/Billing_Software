@@ -14,14 +14,22 @@ import 'license_screen.dart';
 import '../services/license_service.dart';
 import '../services/notification_service.dart';
 
-class LoginScreen extends ConsumerStatefulWidget {
+class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
 
   @override
-  ConsumerState<LoginScreen> createState() => _LoginScreenState();
+  Widget build(BuildContext context) =>
+      Theme(data: authTheme(Theme.of(context)), child: const _LoginView());
 }
 
-class _LoginScreenState extends ConsumerState<LoginScreen>
+class _LoginView extends ConsumerStatefulWidget {
+  const _LoginView();
+
+  @override
+  ConsumerState<_LoginView> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends ConsumerState<_LoginView>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();

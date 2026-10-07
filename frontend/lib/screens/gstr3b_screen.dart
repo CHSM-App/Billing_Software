@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
+import '../services/file_export.dart';
 
 import '../api.dart' as api;
 import '../services/gstr3b_export.dart';
@@ -120,13 +120,8 @@ class Gstr3bScreen extends ConsumerWidget {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final bytes = Gstr3bExport.buildCsv(r);
-      await Share.shareXFiles(
-        [
-          XFile.fromData(bytes,
-              name: 'GSTR3B-${period.slug}.csv', mimeType: 'text/csv')
-        ],
-        text: 'GSTR-3B ${period.label}',
-      );
+      await shareFile(bytes, 'GSTR3B-${period.slug}.csv', 'text/csv',
+          text: 'GSTR-3B ${period.label}');
     } catch (e) {
       messenger.showSnackBar(SnackBar(
           content: Text('Could not create CSV: '

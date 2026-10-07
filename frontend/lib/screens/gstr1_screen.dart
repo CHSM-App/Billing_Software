@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
+import '../services/file_export.dart';
 
 import '../api.dart' as api;
 import '../services/gstr1_export.dart';
@@ -320,10 +320,8 @@ class _Gstr1ScreenState extends ConsumerState<Gstr1Screen> {
     try {
       final bytes = Gstr1Export.buildCsv(r);
       final name = 'GSTR1-${ref.read(gstr1PeriodProvider).slug}.csv';
-      await Share.shareXFiles(
-        [XFile.fromData(bytes, name: name, mimeType: 'text/csv')],
-        text: 'GSTR-1 ${ref.read(gstr1PeriodProvider).label}',
-      );
+      await shareFile(bytes, name, 'text/csv',
+          text: 'GSTR-1 ${ref.read(gstr1PeriodProvider).label}');
     } catch (e) {
       _toast('Could not create CSV: ${api.sanitizeUiErrorMessage(e)}');
     } finally {

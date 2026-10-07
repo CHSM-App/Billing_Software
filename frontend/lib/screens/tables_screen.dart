@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:share_plus/share_plus.dart';
+import '../services/file_export.dart';
 import '../api.dart';
 import '../services/printer_service.dart';
 import '../services/table_qr_image.dart';
@@ -336,13 +336,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
     try {
       final png = await TableQrImage.renderPng(
           data: url, label: tableNumber, pixelSize: 800);
-      await Share.shareXFiles(
-        [
-          XFile.fromData(png,
-              name: 'table_${tableNumber}_qr.png', mimeType: 'image/png')
-        ],
-        text: l10n.tablesQrShareText(tableNumber),
-      );
+      await shareFile(png, 'table_${tableNumber}_qr.png', 'image/png',
+          text: l10n.tablesQrShareText(tableNumber));
     } catch (e) {
       if (mounted) _showSnack(l10n.tablesQrShareFailed, isError: true);
     }

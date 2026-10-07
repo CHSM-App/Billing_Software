@@ -14,17 +14,30 @@ import '../widgets/app_widgets.dart';
 /// On success:
 /// - purpose='register'   → pops with `null` (caller proceeds to submit registration)
 /// - purpose='forgot_pin' → pops with the `verified_token` String (caller opens reset-PIN dialog)
-class OtpScreen extends StatefulWidget {
+class OtpScreen extends StatelessWidget {
   final String phone;
   final String purpose;
 
   const OtpScreen({super.key, required this.phone, required this.purpose});
 
   @override
-  State<OtpScreen> createState() => _OtpScreenState();
+  Widget build(BuildContext context) => Theme(
+        data: authTheme(Theme.of(context)),
+        child: _OtpView(phone: phone, purpose: purpose),
+      );
 }
 
-class _OtpScreenState extends State<OtpScreen> {
+class _OtpView extends StatefulWidget {
+  final String phone;
+  final String purpose;
+
+  const _OtpView({required this.phone, required this.purpose});
+
+  @override
+  State<_OtpView> createState() => _OtpScreenState();
+}
+
+class _OtpScreenState extends State<_OtpView> {
   // 6 individual digit controllers + focus nodes
   final List<TextEditingController> _otpCtrls =
       List.generate(6, (_) => TextEditingController());

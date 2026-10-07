@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:share_plus/share_plus.dart';
+import '../services/file_export.dart';
 
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
@@ -312,10 +312,7 @@ class _StoreSettingsScreenState extends ConsumerState<StoreSettingsScreen> {
     try {
       final png = await TableQrImage.renderPng(
           data: _link, label: ref.read(businessNameProvider), pixelSize: 800);
-      await Share.shareXFiles(
-        [XFile.fromData(png, name: 'store_qr.png', mimeType: 'image/png')],
-        text: _link,
-      );
+      await shareFile(png, 'store_qr.png', 'image/png', text: _link);
     } catch (_) {
       if (mounted) _snack(context.l10n.errorSomethingWentWrong, isError: true);
     }

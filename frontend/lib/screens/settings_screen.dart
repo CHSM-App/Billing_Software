@@ -242,8 +242,8 @@ class _SettingsContentState extends State<_SettingsContent>
                         context,
                         icon: Icons.shopping_bag_outlined,
                         iconColor: const Color(0xFF0891B2),
-                        title: 'Purchases',
-                        subtitle: 'Vendor bills, stock receipts and input tax credit',
+                        title: l10n.purchasesTitle,
+                        subtitle: l10n.purchasesSubtitle,
                         onTap: () => Navigator.push(
                           context,
                           MaterialPageRoute(
