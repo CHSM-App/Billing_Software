@@ -44,6 +44,7 @@ class OpenDraftsScreen extends ConsumerWidget {
           tableNumber: draft.tableNumber,
           activeBillId: draft.id,
           activeBillFuture: Future.value(draft),
+          openCart: true,
         ),
       ),
     ).then((_) {

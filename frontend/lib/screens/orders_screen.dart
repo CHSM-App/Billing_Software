@@ -18,9 +18,8 @@ import 'online_orders_screen.dart';
 /// shared app bar, the TabBar, the refresh action, and the "add table" FAB
 /// (shown only on the Tables sub-tab, for owners).
 ///
-/// Tab set is CONTENT-DRIVEN, not fixed: a queue with nothing in it has no tab.
-/// Tables is the exception — a table restaurant's floor plan is always relevant
-/// even when every table is empty.
+/// Tables (table restaurants), Open Orders and Online are always shown; Credit
+/// appears only while someone owes money.
 class OrdersScreen extends ConsumerStatefulWidget {
   /// Whether to include the Tables (floor plan) sub-tab. True for table
   /// restaurants; false for retail / no-table businesses.
@@ -219,20 +218,30 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
     }
   }
 
-  String _tabLabel(AppLocalizations l10n, _OrdersTab tab, int pendingOnline) {
+  /// Tab name followed by a red count badge (same look as the bottom bar),
+  /// hidden at 0. Credit carries no count. Tables counts occupied tables;
+  /// Online counts orders awaiting a decision.
+  Widget _tabLabel(AppLocalizations l10n, _OrdersTab tab,
+      {required int tables, required int open, required int online}) {
+    Widget withCount(String label, int n) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label),
+            if (n > 0) ...[
+              const SizedBox(width: 6),
+              Badge(backgroundColor: Colors.red, label: Text('$n')),
+            ],
+          ],
+        );
     switch (tab) {
       case _OrdersTab.tables:
-        return l10n.ordersTabTables;
+        return withCount(l10n.ordersTabTables, tables);
       case _OrdersTab.openOrders:
-        return l10n.ordersTabOpenOrders;
+        return withCount(l10n.ordersTabOpenOrders, open);
       case _OrdersTab.credit:
-        return l10n.ordersTabCredit;
+        return Text(l10n.ordersTabCredit);
       case _OrdersTab.online:
-        // The count is what makes "something needs deciding" visible without
-        // opening the tab. Dropped once everything left is merely in progress.
-        return pendingOnline > 0
-            ? '${l10n.onlineOrdersTab} ($pendingOnline)'
-            : l10n.onlineOrdersTab;
+        return withCount(l10n.onlineOrdersTab, online);
     }
   }
 
@@ -254,35 +263,26 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final userRole = ref.watch(userRoleProvider);
-    final storeEnabled =
-        ref.watch(sessionProvider).valueOrNull?.storeEnabled ?? false;
-    final pendingOnline = ref.watch(pendingOnlineOrderCountProvider);
+    // Watched here in build(), not inside the LayoutBuilder below, so a count
+    // change always rebuilds the tab labels.
+    // Tables only for table restaurants — watching it elsewhere would fetch the
+    // floor plan (and every occupied table's bill) just for an unseen count.
+    final int occupiedTables = widget.showTables
+        ? (ref.watch(tablesProvider).valueOrNull ?? const [])
+            .where((t) => t.activeBillId != null)
+            .length
+        : 0;
+    final int openCount = ref.watch(openDraftsProvider).valueOrNull?.length ?? 0;
+    final int onlineCount = ref.watch(pendingOnlineOrderCountProvider);
 
     _syncTabs([
       if (widget.showTables) _OrdersTab.tables,
-      if (ref.watch(hasOpenDraftsProvider)) _OrdersTab.openOrders,
+      // Open Orders and Online are always shown, even when empty, so staff
+      // always have somewhere to look. Credit still appears only when owed.
+      _OrdersTab.openOrders,
+      _OrdersTab.online,
       if (ref.watch(hasCreditProvider)) _OrdersTab.credit,
-      // Unlike the other queues, this tab does NOT come and go with its
-      // contents: a shop that has switched the store on needs somewhere to look
-      // when a customer says "I ordered online" — including when the answer is
-      // "nothing arrived". Tables behaves the same way for the same reason.
-      if (storeEnabled) _OrdersTab.online,
     ]);
-
-    // Every queue drained at once. The shell normally hides this whole nav item
-    // in that case, but the two decisions are made a frame apart — so render
-    // something calm instead of asserting inside TabController(length: 0).
-    if (_tabs.isEmpty) {
-      return Scaffold(
-        body: Column(children: [
-          ShellAppBar(
-            automaticallyImplyLeading: false,
-            title: Text(l10n.navOrders),
-          ),
-          const Expanded(child: SizedBox.shrink()),
-        ]),
-      );
-    }
 
     // A notification tap asked for the Online queue. Handled after this frame
     // so the tab set above is already built, and cleared either way so a
@@ -297,14 +297,6 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
     }
 
     final onTablesTab = _tabs[_tabController!.index] == _OrdersTab.tables;
-    // Search filters Open Orders, so it is offered only while that tab exists.
-    // If the tab disappears mid-search, collapse and clear it.
-    final canSearch = _tabs.contains(_OrdersTab.openOrders);
-    if (!canSearch && _searchExpanded) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _searchExpanded) _toggleSearch();
-      });
-    }
 
     return Scaffold(
       body: Column(
@@ -318,7 +310,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
               child: Text(l10n.navOrders),
             ),
             actions: [
-              if (canSearch) _buildSearch(l10n, bar.maxWidth),
+              _buildSearch(l10n, bar.maxWidth),
               IconButton(
                 icon: const Icon(Icons.refresh_outlined),
                 onPressed: _refresh,
@@ -327,16 +319,20 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
             ],
             bottom: TabBar(
               controller: _tabController,
-              // With four possible tabs the labels no longer fit a phone width
-              // evenly; scrolling keeps them readable instead of squeezing.
-              isScrollable: _tabs.length > 3,
-              tabAlignment: _tabs.length > 3 ? TabAlignment.start : null,
+              // Always scrollable: with counts ("Open Orders (8)") the labels
+              // don't fit fixed-width tabs on a phone and the count gets cut off.
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
               labelColor: AppColors.primary,
               unselectedLabelColor: AppColors.textSecondary,
               indicatorColor: AppColors.primary,
               tabs: [
                 for (final t in _tabs)
-                  Tab(text: _tabLabel(l10n, t, pendingOnline))
+                  Tab(
+                      child: _tabLabel(l10n, t,
+                          tables: occupiedTables,
+                          open: openCount,
+                          online: onlineCount))
               ],
             ),
           )),

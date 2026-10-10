@@ -286,8 +286,7 @@ class _MainShellState extends ConsumerState<MainShell>
   static bool _canDecideOnlineOrders(String role) =>
       role == 'owner' || role == 'cashier';
 
-  List<NavItem> _buildNavItems(String userRole, String businessType,
-      bool hasOpenDrafts, bool hasCredit, bool hasOnlineOrders) {
+  List<NavItem> _buildNavItems(String userRole, String businessType) {
     final l10n = context.l10n;
     final isRestaurant = businessType == 'restaurant_with_tables' ||
         businessType == 'restaurant_no_tables';
@@ -304,6 +303,10 @@ class _MainShellState extends ConsumerState<MainShell>
       ];
     }
 
+    final int ordersBadge =
+        (ref.watch(openDraftsProvider).valueOrNull?.length ?? 0) +
+            ref.watch(pendingOnlineOrderCountProvider);
+
     return [
       NavItem(Icons.receipt_long_outlined, Icons.receipt_long, l10n.navBilling,
           const HomeScreen()),
@@ -311,17 +314,18 @@ class _MainShellState extends ConsumerState<MainShell>
         NavItem(Icons.inventory_2_outlined, Icons.inventory_2, l10n.navItems,
             const ItemsScreen()),
       // Orders: one page hosting Tables (table restaurants only), Open Orders,
-      // Credit and Online as sub-tabs — each shown only while it has something
-      // in it (OrdersScreen decides that). Table restaurants always show the
-      // page (Tables is always relevant). Retail / no-table businesses get the
-      // SAME page, minus the Tables sub-tab, and only while at least one queue
-      // has work in it, so it never sits empty.
+      // Online and Credit as sub-tabs. Always shown, even when every queue is
+      // empty. Badge = open drafts (table orders included) + online orders
+      // still waiting on a decision; credit is not counted. Accepted online
+      // orders are already drafts, so counting only pending avoids doubles.
       if (businessType == 'restaurant_with_tables')
         NavItem(Icons.table_restaurant_outlined, Icons.table_restaurant,
-            l10n.navOrders, const OrdersScreen(showTables: true))
-      else if (hasOpenDrafts || hasCredit || hasOnlineOrders)
+            l10n.navOrders, const OrdersScreen(showTables: true),
+            badge: ordersBadge)
+      else
         NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
-            l10n.navOrders, const OrdersScreen(showTables: false)),
+            l10n.navOrders, const OrdersScreen(showTables: false),
+            badge: ordersBadge),
       // Waiters and owners at a restaurant can watch the kitchen queue.
       if (isRestaurant)
         // Red count: dishes ready and waiting to be served.
@@ -365,6 +369,9 @@ class _MainShellState extends ConsumerState<MainShell>
     // Queued offline drafts were just pushed; refresh Open Orders so their
     // local copies are replaced by the authoritative server ones.
     ref.invalidate(openDraftsProvider);
+    // Online orders may have arrived while offline; the Orders badge counts
+    // them. Silent refresh so a failed fetch keeps the last list.
+    unawaited(ref.read(onlineOrdersProvider.notifier).refreshSilently());
     // History: the just-synced offline bills are now on the server and their
     // local INV-<tag>-#### rows are gone, so re-fetch the authoritative copies.
     ref.invalidate(billsProvider);
@@ -389,19 +396,7 @@ class _MainShellState extends ConsumerState<MainShell>
           }
         });
 
-        // Kitchen staff never see billing/orders, so don't even query drafts.
-        final hasOpenDrafts = session.userRole != 'kitchen' &&
-            ref.watch(hasOpenDraftsProvider);
-        final hasCredit =
-            session.userRole != 'kitchen' && ref.watch(hasCreditProvider);
-        // Only a role that can decide an order needs the queue — and only when
-        // the shop actually runs a store. Deliberately NOT gated on there being
-        // open orders: with the store on, the Online tab is always available,
-        // so the Orders page must be reachable to host it.
-        final hasOnlineOrders =
-            session.storeEnabled && _canDecideOnlineOrders(session.userRole);
-        final items = _buildNavItems(session.userRole, session.businessType,
-            hasOpenDrafts, hasCredit, hasOnlineOrders);
+        final items = _buildNavItems(session.userRole, session.businessType);
         // Kept so a notification tap can find the Orders tab's index without
         // rebuilding the list outside build().
         _navItems = items;

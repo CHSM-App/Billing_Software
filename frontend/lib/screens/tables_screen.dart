@@ -86,6 +86,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                       .then<Bill?>((d) => Bill.fromJson(d))
                       .catchError((_) => null)
                   : null,
+          // Occupied table → straight to its cart; an empty one opens on items.
+          openCart: table.activeBillId != null,
         ),
         transitionsBuilder: (_, animation, __, child) =>
             FadeTransition(opacity: animation, child: child),

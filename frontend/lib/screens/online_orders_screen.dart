@@ -233,6 +233,7 @@ class _OnlineOrderCardState extends ConsumerState<_OnlineOrderCard> {
           activeBillFuture: cached != null
               ? Future.value(cached)
               : getBill(o.billId!).then((j) => Bill.fromJson(j)),
+          openCart: true,
         ),
       ),
     ).then((_) {

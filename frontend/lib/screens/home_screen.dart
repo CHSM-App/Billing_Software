@@ -65,10 +65,14 @@ class HomeScreen extends ConsumerStatefulWidget {
   /// Called instead of [Navigator.pop] when a bill is finalized or saved in
   /// split-view mode. When null the default pop behaviour is used.
   final VoidCallback? onBillDone;
+  /// Open the cart sheet as soon as the draft loads — set when an existing
+  /// order is opened from the Orders page, so staff land on the cart, not the
+  /// item list. Phones only; wide layouts already show the cart beside items.
+  final bool openCart;
 
   const HomeScreen(
       {super.key, this.tableId, this.tableNumber, this.activeBillId,
-      this.activeBillFuture, this.onBillDone});
+      this.activeBillFuture, this.onBillDone, this.openCart = false});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -410,6 +414,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           // Restore any additional charges saved on the draft.
           _restoreCharges(bill.additionalCharges);
         });
+        if (widget.openCart && MediaQuery.sizeOf(context).width < 720) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _openCartSheet();
+          });
+        }
       }
     } catch (_) {}
   }
