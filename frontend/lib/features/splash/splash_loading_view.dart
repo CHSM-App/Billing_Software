@@ -13,7 +13,6 @@ import '../../theme/app_theme.dart';
 class SplashLoadingView extends StatelessWidget {
   const SplashLoadingView({super.key});
   
-
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
