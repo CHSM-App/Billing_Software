@@ -22,6 +22,12 @@
 const pino = require('pino');
 const path = require('path');
 const fs   = require('fs');
+const { AsyncLocalStorage } = require('async_hooks');
+
+// The request being handled (set by a middleware in server.js), so every log
+// line written while serving it — route catch blocks, db.js, audit — carries
+// req_id and can be joined to pino-http's line for the same request.
+const requestContext = new AsyncLocalStorage();
 
 const env     = process.env.NODE_ENV || 'development';
 const isProd  = env === 'production';
@@ -114,8 +120,14 @@ const logger = pino(
 
     // ISO 8601 timestamp
     timestamp: pino.stdTimeFunctions.isoTime,
+
+    mixin() {
+      const req = requestContext.getStore();
+      return req ? { req_id: req.id } : {};
+    },
   },
   ...(transportOrUndefined ? [transportOrUndefined] : []),
 );
 
 module.exports = logger;
+module.exports.requestContext = requestContext;

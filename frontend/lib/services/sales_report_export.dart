@@ -48,14 +48,17 @@ class SalesReportExport {
   static double _net(Map<String, dynamic> b) =>
       _num(b['total']) - _num(b['discount_amount']) + _num(b['round_off']);
 
-  /// Effective payment mode: a settled credit bill reports the mode it was
-  /// actually collected in, matching the summary's payment split.
+  /// The payment mode as billed, matching the summary's payment split: a
+  /// credit sale stays 'credit' even once paid off — that money is reported
+  /// on the day it came in (credit_collected). A split bill lists its parts:
+  /// "cash 300.00 + upi 200.00".
   static String _mode(Map<String, dynamic> b) {
     final mode = (b['payment_mode'] ?? '').toString();
-    if (mode == 'credit' &&
-        b['payment_status'] == 'paid' &&
-        (b['settled_payment_mode'] ?? '').toString().isNotEmpty) {
-      return b['settled_payment_mode'].toString();
+    final parts = b['payments'];
+    if (mode == 'split' && parts is List && parts.isNotEmpty) {
+      return parts
+          .map((p) => '${p['mode']} ${_num(p['amount']).toStringAsFixed(2)}')
+          .join(' + ');
     }
     return mode;
   }
@@ -131,7 +134,7 @@ class SalesReportExport {
     for (final r in rows) {
       b.writeln(_row([
         r['bill_number'],
-        _fmtWhen(r['created_at']),
+        _fmtWhen(r['finalized_at'] ?? r['created_at']),
         r['customer_name'],
         r['customer_phone'],
         _money(r['subtotal']),
@@ -307,7 +310,7 @@ class SalesReportExport {
                 for (final r in rows)
                   pw.TableRow(children: [
                     cellText((r['bill_number'] ?? '').toString()),
-                    cellText(_fmtWhen(r['created_at'])),
+                    cellText(_fmtWhen(r['finalized_at'] ?? r['created_at'])),
                     cellText((r['customer_name'] ?? '').toString()),
                     cellText(_money(r['tax_amount']), right: true),
                     cellText(_money(r['discount_amount']), right: true),

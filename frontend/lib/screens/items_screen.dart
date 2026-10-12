@@ -6,7 +6,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
-import '../widgets/category_sheet.dart';
+import '../widgets/category_tree_list.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
 import '../api.dart';
@@ -91,7 +91,7 @@ class ItemsScreen extends ConsumerStatefulWidget {
 }
 
 class _ItemsScreenState extends ConsumerState<ItemsScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, CategoryTreeNav<ItemsScreen> {
   final _searchController = TextEditingController();
   TabController? _tabController;
   int _activeTab = 0;
@@ -99,57 +99,16 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   // stock) in place, instead of the normal cards.
   bool _showStock = false;
 
-  // The item list is ONE continuous sheet grouped by category — the same
-  // layout as the billing screen: a highlighted section bar, then that
-  // category's rows, then the next category.
-  final ScrollController _sheetCtrl = ScrollController();
-  // Categories whose rows are spread open. Everything starts collapsed so the
-  // owner first sees just the category bars; only one is open at a time.
-  final Set<String> _expandedCategories = {};
+  // The item list is the billing screen's tree (see CategoryTreeNav): major
+  // cards with a jump strip on top when the menu has majors, otherwise the
+  // category cards with a category strip.
 
   @override
   void initState() {
     super.initState();
+    initTreeNav();
     _searchController.addListener(() => setState(() {}));
   }
-
-  /// Groups [items] into category sections in [cats] order (alphabetical, from
-  /// categoriesProvider). Items without a category go last under "Other".
-  /// While searching every matching section is spread open — otherwise the
-  /// matches would be hidden behind collapsed bars.
-  List<_ItemSection> _groupByCategory(List<Item> items, List<String> cats) {
-    final searching = _searchController.text.trim().isNotEmpty;
-    final byCat = <String, List<Item>>{};
-    for (final item in items) {
-      final cat = item.category?.trim() ?? '';
-      byCat.putIfAbsent(cat, () => []).add(item);
-    }
-    final ordered = <String>[
-      ...cats.where(byCat.containsKey),
-      // Categories present on items but missing from the provider (shouldn't
-      // happen, but never drop items on the floor).
-      ...byCat.keys.where((c) => c.isNotEmpty && !cats.contains(c)),
-      if (byCat.containsKey('')) '',
-    ];
-    return [
-      for (final cat in ordered)
-        _ItemSection(cat, byCat[cat]!,
-            expanded: searching || _expandedCategories.contains(cat)),
-    ];
-  }
-
-  /// Bar tap: spread open one category's rows (folding whichever category was
-  /// open) or fold it up if it was the open one — only one is ever open.
-  void _toggleCategory(String cat) {
-    setState(() {
-      final wasOpen = _expandedCategories.contains(cat);
-      _expandedCategories.clear();
-      if (!wasOpen) _expandedCategories.add(cat);
-    });
-  }
-
-  String _categoryLabel(String category) =>
-      category.isEmpty ? context.l10n.billingCategoryOther : category;
 
   /// Whether the Raw Materials tab should be offered — restaurant businesses
   /// with inventory enabled (only owners manage it).
@@ -176,7 +135,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   void dispose() {
     _searchController.dispose();
     _tabController?.dispose();
-    _sheetCtrl.dispose();
+    disposeTreeNav();
     super.dispose();
   }
 
@@ -352,11 +311,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           await ref.read(categoryTreeProvider.notifier).reload();
           // Spread open the saved item's category so the owner sees the new
           // (or moved) row instead of a folded bar.
-          if (mounted) {
-            setState(() => _expandedCategories
-              ..clear()
-              ..add(saved.category?.trim() ?? ''));
-          }
+          if (mounted) revealSection(saved.majorCategory, saved.category ?? '');
           return saved;
         },
         onVariantsCreated: (itemId, variants) =>
@@ -602,6 +557,27 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           await ref.read(itemsProvider.future);
         }
 
+        // Same sources and order as the billing list: the owner's major order,
+        // falling back to the majors in use. Empty → no major level at all.
+        final cats =
+            ref.watch(categoriesProvider).valueOrNull ?? const <String>[];
+        final majors = ref.watch(majorCategoryOrderProvider).valueOrNull ??
+            (ref.watch(categoryTreeProvider).valueOrNull ?? {})
+                .keys
+                .where((m) => m.isNotEmpty)
+                .toList();
+        final stockMode = _showStock && inventoryEnabled;
+        // Built before the strip, which reads the tree it lists.
+        final tree = stockMode
+            ? const <TreeMajor>[]
+            : buildTree(items, cats, majors,
+                searching: _searchController.text.trim().isNotEmpty,
+                // Two columns only where the sheet is wide enough for two rows.
+                twoColumns: MediaQuery.of(context).size.width >= 900);
+        final strip = (stockMode || allItems.isEmpty)
+            ? null
+            : buildTreeStrip(majors, cats);
+
         final Widget list;
         if (items.isEmpty) {
           list = CustomScrollView(
@@ -619,7 +595,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
               ),
             ],
           );
-        } else if (_showStock && inventoryEnabled) {
+        } else if (stockMode) {
           final isWide = MediaQuery.of(context).size.width >= 720;
           list = CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -628,12 +604,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
             ],
           );
         } else {
-          list = _buildSheet(items, userRole, inventoryEnabled);
+          list = _buildTreeList(tree, userRole, inventoryEnabled);
         }
 
         return Column(
           children: [
             _searchBar(inventoryEnabled: inventoryEnabled),
+            if (strip != null) strip,
             Expanded(
               child: RefreshIndicator(onRefresh: refresh, child: list),
             ),
@@ -643,23 +620,17 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     );
   }
 
-  /// The category-wise sheet: pinned column header, then one continuous list
-  /// of category bars and item rows — the billing layout.
-  Widget _buildSheet(List<Item> items, String userRole, bool inventoryEnabled) {
-    final cats = ref.watch(categoriesProvider).valueOrNull ?? const <String>[];
-    final sections = _groupByCategory(items, cats);
-    // Two columns only where the sheet is wide enough for two full rows.
-    final twoColumns = MediaQuery.of(context).size.width >= 900;
-
+  /// The billing-style tree: major cards, category cards, item rows.
+  Widget _buildTreeList(
+      List<TreeMajor> tree, String userRole, bool inventoryEnabled) {
     final isOwner = userRole == 'owner';
-    return _ItemSheet(
-      sections: sections,
-      controller: _sheetCtrl,
-      twoColumns: twoColumns,
-      actionsWidth: _ItemSheetRow.actionsWidth(isOwner),
-      labelOf: _categoryLabel,
-      onToggleSection: _toggleCategory,
-      rowBuilder: (item, index) => _ItemSheetRow(
+    return CategoryTreeList(
+      tree: tree,
+      controller: treeScrollCtrl,
+      twoColumns: MediaQuery.of(context).size.width >= 900,
+      onToggleMajor: toggleMajor,
+      onToggleSection: toggleCategory,
+      itemBuilder: (item, index) => _ItemSheetRow(
         index: index,
         item: item,
         inventoryEnabled: inventoryEnabled,
@@ -767,195 +738,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
 }
 
 // ---------------------------------------------------------------------------
-// Category-wise sheet — the billing screen's item table, for managing items.
+// Item row of the billing-style tree (see widgets/category_tree_list.dart).
 // ---------------------------------------------------------------------------
-
-/// One category's worth of rows in the single grouped sheet.
-class _ItemSection {
-  /// Raw category string; empty for items that have no category ("Other").
-  final String category;
-  final List<Item> items;
-  /// Collapsed sections render only their bar; the rows appear once tapped.
-  final bool expanded;
-  const _ItemSection(this.category, this.items, {required this.expanded});
-}
-
-/// A row of the flattened list: a category section bar, or one row of item(s)
-/// — one per row on phones, two side by side on wide screens.
-class _SheetEntry {
-  final _ItemSection? section;
-  final List<Item> items;
-  final int firstIndex; // 1-based running number of items.first
-  const _SheetEntry.header(this.section)
-      : items = const [],
-        firstIndex = 0;
-  const _SheetEntry.rows(this.items, this.firstIndex) : section = null;
-  bool get isHeader => section != null;
-}
-
-class _ItemSheet extends StatelessWidget {
-  final List<_ItemSection> sections;
-  final ScrollController controller;
-  final bool twoColumns;
-  /// Width reserved for the per-row action icons, so the column header lines
-  /// up with the rows beneath it.
-  final double actionsWidth;
-  final String Function(String category) labelOf;
-  final void Function(String category) onToggleSection;
-  final Widget Function(Item item, int index) rowBuilder;
-
-  const _ItemSheet({
-    required this.sections,
-    required this.controller,
-    required this.twoColumns,
-    required this.actionsWidth,
-    required this.labelOf,
-    required this.onToggleSection,
-    required this.rowBuilder,
-  });
-
-  /// Items are numbered even while folded so a number never shifts when
-  /// another category opens.
-  List<_SheetEntry> _entries() {
-    final entries = <_SheetEntry>[];
-    var index = 1;
-    final step = twoColumns ? 2 : 1;
-    for (final s in sections) {
-      entries.add(_SheetEntry.header(s));
-      if (s.expanded) {
-        for (var i = 0; i < s.items.length; i += step) {
-          final end = i + step > s.items.length ? s.items.length : i + step;
-          entries.add(_SheetEntry.rows(s.items.sublist(i, end), index + i));
-        }
-      }
-      index += s.items.length;
-    }
-    return entries;
-  }
-
-  Widget _entry(_SheetEntry e, AppLocalizations l10n) {
-    if (e.isHeader) {
-      final s = e.section!;
-      return CategorySectionBar(
-        label: labelOf(s.category),
-        count: s.items.length,
-        open: s.expanded,
-        onTap: () => onToggleSection(s.category),
-      );
-    }
-    final cells = [
-      for (var i = 0; i < e.items.length; i++)
-        rowBuilder(e.items[i], e.firstIndex + i),
-    ];
-    final Widget row;
-    if (!twoColumns) {
-      row = cells.first;
-    } else {
-      row = Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(child: cells.first),
-          Container(width: 1, color: AppColors.border),
-          Expanded(child: cells.length > 1 ? cells[1] : const SizedBox()),
-        ],
-      );
-    }
-    return Column(
-      children: [
-        SizedBox(height: CategorySheetMetrics.rowExtent - 1, child: row),
-        const Divider(height: 1, indent: 12, endIndent: 12),
-      ],
-    );
-  }
-
-  Widget _header(AppLocalizations l10n) {
-    final style = AppFont.style(
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      color: AppColors.textSecondary,
-    );
-    return Container(
-      height: 28,
-      color: AppColors.surfaceVariant,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          const SizedBox(width: _ItemSheetRow.indexWidth),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(l10n.billingColItem,
-                maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
-          ),
-          SizedBox(
-            width: _ItemSheetRow.priceWidth,
-            child: Text(l10n.billingColPrice,
-                textAlign: TextAlign.right,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: style),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(width: actionsWidth),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    final entries = _entries();
-
-    final columnHeader = !twoColumns
-        ? _header(l10n)
-        : Row(
-            children: [
-              Expanded(child: _header(l10n)),
-              Container(width: 1, color: AppColors.border),
-              Expanded(child: _header(l10n)),
-            ],
-          );
-
-    // The column header stays pinned while the rows scroll beneath it (the
-    // category jump-list sits above this whole sheet).
-    return CustomScrollView(
-      controller: controller,
-      physics: const AlwaysScrollableScrollPhysics(),
-      slivers: [
-        SliverPersistentHeader(
-          pinned: true,
-          delegate: PinnedHeaderDelegate(
-            height: CategorySheetMetrics.columnHeaderHeight,
-            child: ColoredBox(
-              color: AppColors.surface,
-              child: Column(
-                children: [
-                  columnHeader,
-                  const Divider(height: 1),
-                ],
-              ),
-            ),
-          ),
-        ),
-        SliverPadding(
-          // Room for the floating "Add item" button over the last rows.
-          padding: const EdgeInsets.only(bottom: 96),
-          sliver: SliverVariedExtentList(
-            itemExtentBuilder: (i, _) => i >= entries.length
-                ? null
-                : (entries[i].isHeader
-                    ? CategorySheetMetrics.sectionBarExtent
-                    : CategorySheetMetrics.rowExtent),
-            delegate: SliverChildBuilderDelegate(
-              (_, i) => _entry(entries[i], l10n),
-              childCount: entries.length,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 /// One item row of the sheet: running number, name (+ stock / sizes line),
 /// price, and the barcode / delete actions. Tap opens the stock popup.

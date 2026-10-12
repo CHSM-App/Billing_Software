@@ -6,6 +6,61 @@ const { requireDateParam, todayUtc, dayRange, dateRange } = require('../dateUtil
 
 const router = express.Router();
 
+// The finalized bills of @from_dt..@to_dt as money taken per mode: a
+// single-mode bill is one row for its whole Net Payable, a split bill one row
+// per part (bill_payments, migration 050). Both add up to the same total.
+// A credit sale stays 'credit' here for good: paying it off later is money
+// collected on THAT day, reported by creditCollected (credit_payments,
+// migration 051) — so a day's cash is the cash that came in that day.
+// Defines two CTEs: fb (the bills) and tenders (bill_id, mode, amt).
+function tendersCte() {
+  return `
+    fb AS (
+      SELECT id, total, discount_amount, round_off, tax_amount, payment_mode
+      FROM bills
+      WHERE business_id = @business_id
+        AND status = 'finalized'
+        AND finalized_at >= @from_dt AND finalized_at < @to_dt
+    ),
+    tenders AS (
+      SELECT fb.id AS bill_id, fb.payment_mode AS mode,
+             fb.total - fb.discount_amount + fb.round_off AS amt
+      FROM fb
+      WHERE fb.payment_mode <> 'split'
+      UNION ALL
+      SELECT fb.id, bp.mode, bp.amount
+      FROM bill_payments bp
+      JOIN fb ON fb.id = bp.bill_id
+    )`;
+}
+
+// Old credit paid off in @from_dt..@to_dt — at the counter with a new bill or
+// from the Credit tab — per mode. Counted on the day the money came in.
+const CREDIT_COLLECTED = `
+  SELECT cp.mode, ISNULL(SUM(cp.amount), 0) AS amt
+  FROM credit_payments cp
+  WHERE cp.business_id = @business_id
+    AND cp.created_at >= @from_dt AND cp.created_at < @to_dt
+  GROUP BY cp.mode`;
+
+function creditCollected(recordset) {
+  const out = { cash: 0, upi: 0, card: 0, other: 0, total: 0 };
+  for (const r of recordset) {
+    const amt = parseFloat(r.amt) || 0;
+    const mode = Object.prototype.hasOwnProperty.call(out, r.mode) && r.mode !== 'total' ? r.mode : 'other';
+    out[mode] = parseFloat((out[mode] + amt).toFixed(2));
+    out.total = parseFloat((out.total + amt).toFixed(2));
+  }
+  return out;
+}
+
+const MODE_SUMS = `
+            ISNULL(SUM(CASE WHEN mode = 'cash'   THEN amt ELSE 0 END), 0) AS cash,
+            ISNULL(SUM(CASE WHEN mode = 'upi'    THEN amt ELSE 0 END), 0) AS upi,
+            ISNULL(SUM(CASE WHEN mode = 'card'   THEN amt ELSE 0 END), 0) AS card,
+            ISNULL(SUM(CASE WHEN mode = 'credit' THEN amt ELSE 0 END), 0) AS credit,
+            ISNULL(SUM(CASE WHEN mode = 'other'  THEN amt ELSE 0 END), 0) AS other`;
+
 function ownerOnly(req, res, next) {
   if (req.user.role !== 'owner') {
     return res.status(403).json({ error: 'Only owners can access reports' });
@@ -33,29 +88,27 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
 
     const { start, end } = dayRange(dateStr);
 
-    const [billResult, expenseResult] = await Promise.all([
+    const [billResult, expenseResult, collectedResult] = await Promise.all([
       // Sargable range on DATETIME2 — no CAST() wrapping the column.
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .input('from_dt',     sql.DateTime2,        start)
         .input('to_dt',       sql.DateTime2,        end)
+        // Payment-mode figures are the actual money collected: the payable
+        // (total - discount) plus the round_off adjustment, split by part.
         .query(`
-          SELECT
-            COUNT(*) AS bill_count,
-            ISNULL(SUM(total), 0) AS total_revenue,
-            ISNULL(SUM(discount_amount), 0) AS total_discount,
-            ISNULL(SUM(round_off), 0) AS total_round_off,
-            -- Payment-mode figures are the actual money collected: the payable
-            -- (total - discount) plus the round_off adjustment.
-            ISNULL(SUM(CASE WHEN payment_mode = 'cash'   THEN total - discount_amount + round_off ELSE 0 END), 0) AS cash,
-            ISNULL(SUM(CASE WHEN payment_mode = 'upi'    THEN total - discount_amount + round_off ELSE 0 END), 0) AS upi,
-            ISNULL(SUM(CASE WHEN payment_mode = 'card'   THEN total - discount_amount + round_off ELSE 0 END), 0) AS card,
-            ISNULL(SUM(CASE WHEN payment_mode = 'credit' THEN total - discount_amount + round_off ELSE 0 END), 0) AS credit,
-            ISNULL(SUM(CASE WHEN payment_mode = 'other'  THEN total - discount_amount + round_off ELSE 0 END), 0) AS other
-          FROM bills
-          WHERE business_id = @business_id
-            AND status = 'finalized'
-            AND created_at >= @from_dt AND created_at < @to_dt
+          WITH ${tendersCte()}
+          SELECT a.bill_count, a.total_revenue, a.total_discount, a.total_round_off,
+                 m.cash, m.upi, m.card, m.credit, m.other
+          FROM (
+            SELECT
+              COUNT(*) AS bill_count,
+              ISNULL(SUM(total), 0) AS total_revenue,
+              ISNULL(SUM(discount_amount), 0) AS total_discount,
+              ISNULL(SUM(round_off), 0) AS total_round_off
+            FROM fb
+          ) a
+          CROSS JOIN (SELECT ${MODE_SUMS} FROM tenders) m
         `),
       // expenses.expense_date is a DATE column — bind as sql.Date to avoid
       // implicit conversion and keep the index usable.
@@ -67,6 +120,11 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
           FROM expenses
           WHERE business_id = @business_id AND expense_date = @expense_date
         `),
+      pool.request()
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('from_dt',     sql.DateTime2,        start)
+        .input('to_dt',       sql.DateTime2,        end)
+        .query(CREDIT_COLLECTED),
     ]);
 
     const bill      = billResult.recordset[0];
@@ -92,6 +150,8 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
         credit: parseFloat(bill.credit),
         other:  parseFloat(bill.other),
       },
+      // Old credit paid off today, per mode — today's money, not today's sales.
+      credit_collected: creditCollected(collectedResult.recordset),
     });
   } catch (err) {
     logger.error({ err }, 'Today report error');
@@ -120,8 +180,8 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
 
     const { start: fromDt, end: toDt } = dateRange(fromStr, toStr);
 
-    const [billResult, expenseResult, dailyResult, expCatResult, payModeResult, topItemsResult, recentBillsResult] = await Promise.all([
-      // Sargable DATETIME2 range for bills.created_at
+    const [billResult, expenseResult, dailyResult, expCatResult, payModeResult, topItemsResult, recentBillsResult, collectedResult] = await Promise.all([
+      // Sargable DATETIME2 range for bills.finalized_at
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .input('from_dt',     sql.DateTime2,        fromDt)
@@ -129,40 +189,25 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         .query(`
           -- The payment split uses the EFFECTIVE mode and NET amount so it
           -- tallies exactly with total sales:
-          --   effective mode = settled_payment_mode once a credit bill is paid
-          --                    (real cash/upi it was collected as), else
-          --                    payment_mode (an unpaid credit stays 'credit').
+          --   mode           = as billed: a credit sale (or a split's credit
+          --                    part) stays 'credit'; paying it off later shows
+          --                    under credit_collected on the day it is paid.
           --   net amount     = total - discount_amount + round_off (the money
-          --                    actually collected, what total sales uses).
-          SELECT
-            COUNT(*) AS bill_count,
-            ISNULL(SUM(net), 0) AS total_revenue,
-            ISNULL(SUM(discount_amount), 0) AS total_discount,
-            ISNULL(SUM(round_off), 0) AS total_round_off,
-            ISNULL(SUM(tax_amount), 0) AS total_tax,
-            ISNULL(SUM(CASE WHEN eff_mode = 'cash'   THEN net ELSE 0 END), 0) AS cash,
-            ISNULL(SUM(CASE WHEN eff_mode = 'upi'    THEN net ELSE 0 END), 0) AS upi,
-            ISNULL(SUM(CASE WHEN eff_mode = 'card'   THEN net ELSE 0 END), 0) AS card,
-            ISNULL(SUM(CASE WHEN eff_mode = 'credit' THEN net ELSE 0 END), 0) AS credit,
-            ISNULL(SUM(CASE WHEN eff_mode = 'other'  THEN net ELSE 0 END), 0) AS other
+          --                    actually collected, what total sales uses),
+          --                    taken part by part for a split bill.
+          WITH ${tendersCte()}
+          SELECT a.bill_count, a.total_revenue, a.total_discount, a.total_round_off, a.total_tax,
+                 m.cash, m.upi, m.card, m.credit, m.other
           FROM (
             SELECT
-              total,
-              discount_amount,
-              round_off,
-              tax_amount,
-              (total - discount_amount + round_off) AS net,
-              CASE
-                WHEN payment_mode = 'credit' AND payment_status = 'paid'
-                     AND settled_payment_mode IS NOT NULL
-                THEN settled_payment_mode
-                ELSE payment_mode
-              END AS eff_mode
-            FROM bills
-            WHERE business_id = @business_id
-              AND status = 'finalized'
-              AND created_at >= @from_dt AND created_at < @to_dt
-          ) x
+              COUNT(*) AS bill_count,
+              ISNULL(SUM(total - discount_amount + round_off), 0) AS total_revenue,
+              ISNULL(SUM(discount_amount), 0) AS total_discount,
+              ISNULL(SUM(round_off), 0) AS total_round_off,
+              ISNULL(SUM(tax_amount), 0) AS total_tax
+            FROM fb
+          ) a
+          CROSS JOIN (SELECT ${MODE_SUMS} FROM tenders) m
         `),
       // expenses.expense_date is a DATE column — bind as sql.Date
       pool.request()
@@ -175,7 +220,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
           WHERE business_id = @business_id
             AND expense_date >= @from_date AND expense_date <= @to_date
         `),
-      // Daily breakdown — project created_at → DATE for grouping only in the
+      // Daily breakdown — project finalized_at → DATE for grouping only in the
       // SELECT/GROUP BY, not in the WHERE filter (which remains sargable).
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -189,10 +234,10 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
                  ISNULL(e.expenses, 0) AS expenses,
                  ISNULL(b.revenue,  0) - ISNULL(e.expenses, 0) AS profit
           FROM (
-            SELECT CAST(created_at AS DATE) AS day
+            SELECT CAST(finalized_at AS DATE) AS day
             FROM bills
             WHERE business_id = @business_id AND status = 'finalized'
-              AND created_at >= @from_dt AND created_at < @to_dt
+              AND finalized_at >= @from_dt AND finalized_at < @to_dt
             UNION
             SELECT expense_date AS day
             FROM expenses
@@ -200,11 +245,11 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
               AND expense_date >= @from_date AND expense_date <= @to_date
           ) d
           LEFT JOIN (
-            SELECT CAST(created_at AS DATE) AS day, SUM(total - discount_amount + round_off) AS revenue
+            SELECT CAST(finalized_at AS DATE) AS day, SUM(total - discount_amount + round_off) AS revenue
             FROM bills
             WHERE business_id = @business_id AND status = 'finalized'
-              AND created_at >= @from_dt AND created_at < @to_dt
-            GROUP BY CAST(created_at AS DATE)
+              AND finalized_at >= @from_dt AND finalized_at < @to_dt
+            GROUP BY CAST(finalized_at AS DATE)
           ) b ON b.day = d.day
           LEFT JOIN (
             SELECT expense_date AS day, SUM(amount) AS expenses
@@ -231,12 +276,12 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .input('from_dt',     sql.DateTime2,        fromDt)
         .input('to_dt',       sql.DateTime2,        toDt)
+        // A split bill counts once under each mode it was paid in.
         .query(`
-          SELECT payment_mode, COUNT(*) AS count, SUM(total - discount_amount + round_off) AS total
-          FROM bills
-          WHERE business_id = @business_id AND status = 'finalized'
-            AND created_at >= @from_dt AND created_at < @to_dt
-          GROUP BY payment_mode
+          WITH ${tendersCte()}
+          SELECT mode AS payment_mode, COUNT(DISTINCT bill_id) AS count, SUM(amt) AS total
+          FROM tenders
+          GROUP BY mode
           ORDER BY total DESC
         `),
       // Top-selling items — by revenue, over the same period. qty_sold is the
@@ -259,7 +304,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
           FROM bill_items bi
           JOIN bills b ON b.id = bi.bill_id
           WHERE b.business_id = @business_id AND b.status = 'finalized'
-            AND b.created_at >= @from_dt AND b.created_at < @to_dt
+            AND b.finalized_at >= @from_dt AND b.finalized_at < @to_dt
           GROUP BY bi.item_name
           ORDER BY revenue DESC
         `),
@@ -270,14 +315,19 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         .input('to_dt',       sql.DateTime2,        toDt)
         .query(`
           SELECT TOP 10
-                 b.bill_number, b.total, b.discount_amount, b.round_off, b.created_at,
+                 b.bill_number, b.total, b.discount_amount, b.round_off, b.finalized_at,
                  b.customer_name, t.table_number
           FROM bills b
           LEFT JOIN tables t ON t.id = b.table_id
           WHERE b.business_id = @business_id AND b.status = 'finalized'
-            AND b.created_at >= @from_dt AND b.created_at < @to_dt
-          ORDER BY b.created_at DESC
+            AND b.finalized_at >= @from_dt AND b.finalized_at < @to_dt
+          ORDER BY b.finalized_at DESC
         `),
+      pool.request()
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('from_dt',     sql.DateTime2,        fromDt)
+        .input('to_dt',       sql.DateTime2,        toDt)
+        .query(CREDIT_COLLECTED),
     ]);
 
     const bill      = billResult.recordset[0];
@@ -315,6 +365,8 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         category: r.category,
         total:    parseFloat(r.total),
       })),
+      // Old credit paid off in the period, per mode, on the day it came in.
+      credit_collected: creditCollected(collectedResult.recordset),
       revenue_by_payment_mode: payModeResult.recordset.map((r) => ({
         mode:  r.payment_mode,
         count: r.count,
@@ -330,7 +382,10 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         total:           parseFloat(r.total),
         discount_amount: parseFloat(r.discount_amount || 0),
         round_off:       parseFloat(r.round_off || 0),
-        created_at:      r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+        bill_date:       r.finalized_at instanceof Date ? r.finalized_at.toISOString() : String(r.finalized_at),
+        // Same value under the old key: app versions still in the field parse
+        // created_at here and fail the whole report without it.
+        created_at:      r.finalized_at instanceof Date ? r.finalized_at.toISOString() : String(r.finalized_at),
         customer_name:   r.customer_name,
         table_number:    r.table_number,
       })),
@@ -372,12 +427,12 @@ router.get('/weekly-sales', requireAuth, ownerOnly, async (req, res) => {
       .input('from_dt',     sql.DateTime2,        fromDt)
       .input('to_dt',       sql.DateTime2,        toDt)
       .query(`
-        SELECT CAST(created_at AS DATE) AS day,
+        SELECT CAST(finalized_at AS DATE) AS day,
                SUM(total - discount_amount + round_off) AS revenue
         FROM bills
         WHERE business_id = @business_id AND status = 'finalized'
-          AND created_at >= @from_dt AND created_at < @to_dt
-        GROUP BY CAST(created_at AS DATE)
+          AND finalized_at >= @from_dt AND finalized_at < @to_dt
+        GROUP BY CAST(finalized_at AS DATE)
       `);
 
     const byDay = {};
@@ -458,8 +513,11 @@ router.get('/gstr1', requireAuth, ownerOnly, async (req, res) => {
         INNER JOIN bills b      ON b.id = bi.bill_id
         INNER JOIN businesses bs ON bs.id = b.business_id
         WHERE b.business_id = @business_id
-          AND b.created_at >= @from_dt
-          AND b.created_at <= @to_dt
+          -- Issued invoices only: a draft was never an invoice and a voided
+          -- one is cancelled. (Same rule in the summary and HSN queries below.)
+          AND b.status = 'finalized'
+          AND b.finalized_at >= @from_dt
+          AND b.finalized_at <= @to_dt
           AND ISNULL(bs.gst_enabled, 0) = 1
           AND bi.tax_rate IS NOT NULL
           AND bi.tax_rate > 0
@@ -493,8 +551,9 @@ router.get('/gstr1', requireAuth, ownerOnly, async (req, res) => {
           FROM bills b
           INNER JOIN businesses bs ON bs.id = b.business_id
           WHERE b.business_id = @business_id
-            AND b.created_at >= @from_dt
-            AND b.created_at <= @to_dt
+            AND b.status = 'finalized'
+            AND b.finalized_at >= @from_dt
+            AND b.finalized_at <= @to_dt
             AND ISNULL(bs.gst_enabled, 0) = 1
         `),
       pool.request()
@@ -1121,7 +1180,8 @@ router.get('/gstr3b', requireAuth, ownerOnly, async (req, res) => {
             INNER JOIN bills b       ON b.id = bi.bill_id
             INNER JOIN businesses bs ON bs.id = b.business_id
             WHERE b.business_id = @business_id
-              AND b.created_at >= @from_dt AND b.created_at <= @to_dt
+              AND b.status = 'finalized'
+              AND b.finalized_at >= @from_dt AND b.finalized_at <= @to_dt
               AND ISNULL(bs.gst_enabled, 0) = 1
               AND bi.tax_rate IS NOT NULL AND bi.tax_rate > 0
           )

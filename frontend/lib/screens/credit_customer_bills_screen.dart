@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -16,8 +17,8 @@ import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 
 /// Shows one credit customer's unpaid bills. The cashier/owner selects one or
-/// more, then settles them (marks paid with a payment mode), prints a merged
-/// receipt, or sends the receipt links over WhatsApp.
+/// more, then settles them (marks paid with a payment mode) and prints or
+/// WhatsApps ONE Payment Receipt listing every bill paid.
 class CreditCustomerBillsScreen extends ConsumerStatefulWidget {
   final CreditCustomer customer;
 
@@ -70,7 +71,7 @@ class _CreditCustomerBillsScreenState
 
   double get _selectedTotal => _bills
       .where((b) => _selected.contains(b.id))
-      .fold(0.0, (s, b) => s + b.grandTotal);
+      .fold(0.0, (s, b) => s + b.amountDue);
 
   void _toggle(String id) {
     setState(() {
@@ -113,28 +114,37 @@ class _CreditCustomerBillsScreenState
       ),
       builder: (_) => _SettlementSheet(
         bills: _selectedBills,
-        onConfirm: (mode, action) => _confirmSettlement(mode, action),
+        onConfirm: (mode, action, amounts) =>
+            _confirmSettlement(mode, action, amounts),
       ),
     );
   }
 
-  /// Settles the selected bills with [mode], then performs [action]
-  /// (print / whatsapp / none). Closes the sheet and this screen on success.
-  Future<void> _confirmSettlement(String mode, _SettleAction action) async {
+  /// Pays [amounts] (bill id → amount: its whole due, or part of it) in
+  /// [mode], then performs [action] (print / whatsapp). Closes the sheet and
+  /// this screen on success.
+  Future<void> _confirmSettlement(
+      String mode, _SettleAction action, Map<String, double> amounts) async {
     final l10n = context.l10n;
-    // Snapshot before settling — the merged receipt is built from these.
-    final bills = _selectedBills;
 
     setState(() => _busy = true);
     try {
-      await settleCreditBills(bills.map((b) => b.id).toList(), mode);
+      final res = await settleCreditBills(amounts, mode);
       if (!mounted) return;
+      // The one Payment Receipt for this payment: every bill paid, what was
+      // paid on each now and what each still owes.
+      final raw = res['settlement'];
+      final settlement = raw is Map<String, dynamic>
+          ? CreditSettlement.fromJson(raw)
+          : null;
 
       // Fulfil the chosen delivery, best-effort — settlement already succeeded.
-      if (action == _SettleAction.print) {
-        await _printEach(bills, mode);
-      } else if (action == _SettleAction.whatsapp) {
-        await _sendWhatsAppFor(bills);
+      if (settlement != null) {
+        if (action == _SettleAction.print) {
+          await _printSettlement(settlement);
+        } else if (action == _SettleAction.whatsapp) {
+          await _sendWhatsAppSettlement(settlement);
+        }
       }
       if (!mounted) return;
 
@@ -151,17 +161,13 @@ class _CreditCustomerBillsScreenState
     }
   }
 
-  // ── Print (one receipt per bill) ────────────────────────────────────────────
+  // ── Print (one Payment Receipt) ─────────────────────────────────────────────
 
-  /// Prints each settled bill as its OWN receipt — bills are never merged.
-  /// One tap prints all selected bills in sequence. [settledMode] is how the
-  /// credit was actually paid, so each receipt shows e.g. "Cash", not "Credit".
-  Future<void> _printEach(List<Bill> bills, String settledMode) async {
+  /// Prints ONE Payment Receipt for the whole payment, however many bills it
+  /// paid: each bill's number, date, amount, what was paid on it now and any
+  /// balance it still owes, then the total received.
+  Future<void> _printSettlement(CreditSettlement settlement) async {
     final l10n = context.l10n;
-    if (bills.isEmpty) {
-      _showSnack(l10n.creditSelectAtLeastOne, isError: true);
-      return;
-    }
     // PDF sizes (A5/A4) open the OS print dialog and need no thermal printer;
     // only require a paired printer for the thermal sizes.
     final pdfSelected = await ReceiptOutput.isPdfSelected();
@@ -180,7 +186,6 @@ class _CreditCustomerBillsScreenState
     final addr = profile['business_address'] ?? '';
     final ph = profile['business_phone'] ?? '';
     final fss = profile['fssai_number'] ?? '';
-    final sac = profile['default_sac_code'] ?? '';
     final gstEnabled = ref.read(gstEnabledProvider);
     final String? address = addr.isNotEmpty ? addr : null;
     final String? phone = ph.isNotEmpty ? ph : null;
@@ -191,18 +196,12 @@ class _CreditCustomerBillsScreenState
       gstin = g.isNotEmpty ? g : null;
     }
     try {
-      // Each settled bill prints as its own receipt (never merged). For thermal
-      // the service settles the BT link between jobs; for PDF each bill is a page.
-      final printables =
-          bills.map((b) => _asSettled(b, settledMode)).toList();
-      await ReceiptOutput.emit(printables,
+      await ReceiptOutput.emitSettlement(settlement,
           businessName: businessName,
           businessAddress: address,
           businessPhone: phone,
           businessGstin: gstin,
           businessFssai: fssai,
-          defaultSacCode: sac.isNotEmpty ? sac : null,
-          gstEnabled: gstEnabled,
           labels: labels);
       if (mounted) _showSnack(l10n.billingPrintSuccess);
     } on PrinterException catch (e) {
@@ -213,59 +212,32 @@ class _CreditCustomerBillsScreenState
     }
   }
 
-  /// Copy of [bill] with the settled payment mode set, so the printed receipt
-  /// shows the real collection method instead of "Credit". Nothing is merged.
-  Bill _asSettled(Bill bill, String settledMode) => Bill(
-        id: bill.id,
-        businessId: bill.businessId,
-        billNumber: bill.billNumber,
-        customerName: bill.customerName ?? widget.customer.customerName,
-        customerPhone: bill.customerPhone ?? widget.customer.customerPhone,
-        subtotal: bill.subtotal,
-        taxAmount: bill.taxAmount,
-        discountAmount: bill.discountAmount,
-        chargesAmount: bill.chargesAmount,
-        additionalCharges: bill.additionalCharges,
-        total: bill.total,
-        roundOff: bill.roundOff,
-        paymentMode: settledMode,
-        status: 'finalized',
-        paymentStatus: 'paid',
-        createdByUserId: bill.createdByUserId,
-        createdAt: bill.createdAt,
-        items: bill.items,
-      );
-
   // ── WhatsApp ────────────────────────────────────────────────────────────────
 
-  Future<void> _sendWhatsAppFor(List<Bill> bills) async {
+  /// ONE message for the whole payment (every bill + total received), linking
+  /// to its Payment Receipt. The backend decides API vs deeplink per its
+  /// whatsapp_mode: 'api' sends server-side; 'deeplink' returns phone +
+  /// message and we open the cashier's WhatsApp with it.
+  Future<void> _sendWhatsAppSettlement(CreditSettlement settlement) async {
     final l10n = context.l10n;
     try {
-      // Per bill (never merged). The backend decides API vs deeplink per its
-      // whatsapp_mode: 'api' sends server-side; 'deeplink' returns phone +
-      // message and we open the cashier's WhatsApp in sequence.
-      for (var i = 0; i < bills.length; i++) {
-        if (i > 0) await Future.delayed(const Duration(milliseconds: 300));
-        final data = await whatsAppBill(bills[i].id);
-        if (data['mode'] == 'api') {
-          continue; // sent server-side; nothing to open
-        }
-        final phone = (data['phone'] ?? '').toString();
-        final message = (data['message'] ?? '').toString();
-        if (phone.isEmpty) continue;
-        final text = Uri.encodeComponent(message);
-        // Try whatsapp:// first (most reliable when installed), then wa.me.
-        for (final uri in [
-          Uri.parse('whatsapp://send?phone=$phone&text=$text'),
-          Uri.parse('https://wa.me/$phone?text=$text'),
-        ]) {
-          try {
-            if (await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-              break;
-            }
-          } catch (_) {
-            // try next candidate
+      final data = await whatsAppSettlement(settlement.id);
+      if (data['mode'] == 'api') return; // sent server-side; nothing to open
+      final phone = (data['phone'] ?? '').toString();
+      final message = (data['message'] ?? '').toString();
+      if (phone.isEmpty) return;
+      final text = Uri.encodeComponent(message);
+      // Try whatsapp:// first (most reliable when installed), then wa.me.
+      for (final uri in [
+        Uri.parse('whatsapp://send?phone=$phone&text=$text'),
+        Uri.parse('https://wa.me/$phone?text=$text'),
+      ]) {
+        try {
+          if (await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+            break;
           }
+        } catch (_) {
+          // try next candidate
         }
       }
     } on ApiException catch (e) {
@@ -365,7 +337,7 @@ class _CreditCustomerBillsScreenState
                                 ?.copyWith(fontWeight: FontWeight.w600)),
                         const SizedBox(height: 2),
                         Text(
-                          '${_dateFmt.format(bill.createdAt.toLocal())} · ${l10n.openOrdersItemCount(itemCount.toInt())}',
+                          '${_dateFmt.format(bill.billDate.toLocal())} · ${l10n.openOrdersItemCount(itemCount.toInt())}',
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
@@ -375,7 +347,7 @@ class _CreditCustomerBillsScreenState
                     ),
                   ),
                   Text(
-                    '₹${bill.grandTotal.toStringAsFixed(2)}',
+                    '₹${bill.amountDue.toStringAsFixed(2)}',
                     style: Theme.of(context)
                         .textTheme
                         .titleMedium
@@ -454,7 +426,9 @@ enum _SettleAction { print, whatsapp }
 /// then settles via Print / WhatsApp / plain Confirm. Items are NOT editable.
 class _SettlementSheet extends StatefulWidget {
   final List<Bill> bills;
-  final Future<void> Function(String mode, _SettleAction action) onConfirm;
+  /// [amounts] — bill id → what is being paid on it now.
+  final Future<void> Function(
+      String mode, _SettleAction action, Map<String, double> amounts) onConfirm;
 
   const _SettlementSheet({required this.bills, required this.onConfirm});
 
@@ -466,14 +440,48 @@ class _SettlementSheetState extends State<_SettlementSheet> {
   String _mode = 'cash';
   bool _busy = false;
   final _dateFmt = DateFormat('dd MMM yyyy, hh:mm a');
+  // How much is paid on each bill now: everything it owes by default, or the
+  // part the cashier types — the rest stays owing.
+  late final Map<String, TextEditingController> _amounts = {
+    for (final b in widget.bills)
+      b.id: TextEditingController(text: b.amountDue.toStringAsFixed(2))
+        ..addListener(() => setState(() {})),
+  };
 
-  double get _total => widget.bills
-      .fold(0.0, (s, b) => s + b.grandTotal);
+  @override
+  void dispose() {
+    for (final c in _amounts.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  /// What the cashier typed for [bill], as entered (never below 0). It is NOT
+  /// lowered to what the bill owes: doing that silently paid less than the
+  /// cashier asked for — an amount over the due is refused instead
+  /// ([_tooMuch]), the same rule the server enforces.
+  double _amountFor(Bill bill) {
+    final v = double.tryParse(_amounts[bill.id]!.text.trim()) ?? 0.0;
+    return double.parse((v < 0 ? 0 : v).toStringAsFixed(2));
+  }
+
+  bool _tooMuch(Bill bill) => _amountFor(bill) > bill.amountDue + 0.004;
+
+  bool get _anyTooMuch => widget.bills.any(_tooMuch);
+
+  double get _total =>
+      widget.bills.fold(0.0, (s, b) => s + _amountFor(b));
 
   Future<void> _run(_SettleAction action) async {
+    if (_anyTooMuch) return;
+    final amounts = {
+      for (final b in widget.bills)
+        if (_amountFor(b) > 0.004) b.id: _amountFor(b),
+    };
+    if (amounts.isEmpty) return;
     setState(() => _busy = true);
     try {
-      await widget.onConfirm(_mode, action);
+      await widget.onConfirm(_mode, action, amounts);
     } finally {
       // The parent closes this sheet on success; if it's still mounted the
       // settlement failed, so re-enable the buttons.
@@ -485,26 +493,80 @@ class _SettlementSheetState extends State<_SettlementSheet> {
   /// items listed below.
   Widget _buildBillGroup(Bill bill) {
     final theme = Theme.of(context);
+    final l10n = context.l10n;
     return Padding(
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.space12, vertical: AppSpacing.space8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Heading: bill number + date
+          // Heading: bill number + date, and how much to pay on it now.
           Row(
             children: [
               Expanded(
-                child: Text(bill.billNumber,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.w700)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(bill.billNumber,
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w700)),
+                    Text(
+                        '${_dateFmt.format(bill.billDate.toLocal())} · '
+                        '${l10n.billingPrevDueOwes('₹${bill.amountDue.toStringAsFixed(2)}')}',
+                        style: theme.textTheme.labelSmall
+                            ?.copyWith(color: AppColors.textSecondary)),
+                  ],
+                ),
               ),
-              Text(_dateFmt.format(bill.createdAt.toLocal()),
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: AppColors.textSecondary)),
+              SizedBox(
+                width: 110,
+                child: TextField(
+                  controller: _amounts[bill.id],
+                  enabled: !_busy,
+                  textAlign: TextAlign.right,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(
+                        RegExp(r'^\d*\.?\d{0,2}')),
+                  ],
+                  decoration: InputDecoration(
+                    isDense: true,
+                    labelText: l10n.creditCollectAmount,
+                    prefixText: '₹ ',
+                    errorMaxLines: 2,
+                    errorText: _tooMuch(bill)
+                        ? l10n.creditAmountMax(
+                            '₹${bill.amountDue.toStringAsFixed(2)}')
+                        : null,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.space4),
+          // Paid on it so far — "Paid in Bill 0012 · Cash  ₹300".
+          for (final p in bill.creditPayments)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                        '${p.paidInBillNumber != null ? l10n.billingPaidInBill(stripBillPrefix(p.paidInBillNumber!)) : l10n.billingPaidOnCredit} · '
+                        '${paymentModeLabel(l10n, p.mode)} · '
+                        '${DateFormat('dd MMM').format(p.createdAt.toLocal())}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: AppColors.success)),
+                  ),
+                  Text('− ₹${p.amount.toStringAsFixed(2)}',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: AppColors.success)),
+                ],
+              ),
+            ),
           // Items
           ...bill.items.map((it) {
             final qty = it.quantity.toStringAsFixed(
@@ -638,7 +700,7 @@ class _SettlementSheetState extends State<_SettlementSheet> {
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: () => _run(_SettleAction.whatsapp),
+                      onPressed: _anyTooMuch ? null : () => _run(_SettleAction.whatsapp),
                       icon: const Icon(Icons.chat_outlined, size: 18),
                       label: Text(l10n.creditSendWhatsapp),
                       style: ElevatedButton.styleFrom(
@@ -652,7 +714,7 @@ class _SettlementSheetState extends State<_SettlementSheet> {
                   const SizedBox(width: AppSpacing.space8),
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: () => _run(_SettleAction.print),
+                      onPressed: _anyTooMuch ? null : () => _run(_SettleAction.print),
                       icon: const Icon(Icons.print_outlined, size: 18),
                       label: Text(l10n.creditPrint),
                       style: ElevatedButton.styleFrom(

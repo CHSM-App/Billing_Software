@@ -1,37 +1,134 @@
 const express = require('express');
-const crypto  = require('crypto');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const { whatsappLimiter } = require('../middleware/rateLimiter');
 const logger = require('../logger');
 const audit = require('../audit');
 const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUtils');
-const { sendBillLink, normalisePhone } = require('../whatsapp');
+const { sendBillLink, normalisePhone, sendReceiptLink } = require('../whatsapp');
+const { generateReceiptToken, RECEIPT_BASE } = require('../receiptToken');
 const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
 
 // Shared by create and finalize so a mode accepted when a bill is parked is
-// still accepted when it is settled.
-const validPaymentModes = ['cash', 'upi', 'card', 'credit', 'other'];
+// still accepted when it is settled. 'split' = paid in several parts, listed
+// in bill_payments (migration 050).
+const validPaymentModes = ['cash', 'upi', 'card', 'credit', 'other', 'split'];
+
+// The tenders one part of a split bill can be — any mode but 'split' itself.
+// A 'credit' part is what the customer still owes (bills.credit_amount).
+const SPLIT_MODES = ['cash', 'upi', 'card', 'other', 'credit'];
+
+// A split bill's `payments`: 2–5 parts, each mode at most once, amounts > 0.
+// Only the caller knows the bill's payable, so the sum is checked there.
+function parsePayments(payments) {
+  if (!Array.isArray(payments) || payments.length < 2 || payments.length > SPLIT_MODES.length) {
+    return { error: `A split bill needs 2 to ${SPLIT_MODES.length} payments` };
+  }
+  const rows = [];
+  for (const p of payments) {
+    const mode = p && p.mode;
+    const amount = Number(p && p.amount);
+    if (!SPLIT_MODES.includes(mode)) {
+      return { error: `payment mode must be one of: ${SPLIT_MODES.join(', ')}` };
+    }
+    if (rows.some((r) => r.mode === mode)) {
+      return { error: `Payment mode "${mode}" is listed twice` };
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { error: 'Each payment amount must be greater than 0' };
+    }
+    rows.push({ mode, amount: Math.round(amount * 100) / 100 });
+  }
+  const credit = rows.find((r) => r.mode === 'credit');
+  return {
+    rows,
+    sum: Math.round(rows.reduce((s, r) => s + r.amount, 0) * 100) / 100,
+    creditAmount: credit ? credit.amount : null,
+  };
+}
+
+// The figure the parts must add up to: the bill's Net Payable.
+// The sale time an offline bill carries (finalized_at), when believable: not
+// in the future beyond clock skew, not older than an offline queue could hold.
+// Anything else falls back to server time (null) rather than rejecting — a 400
+// would park an already-printed sale in the conflict screen.
+const SALE_TIME_SKEW_MS = 5 * 60 * 1000;
+const SALE_TIME_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+function clientSaleTime(value, now = Date.now()) {
+  if (value === undefined || value === null) return null;
+  const t = typeof value === 'string' ? Date.parse(value) : NaN;
+  if (Number.isFinite(t) && t <= now + SALE_TIME_SKEW_MS && t >= now - SALE_TIME_MAX_AGE_MS) {
+    return new Date(t);
+  }
+  logger.warn({ finalized_at: value }, 'ignoring implausible client finalized_at');
+  return null;
+}
+
+function payableOf(total, discount, roundOff) {
+  return Math.round((Number(total) - Number(discount || 0) + Number(roundOff || 0)) * 100) / 100;
+}
+
+// The app adds its parts up against the payable IT computed; the server
+// re-prices the bill, and the two can differ by a paisa or so of rounding.
+// Up to ₹0.10 the last part absorbs the gap, so the stored parts always add up
+// to exactly the bill (and reports to exactly total sales). More than that is
+// a real mismatch. Returns an error message, or null after fitting `split`.
+const SPLIT_SLACK = 0.10;
+function fitSplit(split, payable) {
+  const gap = Math.round((payable - split.sum) * 100) / 100;
+  if (gap === 0) return null;
+  const last = split.rows[split.rows.length - 1];
+  if (Math.abs(gap) > SPLIT_SLACK || last.amount + gap <= 0) {
+    return `Payments add up to ₹${split.sum.toFixed(2)} but the bill is ₹${payable.toFixed(2)}`;
+  }
+  last.amount = Math.round((last.amount + gap) * 100) / 100;
+  split.sum = payable;
+  if (last.mode === 'credit') split.creditAmount = last.amount;
+  return null;
+}
+
+async function insertPayments(request, billId, rows) {
+  request.input('bill_id', sql.UniqueIdentifier, billId);
+  const values = rows.map((r, i) => {
+    request
+      .input(`pay_mode${i}`, sql.NVarChar(20), r.mode)
+      .input(`pay_amount${i}`, sql.Decimal(10, 2), r.amount);
+    return `(@bill_id, @pay_mode${i}, @pay_amount${i})`;
+  });
+  await request.query(`INSERT INTO bill_payments (bill_id, mode, amount) VALUES ${values.join(', ')}`);
+}
+
+// Gives every split bill in `bills` its `payments` list, in one query. Bills
+// paid in a single mode have no rows and are left as they were.
+async function attachPayments(bills) {
+  const split = bills.filter((b) => b.payment_mode === 'split');
+  if (split.length === 0) return bills;
+  const req = pool.request();
+  const names = split.map((b, i) => {
+    req.input(`pb${i}`, sql.UniqueIdentifier, b.id);
+    return `@pb${i}`;
+  });
+  const result = await req.query(`
+    SELECT bill_id, mode, amount FROM bill_payments
+    WHERE bill_id IN (${names.join(',')})
+    ORDER BY created_at, mode
+  `);
+  const byBill = {};
+  for (const r of result.recordset) {
+    (byBill[String(r.bill_id).toLowerCase()] ||= []).push({ mode: r.mode, amount: Number(r.amount) });
+  }
+  for (const b of split) b.payments = byBill[String(b.id).toLowerCase()] || [];
+  return bills;
+}
 const { stripBillPrefix } = require('../billNumber');
 const { parseAdditionalCharges, serializeCharges, attachCharges } = require('../charges');
+const {
+  round2, parseCollections, checkCollections, pourIntoModes, recordCreditPayments,
+  reverseCollections, attachCreditInfo,
+} = require('../creditPayments');
 const { upsertCustomer, syncCustomers, canonicalPhone, billPhoneMatch } = require('../customers');
-
-// Base URL used in receipt links — no trailing slash
-const RECEIPT_BASE = process.env.RECEIPT_BASE_URL || 'https://Vittam.vengurlatech.com';
-
-function generateReceiptToken() {
-  // 16 alphanumeric chars (base62) — ~95 bits of entropy, unguessable.
-  // Deliberately avoids base64url's '-' and '_': some WhatsApp/link renderers
-  // munge those (e.g. inserting a space before a leading '-'), producing a
-  // broken receipt URL. Pure [A-Za-z0-9] survives every renderer intact.
-  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const bytes = crypto.randomBytes(16);
-  let out = '';
-  for (let i = 0; i < 16; i++) out += ALPHABET[bytes[i] % 62];
-  return out;
-}
 
 const router = express.Router();
 
@@ -411,8 +508,9 @@ async function fetchBill(billId, businessId) {
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
              b.total, b.round_off, b.payment_mode, b.status,
-             b.payment_status, b.settled_at, b.settled_payment_mode,
-             b.created_by_user_id, b.created_at, b.receipt_token,
+             b.payment_status, b.settled_at, b.settled_payment_mode, b.credit_amount,
+             b.credit_collected,
+             b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token,
              t.table_number,
              -- Payment the CUSTOMER already made online, for a bill that began
              -- life as an online-store order. Joined rather than copied onto
@@ -443,12 +541,15 @@ async function fetchBill(billId, businessId) {
     `);
 
   bill.items = itemsResult.recordset;
+  await attachPayments([bill]);
+  // Old dues it collected; or, for a credit bill, what has been paid on it.
+  await attachCreditInfo([bill]);
   return bill;
 }
 
 // POST /api/bills
 router.post('/', requireAuth, async (req, res) => {
-  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges } = req.body;
+  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
@@ -468,10 +569,22 @@ router.post('/', requireAuth, async (req, res) => {
   if (billStatus === 'finalized' && req.user.role === 'server') {
     return res.status(403).json({ error: 'A server can only send orders to the kitchen; a cashier finalizes the bill and takes payment' });
   }
+  // Split: the parts are chosen when the bill is settled, so only a finalized
+  // bill (the offline queue posts those directly) may carry them.
+  let split = null;
+  if (payment_mode === 'split') {
+    if (billStatus !== 'finalized') {
+      return res.status(400).json({ error: 'A split payment is chosen when the bill is settled, not on a draft' });
+    }
+    split = parsePayments(payments);
+    if (split.error) return res.status(400).json({ error: split.error });
+  }
   // Credit (udhaari): the sale is finalized but unpaid — money is collected
   // later via the Credit tab. We must know *who* owes, so name + phone are
-  // mandatory. A draft is never "on credit" (it's just an open order).
-  const isCredit = billStatus === 'finalized' && payment_mode === 'credit';
+  // mandatory. A draft is never "on credit" (it's just an open order). A split
+  // with a credit part is unpaid for that part (credit_amount) the same way.
+  const isCredit = billStatus === 'finalized' &&
+    (payment_mode === 'credit' || !!(split && split.creditAmount));
   if (isCredit) {
     if (!customer_name || !customer_name.trim() || !customer_phone || !customer_phone.trim()) {
       return res.status(400).json({ error: 'Customer name and phone are required for a credit bill' });
@@ -505,6 +618,9 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ error: parsedCharges.error });
   }
   const { charges: chargeList, chargesAmount } = parsedCharges;
+  // Offline sync sends when the sale actually happened; without it the bill
+  // would be dated when the device came back online.
+  const saleTime = billStatus === 'finalized' ? clientSaleTime(finalized_at) : null;
 
   try {
     await poolConnect;
@@ -642,6 +758,13 @@ router.post('/', requireAuth, async (req, res) => {
         ? parseFloat(Number(round_off).toFixed(2))
         : computeRoundOff(total - discountAmount, roundOffEnabled);
 
+      // The parts of a split bill must add up to exactly what it charges.
+      const mismatch = split && fitSplit(split, payableOf(total, discountAmount, roundOff));
+      if (mismatch) {
+        await transaction.rollback();
+        return res.status(400).json({ error: mismatch });
+      }
+
       // Centralized stock pre-check: validate ALL items before any writes.
       // itemMap rows were fetched inside this transaction (locked), so
       // stock_quantity here reflects the committed state at transaction start.
@@ -695,23 +818,32 @@ router.post('/', requireAuth, async (req, res) => {
         .input('round_off',       sql.Decimal(10, 2),   roundOff)
         .input('payment_mode',    sql.NVarChar(20),     payment_mode)
         .input('payment_status',  sql.NVarChar(20),     paymentStatus)
+        .input('credit_amount',   sql.Decimal(10, 2),   split ? split.creditAmount : null)
         .input('status',          sql.NVarChar(20),     billStatus)
         .input('created_by_user_id', sql.UniqueIdentifier, req.user.user_id)
         .input('client_bill_id',  sql.NVarChar(36),     client_bill_id || null)
         .input('receipt_token',   sql.NVarChar(16),     receiptToken)
+        .input('sale_time',       sql.DateTime2,        saleTime)
+        // An offline sale was ordered and finalized in one moment, so its
+        // client time is both dates. A draft gets finalized_at on finalize.
         .query(`
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
                              subtotal, tax_amount, discount_amount, charges_amount, additional_charges,
-                             total, round_off, payment_mode, payment_status, status,
-                             created_by_user_id, client_bill_id, receipt_token)
+                             total, round_off, payment_mode, payment_status, credit_amount, status,
+                             created_by_user_id, client_bill_id, receipt_token,
+                             created_at, finalized_at)
           OUTPUT INSERTED.id
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
                   @subtotal, @tax_amount, @discount_amount, @charges_amount, @additional_charges,
-                  @total, @round_off, @payment_mode, @payment_status, @status,
-                  @created_by_user_id, @client_bill_id, @receipt_token)
+                  @total, @round_off, @payment_mode, @payment_status, @credit_amount, @status,
+                  @created_by_user_id, @client_bill_id, @receipt_token,
+                  COALESCE(@sale_time, SYSUTCDATETIME()),
+                  CASE WHEN @status = 'finalized' THEN COALESCE(@sale_time, SYSUTCDATETIME()) END)
         `);
 
       const billId = billResult.recordset[0].id;
+
+      if (split) await insertPayments(transaction.request(), billId, split.rows);
 
       // Insert bill_items — one multi-row INSERT instead of one network round
       // trip per line (a 15-item bill was 15 sequential awaits in series; this
@@ -849,25 +981,28 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     let where = 'b.business_id = @business_id';
+    // A bill's date is when it was finalized; a draft (or a draft voided
+    // before settling) has only its order time.
+    const billDate = 'COALESCE(b.finalized_at, b.created_at)';
 
     if (from && to) {
-      // Explicit range: sargable DATETIME2 bounds (>= start of from-day, < start of day after to)
+      // Explicit range: >= start of from-day, < start of day after to
       const { start: fromDt, end: toDt } = dateRange(from, to);
       request.input('from_dt', sql.DateTime2, fromDt);
       request.input('to_dt',   sql.DateTime2, toDt);
-      where += ' AND b.created_at >= @from_dt AND b.created_at < @to_dt';
+      where += ` AND ${billDate} >= @from_dt AND ${billDate} < @to_dt`;
     } else if (from) {
       // Only lower bound supplied — from that day onward
       const { start: fromDt } = dayRange(from);
       request.input('from_dt', sql.DateTime2, fromDt);
-      where += ' AND b.created_at >= @from_dt';
+      where += ` AND ${billDate} >= @from_dt`;
     } else {
       // No range supplied — default to today (UTC calendar day)
       const dateStr = todayUtc();
       const { start: fromDt, end: toDt } = dayRange(dateStr);
       request.input('from_dt', sql.DateTime2, fromDt);
       request.input('to_dt',   sql.DateTime2, toDt);
-      where += ' AND b.created_at >= @from_dt AND b.created_at < @to_dt';
+      where += ` AND ${billDate} >= @from_dt AND ${billDate} < @to_dt`;
     }
     if (search) {
       request.input('search', sql.NVarChar(100), `%${search}%`);
@@ -878,10 +1013,11 @@ router.get('/', requireAuth, async (req, res) => {
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
              b.total, b.round_off, b.payment_mode, b.status,
-             b.created_by_user_id, b.created_at, b.receipt_token
+             b.payment_status, b.credit_amount, b.credit_collected,
+             b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token
       FROM bills b
       WHERE ${where}
-      ORDER BY b.created_at DESC
+      ORDER BY ${billDate} DESC
     `);
 
     if (billsResult.recordset.length === 0) return res.json([]);
@@ -905,7 +1041,8 @@ router.get('/', requireAuth, async (req, res) => {
       items: itemsByBill[b.id] || [],
     }));
 
-    return res.json(bills);
+    await attachPayments(bills);
+    return res.json(await attachCreditInfo(bills));
   } catch (err) {
     logger.error({ err }, 'Get bills error');
     return res.status(500).json({ error: 'Failed to fetch bills' });
@@ -1125,6 +1262,99 @@ router.get('/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Settles a draft by what the customer handed over — several parts (a split),
+// money for old credit bills (`collections`, from the Credit lines on the
+// billing screen), or both — all or nothing.
+//
+// The tenders cover this bill's payable PLUS the old dues being collected. The
+// old bills are paid first, from the money modes only (credit cannot pay
+// credit) — see pourIntoModes — and this bill keeps what each mode has left,
+// plus any credit part. ₹700 bill + ₹300 old due, paid Cash 600 + UPI 400:
+// the old bill gets ₹300 cash; this bill records Cash 300 + UPI 400.
+//
+// Without a split, `mode` (or the draft's own mode) pays all of it. Returns
+// { row } like the single-mode UPDATE's OUTPUT, plus `creditPart` and
+// `collected`, or { status, error }.
+async function finalizeWithTenders(billId, businessId, { mode, split, collections }) {
+  const transaction = pool.transaction();
+  await transaction.begin();
+  const fail = async (status, error) => {
+    await transaction.rollback();
+    return { status, error };
+  };
+  try {
+    // The draft first, locked: its payable decides everything below.
+    const draft = (await transaction.request()
+      .input('id', sql.UniqueIdentifier, billId)
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .query(`
+        SELECT id, table_id, bill_number, payment_mode, customer_name, customer_phone,
+               total, discount_amount, round_off
+        FROM bills WITH (UPDLOCK, ROWLOCK)
+        WHERE id = @id AND business_id = @business_id AND status = 'draft'
+      `)).recordset[0];
+    if (!draft) return fail(404, 'Draft bill not found');
+    const payable = payableOf(draft.total, draft.discount_amount, draft.round_off);
+
+    let collect = [];
+    if (collections.length) {
+      const checked = await checkCollections(transaction.request(), businessId, collections);
+      if (checked.error) return fail(409, checked.error);
+      collect = checked.list;
+    }
+    const collected = round2(collect.reduce((s, c) => s + c.amount, 0));
+
+    // Everything handed over: the parts, or one mode for all of it.
+    const tenders = split || {
+      rows: [{ mode: mode || draft.payment_mode, amount: round2(payable + collected) }],
+      sum: round2(payable + collected),
+    };
+    const mismatch = split && fitSplit(split, round2(payable + collected));
+    if (mismatch) return fail(400, mismatch);
+
+    const poured = pourIntoModes(collect, tenders.rows);
+    if (poured.error) return fail(400, poured.error);
+
+    // This bill's own parts: what each money mode has left, and any credit.
+    const parts = [];
+    for (const t of tenders.rows) {
+      if (t.mode === 'credit') parts.push({ mode: 'credit', amount: t.amount });
+      else if (poured.left.get(t.mode) > 0.004) parts.push({ mode: t.mode, amount: poured.left.get(t.mode) });
+    }
+    const billMode = parts.length > 1 ? 'split' : (parts[0] || tenders.rows[0]).mode;
+    const creditPart = parts.length > 1
+      ? (parts.find((p) => p.mode === 'credit') || {}).amount ?? null
+      : null;
+    // A credit part needs someone to owe it, exactly like a whole-bill credit.
+    if (creditPart && (!draft.customer_name || !draft.customer_phone)) {
+      return fail(400, 'Customer name and phone are required for a credit bill');
+    }
+
+    await transaction.request()
+      .input('id', sql.UniqueIdentifier, draft.id)
+      .input('payment_mode', sql.NVarChar(20), billMode)
+      .input('payment_status', sql.NVarChar(20),
+        billMode === 'credit' || creditPart ? 'unpaid' : 'paid')
+      .input('credit_amount', sql.Decimal(10, 2), creditPart)
+      .input('credit_collected', sql.Decimal(10, 2), collected > 0 ? collected : null)
+      .query(`
+        UPDATE bills
+        SET status = 'finalized', finalized_at = SYSUTCDATETIME(),
+            payment_mode = @payment_mode,
+            payment_status = @payment_status, credit_amount = @credit_amount,
+            credit_collected = @credit_collected
+        WHERE id = @id
+      `);
+    if (parts.length > 1) await insertPayments(transaction.request(), draft.id, parts);
+    await recordCreditPayments(transaction, businessId, poured.rows, draft.id);
+    await transaction.commit();
+    return { row: { ...draft, payment_mode: billMode }, creditPart, collected };
+  } catch (err) {
+    try { await transaction.rollback(); } catch (_) {}
+    throw err;
+  }
+}
+
 // PUT /api/bills/:id/finalize
 router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   // The mode money was ACTUALLY taken in, which is only known now. A held bill
@@ -1133,41 +1363,57 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   // credit ledger all reported the wrong tender. Optional: callers that do not
   // send it keep the stored mode, which is what every offline-queued finalize
   // relies on.
-  const { payment_mode } = req.body || {};
+  const { payment_mode, payments, collect } = req.body || {};
   if (payment_mode !== undefined && !validPaymentModes.includes(payment_mode)) {
     return res.status(400).json({ error: `payment_mode must be one of: ${validPaymentModes.join(', ')}` });
   }
+  const split = payment_mode === 'split' ? parsePayments(payments) : null;
+  if (split && split.error) return res.status(400).json({ error: split.error });
+  // Old credit bills the customer is paying off with this one.
+  const collections = parseCollections(collect);
+  if (collections.error) return res.status(400).json({ error: collections.error });
+  let tendered = null;
   try {
     await poolConnect;
-    // The app finalizes a bill in two steps: create as draft, then finalize.
-    // So the credit → unpaid decision has to happen HERE, not only at create.
-    // A credit bill becomes a finalized-but-unpaid sale (money collected later
-    // via the Credit tab); every other mode is paid on finalize.
-    const result = await pool.request()
-      .input('id', sql.UniqueIdentifier, req.params.id)
-      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-      .input('payment_mode', sql.NVarChar(20), payment_mode ?? null)
-      .query(`
-        UPDATE bills
-        SET status = 'finalized',
-            payment_mode = COALESCE(@payment_mode, payment_mode),
-            -- Derived from the INCOMING mode, not the stored one: switching a
-            -- held bill to credit has to make it unpaid, or it never reaches
-            -- the Credit tab.
-            payment_status = CASE WHEN COALESCE(@payment_mode, payment_mode) = 'credit'
-                                  THEN 'unpaid' ELSE 'paid' END
-        OUTPUT INSERTED.id, INSERTED.table_id, INSERTED.bill_number,
-               INSERTED.payment_mode, INSERTED.customer_name, INSERTED.customer_phone
-        WHERE id = @id AND business_id = @business_id AND status = 'draft'
-      `);
+    let finalizedRow;
+    if (split || collections.list.length) {
+      tendered = await finalizeWithTenders(req.params.id, req.user.business_id,
+        { mode: payment_mode, split, collections: collections.list });
+      if (tendered.error) return res.status(tendered.status).json({ error: tendered.error });
+      finalizedRow = tendered.row;
+    } else {
+      // The app finalizes a bill in two steps: create as draft, then finalize.
+      // So the credit → unpaid decision has to happen HERE, not only at create.
+      // A credit bill becomes a finalized-but-unpaid sale (money collected later
+      // via the Credit tab); every other mode is paid on finalize.
+      const result = await pool.request()
+        .input('id', sql.UniqueIdentifier, req.params.id)
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('payment_mode', sql.NVarChar(20), payment_mode ?? null)
+        .query(`
+          UPDATE bills
+          SET status = 'finalized',
+              -- The sale date: a bill held for days is dated when settled.
+              finalized_at = SYSUTCDATETIME(),
+              payment_mode = COALESCE(@payment_mode, payment_mode),
+              -- Derived from the INCOMING mode, not the stored one: switching a
+              -- held bill to credit has to make it unpaid, or it never reaches
+              -- the Credit tab.
+              payment_status = CASE WHEN COALESCE(@payment_mode, payment_mode) = 'credit'
+                                    THEN 'unpaid' ELSE 'paid' END
+          OUTPUT INSERTED.id, INSERTED.table_id, INSERTED.bill_number,
+                 INSERTED.payment_mode, INSERTED.customer_name, INSERTED.customer_phone
+          WHERE id = @id AND business_id = @business_id AND status = 'draft'
+        `);
 
-    if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ error: 'Draft bill not found' });
+      if (result.rowsAffected[0] === 0) {
+        return res.status(404).json({ error: 'Draft bill not found' });
+      }
+      finalizedRow = result.recordset[0];
     }
 
     // A credit finalize with no customer is unrecoverable in the Credit tab
     // (nothing to group by). The client enforces name+phone, but guard here too.
-    const finalizedRow = result.recordset[0];
     if (finalizedRow.payment_mode === 'credit' &&
         (!finalizedRow.customer_name || !finalizedRow.customer_phone)) {
       logger.warn(
@@ -1176,7 +1422,7 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
       );
     }
 
-    const { table_id: tableId, bill_number: billNumber } = result.recordset[0];
+    const { table_id: tableId, bill_number: billNumber } = finalizedRow;
     if (tableId) {
       await pool.request()
         .input('table_id', sql.UniqueIdentifier, tableId)
@@ -1198,8 +1444,10 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
     // table or the open-orders list.
     broadcast(req.user.business_id, { type: 'kitchen' });
     broadcast(req.user.business_id, { type: bill.table_id ? 'tables' : 'drafts' });
-    // A finalized credit bill adds to the debtor list — refresh the Credit tab.
-    if (finalizedRow.payment_mode === 'credit') {
+    // A finalized credit bill, a credit part, or old dues paid off all change
+    // the debtor list — refresh the Credit tab.
+    if (finalizedRow.payment_mode === 'credit' ||
+        (tendered && (tendered.creditPart || tendered.collected > 0))) {
       broadcast(req.user.business_id, { type: 'credit' });
     }
 
@@ -1767,7 +2015,7 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT b.id, b.status, b.table_id, b.bill_number, b.total,
-               bs.inventory_enabled
+               b.credit_collected, bs.inventory_enabled
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
         WHERE b.id = @id AND b.business_id = @business_id
@@ -1801,6 +2049,12 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
       if (voidResult.rowsAffected[0] === 0) {
         await transaction.rollback();
         return res.status(409).json({ error: 'Bill is already voided' });
+      }
+
+      // A bill that paid off old credit takes that money back with it: the old
+      // bills owe it again (migration 051).
+      if (Number(bill.credit_collected) > 0) {
+        await reverseCollections(transaction, req.user.business_id, bill.id);
       }
 
       // Restore stock — only runs when the status flip above succeeded,
@@ -2030,33 +2284,15 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
       `View your receipt here: ${receiptUrl}\n\n` +
       `Thank you for shopping with us!`;
 
-    // Paid: send via the Business API. Report failure; no deeplink fallback.
-    if (whatsapp_mode === 'api') {
-      const result = await sendBillLink({
-        phone: customer_phone,
-        shopName: shop_name,
-        billNumber: displayNumber,
-        receiptUrl,
-      });
-      if (result.sent) {
-        return res.json({ mode: 'api', sent: true, campaign_id: result.campaignId });
-      }
-      if (result.skipped) {
-        return res.status(503).json({
-          mode: 'api',
-          sent: false,
-          error: 'WhatsApp API sending is disabled',
-        });
-      }
-      return res.status(502).json({
-        mode: 'api',
-        sent: false,
-        error: result.error || 'Failed to send WhatsApp message',
-      });
-    }
-
-    // Free: hand the app the phone + message to open WhatsApp itself.
-    return res.json({ mode: 'deeplink', phone, message, receipt_url: receiptUrl });
+    const out = await sendReceiptLink({
+      whatsappMode: whatsapp_mode,
+      phone: customer_phone,
+      shopName: shop_name,
+      billNumber: displayNumber,
+      receiptUrl,
+      message,
+    });
+    return res.status(out.status).json(out.body);
   } catch (err) {
     logger.error({ err }, 'whatsapp send error');
     return res.status(500).json({ error: 'Failed to send WhatsApp message' });

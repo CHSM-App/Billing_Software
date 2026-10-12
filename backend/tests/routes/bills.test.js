@@ -1070,3 +1070,84 @@ describe('POST /api/bills — recipe deduction', () => {
     expect(deductions).toEqual([]);
   });
 });
+
+// ------------------------------------------------------------------
+// Bill date = finalized_at (the sale), not created_at (the order)
+// ------------------------------------------------------------------
+describe('bill finalized date', () => {
+  // POST one cash bill; returns the inputs bound to the bills INSERT.
+  async function postBill(extra) {
+    const captured = [];
+    const txQueryMock = jest.fn()
+      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
+      .mockResolvedValue({ recordset: [], rowsAffected: [1] });
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      captured.push(inputs);
+      return {
+        inputs,
+        input: jest.fn(function (name, _type, value) { inputs[name] = value; return this; }),
+        query: txQueryMock,
+      };
+    });
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 1 }], payment_mode: 'cash', ...extra });
+    expect(res.status).toBe(201);
+    const insertSql = txQueryMock.mock.calls.map((c) => c[0]).find((q) => /INSERT INTO bills/.test(q));
+    return { inputs: captured.find((i) => 'subtotal' in i), insertSql };
+  }
+
+  test('an offline bill keeps the time it was sold, not the sync time', async () => {
+    const soldAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const { inputs, insertSql } = await postBill({ finalized_at: soldAt });
+    expect(inputs.sale_time.toISOString()).toBe(soldAt);
+    expect(insertSql).toMatch(/created_at, finalized_at/);
+  });
+
+  test('an implausible client time falls back to server time instead of rejecting', async () => {
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    expect((await postBill({ finalized_at: tomorrow })).inputs.sale_time).toBeNull();
+    expect((await postBill({ finalized_at: 'yesterday' })).inputs.sale_time).toBeNull();
+  });
+
+  test('a draft gets no finalize time until it is settled', async () => {
+    const { inputs, insertSql } = await postBill({ status: 'draft', finalized_at: new Date().toISOString() });
+    expect(inputs.sale_time).toBeNull();
+    expect(insertSql).toMatch(/CASE WHEN @status = 'finalized'/);
+  });
+
+  test('finalizing a held bill stamps finalized_at', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID, table_id: null, bill_number: 'INV-0001' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    const res = await request(app)
+      .put(`/api/bills/${BILL_ID}/finalize`)
+      .set(authHeader());
+    expect(res.status).toBe(200);
+    expect(mockRequest.query.mock.calls[0][0]).toMatch(/finalized_at = SYSUTCDATETIME\(\)/);
+  });
+
+  test('history filters and sorts by the finalize date, falling back to the order date', async () => {
+    mockRequest.recordset = [];
+    const res = await request(app)
+      .get('/api/bills?from=2026-10-12&to=2026-10-12')
+      .set(authHeader());
+    expect(res.status).toBe(200);
+    const sqlText = mockRequest.query.mock.calls[0][0];
+    expect(sqlText).toMatch(/COALESCE\(b\.finalized_at, b\.created_at\) >= @from_dt/);
+    expect(sqlText).toMatch(/ORDER BY COALESCE\(b\.finalized_at, b\.created_at\) DESC/);
+  });
+});

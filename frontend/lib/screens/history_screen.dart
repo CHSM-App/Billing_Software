@@ -33,17 +33,6 @@ String _billStatusLabel(AppLocalizations l10n, String status) {
   };
 }
 
-/// Maps a raw payment mode value from the API to a localized display label.
-String _paymentModeLabel(AppLocalizations l10n, String mode) {
-  return switch (mode) {
-    'cash' => l10n.paymentCash,
-    'upi' => l10n.paymentUpi,
-    'card' => l10n.paymentCard,
-    'credit' => l10n.paymentCredit,
-    _ => l10n.paymentOther,
-  };
-}
-
 StatusType _billStatusType(String status) => switch (status) {
       'finalized' => StatusType.success,
       'voided' => StatusType.error,
@@ -53,6 +42,7 @@ StatusType _billStatusType(String status) => switch (status) {
 class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   final _dateFmt = DateFormat('dd MMM yyyy');
   final _timeFmt = DateFormat('hh:mm a');
+  final _orderedFmt = DateFormat('dd MMM, hh:mm a');
 
   @override
   void initState() {
@@ -353,8 +343,14 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 const SizedBox(height: 2),
                 Text(
                   l10n.historyBillMeta(
-                    _timeFmt.format(bill.createdAt.toLocal()),
-                    _paymentModeLabel(l10n, bill.paymentMode),
+                    // A held bill is listed under the day it was settled; its
+                    // order time rides along (in the meta line — the card's
+                    // height is fixed).
+                    bill.wasHeld
+                        ? '${_timeFmt.format(bill.billDate.toLocal())}  ·  '
+                            '${l10n.historyOrderedAt(_orderedFmt.format(bill.createdAt.toLocal()))}'
+                        : _timeFmt.format(bill.billDate.toLocal()),
+                    paymentModeLabel(l10n, bill.paymentMode),
                     l10n.historyItemCount(bill.items.length),
                   ),
                   maxLines: 2,
@@ -525,12 +521,21 @@ class BillDetailDialog extends StatelessWidget {
             children: [
               Text(
                 DateFormat('dd MMM yyyy, hh:mm a')
-                    .format(bill.createdAt.toLocal()),
+                    .format(bill.billDate.toLocal()),
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
                     ?.copyWith(color: AppColors.textSecondary),
               ),
+              if (bill.wasHeld)
+                Text(
+                  l10n.historyOrderedAt(DateFormat('dd MMM yyyy, hh:mm a')
+                      .format(bill.createdAt.toLocal())),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.textSecondary),
+                ),
               if (bill.customerName != null) ...[
                 const SizedBox(height: AppSpacing.space4),
                 Text(bill.customerName!,
@@ -602,9 +607,44 @@ class BillDetailDialog extends StatelessWidget {
                     '₹${bill.grandTotal.toStringAsFixed(2)}',
                     bold: true),
               ],
+              // Old credit bills paid off with this one, then the total
+              // handed over.
+              if (bill.collected.isNotEmpty) ...[
+                for (final c in bill.collected)
+                  _row(
+                      context,
+                      '${l10n.billingPreviousDue} · ${l10n.billingPrevDueBill(c.displayNumber)}',
+                      '+ ₹${c.amount.toStringAsFixed(2)}'),
+                _row(context, l10n.billingTotalPaid,
+                    '₹${bill.totalPaid.toStringAsFixed(2)}',
+                    bold: true),
+              ],
               const SizedBox(height: AppSpacing.space4),
-              _row(context, l10n.historyPayment,
-                  _paymentModeLabel(l10n, bill.paymentMode)),
+              // One tender: "Payment  Cash". Several (a split, or old dues
+              // collected): one line per part — joined into a single value
+              // they ran off the side of a phone-width dialog.
+              if (bill.tendered.length == 1 && bill.collected.isEmpty)
+                _row(context, l10n.historyPayment,
+                    paymentModeLabel(l10n, bill.tendered.first.mode))
+              else ...[
+                _row(context, l10n.historyPayment, ''),
+                for (final p in bill.tendered)
+                  _row(context, '   ${paymentModeLabel(l10n, p.mode)}',
+                      '₹${p.amount.toStringAsFixed(2)}'),
+              ],
+              // A credit bill: each payment made on it since — "Paid in Bill
+              // 0012 · Cash" — and what it still owes.
+              for (final p in bill.creditPayments)
+                _row(
+                    context,
+                    '${p.paidInBillNumber != null ? l10n.billingPaidInBill(stripBillPrefix(p.paidInBillNumber!)) : l10n.billingPaidOnCredit}'
+                    ' · ${paymentModeLabel(l10n, p.mode)} · ${DateFormat('dd MMM yyyy').format(p.createdAt.toLocal())}',
+                    '− ₹${p.amount.toStringAsFixed(2)}'),
+              if (bill.isUnpaidCredit &&
+                  (bill.creditAmount != null || bill.creditPayments.isNotEmpty))
+                _row(context, l10n.billingBalanceDue,
+                    '₹${bill.amountDue.toStringAsFixed(2)}',
+                    bold: true),
             ],
           ),
         ),

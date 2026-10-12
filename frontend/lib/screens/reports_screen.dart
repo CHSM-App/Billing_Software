@@ -690,6 +690,50 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
       ));
       if (i + 2 < present.length) rows.add(const SizedBox(height: 12));
     }
+
+    // Old credit paid off in the period — money that came in, but not this
+    // period's sales, so it sits under the tiles rather than in them.
+    final collected = s.creditCollected['total'] ?? 0;
+    if (collected > 0) {
+      final byMode = [
+        for (final m in ['cash', 'upi', 'card', 'other'])
+          if ((s.creditCollected[m] ?? 0) > 0)
+            '${_paymentLabel(l10n, m)} ₹${_amt.format(s.creditCollected[m])}',
+      ].join(' · ');
+      rows
+        ..add(const SizedBox(height: 12))
+        ..add(Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.successLight,
+            borderRadius: BorderRadius.circular(AppRadius.large),
+            border: Border.all(color: AppColors.success),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(l10n.reportsCreditCollected,
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.textSecondary)),
+                    const SizedBox(height: 4),
+                    Text(byMode,
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+              Text('₹${_amt.format(collected)}',
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary)),
+            ],
+          ),
+        ));
+    }
     return Column(children: rows);
   }
 
@@ -748,7 +792,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               style: const TextStyle(
                   fontSize: 13, color: AppColors.textPrimary)),
         ),
-        Text(_timeFmt.format(b.createdAt.toLocal()),
+        Text(_timeFmt.format(b.billDate.toLocal()),
             style:
                 const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
         const SizedBox(width: 12),

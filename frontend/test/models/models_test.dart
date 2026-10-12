@@ -261,6 +261,31 @@ void main() {
       'items': [],
     };
 
+    test('billDate is the finalize time; a held bill keeps its order time', () {
+      // Held on the 7th, settled on the 12th: dated the 12th.
+      final held = Bill.fromJson({
+        ...billJson,
+        'created_at': '2026-10-07T14:15:00.000Z',
+        'finalized_at': '2026-10-12T06:40:00.000Z',
+      });
+      expect(held.billDate, DateTime.utc(2026, 10, 12, 6, 40));
+      expect(held.createdAt, DateTime.utc(2026, 10, 7, 14, 15));
+      expect(held.wasHeld, isTrue);
+
+      // Billed straight away: both stamps in the same instant.
+      final direct = Bill.fromJson({
+        ...billJson,
+        'finalized_at': billJson['created_at'],
+      });
+      expect(direct.wasHeld, isFalse);
+
+      // A draft (or an older payload) has only its order time.
+      final draft = Bill.fromJson(billJson);
+      expect(draft.finalizedAt, isNull);
+      expect(draft.billDate, draft.createdAt);
+      expect(draft.wasHeld, isFalse);
+    });
+
     test('displayNumber drops the bill prefix', () {
       expect(Bill.fromJson(billJson).displayNumber, '0001');
       expect(
@@ -287,6 +312,80 @@ void main() {
       final bill = Bill.fromJson(billJson);
       expect(bill.createdAt, isA<DateTime>());
       expect(bill.createdAt.year, 2024);
+    });
+
+    // Split payments: ₹100 paid 60 cash + 40 on credit.
+    test('a split bill lists its parts and owes only its credit part', () {
+      final bill = Bill.fromJson({
+        ...billJson,
+        'payment_mode': 'split',
+        'payment_status': 'unpaid',
+        'credit_amount': '40.00',
+        'payments': [
+          {'mode': 'cash', 'amount': 60},
+          {'mode': 'credit', 'amount': '40.00'},
+        ],
+      });
+      expect(bill.isSplit, isTrue);
+      expect(bill.amountDue, 40.0);
+      expect(bill.tenderLabel((m) => m.toUpperCase()),
+          'CASH ₹60.00 + CREDIT ₹40.00');
+    });
+
+    test('a whole-bill credit owes its rounded payable', () {
+      final bill = Bill.fromJson({
+        ...billJson,
+        'payment_mode': 'credit',
+        'payment_status': 'unpaid',
+        'total': 99.6,
+        'round_off': 0.4,
+      });
+      expect(bill.isSplit, isFalse);
+      expect(bill.amountDue, closeTo(100.0, 1e-9));
+      expect(bill.tenderLabel((m) => m), 'credit');
+    });
+
+    // Paying credit off in parts (migration 051).
+    test('a credit bill owes its credit part less what has been paid on it',
+        () {
+      final bill = Bill.fromJson({
+        ...billJson,
+        'payment_mode': 'credit',
+        'payment_status': 'unpaid',
+        'credit_payments': [
+          {'amount': 30, 'mode': 'cash', 'created_at': '2024-01-16T10:00:00Z',
+           'paid_in_bill_number': 'INV-0012'},
+          {'amount': '20.00', 'mode': 'upi', 'created_at': '2024-01-17T10:00:00Z'},
+        ],
+      });
+      expect(bill.creditPaid, 50.0);
+      expect(bill.amountDue, 50.0);
+      expect(bill.creditPayments.first.paidInBillNumber, 'INV-0012');
+      expect(bill.creditPayments.last.paidInBillNumber, isNull);
+    });
+
+    test('a bill that collected old dues totals them on top of itself', () {
+      final bill = Bill.fromJson({
+        ...billJson,
+        'collected': [
+          {'bill_id': 'old-1', 'bill_number': 'INV-0007', 'amount': 300},
+          {'bill_id': 'old-2', 'bill_number': 'INV-0009', 'amount': '50.50'},
+        ],
+      });
+      expect(bill.collectedTotal, 350.5);
+      expect(bill.totalPaid, 450.5);
+      expect(bill.collected.first.displayNumber, '0007');
+    });
+
+    test('payments also parse from the JSON string the offline queue stores',
+        () {
+      expect(
+        BillPayment.listFrom('[{"mode":"upi","amount":25.5}]')
+            .map((p) => '${p.mode}:${p.amount}'),
+        ['upi:25.5'],
+      );
+      expect(BillPayment.listFrom('not json'), isEmpty);
+      expect(BillPayment.listFrom(null), isEmpty);
     });
 
     test('parses items list', () {

@@ -92,6 +92,52 @@ class ReceiptOutput {
     );
   }
 
+  /// Emit ONE Payment Receipt for a Credit-tab payment, however many bills it
+  /// paid: thermal sizes print it on the roll, A5/A4 open it in the print
+  /// dialog as a single page.
+  static Future<void> emitSettlement(
+    CreditSettlement settlement, {
+    required String businessName,
+    String? businessAddress,
+    String? businessPhone,
+    String? businessGstin,
+    String? businessFssai,
+    String? footerNote,
+    required ReceiptLabels labels,
+  }) async {
+    if (settlement.lines.isEmpty) return;
+    final size = await getPaperSize();
+
+    if (PaperSizes.isThermal(size)) {
+      await PrinterService.instance.printSettlement(
+        settlement,
+        businessName: businessName,
+        businessAddress: businessAddress,
+        businessPhone: businessPhone,
+        businessGstin: businessGstin,
+        businessFssai: businessFssai,
+        labels: labels,
+        paperDots: PaperSizes.thermalDots(size),
+      );
+      return;
+    }
+
+    final bytes = await InvoicePdf.buildSettlement(
+      settlement: settlement,
+      pageFormat: size == PaperSizes.a5 ? PdfPageFormat.a5 : PdfPageFormat.a4,
+      businessName: businessName,
+      address: businessAddress,
+      phone: businessPhone,
+      gstin: businessGstin,
+      fssai: businessFssai,
+      footerNote: footerNote,
+    );
+    await Printing.layoutPdf(
+      onLayout: (_) async => bytes,
+      name: 'Payment-Receipt-${settlement.receiptToken}',
+    );
+  }
+
   /// Render a single [bill] to a preview for the currently-selected paper size,
   /// WITHOUT printing. Thermal sizes return a receipt PNG; A5/A4 return PDF
   /// bytes. Mirrors [emit] so the preview matches what will actually be printed.

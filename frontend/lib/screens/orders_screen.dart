@@ -277,11 +277,12 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
 
     _syncTabs([
       if (widget.showTables) _OrdersTab.tables,
-      // Open Orders and Online are always shown, even when empty, so staff
-      // always have somewhere to look. Credit still appears only when owed.
+      // Always shown, even when empty, so staff always know where to look —
+      // a Credit tab that came and went with the dues read as a missing
+      // feature. An empty one says no one owes money.
       _OrdersTab.openOrders,
       _OrdersTab.online,
-      if (ref.watch(hasCreditProvider)) _OrdersTab.credit,
+      _OrdersTab.credit,
     ]);
 
     // A notification tap asked for the Online queue. Handled after this frame

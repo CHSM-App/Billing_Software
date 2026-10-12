@@ -1048,6 +1048,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get receiptThankYou => 'Thank you, visit again!';
 
   @override
+  String get receiptPaymentReceipt => 'PAYMENT RECEIPT';
+
+  @override
+  String get receiptSettledInvoices => 'Settled Invoices';
+
+  @override
+  String get receiptColInvoice => 'Invoice';
+
+  @override
+  String get receiptColDate => 'Date';
+
+  @override
+  String get receiptColBill => 'Bill';
+
+  @override
+  String get receiptColPaid => 'Paid';
+
+  @override
+  String get receiptColBalance => 'Balance';
+
+  @override
+  String get receiptBalDue => 'Bal due';
+
+  @override
+  String get receiptTotalPaid => 'Total paid';
+
+  @override
+  String get receiptTotalReceived => 'TOTAL RECEIVED';
+
+  @override
   String get receiptDefaultBusiness => 'BUSINESS';
 
   @override
@@ -1227,6 +1257,16 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String billingBillSaved(String number) {
     return 'Bill $number saved';
+  }
+
+  @override
+  String billingBillSavedAndSent(String number) {
+    return 'Bill $number saved & sent to customer';
+  }
+
+  @override
+  String billingBillSavedWhatsappFailed(String number, String error) {
+    return 'Bill $number saved, but WhatsApp failed: $error';
   }
 
   @override
@@ -1467,6 +1507,76 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get paymentOther => 'Other';
+
+  @override
+  String get paymentSplit => 'Split';
+
+  @override
+  String get billingAddPayment => 'Add payment';
+
+  @override
+  String billingPayRemaining(String amount) {
+    return 'Remaining $amount';
+  }
+
+  @override
+  String billingPayExtra(String amount) {
+    return '$amount extra';
+  }
+
+  @override
+  String billingSplitMismatch(String amount) {
+    return 'Payments must add up to $amount';
+  }
+
+  @override
+  String get billingBalanceDue => 'Balance due';
+
+  @override
+  String get billingCollectNeedsInternet =>
+      'Collecting old credit needs an internet connection — untick the old bills to save this bill offline';
+
+  @override
+  String billingPrevDueBill(String number) {
+    return 'Bill $number';
+  }
+
+  @override
+  String billingPrevDueOwes(String amount) {
+    return 'owes $amount';
+  }
+
+  @override
+  String get billingTotalPaid => 'Total';
+
+  @override
+  String billingPaidInBill(String number) {
+    return 'Paid in Bill $number';
+  }
+
+  @override
+  String get billingPaidOnCredit => 'Paid';
+
+  @override
+  String get creditCollectAmount => 'Collect';
+
+  @override
+  String creditAmountMax(String amount) {
+    return 'Max $amount';
+  }
+
+  @override
+  String billingPrevDueTooMuch(String number, String amount) {
+    return 'Bill $number owes only $amount';
+  }
+
+  @override
+  String get reportsCreditCollected => 'Credit collected';
+
+  @override
+  String billingPrevDueNeedsPayment(String amount) {
+    return 'The previous due of $amount has to be paid now — it can\'t go on credit';
+  }
 
   @override
   String get itemsTitle => 'Items / Menu';
@@ -2012,6 +2122,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String historyBillMeta(String time, String payment, String items) {
     return '$time  ·  $payment  ·  $items';
+  }
+
+  @override
+  String historyOrderedAt(String date) {
+    return 'Ordered $date';
   }
 
   @override
@@ -2728,7 +2843,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get printerSetupScanHint =>
-      'Shows printers already paired in your phone\'s Bluetooth settings. Pair the printer there first, then tap Scan.';
+      'Shows Bluetooth printers paired in your phone\'s settings and USB printers plugged in. For a Wi-Fi/LAN printer, use Add Wi-Fi / LAN Printer below.';
 
   @override
   String get printerSetupTapScan => 'Tap \"Scan\" to find printers';
@@ -2756,6 +2871,28 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get printerSetupNoteUsb =>
       'USB on Windows requires WinUSB driver installed for the printer';
+
+  @override
+  String get printerSetupNoteNetwork =>
+      'Wi-Fi/LAN: the printer and this device must be on the same network. Or join the printer\'s own Wi-Fi and use IP 192.168.223.1';
+
+  @override
+  String get printerSetupAddNetwork => 'Add Wi-Fi / LAN Printer';
+
+  @override
+  String get printerSetupNetworkTitle => 'Wi-Fi / LAN Printer';
+
+  @override
+  String get printerSetupNetworkIp => 'Printer IP address';
+
+  @override
+  String get printerSetupNetworkIpHint => 'e.g. 192.168.1.50';
+
+  @override
+  String get printerSetupNetworkPort => 'Port';
+
+  @override
+  String get printerSetupNetworkInvalid => 'Enter the printer\'s IP address';
 
   @override
   String get printerSetupPaperSize => 'Paper Size';

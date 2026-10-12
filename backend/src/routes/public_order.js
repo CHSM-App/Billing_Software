@@ -199,11 +199,21 @@ router.get('/:qrToken/menu', orderLimiter, async (req, res) => {
 
     const itemsResult = await pool.request()
       .input('business_id', sql.UniqueIdentifier, table.business_id)
+      // Best sellers first, then by name — the order the billing screen lists
+      // a category in (items_provider.dart _sorted). The page groups by
+      // category itself and keeps this order inside each one.
       .query(`
-        SELECT id, name, major_category, category, price, tax_rate, image_url
-        FROM items
-        WHERE business_id = @business_id AND is_active = 1
-        ORDER BY major_category ASC, category ASC, name ASC
+        SELECT i.id, i.name, i.major_category, i.category, i.price, i.tax_rate, i.image_url
+        FROM items i
+        LEFT JOIN (
+          SELECT bi.item_id, SUM(bi.quantity) AS sold
+          FROM bill_items bi
+          JOIN bills bl ON bl.id = bi.bill_id
+          WHERE bl.business_id = @business_id AND bl.status = 'finalized' AND bi.item_id IS NOT NULL
+          GROUP BY bi.item_id
+        ) ts ON ts.item_id = i.id
+        WHERE i.business_id = @business_id AND i.is_active = 1
+        ORDER BY CASE WHEN ts.sold IS NULL THEN 1 ELSE 0 END, ts.sold DESC, i.name ASC
       `);
 
     const items = itemsResult.recordset;

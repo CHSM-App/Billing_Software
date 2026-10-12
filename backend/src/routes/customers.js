@@ -247,7 +247,7 @@ router.get('/:id/bills', async (req, res) => {
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount,
                b.additional_charges, b.total, b.round_off,
                b.payment_mode, b.payment_status, b.status,
-               b.created_by_user_id, b.created_at, b.receipt_token
+               b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token
         FROM @page p JOIN bills b ON b.id = p.id
         ORDER BY b.created_at DESC, b.id;
 

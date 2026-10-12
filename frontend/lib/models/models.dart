@@ -430,14 +430,50 @@ class Bill {
   /// business has rounding disabled. NEVER folded into subtotal/tax/total — the
   /// final payable is [grandTotal] = total - discount + roundOff.
   final double roundOff;
+  /// cash / upi / card / other / credit — or 'split', paid in the [payments].
   final String paymentMode;
   final String status;
   /// 'paid' | 'unpaid'. Unpaid means a credit (udhaari) bill awaiting
   /// settlement. Defaults to 'paid' for older bills / partial responses.
   final String paymentStatus;
   final String createdByUserId;
+  /// When the bill was first written — for a held order, the ORDER time.
   final DateTime createdAt;
+  /// When the sale was finalized. Null for a draft, and for an unsynced
+  /// offline bill (its [createdAt] already is the moment it was finalized).
+  final DateTime? finalizedAt;
   final List<BillItem> items;
+
+  /// The bill's date: what it prints as "Date" and what history and reports
+  /// file it under. A bill held on the 7th and settled on the 12th is dated
+  /// the 12th; a draft has only its order time.
+  DateTime get billDate => finalizedAt ?? createdAt;
+
+  /// True when the bill sat open before being settled, so its order time is
+  /// worth showing beside [billDate].
+  bool get wasHeld =>
+      finalizedAt != null &&
+      finalizedAt!.difference(createdAt) >= const Duration(minutes: 1);
+
+  /// The parts of a split bill, e.g. cash 300 + upi 200 + credit 200. Empty
+  /// for a bill paid in one mode.
+  final List<BillPayment> payments;
+
+  /// The part of this bill left on credit — its 'credit' payment. Null for a
+  /// whole-bill credit (all of [grandTotal] is owed) and for paid bills.
+  final double? creditAmount;
+
+  /// Old credit bills paid off along with this one — printed after the grand
+  /// total as "Prev. due · Bill 0007 ₹500". Empty for most bills.
+  final List<CollectedDue> collected;
+
+  /// The money behind [collected], per mode — with this bill's own parts it is
+  /// everything the customer handed over (see [tendered]).
+  final List<BillPayment> collectedByMode;
+
+  /// For a credit bill: every payment made on it since, oldest first — from a
+  /// later bill ("paid in Bill 0012") or from the Credit tab.
+  final List<CreditPaymentEntry> creditPayments;
 
   /// Set only on a bill that began life as an online-store order: the advance
   /// the customer already paid and the UPI reference they typed. Both live on
@@ -465,6 +501,56 @@ class Bill {
   /// The final amount the customer pays: total, less discount, plus round-off.
   double get grandTotal => total - discountAmount + roundOff;
 
+  /// What an unpaid bill still owes: its credit part (else the whole bill),
+  /// less what has been paid on it. Same rule as the server's DUE
+  /// (src/creditPayments.js).
+  double get amountDue => double.parse(
+      ((creditAmount ?? grandTotal) - creditPaid).toStringAsFixed(2));
+
+  /// Paid so far on this credit bill.
+  double get creditPaid => creditPayments.fold(0.0, (s, p) => s + p.amount);
+
+  /// Old dues this bill collected, in total.
+  double get collectedTotal => collected.fold(0.0, (s, c) => s + c.amount);
+
+  /// What the customer handed over: this bill plus the old dues it collected.
+  double get totalPaid => grandTotal + collectedTotal;
+
+  bool get isSplit => paymentMode == 'split' && payments.isNotEmpty;
+
+  /// Everything the customer handed over, per mode: this bill's own parts
+  /// plus the money that paid off [collected] old dues. Without collected
+  /// dues it is just this bill's parts (one entry for a single-mode bill).
+  List<BillPayment> get tendered {
+    final own = isSplit ? payments : [BillPayment(paymentMode, grandTotal)];
+    if (collected.isEmpty) return own;
+    // Not saved yet (a preview): its parts, or its one mode, already cover
+    // the old dues too.
+    if (collectedByMode.isEmpty) {
+      return isSplit ? payments : [BillPayment(paymentMode, totalPaid)];
+    }
+    final byMode = <String, double>{};
+    for (final p in [...own, ...collectedByMode]) {
+      byMode[p.mode] = (byMode[p.mode] ?? 0) + p.amount;
+    }
+    return [
+      for (final e in byMode.entries)
+        BillPayment(e.key, double.parse(e.value.toStringAsFixed(2))),
+    ];
+  }
+
+  /// How the bill was paid, for history, receipts and exports:
+  /// "Cash" or "Cash ₹300.00 + UPI ₹200.00 + Credit ₹200.00". With old dues
+  /// collected it is everything handed over, not just this bill's share.
+  /// [nameOf] turns a mode into its display name.
+  String tenderLabel(String Function(String mode) nameOf) {
+    final parts = tendered;
+    if (parts.length == 1 && collected.isEmpty) return nameOf(parts.first.mode);
+    return parts
+        .map((p) => '${nameOf(p.mode)} ₹${p.amount.toStringAsFixed(2)}')
+        .join(' + ');
+  }
+
   Bill({
     required this.id,
     required this.businessId,
@@ -485,12 +571,18 @@ class Bill {
     this.paymentStatus = 'paid',
     required this.createdByUserId,
     required this.createdAt,
+    this.finalizedAt,
     required this.items,
     // Absent on every bill that did not come from the online store, and on the
     // lighter bill shapes the credit endpoints return.
     this.onlinePaidAmount = 0.0,
     this.onlinePaymentTxnId,
     this.onlineOrderNumber,
+    this.payments = const [],
+    this.creditAmount,
+    this.collected = const [],
+    this.collectedByMode = const [],
+    this.creditPayments = const [],
   });
 
   factory Bill.fromJson(Map<String, dynamic> j) => Bill(
@@ -521,12 +613,165 @@ class Bill {
         paymentStatus: j['payment_status'] ?? 'paid',
         createdByUserId: j['created_by_user_id'] ?? '',
         createdAt: DateTime.parse(j['created_at']),
+        finalizedAt: j['finalized_at'] == null
+            ? null
+            : DateTime.tryParse('${j['finalized_at']}'),
         onlinePaidAmount:
             double.tryParse('${j['online_paid_amount'] ?? 0}') ?? 0.0,
         onlinePaymentTxnId: j['online_payment_txn_id'] as String?,
         onlineOrderNumber: j['online_order_number'] as String?,
         items: (j['items'] as List? ?? []).map((i) => BillItem.fromJson(i)).toList(),
+        payments: BillPayment.listFrom(j['payments']),
+        creditAmount: j['credit_amount'] != null
+            ? double.tryParse(j['credit_amount'].toString())
+            : null,
+        collected: [
+          for (final c in (j['collected'] as List? ?? const []).whereType<Map>())
+            CollectedDue(
+              billId: '${c['bill_id']}',
+              billNumber: '${c['bill_number']}',
+              amount: double.tryParse('${c['amount']}') ?? 0.0,
+            ),
+        ],
+        collectedByMode: BillPayment.listFrom(j['collected_by_mode']),
+        creditPayments: [
+          for (final p
+              in (j['credit_payments'] as List? ?? const []).whereType<Map>())
+            CreditPaymentEntry(
+              amount: double.tryParse('${p['amount']}') ?? 0.0,
+              mode: '${p['mode']}',
+              createdAt: DateTime.tryParse('${p['created_at']}') ??
+                  DateTime.now(),
+              paidInBillNumber: p['paid_in_bill_number'] as String?,
+            ),
+        ],
       );
+}
+
+/// An old credit bill paid off (in full or in part) along with a new bill.
+class CollectedDue {
+  final String billId;
+  final String billNumber;
+  final double amount;
+
+  const CollectedDue(
+      {required this.billId, required this.billNumber, required this.amount});
+
+  /// [billNumber] without its prefix, for the customer.
+  String get displayNumber => stripBillPrefix(billNumber);
+}
+
+/// One payment made on a credit bill.
+class CreditPaymentEntry {
+  final double amount;
+  final String mode;
+  final DateTime createdAt;
+
+  /// The bill it was collected with; null when paid from the Credit tab.
+  final String? paidInBillNumber;
+
+  const CreditPaymentEntry({
+    required this.amount,
+    required this.mode,
+    required this.createdAt,
+    this.paidInBillNumber,
+  });
+}
+
+/// One Credit-tab payment that paid one or more credit bills — printed and
+/// sent as a single Payment Receipt (backend migration 052).
+class CreditSettlement {
+  final String id;
+  final String receiptToken;
+  final DateTime createdAt;
+  final String mode;
+  final double total;
+  final String? customerName;
+  final String? customerPhone;
+  final List<SettlementLine> lines;
+
+  const CreditSettlement({
+    required this.id,
+    required this.receiptToken,
+    required this.createdAt,
+    required this.mode,
+    required this.total,
+    this.customerName,
+    this.customerPhone,
+    required this.lines,
+  });
+
+  factory CreditSettlement.fromJson(Map<String, dynamic> j) => CreditSettlement(
+        id: j['id'] as String,
+        receiptToken: (j['receipt_token'] ?? '') as String,
+        createdAt: DateTime.parse(j['created_at'] as String),
+        mode: (j['mode'] ?? 'cash') as String,
+        total: _money(j['total']),
+        customerName: j['customer_name'] as String?,
+        customerPhone: j['customer_phone'] as String?,
+        lines: [
+          for (final l in (j['lines'] as List? ?? const []))
+            SettlementLine.fromJson(l as Map<String, dynamic>),
+        ],
+      );
+}
+
+/// One bill on a Payment Receipt: what it came to, what was paid on it in
+/// this payment, and what it still owes after.
+class SettlementLine {
+  final String billNumber;
+  final DateTime billDate;
+  final double billTotal;
+  final double paid;
+  final double due;
+
+  const SettlementLine({
+    required this.billNumber,
+    required this.billDate,
+    required this.billTotal,
+    required this.paid,
+    required this.due,
+  });
+
+  String get displayNumber => stripBillPrefix(billNumber);
+
+  factory SettlementLine.fromJson(Map<String, dynamic> j) => SettlementLine(
+        billNumber: (j['bill_number'] ?? '') as String,
+        billDate: DateTime.parse(j['bill_date'] as String),
+        billTotal: _money(j['bill_total']),
+        paid: _money(j['paid']),
+        due: _money(j['due']),
+      );
+}
+
+/// A money field that may arrive as a number or a numeric string.
+double _money(dynamic v) => v is num ? v.toDouble() : double.tryParse('$v') ?? 0;
+
+/// One part of a split bill: [mode] is cash / upi / card / other / credit.
+class BillPayment {
+  final String mode;
+  final double amount;
+
+  const BillPayment(this.mode, this.amount);
+
+  Map<String, dynamic> toJson() => {'mode': mode, 'amount': amount};
+
+  /// Accepts the API's list or the JSON string the offline queue stores.
+  static List<BillPayment> listFrom(dynamic raw) {
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        raw = jsonDecode(raw);
+      } catch (_) {
+        return const [];
+      }
+    }
+    if (raw is! List) return const [];
+    return [
+      for (final p in raw.whereType<Map>())
+        BillPayment(p['mode'].toString(),
+            double.tryParse('${p['amount']}') ?? 0.0),
+    ];
+  }
 }
 
 /// A debtor row for the Credit tab: one customer (grouped by phone) with their
@@ -704,6 +949,10 @@ class ReportSummary {
   final List<TopItem> topItems;
   final List<RecentBill> recentBills;
 
+  /// Old credit paid off in the period, per mode, plus 'total' — counted on
+  /// the day the money came in, separate from the period's sales.
+  final Map<String, double> creditCollected;
+
   ReportSummary({
     required this.from,
     required this.to,
@@ -719,6 +968,7 @@ class ReportSummary {
     required this.revenueByPaymentMode,
     this.topItems = const [],
     this.recentBills = const [],
+    this.creditCollected = const {},
   });
 
   /// Net sales for the period. total_revenue is already net of discount from
@@ -757,6 +1007,8 @@ class ReportSummary {
       recentBills: (j['recent_bills'] as List? ?? [])
           .map((e) => RecentBill.fromJson(e))
           .toList(),
+      creditCollected: (j['credit_collected'] as Map? ?? const {}).map(
+          (k, v) => MapEntry('$k', double.tryParse('$v') ?? 0.0)),
     );
   }
 }
@@ -781,7 +1033,8 @@ class RecentBill {
   final String billNumber;
   final double total;
   final double discountAmount;
-  final DateTime createdAt;
+  /// When the sale was finalized — what the report files it under.
+  final DateTime billDate;
   final String? customerName;
   final String? tableNumber;
 
@@ -789,7 +1042,7 @@ class RecentBill {
     required this.billNumber,
     required this.total,
     required this.discountAmount,
-    required this.createdAt,
+    required this.billDate,
     this.customerName,
     this.tableNumber,
   });
@@ -800,7 +1053,7 @@ class RecentBill {
         billNumber: j['bill_number'] ?? '',
         total: double.parse((j['total'] ?? 0).toString()),
         discountAmount: double.parse((j['discount_amount'] ?? 0).toString()),
-        createdAt: DateTime.parse(j['created_at']),
+        billDate: DateTime.parse(j['bill_date']),
         customerName: j['customer_name'],
         tableNumber: j['table_number']?.toString(),
       );

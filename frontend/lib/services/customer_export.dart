@@ -45,14 +45,14 @@ class CustomerExport {
         for (final b in bills)
           [
             b.billNumber,
-            _dateTimeFmt.format(b.createdAt.toLocal()),
+            _dateTimeFmt.format(b.billDate.toLocal()),
             b.items.map((i) => '${i.itemName} ×${_qty(i.quantity)}').join(', '),
             b.subtotal,
             b.taxAmount,
             b.discountAmount,
             // Same figure the bill row on screen shows.
             b.grandTotal,
-            b.paymentMode.toUpperCase(),
+            b.tenderLabel((m) => m).toUpperCase(),
             _capitalize(b.paymentStatus),
           ],
       ];

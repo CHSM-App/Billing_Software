@@ -1,9 +1,17 @@
+import 'dart:async' show TimeoutException;
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:ffi'
+    show IntPtr, Uint8, Uint32, nullptr, AllocatorAlloc, Uint8Pointer,
+        AbiSpecificIntegerPointer, Uint32Pointer, StructPointer;
+import 'dart:io' show Platform, Socket, SocketException;
 import 'dart:typed_data' show Uint8List;
 import 'dart:ui' show TextAlign;
 import 'dart:ui' as ui show Image;
+import 'package:ffi/ffi.dart' show using, StringUtf16Pointer;
 import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
+import 'package:win32/win32.dart' as win
+    show OpenPrinter, StartDocPrinter, WritePrinter, EndDocPrinter,
+        ClosePrinter, DOC_INFO_1;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
@@ -13,6 +21,8 @@ import 'package:flutter_thermal_printer/flutter_thermal_printer.dart' as ftp
     show FlutterThermalPrinter;
 import 'package:flutter_thermal_printer/utils/printer.dart' as ftp
     show Printer, ConnectionType;
+import 'package:flutter_thermal_printer/printer_manager.dart' as ftp
+    show PrinterManager;
 
 import 'receipt_labels.dart';
 import 'kitchen_ticket.dart';
@@ -23,7 +33,9 @@ import 'barcode_image.dart';
 // Unified Printer model — wraps both BluetoothInfo and ftp.Printer
 // ---------------------------------------------------------------------------
 
-enum ConnectionType { ble, usb, classicBt }
+/// [network] is raw TCP (port 9100) over Wi-Fi or Ethernet; its address is
+/// "host:port".
+enum ConnectionType { ble, usb, classicBt, network }
 
 /// Monospace column widths for the ASCII receipt, sized to the paper width.
 /// The four item columns must sum to [cols] so rows fill the line and totals
@@ -47,27 +59,36 @@ class _ColProfile {
 
 class Printer {
   final String? name;
-  final String? address; // MAC address
+  /// MAC (Bluetooth), "host:port" (network), printer name (Windows USB) or
+  /// USB vendor id (Android USB).
+  final String? address;
   final ConnectionType? connectionType;
 
-  const Printer({this.name, this.address, this.connectionType});
+  /// Android USB only — the plugin finds the device by vendor + product id.
+  final String? productId;
+
+  const Printer(
+      {this.name, this.address, this.connectionType, this.productId});
 
   factory Printer.fromJson(Map<String, dynamic> j) => Printer(
         name: j['name'] as String?,
         address: j['address'] as String?,
         connectionType: _ctFromString(j['connectionType'] as String?),
+        productId: j['productId'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
         'name': name,
         'address': address,
         'connectionType': connectionType?.name,
+        'productId': productId,
       };
 
   static ConnectionType? _ctFromString(String? s) => switch (s) {
         'classicBt' => ConnectionType.classicBt,
         'ble' => ConnectionType.ble,
         'usb' => ConnectionType.usb,
+        'network' => ConnectionType.network,
         _ => null,
       };
 }
@@ -75,9 +96,12 @@ class Printer {
 // ---------------------------------------------------------------------------
 // PrinterService
 //
-// Android / iOS  → print_bluetooth_thermal (Classic BT / SPP)
-//                  Raw bytes: plain ASCII text + 0x0A line feeds (NO ESC @ reset)
-// Windows        → flutter_thermal_printer (BLE / USB) with TSPL commands
+// Transport follows the printer's connection type, not the platform:
+//   classicBt → print_bluetooth_thermal (SPP; Android)
+//   usb / ble → flutter_thermal_printer (USB on Windows + Android, BLE on Windows)
+//   network   → raw TCP to host:9100 (Wi-Fi / Ethernet; every platform)
+// Raw bytes: NO ESC @ reset (blanks some printers). Every receipt ends with a
+// feed-and-cut (see [_feedAndCut]); printers without a cutter ignore it.
 // ---------------------------------------------------------------------------
 
 const _prefKey = 'active_printer';
@@ -110,12 +134,18 @@ class PrinterService {
   // Discovery
   // -------------------------------------------------------------------------
 
+  /// Network printers are not discovered — the user enters their IP (printed
+  /// on the printer's self-test slip) and it is saved like any other printer.
   Future<List<Printer>> listPrinters() async {
     if (_isWindows) {
-      return _listWindows();
-    } else {
-      return _listClassicBt();
+      return _listFtp([ftp.ConnectionType.BLE, ftp.ConnectionType.USB]);
     }
+    // Android: paired SPP printers + USB-OTG printers. BLE is skipped here —
+    // dual-mode printers show up over SPP already, which is faster.
+    return [
+      ...await _listClassicBt(),
+      if (Platform.isAndroid) ...await _listFtp([ftp.ConnectionType.USB]),
+    ];
   }
 
   Future<List<Printer>> _listClassicBt() async {
@@ -133,32 +163,34 @@ class PrinterService {
     }
   }
 
-  Future<List<Printer>> _listWindows() async {
-    final found = <Printer>[];
+  Future<List<Printer>> _listFtp(List<ftp.ConnectionType> types) async {
+    final ftpInstance = ftp.FlutterThermalPrinter.instance;
+    var devices = <ftp.Printer>[];
+    // Listen BEFORE scanning: the stream is broadcast, and Android's USB scan
+    // emits during getPrinters() — subscribing afterwards missed it entirely.
+    final sub = ftpInstance.devicesStream.listen((d) => devices = List.of(d));
     try {
-      final ftpInstance = ftp.FlutterThermalPrinter.instance;
       await ftpInstance.getPrinters(
         refreshDuration: const Duration(seconds: 3),
-        connectionTypes: [ftp.ConnectionType.BLE, ftp.ConnectionType.USB],
+        connectionTypes: types,
       );
-      await ftpInstance.devicesStream.first
-          .timeout(
-        const Duration(seconds: 4),
-        onTimeout: () => <ftp.Printer>[],
-      )
-          .then((devices) {
-        for (final d in devices) {
-          found.add(Printer(
-            name: d.name,
-            address: d.address,
-            connectionType: d.connectionType == ftp.ConnectionType.USB
-                ? ConnectionType.usb
-                : ConnectionType.ble,
-          ));
-        }
-      });
-    } catch (_) {}
-    return found;
+      await Future.delayed(const Duration(seconds: 4));
+    } catch (_) {
+    } finally {
+      await sub.cancel();
+      await ftpInstance.stopScan();
+    }
+    return [
+      for (final d in devices)
+        Printer(
+          name: d.name,
+          address: d.address,
+          productId: d.productId,
+          connectionType: d.connectionType == ftp.ConnectionType.USB
+              ? ConnectionType.usb
+              : ConnectionType.ble,
+        ),
+    ];
   }
 
   // -------------------------------------------------------------------------
@@ -192,13 +224,15 @@ class PrinterService {
   ///     is currently enabled.
   ///
   /// It deliberately does NOT open a connection (that is slow and would churn
-  /// the BT link); the actual connect still happens at print time. On Windows
-  /// (BLE/USB) reachability is only known at connect time, so "configured" is
-  /// treated as printable.
+  /// the BT link); the actual connect still happens at print time. For
+  /// BLE/USB/network printers reachability is only known at connect time, so
+  /// "configured" is treated as printable.
   Future<bool> canPrint() async {
     final printer = await getActivePrinter();
     if (printer == null) return false;
-    if (_isWindows) return true;
+    if (_isWindows || printer.connectionType != ConnectionType.classicBt) {
+      return true;
+    }
     try {
       final permitted =
           await PrintBluetoothThermal.isPermissionBluetoothGranted;
@@ -272,11 +306,7 @@ class PrinterService {
     // overflow its space-padded columns and re-wrap mid-word.
     final rows = KitchenTicket.build(order, reprint: reprint);
     final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
-    if (_isWindows) {
-      await _printWindows(printer, raster);
-    } else {
-      await _sendClassicBtTuned(printer, raster, 0, 0);
-    }
+    await _printBytes(printer, raster, chunkSize: 0);
   }
 
   // -------------------------------------------------------------------------
@@ -570,7 +600,7 @@ class PrinterService {
       lines.add('${labels?.table ?? 'Table:'} ${bill.tableNumber}');
     }
     lines.add(
-        '${labels?.date ?? 'Date:'} ${_formatDate(bill.createdAt.toLocal())}');
+        '${labels?.date ?? 'Date:'} ${_formatDate(bill.billDate.toLocal())}');
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
       lines.add('${labels?.customer ?? 'Cust:'} ${bill.customerName}');
     }
@@ -668,8 +698,9 @@ class PrinterService {
     lines.add(_twoCol(p, labels?.total ?? 'Grand Total:',
         'Rs.${grandTotal.toStringAsFixed(2)}'));
 
-    lines.add(
-        _twoCol(p, labels?.payment ?? 'Payment:', bill.paymentMode.toUpperCase()));
+    for (final (label, value, _) in _paymentLines(bill, grandTotal, labels)) {
+      lines.add(_twoCol(p, label, value));
+    }
     lines.add('-' * p.cols);
     lines.add(_centre(labels?.thankYou ?? 'Thank you, visit again!', p.cols));
     // Brand line under the thank-you note. The plain-text path has no per-line
@@ -716,33 +747,16 @@ class PrinterService {
     final sizeGrand = 32 * fs;
     final sizeBrand = 18 * fs;
 
-    // Header — order: name, address, phone, GSTIN, FSSAI. Only the business
-    // name is always shown; every other line prints only when available.
-    rows.add(ReceiptRow.center(
-        businessName ?? labels?.defaultBusiness ?? 'BUSINESS',
-        size: sizeTitle, bold: true));
-    if (businessAddress != null && businessAddress.isNotEmpty) {
-      // Split a multi-line/CRLF address into separate centred rows so each
-      // physical line is centred (a single row with an embedded newline would
-      // left-align the wrapped part). Raw (unpadded) lines — ReceiptRow.center
-      // handles the centring for the raster path.
-      for (final l in _wrapLines(businessAddress, p.cols)) {
-        rows.add(ReceiptRow.center(l, size: sizeBody));
-      }
-    }
-    if (businessPhone != null && businessPhone.isNotEmpty) {
-      rows.add(ReceiptRow.center(
-          '${labels?.phonePrefix ?? 'Ph:'} $businessPhone', size: sizeBody));
-    }
-    if (gst) {
-      rows.add(ReceiptRow.center(
-          '${labels?.gstin ?? 'GSTIN:'} $businessGstin', size: sizeBody));
-    }
-    if (fssai) {
-      rows.add(ReceiptRow.center(
-          '${labels?.fssai ?? 'FSSAI:'} $businessFssai', size: sizeBody));
-    }
-    rows.add(ReceiptRow.rule());
+    rows.addAll(_headerRows(
+        businessName: businessName,
+        businessAddress: businessAddress,
+        businessPhone: businessPhone,
+        businessGstin: gst ? businessGstin : null,
+        businessFssai: fssai ? businessFssai : null,
+        cols: p.cols,
+        sizeTitle: sizeTitle,
+        sizeBody: sizeBody,
+        labels: labels));
 
     // Bill info (label left, value right)
     rows.add(ReceiptRow.cols([
@@ -757,7 +771,7 @@ class PrinterService {
     }
     rows.add(ReceiptRow.cols([
       ReceiptCell(
-          '${labels?.date ?? 'Date:'} ${_formatDate(bill.createdAt.toLocal())}',
+          '${labels?.date ?? 'Date:'} ${_formatDate(bill.billDate.toLocal())}',
           widthFraction: 1.0),
     ], size: sizeBody));
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
@@ -883,8 +897,9 @@ class PrinterService {
     rows.add(total(labels?.total ?? 'Grand Total:',
         'Rs.${grandTotal.toStringAsFixed(2)}',
         bold: true, size: sizeGrand));
-    rows.add(total(labels?.payment ?? 'Payment:',
-        bill.paymentMode.toUpperCase()));
+    for (final (label, value, bold) in _paymentLines(bill, grandTotal, labels)) {
+      rows.add(total(label, value, bold: bold));
+    }
     rows.add(ReceiptRow.rule());
     rows.add(ReceiptRow.center(
         labels?.thankYou ?? 'Thank you, visit again!', size: sizeBody));
@@ -892,6 +907,150 @@ class PrinterService {
     rows.add(ReceiptRow.center(labels?.poweredBy ?? 'Powered by Vengurlatech',
         size: sizeBrand, italic: true));
 
+    return rows;
+  }
+
+  /// Shop header shared by every receipt — order: name, address, phone, GSTIN,
+  /// FSSAI, then a rule. Only the name is always shown; every other line
+  /// prints only when available.
+  static List<ReceiptRow> _headerRows({
+    String? businessName,
+    String? businessAddress,
+    String? businessPhone,
+    String? businessGstin,
+    String? businessFssai,
+    required int cols,
+    required double sizeTitle,
+    required double sizeBody,
+    ReceiptLabels? labels,
+  }) {
+    final rows = <ReceiptRow>[
+      ReceiptRow.center(businessName ?? labels?.defaultBusiness ?? 'BUSINESS',
+          size: sizeTitle, bold: true),
+    ];
+    if (businessAddress != null && businessAddress.isNotEmpty) {
+      // Split a multi-line/CRLF address into separate centred rows so each
+      // physical line is centred (a single row with an embedded newline would
+      // left-align the wrapped part). Raw (unpadded) lines — ReceiptRow.center
+      // handles the centring for the raster path.
+      for (final l in _wrapLines(businessAddress, cols)) {
+        rows.add(ReceiptRow.center(l, size: sizeBody));
+      }
+    }
+    if (businessPhone != null && businessPhone.isNotEmpty) {
+      rows.add(ReceiptRow.center(
+          '${labels?.phonePrefix ?? 'Ph:'} $businessPhone', size: sizeBody));
+    }
+    if (businessGstin != null && businessGstin.isNotEmpty) {
+      rows.add(ReceiptRow.center(
+          '${labels?.gstin ?? 'GSTIN:'} $businessGstin', size: sizeBody));
+    }
+    if (businessFssai != null && businessFssai.isNotEmpty) {
+      rows.add(ReceiptRow.center(
+          '${labels?.fssai ?? 'FSSAI:'} $businessFssai', size: sizeBody));
+    }
+    rows.add(ReceiptRow.rule());
+    return rows;
+  }
+
+  /// The Payment Receipt for one Credit-tab payment: shop header, then every
+  /// bill it paid (number, date, bill amount, paid now; a "Bal due" row under
+  /// a bill still owing), then Total paid and a large TOTAL RECEIVED.
+  List<ReceiptRow> _buildSettlementRows(CreditSettlement s, _ColProfile basep,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      String? businessGstin,
+      String? businessFssai,
+      ReceiptLabels? labels}) {
+    // Same sizes, and the same 58mm scale-down, as a bill receipt.
+    final fs = basep.cols <= _cols58.cols ? 0.85 : 1.0;
+    final sizeBody = 26 * fs;
+    final sizeTotal = 22 * fs;
+    final sizeGrand = 32 * fs;
+    String rs(double v) => v.toStringAsFixed(2);
+    String dm(DateTime d) {
+      final l = d.toLocal();
+      return '${l.day.toString().padLeft(2, '0')}-${l.month.toString().padLeft(2, '0')}';
+    }
+
+    final rows = _headerRows(
+        businessName: businessName,
+        businessAddress: businessAddress,
+        businessPhone: businessPhone,
+        businessGstin: businessGstin,
+        businessFssai: businessFssai,
+        cols: basep.cols,
+        sizeTitle: 34 * fs,
+        sizeBody: sizeBody,
+        labels: labels);
+
+    ReceiptRow line(String t) =>
+        ReceiptRow.cols([ReceiptCell(t, widthFraction: 1.0)], size: sizeBody);
+    rows.add(ReceiptRow.center(labels?.paymentReceipt ?? 'PAYMENT RECEIPT',
+        size: sizeBody, bold: true));
+    rows.add(line(
+        '${labels?.date ?? 'Date:'} ${_formatDate(s.createdAt.toLocal())}'));
+    if (s.customerName != null && s.customerName!.isNotEmpty) {
+      rows.add(line('${labels?.customer ?? 'Cust:'} ${s.customerName}'));
+    }
+    if (s.customerPhone != null && s.customerPhone!.isNotEmpty) {
+      rows.add(line('${labels?.customerPhone ?? 'Ph:'} ${s.customerPhone}'));
+    }
+    rows.add(ReceiptRow.rule());
+
+    // The invoice table — ruled like the item table, so RasterLab fits the
+    // numeric columns to their widest value and the invoice number takes the
+    // rest. A part-paid bill gets a "Bal due" row of its own right under it.
+    rows.add(ReceiptRow.center(labels?.settledInvoices ?? 'Settled Invoices',
+        size: sizeBody, bold: true));
+    ReceiptRow tableRow(String inv, String date, String bill, String paid,
+            {bool heading = false}) =>
+        ReceiptRow.cols([
+          ReceiptCell(inv,
+              align: heading ? TextAlign.center : TextAlign.left,
+              widthFraction: 0.25),
+          ReceiptCell(date, align: TextAlign.center, widthFraction: 0.19),
+          ReceiptCell(bill,
+              align: heading ? TextAlign.center : TextAlign.right,
+              widthFraction: 0.28),
+          ReceiptCell(paid,
+              align: heading ? TextAlign.center : TextAlign.right,
+              widthFraction: 0.28),
+        ], size: sizeBody, bold: heading, verticalRules: true);
+    rows.add(tableRow(
+        labels?.colInvoice ?? 'Invoice',
+        labels?.colDate ?? 'Date',
+        labels?.colBill ?? 'Bill',
+        labels?.colPaid ?? 'Paid',
+        heading: true));
+    rows.add(ReceiptRow.rule());
+    for (var i = 0; i < s.lines.length; i++) {
+      final l = s.lines[i];
+      rows.add(tableRow(
+          l.displayNumber, dm(l.billDate), rs(l.billTotal), rs(l.paid)));
+      if (l.due > 0.004) {
+        rows.add(tableRow('', '', labels?.balDue ?? 'Bal due', rs(l.due)));
+      }
+      if (i < s.lines.length - 1) rows.add(ReceiptRow.rule(light: true));
+    }
+    rows.add(ReceiptRow.rule());
+
+    ReceiptRow total(String l, String r, {bool bold = false, double? size}) =>
+        ReceiptRow.cols([
+          ReceiptCell(l, widthFraction: 0.55),
+          ReceiptCell(r, align: TextAlign.right, widthFraction: 0.45),
+        ], size: size ?? sizeTotal, bold: bold);
+    rows.add(total(labels?.settledTotalPaid ?? 'Total paid', 'Rs.${rs(s.total)}'));
+    rows.add(total(labels?.payment ?? 'Payment:', s.mode.toUpperCase()));
+    rows.add(ReceiptRow.rule(bold: true));
+    rows.add(total(labels?.totalReceived ?? 'TOTAL RECEIVED', 'Rs.${rs(s.total)}',
+        bold: true, size: sizeGrand));
+    rows.add(ReceiptRow.rule(bold: true));
+    rows.add(ReceiptRow.center(
+        labels?.thankYou ?? 'Thank you, visit again!', size: sizeBody));
+    rows.add(ReceiptRow.center(labels?.poweredBy ?? 'Powered by Vengurlatech',
+        size: 18 * fs, italic: true));
     return rows;
   }
 
@@ -980,6 +1139,48 @@ class PrinterService {
     return RasterLab.receiptPreviewPng(rows, width: paperDots);
   }
 
+  /// Print one Credit-tab payment as a single Payment Receipt (raster, like a
+  /// bill). [paperDots] selects the width (384 → 58mm, else 80mm).
+  Future<void> printSettlement(CreditSettlement settlement,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      String? businessGstin,
+      String? businessFssai,
+      ReceiptLabels? labels,
+      int paperDots = 576}) async {
+    final printer = await getActivePrinter();
+    if (printer == null) throw PrinterException('No printer configured');
+    final rows = _buildSettlementRows(settlement, _profileForDots(paperDots),
+        businessName: businessName,
+        businessPhone: businessPhone,
+        businessAddress: businessAddress,
+        businessGstin: businessGstin,
+        businessFssai: businessFssai,
+        labels: labels);
+    final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
+    await _printBytes(printer, raster, chunkSize: 0);
+  }
+
+  /// PNG of [printSettlement]'s receipt, without touching the printer.
+  Future<Uint8List> buildSettlementPreviewPng(CreditSettlement settlement,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      String? businessGstin,
+      String? businessFssai,
+      ReceiptLabels? labels,
+      int paperDots = 576}) {
+    final rows = _buildSettlementRows(settlement, _profileForDots(paperDots),
+        businessName: businessName,
+        businessPhone: businessPhone,
+        businessAddress: businessAddress,
+        businessGstin: businessGstin,
+        businessFssai: businessFssai,
+        labels: labels);
+    return RasterLab.receiptPreviewPng(rows, width: paperDots);
+  }
+
   Future<void> printBill(Bill bill,
       {String? businessName,
       String? businessPhone,
@@ -1025,11 +1226,7 @@ class PrinterService {
         gstEnabled: gstEnabled,
         labels: labels);
     final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
-    if (_isWindows) {
-      await _printWindows(printer, raster);
-    } else {
-      await _sendClassicBtTuned(printer, raster, 0, 0);
-    }
+    await _printBytes(printer, raster, chunkSize: 0);
 
     // --- Previous behaviour: raster only for non-English, ASCII text for -----
     // --- English. Restore this block to go back to text printing.        -----
@@ -1102,7 +1299,7 @@ class PrinterService {
 
   /// Raster-lab tuned send: explicit [chunkSize] and inter-chunk [delayMs] so
   /// Stage 5 can measure throughput and find the smallest clean chunk/delay.
-  /// Android/Classic-BT only; Windows ignores the tuning and uses its own path.
+  /// Classic-BT only; other transports ignore the tuning.
   Future<void> printRawBytesTuned(
     List<int> bytes, {
     required int chunkSize,
@@ -1110,11 +1307,7 @@ class PrinterService {
   }) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
-    if (_isWindows) {
-      await _printWindows(printer, bytes);
-      return;
-    }
-    await _sendClassicBtTuned(printer, bytes, chunkSize, delayMs);
+    await _printBytes(printer, bytes, chunkSize: chunkSize, delayMs: delayMs);
   }
 
   Future<void> testPrint({int paperDots = 576}) async {
@@ -1170,11 +1363,8 @@ class PrinterService {
     image.dispose();
 
     for (var i = 0; i < copies; i++) {
-      if (_isWindows) {
-        await _printWindows(printer, raster);
-      } else {
-        await _sendClassicBtTuned(printer, raster, 0, 0);
-      }
+      // No cut: label stock would be sliced through its backing.
+      await _printBytes(printer, raster, chunkSize: 0, cut: false);
       if (i < copies - 1) {
         await Future.delayed(const Duration(milliseconds: 800));
       }
@@ -1187,24 +1377,82 @@ class PrinterService {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
     final raster = await RasterLab.imageToReceiptRaster(image);
-    if (_isWindows) {
-      await _printWindows(printer, raster);
-    } else {
-      await _sendClassicBtTuned(printer, raster, 0, 0);
-    }
+    await _printBytes(printer, raster, chunkSize: 0);
   }
 
   // -------------------------------------------------------------------------
   // Low-level send
   // -------------------------------------------------------------------------
 
+  /// ESC/POS GS V 65 n: feed until the last printed line is past the blade
+  /// (+ n dots of margin), then full cut. Feeding to the cutter is the
+  /// printer's job, so this works whatever the head-to-blade distance is.
+  /// Printers without a cutter ignore it.
+  static const List<int> _feedAndCut = [0x1D, 0x56, 0x41, 0x10];
+
+  /// The one place every job goes through: picks the transport from the
+  /// printer's connection type and appends the cut.
+  ///
+  /// Classic BT: [chunkSize] set → [_sendClassicBtTuned] (0 = single write),
+  /// otherwise [_printClassicBt] honouring [slow].
   Future<void> _printBytes(Printer printer, List<int> bytes,
-      {bool slow = false}) async {
-    if (_isWindows) {
-      await _printWindows(printer, bytes);
-    } else {
-      await _printClassicBt(printer, bytes, slow: slow);
+      {bool slow = false,
+      int? chunkSize,
+      int delayMs = 0,
+      bool cut = true}) async {
+    final job = cut ? [...bytes, ..._feedAndCut] : bytes;
+    switch (printer.connectionType) {
+      case ConnectionType.network:
+        await _printNetwork(printer, job);
+      case ConnectionType.usb || ConnectionType.ble:
+        await _printFtp(printer, job);
+      case _ when chunkSize != null:
+        await _sendClassicBtTuned(printer, job, chunkSize, delayMs);
+      case _:
+        await _printClassicBt(printer, job, slow: slow);
     }
+  }
+
+  /// Raw TCP to the printer's port (9100 by default) — Wi-Fi and Ethernet are
+  /// the same thing from here.
+  ///
+  /// Closing right after flush() is NOT enough: flush only means the OS took
+  /// the bytes, and these Wi-Fi modules drop whatever they haven't passed to
+  /// the print engine when the connection closes. A text test print is done by
+  /// then; a raster bill is not. So end with GS r 1 (transmit paper status) —
+  /// it is NOT a real-time command, the printer answers only after everything
+  /// before it has been processed — and close once that reply arrives.
+  Future<void> _printNetwork(Printer printer, List<int> bytes) async {
+    final (host, port) = parseHostPort(printer.address ?? '');
+    if (host.isEmpty) throw PrinterException('Printer IP address not set');
+    try {
+      final socket = await Socket.connect(host, port,
+          timeout: const Duration(seconds: 5));
+      final done = socket.first;
+      socket.add(bytes);
+      socket.add(const [0x1D, 0x72, 0x01]); // GS r 1
+      await socket.flush();
+      try {
+        await done.timeout(const Duration(seconds: 20));
+      } on TimeoutException {
+        // Printer doesn't answer GS r — data is sent; close and hope.
+      } on StateError {
+        // Printer closed the connection itself — it has the data.
+      }
+      socket.destroy();
+    } on SocketException catch (e) {
+      throw PrinterException(
+          'Could not reach printer at $host:$port. Check it is on the same '
+          'Wi-Fi/LAN and the IP is correct. (${e.message})');
+    }
+  }
+
+  /// "192.168.1.50:9100" → (host, port). Port defaults to 9100.
+  static (String, int) parseHostPort(String address) {
+    final a = address.trim();
+    final i = a.lastIndexOf(':');
+    if (i < 0) return (a, 9100);
+    return (a.substring(0, i), int.tryParse(a.substring(i + 1)) ?? 9100);
   }
 
   Future<void> _printClassicBt(Printer printer, List<int> bytes,
@@ -1308,19 +1556,48 @@ class PrinterService {
     }
   }
 
-  Future<void> _printWindows(Printer printer, List<int> bytes) async {
+  /// USB (Windows + Android) and BLE (Windows) via flutter_thermal_printer.
+  Future<void> _printFtp(Printer printer, List<int> bytes) async {
+    final usb = printer.connectionType == ConnectionType.usb;
+    if (usb && _isWindows) {
+      return _writeRawWin32(printer.name ?? printer.address ?? '', bytes);
+    }
     try {
       final ftpPrinter = ftp.Printer(
         name: printer.name,
         address: printer.address,
-        connectionType: printer.connectionType == ConnectionType.usb
-            ? ftp.ConnectionType.USB
-            : ftp.ConnectionType.BLE,
+        // Android USB looks the device up by vendor (stored as address) +
+        // product id; Windows USB ignores both and prints by name.
+        vendorId: printer.address,
+        productId: printer.productId,
+        connectionType:
+            usb ? ftp.ConnectionType.USB : ftp.ConnectionType.BLE,
       );
       final ftpInstance = ftp.FlutterThermalPrinter.instance;
-      final connected = await ftpInstance.connect(ftpPrinter);
-      if (!connected) throw PrinterException('Could not connect to printer');
-      // This printer connects over BLE on Windows. BLE is packet-based and the
+      if (usb && !_isWindows) {
+        // The Android plugin's connect() only fires the USB permission prompt
+        // and always returns false; isConnected() means "permission granted".
+        if (!await ftp.PrinterManager.instance.isConnected(ftpPrinter)) {
+          await ftpInstance.connect(ftpPrinter);
+          throw PrinterException(
+              'Allow USB access to the printer when asked, then print again. '
+              'If nothing was asked, re-plug the USB cable.');
+        }
+        // The plugin sends each call as ONE bulkTransfer with a 5 s timeout and
+        // swallows failures; Android < 9 also truncates transfers over 16 KB.
+        // A raster bill is far bigger than that (the tiny text test print
+        // isn't), so feed it in 16 KB pieces.
+        const usbChunk = 16384;
+        for (var i = 0; i < bytes.length; i += usbChunk) {
+          await ftpInstance.printData(ftpPrinter,
+              bytes.sublist(i, (i + usbChunk).clamp(0, bytes.length)));
+        }
+        return;
+      }
+      if (!await ftpInstance.connect(ftpPrinter)) {
+        throw PrinterException('Could not connect to printer');
+      }
+      // BLE (Windows). BLE is packet-based and the
       // write size is capped by the ATT MTU — chunks larger than ~512 bytes make
       // writeCharacteristic.write() fail silently (nothing prints). So keep 512
       // (safe, proven) and just drop the artificial per-chunk delay for smooth
@@ -1336,6 +1613,45 @@ class PrinterService {
       if (e is PrinterException) rethrow;
       throw PrinterException(e.toString());
     }
+  }
+
+  /// Windows USB: hand the bytes to the print spooler as a RAW job.
+  ///
+  /// flutter_thermal_printer opens the job with NO datatype, so the driver's
+  /// default applies — and when that is TEXT the spooler re-renders the bytes:
+  /// the plain-ASCII test print survives, binary raster bills don't.
+  static void _writeRawWin32(String printerName, List<int> bytes) {
+    using((arena) {
+      final handle = arena<IntPtr>();
+      if (win.OpenPrinter(
+              printerName.toNativeUtf16(allocator: arena), handle, nullptr) ==
+          0) {
+        throw PrinterException('Windows printer "$printerName" not found. '
+            'Check it is listed in Settings → Printers & scanners.');
+      }
+      try {
+        final doc = arena<win.DOC_INFO_1>();
+        doc.ref
+          ..pDocName = 'Receipt'.toNativeUtf16(allocator: arena)
+          ..pOutputFile = nullptr
+          ..pDatatype = 'RAW'.toNativeUtf16(allocator: arena);
+        if (win.StartDocPrinter(handle.value, 1, doc) == 0) {
+          throw PrinterException('Windows refused the print job');
+        }
+        final buf = arena<Uint8>(bytes.length);
+        buf.asTypedList(bytes.length).setAll(0, bytes);
+        final written = arena<Uint32>();
+        final ok =
+            win.WritePrinter(handle.value, buf, bytes.length, written) != 0;
+        win.EndDocPrinter(handle.value);
+        if (!ok || written.value != bytes.length) {
+          throw PrinterException(
+              'Printer took ${written.value} of ${bytes.length} bytes');
+        }
+      } finally {
+        win.ClosePrinter(handle.value);
+      }
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -1460,6 +1776,49 @@ class PrinterService {
     return prof.gstCols > 0
         ? '$n|$q|$pr|$g|$t'
         : '$n|$q|$pr|$t';
+  }
+
+  /// The rows printed after Grand Total, shared by both receipt paths, as
+  /// (label, value, bold):
+  ///   - old dues this bill collected — "Prev. Due #0007  +Rs.300.00" each —
+  ///     then the total handed over;
+  ///   - how it was paid: one mode, or SPLIT and each mode's amount (with old
+  ///     dues collected, everything handed over, not just this bill's share);
+  ///   - on a credit bill, each payment made on it since and what it still owes.
+  static List<(String, String, bool)> _paymentLines(
+      Bill bill, double grandTotal, ReceiptLabels? labels) {
+    String rs(double v) => 'Rs.${v.toStringAsFixed(2)}';
+    final out = <(String, String, bool)>[];
+    for (final c in bill.collected) {
+      out.add(('${labels?.prevDue ?? 'Prev. Due'} #${c.displayNumber}',
+          '+${rs(c.amount)}', false));
+    }
+    if (bill.collected.isNotEmpty) {
+      // "Total", not "Total Paid": part of it may have gone on credit again.
+      out.add((labels?.totalPaid ?? 'Total:',
+          rs(grandTotal + bill.collectedTotal), true));
+    }
+    final tendered = bill.tendered;
+    final many = tendered.length > 1;
+    out.add((labels?.payment ?? 'Payment:',
+        many ? 'SPLIT' : tendered.first.mode.toUpperCase(), false));
+    if (many) {
+      for (final t in tendered) {
+        out.add(('  ${t.mode.toUpperCase()}', rs(t.amount), false));
+      }
+    }
+    for (final cp in bill.creditPayments) {
+      final where = cp.paidInBillNumber != null
+          ? ' #${stripBillPrefix(cp.paidInBillNumber!)}'
+          : '';
+      out.add(('${labels?.paid ?? 'Paid'}$where ${cp.mode.toUpperCase()}',
+          '-${rs(cp.amount)}', false));
+    }
+    if (bill.isUnpaidCredit &&
+        (bill.creditAmount != null || bill.creditPayments.isNotEmpty)) {
+      out.add((labels?.balanceDue ?? 'Balance Due:', rs(bill.amountDue), true));
+    }
+    return out;
   }
 
   /// 2-column row: label left, value right, spanning the profile width.

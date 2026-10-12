@@ -167,7 +167,7 @@ class InvoicePdf {
       // than the net payable the cashier was shown.
       final grandTotal =
           bill.grandTotal - (gstEnabled ? 0.0 : bill.taxAmount);
-      final dateStr = DateFormat('dd-MM-yyyy').format(bill.createdAt.toLocal());
+      final dateStr = DateFormat('dd-MM-yyyy').format(bill.billDate.toLocal());
 
       // Use "Rs." rather than the ₹ glyph: the base PDF font (Helvetica) has no
       // Unicode ₹, and it matches the thermal receipt's currency style.
@@ -235,10 +235,161 @@ class InvoicePdf {
     return doc.save();
   }
 
+  /// One A4/A5 page for a Credit-tab payment: the shop header, who paid, a
+  /// table of every bill it settled (number, date, bill amount, paid now,
+  /// balance still owed), Total paid and a large TOTAL RECEIVED.
+  static Future<Uint8List> buildSettlement({
+    required CreditSettlement settlement,
+    required PdfPageFormat pageFormat,
+    required String businessName,
+    String? address,
+    String? phone,
+    String? gstin,
+    String? fssai,
+    String? footerNote,
+  }) async {
+    final devanagari = await _loadDevanagari();
+    final shaped = ShapedText();
+    await shaped.add(businessName, fontSize: 15, bold: true, maxWidth: 260);
+    await shaped.add(address?.replaceAll('\r\n', '\n'), maxWidth: 260);
+    await shaped.add(footerNote, maxWidth: 300);
+    await shaped.add('For: $businessName', bold: true, maxWidth: 200);
+    await shaped.add(settlement.customerName,
+        fontSize: 11, bold: true, maxWidth: 260);
+
+    final s = settlement;
+    String money(num v) => 'Rs.${v.toStringAsFixed(2)}';
+    final dateFmt = DateFormat('dd-MM-yyyy');
+    const head = pw.TextStyle(fontSize: 9);
+    final headBold = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
+    pw.Widget cell(String t, {bool right = false, pw.TextStyle? style}) =>
+        pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+          child: pw.Text(t,
+              textAlign: right ? pw.TextAlign.right : pw.TextAlign.left,
+              style: style ?? const pw.TextStyle(fontSize: 10)),
+        );
+
+    final doc = pw.Document();
+    doc.addPage(pw.MultiPage(
+      pageFormat: pageFormat,
+      theme: pw.ThemeData.withFont(
+        base: pw.Font.helvetica(),
+        bold: pw.Font.helveticaBold(),
+        italic: pw.Font.helveticaOblique(),
+        boldItalic: pw.Font.helveticaBoldOblique(),
+        fontFallback: [devanagari],
+      ),
+      margin: pw.EdgeInsets.fromLTRB(24, 24, 24, 4 * PdfPageFormat.mm),
+      footer: (context) => pw.Align(
+        alignment: pw.Alignment.bottomRight,
+        child: pw.Text('Powered by Vengurlatech',
+            style: pw.TextStyle(
+                fontSize: 7,
+                color: PdfColors.grey600,
+                fontStyle: pw.FontStyle.italic)),
+      ),
+      build: (context) => [
+        pw.Center(
+          child: pw.Text('Payment Receipt',
+              style:
+                  pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+        ),
+        pw.SizedBox(height: 8),
+        _headerBox(businessName, address, phone, gstin, fssai,
+            s.mode.toUpperCase(), dateFmt.format(s.createdAt.toLocal()), shaped,
+            numberLabel: 'Payment'),
+        if ((s.customerName ?? '').isNotEmpty || (s.customerPhone ?? '').isNotEmpty)
+          pw.Container(
+            width: double.infinity,
+            decoration: const pw.BoxDecoration(
+                border: pw.Border(
+                    left: pw.BorderSide(width: 0.8),
+                    right: pw.BorderSide(width: 0.8),
+                    bottom: pw.BorderSide(width: 0.8))),
+            padding: const pw.EdgeInsets.all(8),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('Received From', style: head),
+                pw.SizedBox(height: 2),
+                if ((s.customerName ?? '').isNotEmpty)
+                  shaped.widget(s.customerName!,
+                      fontSize: 11,
+                      bold: true,
+                      style: pw.TextStyle(
+                          fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                if ((s.customerPhone ?? '').isNotEmpty)
+                  pw.Text('Contact No.: ${s.customerPhone}', style: head),
+              ],
+            ),
+          ),
+        pw.SizedBox(height: 14),
+        pw.Text('Settled Invoices',
+            style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 6),
+        pw.Table(
+          border: pw.TableBorder.symmetric(
+              inside: const pw.BorderSide(width: 0.4, color: PdfColors.grey400),
+              outside: const pw.BorderSide(width: 0.8)),
+          columnWidths: const {
+            0: pw.FlexColumnWidth(2.2),
+            1: pw.FlexColumnWidth(2),
+            2: pw.FlexColumnWidth(2),
+            3: pw.FlexColumnWidth(2),
+            4: pw.FlexColumnWidth(2),
+          },
+          children: [
+            pw.TableRow(
+              decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+              children: [
+                cell('Invoice', style: headBold),
+                cell('Date', style: headBold),
+                cell('Bill Amount', right: true, style: headBold),
+                cell('Paid', right: true, style: headBold),
+                cell('Balance', right: true, style: headBold),
+              ],
+            ),
+            for (final l in s.lines)
+              pw.TableRow(children: [
+                cell(l.displayNumber),
+                cell(dateFmt.format(l.billDate.toLocal())),
+                cell(money(l.billTotal), right: true),
+                cell(money(l.paid), right: true),
+                cell(l.due > 0.004 ? money(l.due) : '-', right: true),
+              ]),
+          ],
+        ),
+        pw.SizedBox(height: 4),
+        _totRow('Total paid', money(s.total), bold: true),
+        pw.Divider(thickness: 0.6, color: PdfColors.grey400),
+        pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('TOTAL RECEIVED',
+                  style: pw.TextStyle(
+                      fontSize: 16, fontWeight: pw.FontWeight.bold)),
+              pw.Text(money(s.total),
+                  style: pw.TextStyle(
+                      fontSize: 18,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.green700)),
+            ],
+          ),
+        ),
+        pw.SizedBox(height: 24),
+        _footer(businessName, footerNote, shaped),
+      ],
+    ));
+    return doc.save();
+  }
+
   // --- Header box: business (left) | Invoice No/Date (right) --------------
   static pw.Widget _headerBox(String name, String? address, String? phone,
       String? gstin, String? fssai, String billNumber, String dateStr,
-      ShapedText shaped) {
+      ShapedText shaped, {String numberLabel = 'Invoice No.'}) {
     final left = <pw.Widget>[
       shaped.widget(name,
           fontSize: 15,
@@ -289,7 +440,7 @@ class InvoicePdf {
               width: double.infinity,
               decoration: const pw.BoxDecoration(
                   border: pw.Border(bottom: pw.BorderSide(width: 0.8))),
-              child: _kvCell('Invoice No.', billNumber),
+              child: _kvCell(numberLabel, billNumber),
             ),
             pw.Container(width: double.infinity, child: _kvCell('Date', dateStr)),
           ]),
@@ -476,9 +627,35 @@ class InvoicePdf {
               pw.SizedBox(height: 10),
               pw.Text('Payment mode',
                   style: const pw.TextStyle(fontSize: 9)),
-              pw.Text(_titleCase(bill.paymentMode),
+              // A split bill: "Cash Rs.300.00 + Credit Rs.200.00" (Rs., not
+              // ₹ — the base PDF font has no ₹ glyph). With old dues collected
+              // it is everything handed over, not just this bill's share.
+              pw.Text(
+                  bill.tendered.length > 1 || bill.collected.isNotEmpty
+                      ? bill.tendered
+                          .map((p) =>
+                              '${_titleCase(p.mode)} Rs.${p.amount.toStringAsFixed(2)}')
+                          .join(' + ')
+                      : _titleCase(bill.paymentMode),
                   style: pw.TextStyle(
                       fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              // A credit bill's payments since: "Paid in Bill 0012 · Cash".
+              for (final p in bill.creditPayments)
+                pw.Text(
+                    '${p.paidInBillNumber != null ? 'Paid in Bill ${stripBillPrefix(p.paidInBillNumber!)}' : 'Paid'}'
+                    ' · ${_titleCase(p.mode)} · ${p.createdAt.toLocal().toString().substring(0, 10)}'
+                    '  Rs.${p.amount.toStringAsFixed(2)}',
+                    style: const pw.TextStyle(fontSize: 9)),
+              if (bill.isUnpaidCredit &&
+                  (bill.creditAmount != null ||
+                      bill.creditPayments.isNotEmpty)) ...[
+                pw.SizedBox(height: 6),
+                pw.Text('Balance due',
+                    style: const pw.TextStyle(fontSize: 9)),
+                pw.Text('Rs.${bill.amountDue.toStringAsFixed(2)}',
+                    style: pw.TextStyle(
+                        fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              ],
             ],
           ),
         ),
@@ -515,6 +692,19 @@ class InvoicePdf {
                       '${bill.roundOff < 0 ? '- ' : '+ '}${money(bill.roundOff.abs())}'),
                 pw.Container(height: 0.6, color: PdfColors.black),
                 _totRow('Grand Total', money(grandTotal), bold: true),
+                // Old credit bills paid off with this one, then the total
+                // handed over.
+                if (bill.collected.isNotEmpty) ...[
+                  for (final c in bill.collected)
+                    _totRow('Prev. due · Bill ${c.displayNumber}',
+                        '+ ${money(c.amount)}'),
+                  pw.Container(height: 0.6, color: PdfColors.black),
+                  // "Total", not "Total Paid": part of it may have gone on
+                  // credit again.
+                  _totRow('Total',
+                      money(grandTotal + bill.collectedTotal),
+                      bold: true),
+                ],
               ],
             ),
           ),

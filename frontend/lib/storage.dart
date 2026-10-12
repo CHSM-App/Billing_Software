@@ -174,6 +174,7 @@ class AuthStorage {
   // A4 invoices still wants a thermal ticket for the cooks.
   static const _keyKitchenAutoPrint = 'kitchen_auto_print';
   static const _keyKitchenPaperSize = 'kitchen_paper_size';
+  static const _keyRecentNetworkPrinters = 'recent_network_printers';
 
   // -------------------------------------------------------------------------
   // Write
@@ -326,6 +327,23 @@ class AuthStorage {
     return prefs.getString(_keyMajorCategoryOrder(businessId));
   }
 
+  // How often this device has settled bills in each payment mode, as a JSON
+  // map mode → count. The billing screen's "+" (add a payment) picks the
+  // most-used mode not already on the bill. Per device and per business, like
+  // the major-category order: it describes this counter's habits.
+  static String _keyPaymentModeUse(String businessId) =>
+      'payment_mode_use_$businessId';
+
+  Future<void> savePaymentModeUse(String businessId, String json) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyPaymentModeUse(businessId), json);
+  }
+
+  Future<String?> getPaymentModeUse(String businessId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyPaymentModeUse(businessId));
+  }
+
   Future<void> saveChargeSuggestions(String businessId, String json) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyChargeSuggestions(businessId), json);
@@ -405,6 +423,21 @@ class AuthStorage {
     return (s != null && PaperSizes.isThermal(s)) ? s : PaperSizes.mm80;
   }
 
+  /// Wi-Fi/LAN printer addresses ("ip:port") added on this device, newest
+  /// first — offered as one-tap fills in the add-printer dialog so an IP is
+  /// typed once, not every time.
+  Future<List<String>> getRecentNetworkPrinters() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_keyRecentNetworkPrinters) ?? const [];
+  }
+
+  Future<void> rememberNetworkPrinter(String address) async {
+    final prefs = await SharedPreferences.getInstance();
+    final previous = prefs.getStringList(_keyRecentNetworkPrinters) ?? const [];
+    await prefs.setStringList(_keyRecentNetworkPrinters,
+        [address, ...previous.where((a) => a != address)].take(5).toList());
+  }
+
   Future<void> saveAccessToken(String accessToken) =>
       _secure.write(key: _keyAccessToken, value: accessToken);
 
@@ -464,6 +497,8 @@ class AuthStorage {
       for (final key in _keysSurvivingLogout)
         if (prefs.getString(key) != null) key: prefs.getString(key)!,
     };
+    // The printers on this shop's network don't change with who is signed in.
+    final recentPrinters = prefs.getStringList(_keyRecentNetworkPrinters);
 
     await Future.wait([
       _secure.deleteAll(),
@@ -472,6 +507,9 @@ class AuthStorage {
 
     for (final entry in preserved.entries) {
       await prefs.setString(entry.key, entry.value);
+    }
+    if (recentPrinters != null) {
+      await prefs.setStringList(_keyRecentNetworkPrinters, recentPrinters);
     }
   }
 }
@@ -531,6 +569,10 @@ Future<void>    saveMajorCategoryOrder(String businessId, String json) =>
     AuthStorage.instance.saveMajorCategoryOrder(businessId, json);
 Future<String?> getMajorCategoryOrder(String businessId) =>
     AuthStorage.instance.getMajorCategoryOrder(businessId);
+Future<void>    savePaymentModeUse(String businessId, String json) =>
+    AuthStorage.instance.savePaymentModeUse(businessId, json);
+Future<String?> getPaymentModeUse(String businessId) =>
+    AuthStorage.instance.getPaymentModeUse(businessId);
 Future<String>  nextOfflineBillNumber()        => AuthStorage.instance.nextOfflineBillNumber();
 Future<String>  getDeviceTag()                 => AuthStorage.instance.getDeviceTag();
 Future<void>    savePaperSize(String size)     => AuthStorage.instance.savePaperSize(size);
@@ -539,6 +581,9 @@ Future<void>    saveKitchenAutoPrint(bool on)  => AuthStorage.instance.saveKitch
 Future<bool>    getKitchenAutoPrint()          => AuthStorage.instance.getKitchenAutoPrint();
 Future<void>    saveKitchenPaperSize(String s) => AuthStorage.instance.saveKitchenPaperSize(s);
 Future<String>  getKitchenPaperSize()          => AuthStorage.instance.getKitchenPaperSize();
+Future<List<String>> getRecentNetworkPrinters() => AuthStorage.instance.getRecentNetworkPrinters();
+Future<void>    rememberNetworkPrinter(String address) =>
+    AuthStorage.instance.rememberNetworkPrinter(address);
 Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInventoryEnabled(e);
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);

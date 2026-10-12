@@ -30,7 +30,26 @@ class ReceiptLabels {
   final String roundOff;
   final String total;
   final String payment;
+  // Printed under a bill with a credit part: what the customer still owes.
+  final String balanceDue;
+  // An old credit bill paid off with this one: "Prev. Due #0007".
+  final String prevDue;
+  // This bill plus the old dues it collected.
+  final String totalPaid;
+  // A payment made on a credit bill: "Paid #0012 CASH".
+  final String paid;
   final String thankYou;
+  // The Payment Receipt for a Credit-tab payment (several bills, one receipt).
+  final String paymentReceipt;
+  final String settledInvoices;
+  final String colInvoice;
+  final String colDate;
+  final String colBill;
+  final String colPaid;
+  final String colBalance;
+  final String balDue;
+  final String settledTotalPaid;
+  final String totalReceived;
   // Brand line printed in small text under the thank-you note. It's a product
   // name, so — like FSSAI — it's the same across all languages and isn't routed
   // through the ARB files.
@@ -60,7 +79,21 @@ class ReceiptLabels {
     this.roundOff = 'Round Off:',
     required this.total,
     required this.payment,
+    this.balanceDue = 'Balance Due:',
+    this.prevDue = 'Prev. Due',
+    this.totalPaid = 'Total:',
+    this.paid = 'Paid',
     required this.thankYou,
+    this.paymentReceipt = 'PAYMENT RECEIPT',
+    this.settledInvoices = 'Settled Invoices',
+    this.colInvoice = 'Invoice',
+    this.colDate = 'Date',
+    this.colBill = 'Bill',
+    this.colPaid = 'Paid',
+    this.colBalance = 'Balance',
+    this.balDue = 'Bal due',
+    this.settledTotalPaid = 'Total paid',
+    this.totalReceived = 'TOTAL RECEIVED',
     this.poweredBy = 'Powered by Vengurla Tech',
   });
 
@@ -87,6 +120,20 @@ class ReceiptLabels {
         roundOff: l10n.receiptRoundOff,
         total: l10n.receiptTotal,
         payment: l10n.receiptPayment,
+        balanceDue: '${l10n.billingBalanceDue}:',
+        prevDue: l10n.billingPreviousDue,
+        totalPaid: '${l10n.billingTotalPaid}:',
+        paid: l10n.billingPaidOnCredit,
         thankYou: l10n.receiptThankYou,
+        paymentReceipt: l10n.receiptPaymentReceipt,
+        settledInvoices: l10n.receiptSettledInvoices,
+        colInvoice: l10n.receiptColInvoice,
+        colDate: l10n.receiptColDate,
+        colBill: l10n.receiptColBill,
+        colPaid: l10n.receiptColPaid,
+        colBalance: l10n.receiptColBalance,
+        balDue: l10n.receiptBalDue,
+        settledTotalPaid: l10n.receiptTotalPaid,
+        totalReceived: l10n.receiptTotalReceived,
       );
 }

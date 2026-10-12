@@ -1051,6 +1051,36 @@ class AppLocalizationsMr extends AppLocalizations {
   String get receiptThankYou => 'धन्यवाद, पुन्हा भेट द्या!';
 
   @override
+  String get receiptPaymentReceipt => 'पेमेंट पावती';
+
+  @override
+  String get receiptSettledInvoices => 'भरलेली बिले';
+
+  @override
+  String get receiptColInvoice => 'बिल क्र.';
+
+  @override
+  String get receiptColDate => 'दिनांक';
+
+  @override
+  String get receiptColBill => 'बिल';
+
+  @override
+  String get receiptColPaid => 'भरले';
+
+  @override
+  String get receiptColBalance => 'बाकी';
+
+  @override
+  String get receiptBalDue => 'बाकी';
+
+  @override
+  String get receiptTotalPaid => 'एकूण भरले';
+
+  @override
+  String get receiptTotalReceived => 'एकूण प्राप्त';
+
+  @override
   String get receiptDefaultBusiness => 'व्यवसाय';
 
   @override
@@ -1231,6 +1261,16 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String billingBillSaved(String number) {
     return 'बिल $number जतन झाले';
+  }
+
+  @override
+  String billingBillSavedAndSent(String number) {
+    return 'बिल $number जतन झाले व ग्राहकाला पाठवले';
+  }
+
+  @override
+  String billingBillSavedWhatsappFailed(String number, String error) {
+    return 'बिल $number जतन झाले, पण व्हॉट्सअ‍ॅप अयशस्वी: $error';
   }
 
   @override
@@ -1472,6 +1512,76 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get paymentOther => 'इतर';
+
+  @override
+  String get paymentSplit => 'विभागून';
+
+  @override
+  String get billingAddPayment => 'पेमेंट जोडा';
+
+  @override
+  String billingPayRemaining(String amount) {
+    return 'बाकी $amount';
+  }
+
+  @override
+  String billingPayExtra(String amount) {
+    return '$amount जास्त';
+  }
+
+  @override
+  String billingSplitMismatch(String amount) {
+    return 'पेमेंटची बेरीज $amount असायला हवी';
+  }
+
+  @override
+  String get billingBalanceDue => 'बाकी रक्कम';
+
+  @override
+  String get billingCollectNeedsInternet =>
+      'जुनी उधारी जमा करण्यासाठी इंटरनेट लागते — हे बिल ऑफलाइन जतन करण्यासाठी जुनी बिले काढा';
+
+  @override
+  String billingPrevDueBill(String number) {
+    return 'बिल $number';
+  }
+
+  @override
+  String billingPrevDueOwes(String amount) {
+    return 'बाकी $amount';
+  }
+
+  @override
+  String get billingTotalPaid => 'एकूण';
+
+  @override
+  String billingPaidInBill(String number) {
+    return 'बिल $number मध्ये भरले';
+  }
+
+  @override
+  String get billingPaidOnCredit => 'भरले';
+
+  @override
+  String get creditCollectAmount => 'जमा';
+
+  @override
+  String creditAmountMax(String amount) {
+    return 'कमाल $amount';
+  }
+
+  @override
+  String billingPrevDueTooMuch(String number, String amount) {
+    return 'बिल $number वर फक्त $amount बाकी आहे';
+  }
+
+  @override
+  String get reportsCreditCollected => 'उधारी वसूल';
+
+  @override
+  String billingPrevDueNeedsPayment(String amount) {
+    return 'मागील बाकी $amount आत्ताच भरावी लागेल — ती उधारीवर ठेवता येत नाही';
+  }
 
   @override
   String get itemsTitle => 'वस्तू / मेनू';
@@ -2019,6 +2129,11 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String historyBillMeta(String time, String payment, String items) {
     return '$time  ·  $payment  ·  $items';
+  }
+
+  @override
+  String historyOrderedAt(String date) {
+    return 'ऑर्डर $date';
   }
 
   @override
@@ -2737,7 +2852,7 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get printerSetupScanHint =>
-      'तुमच्या फोनच्या ब्लूटूथ सेटिंग्जमध्ये आधीच जोडलेले प्रिंटर दाखवले जातात. आधी तिथे प्रिंटर जोडा, मग इथे शोधा दाबा.';
+      'फोनच्या ब्लूटूथ सेटिंग्जमध्ये जोडलेले प्रिंटर आणि जोडलेले यूएसबी प्रिंटर दाखवले जातात. वाय-फाय/LAN प्रिंटरसाठी खालील \"वाय-फाय / LAN प्रिंटर जोडा\" वापरा.';
 
   @override
   String get printerSetupTapScan => 'प्रिंटर शोधण्यासाठी \"शोधा\" दाबा';
@@ -2765,6 +2880,28 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get printerSetupNoteUsb =>
       'विंडोजवर यूएसबीसाठी प्रिंटरचा WinUSB ड्रायव्हर इन्स्टॉल असणे आवश्यक आहे';
+
+  @override
+  String get printerSetupNoteNetwork =>
+      'वाय-फाय/LAN: प्रिंटर आणि हे उपकरण एकाच नेटवर्कवर असावेत. किंवा प्रिंटरच्या स्वतःच्या वाय-फायला जोडा आणि IP 192.168.223.1 वापरा';
+
+  @override
+  String get printerSetupAddNetwork => 'वाय-फाय / LAN प्रिंटर जोडा';
+
+  @override
+  String get printerSetupNetworkTitle => 'वाय-फाय / LAN प्रिंटर';
+
+  @override
+  String get printerSetupNetworkIp => 'प्रिंटरचा IP पत्ता';
+
+  @override
+  String get printerSetupNetworkIpHint => 'उदा. 192.168.1.50';
+
+  @override
+  String get printerSetupNetworkPort => 'पोर्ट';
+
+  @override
+  String get printerSetupNetworkInvalid => 'प्रिंटरचा IP पत्ता टाका';
 
   @override
   String get printerSetupPaperSize => 'कागद आकार';

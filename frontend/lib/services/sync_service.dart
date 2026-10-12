@@ -197,7 +197,17 @@ class SyncService {
       // Additional charges exactly as printed; the server re-sums them.
       ..._chargesPayload(row),
       'payment_mode': row['payment_mode'],
+      // A split bill's parts, exactly as settled at the counter.
+      if (row['payments'] is String && (row['payments'] as String).isNotEmpty)
+        'payments': jsonDecode(row['payments'] as String),
       'status': 'finalized',
+      // When the sale happened (the offline bill was finalized as it was
+      // saved). Without it the server dates the bill when the device
+      // reconnects — a late-night sale synced next morning moved a day.
+      'finalized_at': DateTime.fromMillisecondsSinceEpoch(
+              row['created_at'] as int)
+          .toUtc()
+          .toIso8601String(),
     };
   }
 

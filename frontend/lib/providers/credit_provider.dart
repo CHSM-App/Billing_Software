@@ -30,9 +30,3 @@ class CreditCustomersNotifier extends AsyncNotifier<List<CreditCustomer>> {
 final creditCustomersProvider =
     AsyncNotifierProvider<CreditCustomersNotifier, List<CreditCustomer>>(
         CreditCustomersNotifier.new);
-
-/// Whether any customer currently owes money on credit. Used to surface a
-/// standalone Credit tab for non-table businesses (table restaurants get the
-/// Credit sub-tab inside the Orders page instead). Defaults to false.
-final hasCreditProvider = Provider<bool>((ref) =>
-    (ref.watch(creditCustomersProvider).valueOrNull ?? const []).isNotEmpty);

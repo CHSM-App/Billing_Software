@@ -7,7 +7,7 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.8:5000/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
           
@@ -925,12 +925,31 @@ Future<Map<String, dynamic>> sendCustomerMessage(
 
 /// Marks the given credit bills paid in one settlement with [paymentMode].
 /// Returns the settled bills (with items) for building a merged receipt.
+/// Pays credit bills from the Credit tab, all in [paymentMode]. [amounts] is
+/// bill id → how much to pay on it: its whole due, or part of it (the bill
+/// stays unpaid with the rest owing). Returns the bills with their payment
+/// history.
 Future<Map<String, dynamic>> settleCreditBills(
-    List<String> billIds, String paymentMode) async {
+    Map<String, double> amounts, String paymentMode) async {
   return _parse(await _authPost(
     Uri.parse('$baseUrl/credit/settle'),
-    body: jsonEncode({'bill_ids': billIds, 'payment_mode': paymentMode}),
+    body: jsonEncode({
+      'payment_mode': paymentMode,
+      'payments': [
+        for (final e in amounts.entries) {'bill_id': e.key, 'amount': e.value},
+      ],
+    }),
   ));
+}
+
+/// Sends ONE WhatsApp for a whole Credit-tab payment ([settlementId] from
+/// [settleCreditBills]). Same reply shape as [whatsAppBill]: `mode` 'api'
+/// (sent server-side) or 'deeplink' (`phone` + `message` to open).
+Future<Map<String, dynamic>> whatsAppSettlement(String settlementId) async {
+  final data = _parse(await _authPost(
+    Uri.parse('$baseUrl/credit/settlements/$settlementId/whatsapp'),
+  ));
+  return Map<String, dynamic>.from(data as Map);
 }
 
 /// Settle a draft bill.
@@ -940,10 +959,27 @@ Future<Map<String, dynamic>> settleCreditBills(
 /// different mode has to say so here — otherwise history, reports and the
 /// credit ledger all keep reporting the original one. Omitted, the stored mode
 /// stands.
-Future<Map<String, dynamic>> finalizeBill(String id, {String? paymentMode}) async {
+/// [payments] — the parts of a split bill; sent only with paymentMode 'split'.
+/// [collect] — old credit bills paid off with this one: bill id → amount. The
+/// payment mode / parts then cover this bill AND those amounts; the server
+/// pays the old bills first and keeps the rest on this one.
+Future<Map<String, dynamic>> finalizeBill(String id,
+    {String? paymentMode,
+    List<Map<String, dynamic>>? payments,
+    Map<String, double>? collect}) async {
   return _parse(await _authPut(
     Uri.parse('$baseUrl/bills/$id/finalize'),
-    body: paymentMode != null ? jsonEncode({'payment_mode': paymentMode}) : null,
+    body: paymentMode != null
+        ? jsonEncode({
+            'payment_mode': paymentMode,
+            if (payments != null) 'payments': payments,
+            if (collect != null && collect.isNotEmpty)
+              'collect': [
+                for (final e in collect.entries)
+                  {'bill_id': e.key, 'amount': e.value},
+              ],
+          })
+        : null,
   ));
 }
 

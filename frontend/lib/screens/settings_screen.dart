@@ -613,12 +613,13 @@ class _SettingsContentState extends State<_SettingsContent>
               const Icon(Icons.category_outlined,
                   size: 16, color: Colors.white70),
               const SizedBox(width: AppSpacing.space8),
-              Text(
-                _formatType(session.businessType),
-                style: TextStyle(
-                  
-                  fontSize: 13,
-                  color: Colors.white.withValues(alpha: 0.8),
+              Expanded(
+                child: Text(
+                  _formatType(session.businessType),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white.withValues(alpha: 0.8),
+                  ),
                 ),
               ),
             ],
@@ -634,12 +635,14 @@ class _SettingsContentState extends State<_SettingsContent>
                 const Icon(Icons.event_available_outlined,
                     size: 16, color: Colors.white70),
                 const SizedBox(width: AppSpacing.space8),
-                Text(
-                  context.l10n.settingsSubscriptionActiveTill(
-                      _subDateFmt.format(_license!.expiresAt!)),
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.8),
+                Expanded(
+                  child: Text(
+                    context.l10n.settingsSubscriptionActiveTill(
+                        _subDateFmt.format(_license!.expiresAt!)),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.white.withValues(alpha: 0.8),
+                    ),
                   ),
                 ),
               ],

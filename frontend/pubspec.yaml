@@ -1,7 +1,7 @@
 name: Vittam
 description: "Billing app for small Indian businesses."
 publish_to: 'none'
-version: 1.1.12+24
+version: 1.1.13+25
 
   
 environment:
@@ -32,6 +32,10 @@ dependencies:
   google_fonts: ^6.1.0
   flutter_thermal_printer: 2.0.0
   print_bluetooth_thermal: ^1.0.0
+  # Already pulled in by flutter_thermal_printer; used directly for RAW
+  # Windows spooler printing (see PrinterService._writeRawWin32).
+  win32: ^5.15.0
+  ffi: ^2.2.0
   permission_handler: ^11.0.0
   esc_pos_utils_plus: ^2.0.4
   barcode_widget: ^2.0.3

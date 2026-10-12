@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/l10n_ext.dart';
 import '../api.dart' show setConnectivityNotifier;
@@ -46,6 +48,7 @@ class _MainShellState extends ConsumerState<MainShell>
   void initState() {
     super.initState();
     _index = widget.initialIndex;
+    HardwareKeyboard.instance.addHandler(_onEscBack);
     // Observe lifecycle so we can re-check the device-access policy when the app
     // returns to the foreground — enforcing a restriction the admin applied
     // while the app was backgrounded, without needing a full restart.
@@ -237,7 +240,45 @@ class _MainShellState extends ConsumerState<MainShell>
     NotificationService.instance.onlineOrderTap
         .removeListener(_onOnlineOrderTapped);
     _railAnimController.dispose();
+    HardwareKeyboard.instance.removeHandler(_onEscBack);
     super.dispose();
+  }
+
+  /// Windows: Esc works like the back arrow. Pops the page on top (respecting
+  /// its PopScope, e.g. an unsaved-bill prompt); at the shell's own level it
+  /// returns to Billing, and on Billing it does nothing — Esc never exits.
+  ///
+  /// Dialogs, sheets and menus (PopupRoutes) are left to Flutter's own Esc
+  /// handling, which honours barrierDismissible. Returns true only when it
+  /// acted, so Esc still reaches text fields and overlays otherwise.
+  bool _onEscBack(KeyEvent event) {
+    if (defaultTargetPlatform != TargetPlatform.windows ||
+        event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.escape ||
+        !mounted) {
+      return false;
+    }
+    final nav = Navigator.of(context);
+    Route<dynamic>? top;
+    nav.popUntil((r) {
+      top = r; // peek at the top route without popping anything
+      return true;
+    });
+    if (top is PopupRoute) return false;
+    // A page pushed over the shell (compared to the shell's own route rather
+    // than canPop, so Esc can never pop the shell itself).
+    if (top != null && top != ModalRoute.of(context)) {
+      nav.maybePop();
+      return true;
+    }
+    if (_index != 0) {
+      // Drop keyboard focus too: the key press flips Flutter into keyboard
+      // highlight mode, and a still-focused rail item would stay greyed out.
+      FocusManager.instance.primaryFocus?.unfocus();
+      setState(() => _index = 0);
+      return true;
+    }
+    return false;
   }
 
   /// A QR table order arrived by push. Refreshes exactly what the WebSocket

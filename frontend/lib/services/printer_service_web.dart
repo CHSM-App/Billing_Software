@@ -10,7 +10,7 @@ import '../models/models.dart';
 export 'printer_service_web.dart'
     show ConnectionType, Printer, PrinterService, PrinterException;
 
-enum ConnectionType { ble, usb, classicBt }
+enum ConnectionType { ble, usb, classicBt, network }
 
 class Printer {
   final String? name;
@@ -35,7 +35,8 @@ class Printer {
         'classicBt' => ConnectionType.classicBt,
         'ble'       => ConnectionType.ble,
         'usb'       => ConnectionType.usb,
-        _           => null,
+        'network'   => ConnectionType.network,
+        _          => null,
       };
 }
 
@@ -145,6 +146,28 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       bool gstEnabled = true,
+      dynamic labels,
+      int paperDots = 576}) async {
+    throw PrinterException('Printing is not supported in the browser.');
+  }
+
+  Future<Uint8List> buildSettlementPreviewPng(CreditSettlement settlement,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      String? businessGstin,
+      String? businessFssai,
+      dynamic labels,
+      int paperDots = 576}) async {
+    throw PrinterException('Receipt preview is not supported in the browser.');
+  }
+
+  Future<void> printSettlement(CreditSettlement settlement,
+      {String? businessName,
+      String? businessPhone,
+      String? businessAddress,
+      String? businessGstin,
+      String? businessFssai,
       dynamic labels,
       int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');

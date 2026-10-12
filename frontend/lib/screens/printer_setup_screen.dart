@@ -6,6 +6,90 @@ import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 
+/// Asks for a Wi-Fi/LAN printer's IP + port. Network printers can't be
+/// scanned for, so this is how one gets saved. Shared with the kitchen
+/// printer settings. Addresses added before are offered as chips that fill
+/// the fields, so an IP is typed once per device.
+Future<Printer?> showNetworkPrinterDialog(BuildContext context) async {
+  final l10n = context.l10n;
+  final recent = await getRecentNetworkPrinters();
+  if (!context.mounted) return null;
+  final ip = TextEditingController();
+  final port = TextEditingController(text: '9100');
+  final formKey = GlobalKey<FormState>();
+  return showDialog<Printer>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(l10n.printerSetupNetworkTitle),
+      content: Form(
+        key: formKey,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (recent.isNotEmpty)
+            Wrap(spacing: AppSpacing.space8, runSpacing: AppSpacing.space4, children: [
+              for (final address in recent)
+                ActionChip(
+                  avatar: const Icon(Icons.history, size: 16),
+                  label: Text(address),
+                  onPressed: () {
+                    // Saved as "ip:port" by this dialog.
+                    final i = address.lastIndexOf(':');
+                    ip.text = i < 0 ? address : address.substring(0, i);
+                    if (i >= 0) port.text = address.substring(i + 1);
+                  },
+                ),
+            ]),
+          TextFormField(
+            controller: ip,
+            autofocus: true,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+                labelText: l10n.printerSetupNetworkIp,
+                hintText: l10n.printerSetupNetworkIpHint),
+            validator: (v) => (v == null || v.trim().isEmpty || v.contains(' '))
+                ? l10n.printerSetupNetworkInvalid
+                : null,
+          ),
+          TextFormField(
+            controller: port,
+            keyboardType: TextInputType.number,
+            decoration:
+                InputDecoration(labelText: l10n.printerSetupNetworkPort),
+            validator: (v) {
+              final p = int.tryParse(v ?? '');
+              return (p == null || p < 1 || p > 65535) ? '1–65535' : null;
+            },
+          ),
+        ]),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l10n.commonCancel)),
+        TextButton(
+          onPressed: () {
+            if (!formKey.currentState!.validate()) return;
+            final address = '${ip.text.trim()}:${port.text.trim()}';
+            rememberNetworkPrinter(address);
+            Navigator.pop(
+                ctx,
+                Printer(
+                    name: l10n.printerSetupNetworkTitle,
+                    address: address,
+                    connectionType: ConnectionType.network));
+          },
+          child: Text(l10n.commonAdd),
+        ),
+      ],
+    ),
+  );
+}
+
+IconData printerIcon(ConnectionType? t) => switch (t) {
+      ConnectionType.usb => Icons.usb_outlined,
+      ConnectionType.network => Icons.wifi_outlined,
+      _ => Icons.bluetooth_outlined,
+    };
+
 class PrinterSetupScreen extends StatefulWidget {
   const PrinterSetupScreen({super.key});
 
@@ -239,6 +323,15 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
             onPressed: _scanning ? null : _scan,
             isLoading: _scanning,
           ),
+          const SizedBox(height: AppSpacing.space8),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final p = await showNetworkPrinterDialog(context);
+              if (p != null && mounted) await _select(p);
+            },
+            icon: const Icon(Icons.wifi_outlined, size: 16),
+            label: Text(l10n.printerSetupAddNetwork),
+          ),
           const SizedBox(height: AppSpacing.space4),
           Text(
             l10n.printerSetupScanHint,
@@ -276,9 +369,7 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                   child: Row(
                     children: [
                       Icon(
-                        printer.connectionType == ConnectionType.usb
-                            ? Icons.usb_outlined
-                            : Icons.bluetooth_outlined,
+                        printerIcon(printer.connectionType),
                         size: 20,
                         color: isActive ? AppColors.accent : AppColors.primary,
                       ),
@@ -328,6 +419,8 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
                 _noteRow(Icons.laptop_outlined, l10n.printerSetupNoteWindows),
                 const SizedBox(height: AppSpacing.space8),
                 _noteRow(Icons.usb_outlined, l10n.printerSetupNoteUsb),
+                const SizedBox(height: AppSpacing.space8),
+                _noteRow(Icons.wifi_outlined, l10n.printerSetupNoteNetwork),
                 const SizedBox(height: AppSpacing.space8),
                 _noteRow(Icons.info_outline, l10n.printerSetupNoteThermal),
               ],

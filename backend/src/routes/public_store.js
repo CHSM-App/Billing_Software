@@ -193,8 +193,17 @@ router.get('/:token/menu', storeLimiter, async (req, res) => {
                i.price_inclusive_tax, i.image_url, b.gst_enabled
         FROM items i
         JOIN businesses b ON b.id = i.business_id
+        LEFT JOIN (
+          SELECT bi.item_id, SUM(bi.quantity) AS sold
+          FROM bill_items bi
+          JOIN bills bl ON bl.id = bi.bill_id
+          WHERE bl.business_id = @business_id AND bl.status = 'finalized' AND bi.item_id IS NOT NULL
+          GROUP BY bi.item_id
+        ) ts ON ts.item_id = i.id
         WHERE i.business_id = @business_id AND i.is_active = 1
-        ORDER BY i.major_category ASC, i.category ASC, i.name ASC
+        -- Best sellers first, then by name: the billing screen's order within a
+        -- category (items_provider.dart _sorted). The page does the grouping.
+        ORDER BY CASE WHEN ts.sold IS NULL THEN 1 ELSE 0 END, ts.sold DESC, i.name ASC
       `);
 
     const items = itemsResult.recordset;

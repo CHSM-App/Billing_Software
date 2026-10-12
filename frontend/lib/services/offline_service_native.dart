@@ -92,7 +92,8 @@ class OfflineService {
       path,
       // 13 was the paused stock-batches build (see STOCK_BATCHES.md). Kept so
       // a device that ran it never opens its DB at a lower version.
-      version: 13,
+      // 14: offline_bills.payments — the parts of a split bill.
+      version: 14,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
       // Self-heal: _createSchema is all IF NOT EXISTS, so this is a no-op on a
@@ -100,7 +101,7 @@ class OfflineService {
       // with tables missing (left by an interrupted create, or by a test that
       // shared this path) otherwise failed every offline query — including
       // the startup cleanup, which sent a logged-in user to the login screen.
-      onOpen: (db) => _createSchema(db, 13),
+      onOpen: (db) => _createSchema(db, 14),
     );
   }
 
@@ -126,6 +127,7 @@ class OfflineService {
         total           REAL    NOT NULL,
         round_off       REAL    NOT NULL DEFAULT 0,
         payment_mode    TEXT    NOT NULL,
+        payments        TEXT,
         items_json      TEXT    NOT NULL,
         created_at      INTEGER NOT NULL,
         sync_status     TEXT    NOT NULL DEFAULT '${SyncStatus.pending}',
@@ -329,6 +331,16 @@ class OfflineService {
       // bills/drafts live in their own tables and are untouched.
       await db.execute('DROP TABLE IF EXISTS cached_items');
       await _createItemCacheTable(db);
+    }
+    if (oldVersion < 14) {
+      // v13 → v14: a split bill keeps its parts (JSON [{mode, amount}]) so the
+      // sync sends them and its receipt can show them. NULL = one mode.
+      // Only when the table is there: a DB without it gets it, column
+      // included, from the self-heal in onOpen.
+      final cols = await db.rawQuery('PRAGMA table_info(offline_bills)');
+      if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'payments')) {
+        await db.execute('ALTER TABLE offline_bills ADD COLUMN payments TEXT');
+      }
     }
   }
 
@@ -755,6 +767,7 @@ class OfflineService {
       'total':           data['total'],
       'round_off':       data['round_off'] ?? 0,
       'payment_mode':    data['payment_mode'],
+      'payments':        data['payments'],
       'items_json':      data['items_json'],
       'created_at':      data['created_at'],
       'sync_status':     SyncStatus.pending,
@@ -947,6 +960,11 @@ class OfflineService {
       total: (row['total'] as num).toDouble(),
       roundOff: (row['round_off'] as num?)?.toDouble() ?? 0,
       paymentMode: row['payment_mode'] as String,
+      payments: BillPayment.listFrom(row['payments']),
+      creditAmount: BillPayment.listFrom(row['payments'])
+          .where((p) => p.mode == 'credit')
+          .firstOrNull
+          ?.amount,
       status: 'unsynced',
       createdByUserId: row['user_id'] as String,
       createdAt:

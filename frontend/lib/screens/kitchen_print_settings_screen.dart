@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../l10n/l10n_ext.dart';
 import '../services/printer_service.dart';
 import '../storage.dart';
+import 'printer_setup_screen.dart' show showNetworkPrinterDialog;
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 
@@ -206,6 +208,15 @@ class _KitchenPrintSettingsScreenState
                   text: _scanning ? 'Scanning…' : 'Scan for printers',
                   onPressed: _scanning ? null : _scan,
                   isLoading: _scanning,
+                ),
+                const SizedBox(height: AppSpacing.space8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final p = await showNetworkPrinterDialog(context);
+                    if (p != null) await _select(p);
+                  },
+                  icon: const Icon(Icons.wifi_outlined, size: 18),
+                  label: Text(context.l10n.printerSetupAddNetwork),
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 ..._found.map(_printerTile),

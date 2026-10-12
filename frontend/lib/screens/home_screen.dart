@@ -129,7 +129,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // Variant items (by id) whose size rows are unfolded beneath them in place.
   final Set<String> _expandedVariantItems = {};
   bool _showCustomerFields = true;
-  String _paymentMode = 'cash';
+  // How the bill is paid: rows of [mode][amount] at the bottom of the cart.
+  // One row is an ordinary single-mode bill; "+" adds a row and splits it.
+  // The last row always takes whatever the others leave of the payable (see
+  // _syncPayRows), so a single row simply IS the total.
+  final List<_PayRow> _payRows = [];
+  // The payable the rows were last filled against. When the cart, discount,
+  // charges or round-off move it, the last row is refilled.
+  double? _payRowsBase;
+  bool _payRefillPending = false;
+  // Bills this device settled per mode — "+" offers the most-used one.
+  Map<String, int> _modeUse = const {};
   // Inline error shown inside the billing card when a credit bill is missing
   // the required customer name/phone. Cleared once both are provided.
   String? _creditError;
@@ -138,18 +148,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // also refresh the open sheet.
   StateSetter? _sheetSetState;
 
-  // Outstanding credit ("previous due") for the currently-entered phone, looked
-  // up as the cashier types a 10-digit number. When _settlePrevCredit is on and
-  // the bill is finalized, these bill_ids are settled with the same mode.
-  double _prevCreditDue = 0;
-  List<String> _prevCreditBillIds = const [];
-  bool _settlePrevCredit = false;
+  // The customer's unpaid credit bills ("previous due"), looked up as the
+  // cashier types a 10-digit number. Each is a line the cashier can tick to
+  // collect with this bill — in full, or the part typed in. Collected dues go
+  // on THIS bill as "Prev. due · Bill 0007" rows (no separate receipt), and
+  // the server pays the old bills off when this one is settled.
+  List<_PrevDueLine> _prevDueLines = const [];
   String? _prevCreditPhone; // the phone the lookup result belongs to
   Timer? _prevCreditDebounce;
-  // Previous credit bills that were just settled with the current bill — each
-  // is printed as its OWN receipt (never merged) when the finalize action is
-  // Print. Consumed and cleared by _autoPrint / _sendBillWhatsApp.
-  List<Bill> _justSettledPrevBills = const [];
+
+  /// Everything the customer still owes on old bills.
+  double get _prevCreditDue => _prevDueLines.fold(0.0, (s, l) => s + l.due);
+
+  /// What is being collected on old bills with this one.
+  double get _collectTotal =>
+      _prevDueLines.fold(0.0, (s, l) => s + l.collect);
+
+  /// Old bill id → amount collected now, for the finalize request.
+  Map<String, double> get _collectMap => {
+        for (final l in _prevDueLines)
+          if (l.collect > 0.004) l.billId: l.collect,
+      };
+  // False while settling via WhatsApp: _sendBillWhatsApp then shows ONE combined
+  // "saved & sent" snack instead of a "saved" snack queued ahead of it.
+  bool _announceSave = true;
   bool _generatingBill = false;
   bool _savingDraft = false;
   bool _draftLoaded = false;
@@ -265,6 +287,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
     HardwareKeyboard.instance.addHandler(_globalKeyHandler);
     _loadChargeSuggestions();
+    _payRows.add(_newPayRow('cash'));
+    _loadModeUse();
   }
 
   @override
@@ -316,6 +340,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _discountAmtFocus.dispose();
     for (final r in _charges) {
       r.dispose();
+    }
+    for (final r in _payRows) {
+      r.dispose();
+    }
+    for (final l in _prevDueLines) {
+      l.dispose();
     }
     _prevCreditDebounce?.cancel();
     super.dispose();
@@ -394,7 +424,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).loadFromBill(bill, allItems);
       if (mounted) {
         setState(() {
-          _paymentMode = bill.paymentMode;
+          // A draft is never split — its parts are chosen when it is settled.
+          _resetPayRows(bill.paymentMode);
           if (bill.customerName != null) {
             _customerNameController.text = bill.customerName!;
             _showCustomerFields = true;
@@ -819,6 +850,411 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         onTap: _jumpToMajor,
         controller: _majorStripCtrl,
         chipKeys: _majorChipKeys,
+      ),
+    );
+  }
+
+  // ── Payment rows ──────────────────────────────────────────────────────────
+  //
+  // [mode ▾][amount][+] at the bottom of the cart. One row is an ordinary
+  // single-mode bill. "+" adds a row for whatever is still unpaid, in the
+  // most-used mode not on the bill yet; any row may be Credit, which becomes
+  // the customer's due (bills.credit_amount on the server).
+
+  static const _payModes = ['cash', 'upi', 'card', 'other', 'credit'];
+
+  /// The payment_mode sent: the one row's mode, or 'split'. The rows cover
+  /// this bill AND any old dues collected — the server pays the old bills
+  /// first and keeps the rest on this one.
+  String get _paymentMode =>
+      _payRows.length > 1 ? 'split' : _payRows.first.mode;
+
+  /// The mode a parked draft carries. A draft is never split — the parts are
+  /// chosen when it is settled.
+  String get _draftMode => _payRows.first.mode;
+
+  bool get _hasCreditPart => _payRows.any((r) => r.mode == 'credit');
+
+  /// The rows as split parts, or null for a single-mode payment.
+  List<BillPayment>? get _splitPayments => _payRows.length < 2
+      ? null
+      : [for (final r in _payRows) BillPayment(r.mode, r.amount)];
+
+  List<Map<String, dynamic>>? get _splitPaymentsJson =>
+      _splitPayments?.map((p) => p.toJson()).toList();
+
+  /// The credit row of a split payment, if it has one.
+  double? get _splitCreditAmount =>
+      _splitPayments?.where((p) => p.mode == 'credit').firstOrNull?.amount;
+
+  /// Sum of the rows that are money taken now — every mode but credit.
+  double get _paidNow => _payRows
+      .where((r) => r.mode != 'credit')
+      .fold(0.0, (s, r) => s + r.amount);
+
+  /// The old dues ticked for collection, as they go on this bill's receipt.
+  List<CollectedDue> get _collectedDues => [
+        for (final l in _prevDueLines)
+          if (l.collect > 0.004)
+            CollectedDue(
+                billId: l.billId, billNumber: l.billNumber, amount: l.collect),
+      ];
+
+  /// Payable less what the rows add up to: > 0 still unpaid, < 0 too much.
+  double _payRemaining() {
+    final sum = _payRows.fold(0.0, (s, r) => s + r.amount);
+    return double.parse((_netPayable() - sum).toStringAsFixed(2));
+  }
+
+  static String _fmtPayAmount(double v) =>
+      v.toStringAsFixed(2).replaceFirst(RegExp(r'\.00$'), '');
+
+  _PayRow _newPayRow(String mode, [double? amount]) {
+    final row = _PayRow(mode);
+    if (amount != null) row.amountController.text = _fmtPayAmount(amount);
+    row.amountController.addListener(_onPayRowsChanged);
+    // Tapping into an amount selects all of it, so the cashier just types
+    // the figure for that mode.
+    row.focus.addListener(() {
+      if (!row.focus.hasFocus) return;
+      _selectAllPayAmount(row);
+      _ensureVisible(row.key);
+    });
+    return row;
+  }
+
+  void _selectAllPayAmount(_PayRow row) {
+    // After the tap has placed its caret, or the caret wins.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final c = row.amountController;
+      c.selection = TextSelection(baseOffset: 0, extentOffset: c.text.length);
+    });
+  }
+
+  void _onPayRowsChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _sheetSetState?.call(() {});
+  }
+
+  /// The last row takes whatever the others leave of the payable.
+  void _refillLastPayRow() {
+    final others = _payRows
+        .take(_payRows.length - 1)
+        .fold(0.0, (s, r) => s + r.amount);
+    final fill = _netPayable() - others;
+    _payRows.last.amountController.text = _fmtPayAmount(fill < 0 ? 0 : fill);
+  }
+
+  /// Called while building the rows: when the payable has moved since the rows
+  /// were filled (items, discount, charges, round-off, previous due), refill
+  /// the last row. Deferred a frame because it writes a controller.
+  void _syncPayRows(double payable) {
+    if (_payRowsBase != null && (payable - _payRowsBase!).abs() < 0.005) return;
+    _payRowsBase = payable;
+    _payRefillPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _payRows.isEmpty) return;
+      _payRefillPending = false;
+      _refillLastPayRow();
+    });
+  }
+
+  bool get _canAddPayRow =>
+      _payRows.length < _payModes.length && _payRemaining() > 0.004;
+
+  void _addPayRow() {
+    if (!_canAddPayRow) return;
+    final rest = _payRemaining();
+    _payRows.add(_newPayRow(_nextPayMode(), rest < 0 ? 0 : rest));
+    _payRowsBase = _netPayable();
+    _onPayRowsChanged();
+  }
+
+  void _removePayRow(_PayRow row) {
+    _payRows.remove(row);
+    _refillLastPayRow();
+    if (!_hasCreditPart && _creditError != null) _setCreditError(null);
+    _onPayRowsChanged();
+    WidgetsBinding.instance.addPostFrameCallback((_) => row.dispose());
+  }
+
+  void _setPayMode(_PayRow row, String mode) {
+    row.mode = mode;
+    // Leaving credit clears any pending "name/phone required" message; the
+    // fields are only mandatory while some part is on credit.
+    if (!_hasCreditPart && _creditError != null) {
+      _setCreditError(null);
+    }
+    _onPayRowsChanged();
+  }
+
+  /// Back to a single row in [mode] — after a settle, or for a reopened draft.
+  void _resetPayRows([String mode = 'cash']) {
+    final old = List<_PayRow>.from(_payRows);
+    _payRows
+      ..clear()
+      ..add(_newPayRow(_payModes.contains(mode) ? mode : 'cash'));
+    _payRowsBase = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final r in old) {
+        r.dispose();
+      }
+    });
+  }
+
+  /// The most-used mode on this device that no row has yet. Ties keep the
+  /// order of [_payModes], so with no history it is cash, then upi, …
+  String _nextPayMode() {
+    final taken = {for (final r in _payRows) r.mode};
+    String? best;
+    for (final m in _payModes) {
+      if (taken.contains(m)) continue;
+      if (best == null || (_modeUse[m] ?? 0) > (_modeUse[best] ?? 0)) best = m;
+    }
+    return best ?? 'cash';
+  }
+
+  Future<void> _loadModeUse() async {
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty) return;
+    try {
+      final raw = await getPaymentModeUse(businessId);
+      if (raw == null) return;
+      _modeUse = (jsonDecode(raw) as Map)
+          .map((k, v) => MapEntry('$k', (v as num).toInt()));
+    } catch (_) {
+      // A corrupt preference only costs the "+" its best guess.
+    }
+  }
+
+  /// Counts a settled bill's modes toward the next "+" default. Best-effort.
+  Future<void> _recordModeUse(Bill bill) async {
+    final modes = bill.isSplit
+        ? bill.payments.map((p) => p.mode)
+        : [bill.paymentMode];
+    final use = Map<String, int>.from(_modeUse);
+    for (final m in modes) {
+      use[m] = (use[m] ?? 0) + 1;
+    }
+    _modeUse = use;
+    final businessId = await getBusinessId();
+    if (businessId == null || businessId.isEmpty) return;
+    try {
+      await savePaymentModeUse(businessId, jsonEncode(use));
+    } catch (_) {}
+  }
+
+  /// Every settle path runs this first: the rows must add up to the payable,
+  /// then a credit part needs its customer.
+  bool _validatePayment() {
+    for (final line in _prevDueLines) {
+      if (line.tooMuch) {
+        _showSnack(
+            context.l10n.billingPrevDueTooMuch(
+                line.displayNumber, '₹${line.due.toStringAsFixed(2)}'),
+            isError: true);
+        return false;
+      }
+    }
+    final unbalanced = _payRemaining().abs() >= 0.005 ||
+        (_payRows.length > 1 && _payRows.any((r) => r.amount <= 0));
+    if (unbalanced) {
+      _showSnack(
+          context.l10n.billingSplitMismatch(
+              '₹${_netPayable().toStringAsFixed(2)}'),
+          isError: true);
+      return false;
+    }
+    final collect = _collectTotal;
+    if (collect > 0) {
+      // Old bills are paid on the server as this one is settled, in the same
+      // transaction — there is no offline queue for that.
+      if (!ref.read(connectivityProvider)) {
+        _showSnack(context.l10n.billingCollectNeedsInternet, isError: true);
+        return false;
+      }
+      // Paying old credit takes money now — it can't itself go on credit.
+      if (_paidNow < collect - 0.004) {
+        _showSnack(
+            context.l10n.billingPrevDueNeedsPayment(
+                '₹${collect.toStringAsFixed(2)}'),
+            isError: true);
+        return false;
+      }
+    }
+    return _validateCreditCustomer();
+  }
+
+  /// The payment block: one row per part, and what is left to collect.
+  Widget _buildPaymentRows(AppLocalizations l10n) {
+    _syncPayRows(_netPayable());
+    final remaining = _payRemaining();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.space16, AppSpacing.space12, AppSpacing.space16, 0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final (i, row) in _payRows.indexed) _buildPayRow(l10n, i, row),
+          if (!_payRefillPending && remaining.abs() >= 0.005)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.space4),
+              child: Text(
+                remaining > 0
+                    ? l10n.billingPayRemaining(
+                        '₹${remaining.toStringAsFixed(2)}')
+                    : l10n.billingPayExtra(
+                        '₹${(-remaining).toStringAsFixed(2)}'),
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.error),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// One old credit bill: [✓] Bill 0007 · 05 Oct / due ₹500 · [collect ₹].
+  /// Ticking fills in the whole due; lowering it collects only part.
+  Widget _buildPrevDueLine(AppLocalizations l10n, _PrevDueLine line) {
+    final date = line.createdAt == null
+        ? ''
+        : ' · ${MaterialLocalizations.of(context).formatShortMonthDay(line.createdAt!.toLocal())}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.space4, 0, AppSpacing.space12, 0),
+      child: Row(
+        children: [
+          Checkbox(
+            value: line.on,
+            visualDensity: VisualDensity.compact,
+            onChanged: (v) => _togglePrevDue(line, v ?? false),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: () => _togglePrevDue(line, !line.on),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(l10n.billingPrevDueBill(line.displayNumber) + date,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                  Text(l10n.billingPrevDueOwes('₹${line.due.toStringAsFixed(2)}'),
+                      style: const TextStyle(
+                          fontSize: 11, color: Color(0xFF92400E))),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 96,
+            child: TextField(
+              controller: line.amountController,
+              enabled: line.on,
+              textAlign: TextAlign.right,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
+              decoration: InputDecoration(
+                isDense: true,
+                prefixText: '₹ ',
+                hintText: line.due.toStringAsFixed(0),
+                errorMaxLines: 2,
+                errorText: line.tooMuch
+                    ? l10n.creditAmountMax('₹${line.due.toStringAsFixed(2)}')
+                    : null,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// [mode ▾][amount][button]: the first row's button adds a part, every
+  /// other row's removes itself.
+  Widget _buildPayRow(AppLocalizations l10n, int i, _PayRow row) {
+    final taken = {
+      for (final r in _payRows)
+        if (!identical(r, row)) r.mode
+    };
+    return Padding(
+      key: row.key,
+      padding: EdgeInsets.only(top: i == 0 ? 0 : AppSpacing.space8),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: DropdownButtonFormField<String>(
+              // The field keeps its first value; the key makes a mode
+              // changed elsewhere (a reset) show up.
+              key: ValueKey('${identityHashCode(row)}-${row.mode}'),
+              initialValue: row.mode,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: i == 0 ? l10n.billingPaymentMode : null,
+                isDense: true,
+              ),
+              items: [
+                for (final m in _payModes)
+                  if (!taken.contains(m))
+                    DropdownMenuItem(
+                        value: m,
+                        child: Text(paymentModeLabel(l10n, m),
+                            maxLines: 1, overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: (v) {
+                if (v != null) _setPayMode(row, v);
+              },
+            ),
+          ),
+          const SizedBox(width: AppSpacing.space8),
+          Expanded(
+            flex: 4,
+            child: TextField(
+              controller: row.amountController,
+              focusNode: row.focus,
+              textAlign: TextAlign.right,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+              ],
+              onTap: () => _selectAllPayAmount(row),
+              decoration: InputDecoration(
+                labelText: i == 0 ? l10n.billingChargeAmount : null,
+                isDense: true,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.space4),
+          if (i == 0)
+            IconButton(
+              tooltip: l10n.billingAddPayment,
+              onPressed: _canAddPayRow ? _addPayRow : null,
+              icon: const Icon(Icons.add_circle_outline),
+              color: AppColors.primary,
+              visualDensity: VisualDensity.compact,
+            )
+          else
+            IconButton(
+              tooltip: l10n.commonRemove,
+              onPressed: () => _removePayRow(row),
+              icon: const Icon(Icons.close, size: 20),
+              color: AppColors.textSecondary,
+              visualDensity: VisualDensity.compact,
+            ),
+        ],
       ),
     );
   }
@@ -1297,8 +1733,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final total = subtotal + effectiveTax + _chargesTotal();
     final roundOff =
         computeRoundOff(total - discountAmt, ref.read(roundOffEnabledProvider));
-    final prevDue = _settlePrevCredit ? _prevCreditDue : 0.0;
-    return total - discountAmt + roundOff + prevDue;
+    // Old dues ticked for collection are handed over with this bill.
+    return total - discountAmt + roundOff + _collectTotal;
   }
 
   /// Queues a brand-new draft locally while offline and shows it optimistically.
@@ -1376,7 +1812,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'additional_charges':
             charges.isEmpty ? null : BillCharge.encode(charges),
         'total': total,
-        'payment_mode': _paymentMode,
+        'payment_mode': _draftMode,
         'items_json': jsonEncode(lineItems),
         'created_at': DateTime.now().millisecondsSinceEpoch,
       });
@@ -1398,7 +1834,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         chargesAmount: chargesTotal,
         additionalCharges: charges,
         total: total,
-        paymentMode: _paymentMode,
+        paymentMode: _draftMode,
         status: 'draft',
         createdByUserId: userId,
         createdAt: DateTime.now(),
@@ -1547,7 +1983,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           result = await createBill({
             'items': payload,
             'table_id': tableId,
-            'payment_mode': _paymentMode,
+            'payment_mode': _draftMode,
             'status': 'draft',
             if (customerName != null) 'customer_name': customerName,
             if (customerPhone != null) 'customer_phone': customerPhone,
@@ -1610,7 +2046,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (!_validateCharges()) return;
     // Remember these descriptions for next time's suggestions (best-effort).
     unawaited(_rememberUsedCharges());
-    if (!_validateCreditCustomer()) return;
+    if (!_validatePayment()) return;
 
     // Finalizing an OFFLINE draft ('LOCAL-…'): the draft only exists in this
     // device's queue, so there is no server bill to finalize against.
@@ -1684,6 +2120,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// offline" and "went offline mid-request" paths.
   Future<void> _billOfflineAndSync(List<CartEntry> cart,
       {void Function(Bill)? onBillReady}) async {
+    // Old dues are paid off on the server together with this bill. Saving
+    // the bill alone offline would silently drop them — nothing was committed
+    // online, so stop and let the cashier retry once connected.
+    if (_collectTotal > 0) {
+      if (mounted) {
+        _showSnack(context.l10n.billingCollectNeedsInternet, isError: true);
+      }
+      return;
+    }
     await _generateBillOffline(cart, onBillReady: onBillReady);
     unawaited(SyncService.instance.syncAll().then((_) {
       ref.invalidate(reportProvider);
@@ -1748,10 +2193,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _generateBillAndWhatsApp() async {
-    await _generateBill(onBillReady: (bill) {
-      _navigateAfterBill();
-      _sendBillWhatsApp(bill);
-    });
+    _announceSave = false;
+    try {
+      await _generateBill(onBillReady: (bill) {
+        _navigateAfterBill();
+        _sendBillWhatsApp(bill);
+      });
+    } finally {
+      _announceSave = true;
+    }
   }
 
   /// Park the unfinished cart. Wrapped so the row and the wide layout share one
@@ -1770,7 +2220,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Every settle path runs the credit guard first, so no finish can bypass the
   /// name/phone a credit bill requires.
   void _settle({required bool inSheet, bool? withReceipt}) {
-    if (!_validateCreditCustomer()) return;
+    if (!_validatePayment()) return;
     final canPrint = ref.read(printReadyProvider);
     final wantsPrint = (withReceipt ?? true) && canPrint;
     if (inSheet) Navigator.pop(context);
@@ -1794,7 +2244,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void _settleWhatsApp({required bool inSheet}) {
     // Both guards run BEFORE anything is finalized: a missing phone must not
     // leave a settled bill with nowhere to send it.
-    if (!_validateCreditCustomer()) return;
+    if (!_validatePayment()) return;
     if (!_ensureCustomerPhoneForWhatsApp()) return;
     if (inSheet) Navigator.pop(context);
     _generateBillAndWhatsApp();
@@ -2041,13 +2491,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     // Not a complete number (or changed away): drop any stale banner.
     if (!RegExp(r'^\d{10}$').hasMatch(phone)) {
-      if (_prevCreditDue > 0 || _prevCreditPhone != null) {
-        setState(() {
-          _prevCreditDue = 0;
-          _prevCreditBillIds = const [];
-          _prevCreditPhone = null;
-          _settlePrevCredit = false;
-        });
+      if (_prevDueLines.isNotEmpty || _prevCreditPhone != null) {
+        setState(_clearPrevDue);
         _sheetSetState?.call(() {});
       }
       return;
@@ -2065,19 +2510,63 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final summary = await getCreditSummary(phone);
       // The user may have edited the phone while the request was in flight.
       if (!mounted || _customerPhoneController.text.trim() != phone) return;
-      final due = double.tryParse('${summary['outstanding'] ?? 0}') ?? 0.0;
-      final ids = (summary['bill_ids'] as List?)?.cast<String>() ?? const [];
+      // One line per unpaid bill, oldest first. Nothing is ticked: the
+      // cashier opts in per bill.
+      final lines = [
+        for (final b in (summary['bills'] as List? ?? const []).whereType<Map>())
+          if ((double.tryParse('${b['due']}') ?? 0.0) > 0.004)
+            _newPrevDueLine(
+              billId: '${b['id']}',
+              billNumber: '${b['bill_number'] ?? ''}',
+              createdAt: DateTime.tryParse('${b['created_at']}'),
+              due: double.tryParse('${b['due']}') ?? 0.0,
+            ),
+      ];
       setState(() {
+        _clearPrevDue();
         _prevCreditPhone = phone;
-        _prevCreditDue = due;
-        _prevCreditBillIds = ids;
-        // Default the toggle off; the cashier opts in per bill.
-        _settlePrevCredit = false;
+        _prevDueLines = lines;
       });
       _sheetSetState?.call(() {});
     } catch (_) {
       // Best-effort: a failed lookup just means no banner. Don't disrupt billing.
     }
+  }
+
+  _PrevDueLine _newPrevDueLine({
+    required String billId,
+    required String billNumber,
+    required DateTime? createdAt,
+    required double due,
+  }) {
+    final line = _PrevDueLine(
+        billId: billId, billNumber: billNumber, createdAt: createdAt, due: due);
+    // Typing an amount moves the payable, so the payment rows follow it.
+    line.amountController.addListener(_onPayRowsChanged);
+    return line;
+  }
+
+  /// Tick or untick an old bill: ticking fills in everything it owes, which
+  /// the cashier can lower to collect only part of it.
+  void _togglePrevDue(_PrevDueLine line, bool on) {
+    line.on = on;
+    if (on && line.amountController.text.trim().isEmpty) {
+      line.amountController.text = _fmtPayAmount(line.due);
+    }
+    _onPayRowsChanged();
+  }
+
+  /// Forgets the looked-up old bills (phone changed, or the bill was settled
+  /// and their dues have moved). Call inside setState.
+  void _clearPrevDue() {
+    final old = _prevDueLines;
+    _prevDueLines = const [];
+    _prevCreditPhone = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final l in old) {
+        l.dispose();
+      }
+    });
   }
 
   /// Clears the inline credit error once both name + phone are filled in, so
@@ -2093,7 +2582,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// A credit (udhaari) bill must identify the debtor: name + phone are
   /// mandatory. Reveals and focuses the customer fields if either is missing.
   bool _validateCreditCustomer() {
-    if (_paymentMode != 'credit') {
+    if (!_hasCreditPart) {
       if (_creditError != null) _setCreditError(null);
       return true;
     }
@@ -2131,8 +2620,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void _onBillSaved(Bill bill) {
     // Stock, history and (for a table order) the table's state all changed.
     _refreshAfterBill(bill);
-    final label = bill.billNumber.isEmpty ? '' : bill.billNumber;
-    _showGlobalSnack(context.l10n.billingBillSaved(label));
+    unawaited(_recordModeUse(bill));
+    if (_announceSave) {
+      _showGlobalSnack(context.l10n.billingBillSaved(bill.billNumber));
+    }
   }
 
   /// Refresh every view a finalized sale invalidates, so the app reflects the
@@ -2149,7 +2640,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // low-stock badges are current.
     ref.read(itemsProvider.notifier).refreshInBackground();
     // A credit (udhaari) sale changes what the customer owes.
-    if (bill.paymentMode == 'credit' || _settlePrevCredit) {
+    if (bill.paymentMode == 'credit' ||
+        bill.creditAmount != null ||
+        bill.collected.isNotEmpty) {
       ref.read(creditCustomersProvider.notifier).refreshSilently();
     }
   }
@@ -2191,7 +2684,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         );
         // The mode selected NOW, not the one the draft was parked with.
         result = await finalizeBill(widget.activeBillId!,
-            paymentMode: _paymentMode);
+            paymentMode: _paymentMode,
+            payments: _splitPaymentsJson,
+            collect: _collectMap);
       } else {
         final draft = await createBill({
           'items': _cartPayload,
@@ -2200,47 +2695,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'customer_name': _customerNameController.text.trim(),
           if (_customerPhoneController.text.trim().isNotEmpty)
             'customer_phone': _customerPhoneController.text.trim(),
-          'payment_mode': _paymentMode,
+          'payment_mode': _draftMode,
           'status': 'draft',
           if (_discountAmtController.text.trim().isNotEmpty)
             'discount_amount': double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
           if (additionalCharges.isNotEmpty)
             'additional_charges': additionalCharges,
         });
-        result = await finalizeBill(draft['id'], paymentMode: _paymentMode);
+        result = await finalizeBill(draft['id'],
+            paymentMode: _paymentMode,
+            payments: _splitPaymentsJson,
+            collect: _collectMap);
       }
+      // Old dues ticked for collection were paid off by the server in the
+      // same transaction, and this bill carries them as "Prev. due" lines —
+      // no separate receipt for the old bills.
       final bill = Bill.fromJson(result);
-
-      // If the cashier opted to clear this customer's previous credit, settle
-      // those unpaid bills with the SAME payment mode as this bill. The current
-      // bill itself is separate. Best-effort: a settle failure is surfaced but
-      // doesn't undo the finalized sale.
-      if (_settlePrevCredit &&
-          _prevCreditBillIds.isNotEmpty &&
-          _paymentMode != 'credit') {
-        final idsToSettle = List<String>.from(_prevCreditBillIds);
-        final settleMode = _paymentMode;
-        try {
-          final res = await settleCreditBills(idsToSettle, settleMode);
-          // Keep the settled bills so the print/WhatsApp action can handle each
-          // on its own (bills are never merged). Stamp the settled mode so a
-          // printed receipt shows how it was collected, not "Credit".
-          _justSettledPrevBills = (res['bills'] as List? ?? [])
-              .map((j) {
-                final b = Bill.fromJson(j as Map<String, dynamic>);
-                return _copyBillWithMode(b, settleMode);
-              })
-              .toList();
-          _prevCreditBillIds = const [];
-          _prevCreditDue = 0;
-          _settlePrevCredit = false;
-          _prevCreditPhone = null;
-        } catch (e) {
-          if (mounted) {
-            _showSnack(l10n.creditSettleFailed, isError: true);
-          }
-        }
-      }
+      if (bill.collected.isNotEmpty) setState(_clearPrevDue);
 
       // Cache the invoice prefix from the authoritative bill number (e.g. the
       // 'INV' in 'INV-0007'), so offline receipts reuse the same prefix.
@@ -2263,7 +2734,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _discountPctController.clear();
       _discountAmtController.clear();
       _clearCharges();
-      setState(() => _paymentMode = 'cash');
+      setState(() => _resetPayRows());
       ref.invalidate(reportProvider);
       // billsProvider is invalidated by _refreshAfterBill below — doing it here
       // too meant two history fetches per settle.
@@ -2471,6 +2942,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'total': total,
         'round_off': roundOff,
         'payment_mode': _paymentMode,
+        'payments': _splitPayments == null
+            ? null
+            : jsonEncode(_splitPaymentsJson),
         'items_json': jsonEncode(lineItems),
         'created_at': DateTime.now().millisecondsSinceEpoch,
       });
@@ -2492,6 +2966,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         total: total,
         roundOff: roundOff,
         paymentMode: _paymentMode,
+        payments: _splitPayments ?? const [],
+        creditAmount: _splitCreditAmount,
         status: 'finalized',
         createdByUserId: userId,
         createdAt: DateTime.now(),
@@ -2516,7 +2992,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _discountPctController.clear();
       _discountAmtController.clear();
       _clearCharges();
-      setState(() => _paymentMode = 'cash');
+      setState(() => _resetPayRows());
       // Deduct the sold quantities from the LOCAL item cache. The server does
       // this on sync, but until then the cached stock is the only figure the
       // app has — without this an offline sale leaves stock unchanged, so the
@@ -2536,29 +3012,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       if (mounted) setState(() => _generatingBill = false);
     }
   }
-
-  /// Copy of [bill] with [mode] as its payment mode, so a settled credit bill's
-  /// printed receipt shows how it was collected instead of "Credit". Nothing is
-  /// merged — this is one bill.
-  Bill _copyBillWithMode(Bill bill, String mode) => Bill(
-        id: bill.id,
-        businessId: bill.businessId,
-        billNumber: bill.billNumber,
-        tableId: bill.tableId,
-        tableNumber: bill.tableNumber,
-        customerName: bill.customerName,
-        customerPhone: bill.customerPhone,
-        subtotal: bill.subtotal,
-        taxAmount: bill.taxAmount,
-        discountAmount: bill.discountAmount,
-        total: bill.total,
-        paymentMode: mode,
-        status: bill.status,
-        paymentStatus: 'paid',
-        createdByUserId: bill.createdByUserId,
-        createdAt: bill.createdAt,
-        items: bill.items,
-      );
 
   /// Build an in-memory [Bill] from the current cart + customer fields for
   /// preview/printing, WITHOUT queuing or saving it. Mirrors the totals and
@@ -2619,6 +3072,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       roundOff: computeRoundOff(
           total - discountAmt, ref.read(roundOffEnabledProvider)),
       paymentMode: _paymentMode,
+      payments: _splitPayments ?? const [],
+      creditAmount: _splitCreditAmount,
+      collected: _collectedDues,
       status: 'preview',
       createdByUserId: '',
       createdAt: DateTime.now(),
@@ -2699,14 +3155,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final g = profile['gst_number'] ?? '';
       gstin = g.isNotEmpty ? g : null;
     }
-    // Consume any previous credit bills that were settled with this bill —
-    // each prints as its OWN receipt (never merged), one tap prints them all.
-    // ReceiptOutput routes to thermal (printBills) or an A5/A4 PDF per the
-    // chosen paper size; thermal settles the BT link between jobs.
-    final prevBills = _justSettledPrevBills;
-    _justSettledPrevBills = const [];
+    // One receipt: old dues collected with this bill print on it as "Prev.
+    // due" lines, not as receipts of their own. ReceiptOutput routes to
+    // thermal (printBills) or an A5/A4 PDF per the chosen paper size.
     try {
-      await ReceiptOutput.emit([bill, ...prevBills],
+      await ReceiptOutput.emit([bill],
           businessName: businessName,
           businessAddress: address,
           businessPhone: phone,
@@ -2729,64 +3182,49 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  /// Sends the receipt and shows ONE snack that confirms both the save and the
+  /// send (the save snack is suppressed for this flow — see [_announceSave]).
+  /// Queued snacks only show once the previous one times out, which made the
+  /// separate "sent" snack look like a delayed send.
   Future<void> _sendBillWhatsApp(Bill bill) async {
     final l10n = context.l10n;
-    // Also handle each settled previous credit bill's receipt separately.
-    final prevBills = _justSettledPrevBills;
-    _justSettledPrevBills = const [];
+    final number = bill.billNumber;
     try {
       // --- API-template send (WhatsApp Business API) — disabled for now ---
       // await sendBillWhatsApp(bill.id);
-      // for (final b in prevBills) {
-      //   await sendBillWhatsApp(b.id);
-      // }
 
-      // Deep-link send: open the user's own WhatsApp with a prefilled message
-      // to the customer's number. The cashier taps Send. Opening several chats
-      // at once isn't possible, so we open the current bill; any settled
-      // previous bills open in sequence after a short gap.
-      await _openWhatsAppForBill(bill.id);
-      for (final b in prevBills) {
-        await Future.delayed(const Duration(milliseconds: 300));
-        await _openWhatsAppForBill(b.id);
-      }
-    } on ApiException catch (e) {
-      if (mounted) {
-        _showSnack(l10n.billingWhatsappFailedWithError(e.message),
-            isError: true);
-      }
-    } catch (_) {
-      if (mounted) _showSnack(l10n.billingWhatsappFailed, isError: true);
+      // API mode sends server-side; deeplink mode opens the cashier's
+      // WhatsApp, where they still tap Send — so that's only "saved".
+      final sent = await _openWhatsAppForBill(bill.id);
+      _showGlobalSnack(sent
+          ? l10n.billingBillSavedAndSent(number)
+          : l10n.billingBillSaved(number));
+    } catch (e) {
+      // The sale IS recorded — say so alongside why WhatsApp failed.
+      final reason = e is ApiException ? e.message : '$e';
+      _showGlobalSnack(l10n.billingBillSavedWhatsappFailed(number, reason),
+          isError: true);
     }
   }
 
   /// Delivers the bill's receipt over WhatsApp. The backend decides by the
-  /// business's mode: 'api' (paid) sends the template server-side — we just
-  /// confirm; 'deeplink' (free) returns phone + message and we open the
-  /// cashier's WhatsApp (whatsapp:// first, then wa.me).
-  Future<void> _openWhatsAppForBill(String billId) async {
+  /// business's mode: 'api' (paid) sends the template server-side; 'deeplink'
+  /// (free) returns phone + message and we open the cashier's WhatsApp
+  /// (whatsapp:// first, then wa.me). Returns true when the backend already
+  /// sent it; throws when it could be neither sent nor opened.
+  Future<bool> _openWhatsAppForBill(String billId) async {
     final data = await whatsAppBill(billId);
 
     // Paid API mode: backend already sent it. Nothing to open.
     if (data['mode'] == 'api') {
-      if (data['sent'] == true) {
-        if (mounted) _showSnack(context.l10n.billingWhatsappSent);
-      } else if (mounted) {
-        _showSnack(
-          (data['error'] ?? context.l10n.billingWhatsappFailed).toString(),
-          isError: true,
-        );
-      }
-      return;
+      if (data['sent'] == true) return true;
+      throw (data['error'] ?? 'Could not send WhatsApp message').toString();
     }
 
     // Free deeplink mode: open the cashier's WhatsApp with the prefilled text.
     final phone = (data['phone'] ?? '').toString();
     final message = (data['message'] ?? '').toString();
-    if (phone.isEmpty) {
-      if (mounted) _showSnack(context.l10n.billingWhatsappFailed, isError: true);
-      return;
-    }
+    if (phone.isEmpty) throw 'No customer phone number';
     final text = Uri.encodeComponent(message);
     final candidates = [
       Uri.parse('whatsapp://send?phone=$phone&text=$text'),
@@ -2798,20 +3236,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       try {
         final ok =
             await launchUrl(uri, mode: LaunchMode.externalApplication);
-        if (ok) return; // opened successfully
+        if (ok) return false; // opened; the cashier taps Send
       } catch (e) {
         lastError = e; // try the next candidate
       }
     }
     // Every strategy failed — surface the real reason so we can diagnose.
-    if (mounted) {
-      _showSnack(
-        lastError != null
-            ? 'WhatsApp could not open: $lastError'
-            : context.l10n.billingWhatsappFailed,
-        isError: true,
-      );
-    }
+    throw 'WhatsApp could not open${lastError != null ? ': $lastError' : ''}';
   }
 
   /// Run a cart change, then warn if that line now exceeds what's in stock.
@@ -3737,59 +4168,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               [
             const Divider(height: 1),
 
-            // Payment mode — placed before customer details so the payment
-            // choice is made first (and, for Credit, prompts for the now-visible
-            // name/phone below). Hidden for servers; taking payment is a
-            // cashier/owner step.
-            if (canFinalize)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
-                  AppSpacing.space16, AppSpacing.space16, 0),
-              child: DropdownButtonFormField<String>(
-                value: _paymentMode,
-                isExpanded: true,
-                decoration: InputDecoration(
-                  labelText: l10n.billingPaymentMode,
-                  prefixIcon: const Icon(Icons.payments_outlined,
-                      size: 18, color: AppColors.textSecondary),
-                ),
-                items: [
-                  DropdownMenuItem(
-                      value: 'cash',
-                      child: Text(l10n.paymentCash,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(
-                      value: 'upi',
-                      child: Text(l10n.paymentUpi,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(
-                      value: 'card',
-                      child: Text(l10n.paymentCard,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  DropdownMenuItem(
-                      value: 'other',
-                      child: Text(l10n.paymentOther,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  // Credit (udhaari): finalize the sale now, collect later.
-                  // Requires customer name + phone (enforced at checkout).
-                  DropdownMenuItem(
-                      value: 'credit',
-                      child: Text(l10n.paymentCredit,
-                          maxLines: 1, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (v) {
-                  setState(() => _paymentMode = v!);
-                  // Leaving credit clears any pending "name/phone required"
-                  // message; the fields are only mandatory for credit.
-                  if (_paymentMode != 'credit' && _creditError != null) {
-                    _setCreditError(null);
-                  } else {
-                    _sheetSetState?.call(() {});
-                  }
-                },
-              ),
-            ),
-
             // Inline credit validation message — shown inside the card (no
             // snackbar, no closing) when a credit bill lacks name/phone.
             if (canFinalize && _creditError != null)
@@ -3909,8 +4287,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
 
             // Previous credit due for this phone — shown below the customer
-            // fields with a toggle to clear it together with the current bill.
-            if (canFinalize && _prevCreditDue > 0)
+            // fields, one line per unpaid bill: tick it to collect it with
+            // this bill, in full or the part typed in.
+            if (canFinalize && _prevDueLines.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                     AppSpacing.space8, AppSpacing.space16, 0),
@@ -3935,7 +4314,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               child: Text(
                                 l10n.billingPrevCreditDue(
                                     _prevCreditDue.toStringAsFixed(2),
-                                    _prevCreditBillIds.length),
+                                    _prevDueLines.length),
                                 style: const TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
@@ -3945,22 +4324,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ],
                         ),
                       ),
-                      SwitchListTile(
-                        dense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.space12),
-                        value: _settlePrevCredit,
-                        // Selected color comes from the theme's switchTheme; no
-                        // per-widget override (the param name differs across
-                        // Flutter versions — activeColor vs activeThumbColor).
-                        title: Text(l10n.billingClearPrevCredit,
-                            style: const TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.w600)),
-                        onChanged: (v) {
-                          setState(() => _settlePrevCredit = v);
-                          _sheetSetState?.call(() {});
-                        },
-                      ),
+                      for (final line in _prevDueLines)
+                        _buildPrevDueLine(l10n, line),
+                      const SizedBox(height: AppSpacing.space4),
                     ],
                   ),
                 ),
@@ -4128,11 +4494,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   // matching the backend. 0 when the business has it disabled.
                   final roundOff = computeRoundOff(
                       total - discountAmt, ref.watch(roundOffEnabledProvider));
-                  // When "clear previous credit" is on, the old due is added to
-                  // this bill's payable, so the customer pays one combined
-                  // amount and those old bills are settled on finalize.
-                  final prevDue =
-                      _settlePrevCredit ? _prevCreditDue : 0.0;
+                  // Old dues ticked for collection are added to this bill's
+                  // payable, one "Prev. due · Bill 0007" row each, so the
+                  // customer pays one combined amount; the server pays the old
+                  // bills off when this one is settled.
+                  final collected = _collectedDues;
+                  final prevDue = _collectTotal;
                   final netPayable = total - discountAmt + roundOff + prevDue;
                   return Container(
                     decoration: BoxDecoration(
@@ -4359,9 +4726,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             ),
                           ),
                         ],
-                        // Previous Due row — added to payable when the toggle
-                        // above is on.
-                        if (prevDue > 0) ...[
+                        // Prev. due rows — one per old bill being collected,
+                        // like the GST rows, each added to the payable.
+                        for (final c in collected) ...[
                           const Divider(height: 1),
                           Padding(
                             padding: const EdgeInsets.symmetric(
@@ -4370,7 +4737,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               children: [
                                 Expanded(
                                   child: Text(
-                                    l10n.billingPreviousDue,
+                                    '${l10n.billingPreviousDue} · ${l10n.billingPrevDueBill(c.displayNumber)}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
@@ -4380,7 +4747,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 ),
                                 const SizedBox(width: AppSpacing.space8),
                                 Text(
-                                  '+ ₹${prevDue.toStringAsFixed(2)}',
+                                  '+ ₹${c.amount.toStringAsFixed(2)}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   textAlign: TextAlign.right,
@@ -4454,6 +4821,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   );
                 }),
               ),
+
+            // Payment — directly above the actions: [mode][amount][+]. One row
+            // is an ordinary bill; "+" splits it, the new row taking whatever
+            // is still unpaid. Hidden for servers; taking payment is a
+            // cashier/owner step.
+            if (canFinalize) _buildPaymentRows(l10n),
 
             // ONE action row: Hold · WhatsApp · Settle, then the printer's
             // state on the line below.
@@ -6223,6 +6596,59 @@ class _GridBtn extends StatelessWidget {
   }
 }
 
+
+/// One of the customer's unpaid credit bills, offered for collection with the
+/// bill being rung up: ticked ([on]) to collect [amount] of its [due] — all of
+/// it by default, or the part the cashier types.
+class _PrevDueLine {
+  final String billId;
+  final String billNumber;
+  final DateTime? createdAt;
+  final double due;
+  bool on = false;
+  final amountController = TextEditingController();
+
+  _PrevDueLine({
+    required this.billId,
+    required this.billNumber,
+    required this.createdAt,
+    required this.due,
+  });
+
+  /// What is collected now: 0 unless ticked, else what was typed. Not lowered
+  /// to [due] — that silently collected less than the cashier entered; more
+  /// than is owed is refused instead ([tooMuch]), as the server does.
+  double get collect {
+    if (!on) return 0;
+    final v = double.tryParse(amountController.text.trim()) ?? 0.0;
+    return double.parse((v < 0 ? 0 : v).toStringAsFixed(2));
+  }
+
+  bool get tooMuch => collect > due + 0.004;
+
+  String get displayNumber => stripBillPrefix(billNumber);
+
+  void dispose() => amountController.dispose();
+}
+
+/// One payment row in the cart panel: a mode and how much of the bill it pays.
+/// Owns its controller and focus node so rows can come and go independently;
+/// [key] lets the panel scroll the row above the keyboard.
+class _PayRow {
+  String mode;
+  final amountController = TextEditingController();
+  final focus = FocusNode();
+  final key = GlobalKey();
+
+  _PayRow(this.mode);
+
+  double get amount => double.tryParse(amountController.text.trim()) ?? 0.0;
+
+  void dispose() {
+    amountController.dispose();
+    focus.dispose();
+  }
+}
 
 /// One additional-charge row in the cart panel: a description ("Delivery")
 /// and an amount. Owns its own controllers and focus nodes so rows can be

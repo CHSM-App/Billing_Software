@@ -526,4 +526,34 @@ async function sendCampaignMessage({ phone, shopName, message }) {
     : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
 }
 
-module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendOnboardingAlert, sendDemoRequest, sendCampaignMessage, campaignText }
+// ─────────────────────────────────────────────────────────────────────────────
+// sendReceiptLink — the one api/deeplink decision every "send receipt on
+// WhatsApp" endpoint shares (a bill, a credit settlement). Returns the HTTP
+// { status, body } for the route to send:
+//   'api'      (paid) — sent here via the template; failure is reported, with
+//                       NO deeplink fallback (paid tier is API-only).
+//   'deeplink' (free) — { mode:'deeplink', phone, message } for the app to
+//                       open the cashier's own WhatsApp with.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendReceiptLink({ whatsappMode, phone, shopName, billNumber, receiptUrl, message }) {
+  if (whatsappMode === 'api') {
+    const result = await sendBillLink({ phone, shopName, billNumber, receiptUrl })
+    if (result.sent) {
+      return { status: 200, body: { mode: 'api', sent: true, campaign_id: result.campaignId } }
+    }
+    if (result.skipped) {
+      return { status: 503, body: { mode: 'api', sent: false, error: 'WhatsApp API sending is disabled' } }
+    }
+    return {
+      status: 502,
+      body: { mode: 'api', sent: false, error: result.error || 'Failed to send WhatsApp message' },
+    }
+  }
+  return {
+    status: 200,
+    body: { mode: 'deeplink', phone: normalisePhone(phone), message, receipt_url: receiptUrl },
+  }
+}
+
+module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendReceiptLink, sendOnboardingAlert, sendDemoRequest, sendCampaignMessage, campaignText }

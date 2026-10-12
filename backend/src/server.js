@@ -97,6 +97,23 @@ app.use('/uploads', express.static(UPLOADS_DIR, {
   fallthrough: true,
 }));
 
+// The item list shared by the customer pages (/order table QR, /store). Under
+// /order so the canonical-host redirect leaves it alone, and registered before
+// that router so it is not taken for a QR token. Read + sent by hand for the
+// same iisnode reason as the pages themselves (see routes/public_order.js).
+const MENU_LIST_JS = path.join(__dirname, 'static', '_shared', 'menu-list.js');
+app.get('/order/menu-list.js', (req, res) => {
+  require('fs').readFile(MENU_LIST_JS, (err, buf) => {
+    if (err) {
+      logger.error({ err, path: MENU_LIST_JS }, 'menu-list.js read failed');
+      return res.status(500).end();
+    }
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'no-cache');
+    return res.send(buf);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // CORS
 // ---------------------------------------------------------------------------
@@ -150,6 +167,13 @@ app.use(pinoHttp({
   customErrorMessage(req, res, err) {
     return `${req.method} ${req.url} ${res.statusCode} — ${err.message}`;
   },
+  // Default logs every response at info — 5xx included — so filtering by
+  // level missed failed requests entirely.
+  customLogLevel(req, res, err) {
+    if (err || res.statusCode >= 500) return 'error';
+    if (res.statusCode >= 400) return 'warn';
+    return 'info';
+  },
   // Suppress noisy health-check pings
   autoLogging: {
     ignore(req) {
@@ -168,6 +192,10 @@ app.use(pinoHttp({
     censor: '[REDACTED]',
   },
 }));
+
+// Tag every log line written while serving this request with its id (see
+// logger.js mixin). Must follow pinoHttp, which assigns req.id.
+app.use((req, res, next) => logger.requestContext.run(req, next));
 
 // Admin item import posts a whole spreadsheet — past the 100kb default. Parsed
 // here first so the global parser below skips it (body already read).
@@ -196,10 +224,21 @@ async function healthHandler(req, res) {
   try {
     await poolConnect;
     await pool.request().query('SELECT 1');
-    res.json({ ok: true, db: 'connected', ts: new Date().toISOString() });
+    res.json({
+      ok: true,
+      db: 'connected',
+      uptime_s: Math.round(process.uptime()),
+      // Only readable once connected — safe here, after SELECT 1 succeeded.
+      pool: { size: pool.size, available: pool.available, borrowed: pool.borrowed, pending: pool.pending },
+      ts: new Date().toISOString(),
+    });
   } catch (err) {
-    logger.error({ err }, 'health check failed');
-    res.status(500).json({ ok: false, db: 'error', error: err.message });
+    // Connect failures are already logged once per attempt in db.js; logging
+    // them again here repeated the same stack on every client probe.
+    if (err.name !== 'ConnectionError') logger.error({ err }, 'health check failed');
+    // 503 = up but not ready. Clients only treat 200/429 as online (api.dart
+    // checkReachable). The DB host:port in err.message stays in the logs.
+    res.status(503).json({ ok: false, db: 'error', ts: new Date().toISOString() });
   }
 }
 
@@ -279,6 +318,19 @@ const PORT = process.env.PORT || 3000;
 // live process. The DB pool connects eagerly in db.js and routes will queue
 // until it is ready. Tests require() this file and set NODE_ENV=test.
 if (process.env.NODE_ENV !== 'test') {
+  // Log instead of crashing: an iisnode restart mid-outage just lands the new
+  // process in the same outage, and the crash itself left no trace.
+  process.on('unhandledRejection', (err) => {
+    logger.error({ err }, 'unhandled promise rejection');
+  });
+  // Still exit (state is unknown after a throw), but record why in the app log
+  // first — otherwise the reason only reached iisnode's stderr file. pino
+  // flushes its transport on exit.
+  process.on('uncaughtException', (err) => {
+    logger.fatal({ err }, 'uncaught exception');
+    process.exit(1);
+  });
+
   const server = app.listen(PORT, '0.0.0.0', () => {
     logger.info({ port: PORT }, 'server listening');
   });

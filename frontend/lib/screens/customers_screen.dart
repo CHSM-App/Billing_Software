@@ -1537,7 +1537,7 @@ class _CustomerBillsScreenState extends ConsumerState<CustomerBillsScreen> {
               title: Text(bill.billNumber,
                   style: const TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Text(
-                '${_dateFmt.format(bill.createdAt.toLocal())} · '
+                '${_dateFmt.format(bill.billDate.toLocal())} · '
                 '${l10n.openOrdersItemCount(itemCount.toInt())} · '
                 '${bill.paymentMode.toUpperCase()}',
                 style: const TextStyle(color: AppColors.textPrimary),

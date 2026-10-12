@@ -128,11 +128,10 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
       // Unsynced offline bills first (most recent, still local), then server
       // bills. De-dupe by id so a just-synced bill doesn't appear twice.
       final serverIds = server.map((b) => b.id).toSet();
-      final merged = [
+      return _newestFirst([
         ...offline.where((b) => !serverIds.contains(b.id)),
         ...server,
-      ];
-      return merged;
+      ]);
     } catch (e) {
       // Show the locally-queued offline bills (instead of an error screen) when
       // we can't reach a working server — either a genuine network outage, or
@@ -144,14 +143,19 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
           (e is api.ApiException && e.statusCode >= 500)) {
         final cached = await _cachedServerBillsInRange(filter);
         final offlineIds = offline.map((b) => b.id).toSet();
-        return [
+        return _newestFirst([
           ...offline,
           ...cached.where((b) => !offlineIds.contains(b.id)),
-        ];
+        ]);
       }
       rethrow;
     }
   }
+
+  /// History order: by [Bill.billDate], newest first — the server's order, with
+  /// local offline bills slotted in where they belong.
+  List<Bill> _newestFirst(List<Bill> bills) =>
+      bills..sort((a, b) => b.billDate.compareTo(a.billDate));
 
   /// Persist raw server bill JSON so history survives going offline.
   Future<void> _cacheServerBills(List<dynamic> data) async {
@@ -173,7 +177,7 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
         .add(const Duration(days: 1));
     final q = filter.search?.trim().toLowerCase();
     return rows.map((j) => Bill.fromJson(j)).where((b) {
-      if (b.createdAt.isBefore(start) || !b.createdAt.isBefore(end)) return false;
+      if (b.billDate.isBefore(start) || !b.billDate.isBefore(end)) return false;
       if (q != null && q.isNotEmpty) {
         final hay = '${b.billNumber} ${b.customerName ?? ''} '
                 '${b.customerPhone ?? ''}'
@@ -196,7 +200,7 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
         .add(const Duration(days: 1));
     final q = filter.search?.trim().toLowerCase();
     return all.where((b) {
-      if (b.createdAt.isBefore(start) || !b.createdAt.isBefore(end)) return false;
+      if (b.billDate.isBefore(start) || !b.billDate.isBefore(end)) return false;
       if (q != null && q.isNotEmpty) {
         final hay = '${b.billNumber} ${b.customerName ?? ''} '
                 '${b.customerPhone ?? ''}'
@@ -251,6 +255,7 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
         status: status,
         createdByUserId: b.createdByUserId,
         createdAt: b.createdAt,
+        finalizedAt: b.finalizedAt,
         items: b.items,
       );
 }

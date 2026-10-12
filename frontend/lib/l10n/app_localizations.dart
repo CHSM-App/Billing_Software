@@ -1958,6 +1958,66 @@ abstract class AppLocalizations {
   /// **'Thank you, visit again!'**
   String get receiptThankYou;
 
+  /// No description provided for @receiptPaymentReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'PAYMENT RECEIPT'**
+  String get receiptPaymentReceipt;
+
+  /// No description provided for @receiptSettledInvoices.
+  ///
+  /// In en, this message translates to:
+  /// **'Settled Invoices'**
+  String get receiptSettledInvoices;
+
+  /// No description provided for @receiptColInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice'**
+  String get receiptColInvoice;
+
+  /// No description provided for @receiptColDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Date'**
+  String get receiptColDate;
+
+  /// No description provided for @receiptColBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill'**
+  String get receiptColBill;
+
+  /// No description provided for @receiptColPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid'**
+  String get receiptColPaid;
+
+  /// No description provided for @receiptColBalance.
+  ///
+  /// In en, this message translates to:
+  /// **'Balance'**
+  String get receiptColBalance;
+
+  /// No description provided for @receiptBalDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Bal due'**
+  String get receiptBalDue;
+
+  /// No description provided for @receiptTotalPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Total paid'**
+  String get receiptTotalPaid;
+
+  /// No description provided for @receiptTotalReceived.
+  ///
+  /// In en, this message translates to:
+  /// **'TOTAL RECEIVED'**
+  String get receiptTotalReceived;
+
   /// No description provided for @receiptDefaultBusiness.
   ///
   /// In en, this message translates to:
@@ -2281,6 +2341,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Bill {number} saved'**
   String billingBillSaved(String number);
+
+  /// No description provided for @billingBillSavedAndSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill {number} saved & sent to customer'**
+  String billingBillSavedAndSent(String number);
+
+  /// No description provided for @billingBillSavedWhatsappFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill {number} saved, but WhatsApp failed: {error}'**
+  String billingBillSavedWhatsappFailed(String number, String error);
 
   /// No description provided for @billingPrintFailed.
   ///
@@ -2659,6 +2731,108 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Other'**
   String get paymentOther;
+
+  /// No description provided for @paymentSplit.
+  ///
+  /// In en, this message translates to:
+  /// **'Split'**
+  String get paymentSplit;
+
+  /// No description provided for @billingAddPayment.
+  ///
+  /// In en, this message translates to:
+  /// **'Add payment'**
+  String get billingAddPayment;
+
+  /// No description provided for @billingPayRemaining.
+  ///
+  /// In en, this message translates to:
+  /// **'Remaining {amount}'**
+  String billingPayRemaining(String amount);
+
+  /// No description provided for @billingPayExtra.
+  ///
+  /// In en, this message translates to:
+  /// **'{amount} extra'**
+  String billingPayExtra(String amount);
+
+  /// No description provided for @billingSplitMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Payments must add up to {amount}'**
+  String billingSplitMismatch(String amount);
+
+  /// No description provided for @billingBalanceDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Balance due'**
+  String get billingBalanceDue;
+
+  /// No description provided for @billingCollectNeedsInternet.
+  ///
+  /// In en, this message translates to:
+  /// **'Collecting old credit needs an internet connection — untick the old bills to save this bill offline'**
+  String get billingCollectNeedsInternet;
+
+  /// No description provided for @billingPrevDueBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill {number}'**
+  String billingPrevDueBill(String number);
+
+  /// No description provided for @billingPrevDueOwes.
+  ///
+  /// In en, this message translates to:
+  /// **'owes {amount}'**
+  String billingPrevDueOwes(String amount);
+
+  /// No description provided for @billingTotalPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get billingTotalPaid;
+
+  /// No description provided for @billingPaidInBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid in Bill {number}'**
+  String billingPaidInBill(String number);
+
+  /// No description provided for @billingPaidOnCredit.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid'**
+  String get billingPaidOnCredit;
+
+  /// No description provided for @creditCollectAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Collect'**
+  String get creditCollectAmount;
+
+  /// Under a collect-amount field when more than the bill owes is typed.
+  ///
+  /// In en, this message translates to:
+  /// **'Max {amount}'**
+  String creditAmountMax(String amount);
+
+  /// No description provided for @billingPrevDueTooMuch.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill {number} owes only {amount}'**
+  String billingPrevDueTooMuch(String number, String amount);
+
+  /// No description provided for @reportsCreditCollected.
+  ///
+  /// In en, this message translates to:
+  /// **'Credit collected'**
+  String get reportsCreditCollected;
+
+  /// No description provided for @billingPrevDueNeedsPayment.
+  ///
+  /// In en, this message translates to:
+  /// **'The previous due of {amount} has to be paid now — it can\'t go on credit'**
+  String billingPrevDueNeedsPayment(String amount);
 
   /// No description provided for @itemsTitle.
   ///
@@ -3627,6 +3801,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{time}  ·  {payment}  ·  {items}'**
   String historyBillMeta(String time, String payment, String items);
+
+  /// Order time of a held bill, shown in history beside the date it was settled.
+  ///
+  /// In en, this message translates to:
+  /// **'Ordered {date}'**
+  String historyOrderedAt(String date);
 
   /// No description provided for @historyVoidBill.
   ///
@@ -4891,7 +5071,7 @@ abstract class AppLocalizations {
   /// No description provided for @printerSetupScanHint.
   ///
   /// In en, this message translates to:
-  /// **'Shows printers already paired in your phone\'s Bluetooth settings. Pair the printer there first, then tap Scan.'**
+  /// **'Shows Bluetooth printers paired in your phone\'s settings and USB printers plugged in. For a Wi-Fi/LAN printer, use Add Wi-Fi / LAN Printer below.'**
   String get printerSetupScanHint;
 
   /// No description provided for @printerSetupTapScan.
@@ -4941,6 +5121,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'USB on Windows requires WinUSB driver installed for the printer'**
   String get printerSetupNoteUsb;
+
+  /// No description provided for @printerSetupNoteNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'Wi-Fi/LAN: the printer and this device must be on the same network. Or join the printer\'s own Wi-Fi and use IP 192.168.223.1'**
+  String get printerSetupNoteNetwork;
+
+  /// No description provided for @printerSetupAddNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'Add Wi-Fi / LAN Printer'**
+  String get printerSetupAddNetwork;
+
+  /// No description provided for @printerSetupNetworkTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Wi-Fi / LAN Printer'**
+  String get printerSetupNetworkTitle;
+
+  /// No description provided for @printerSetupNetworkIp.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer IP address'**
+  String get printerSetupNetworkIp;
+
+  /// No description provided for @printerSetupNetworkIpHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. 192.168.1.50'**
+  String get printerSetupNetworkIpHint;
+
+  /// No description provided for @printerSetupNetworkPort.
+  ///
+  /// In en, this message translates to:
+  /// **'Port'**
+  String get printerSetupNetworkPort;
+
+  /// No description provided for @printerSetupNetworkInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the printer\'s IP address'**
+  String get printerSetupNetworkInvalid;
 
   /// No description provided for @printerSetupPaperSize.
   ///
