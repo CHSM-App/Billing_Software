@@ -4,6 +4,7 @@ class CartEntry {
   final Item item;
   final ItemVariant? variant;
   final double quantity;
+  
 
   const CartEntry({required this.item, this.variant, required this.quantity});
 
