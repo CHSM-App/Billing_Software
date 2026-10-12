@@ -109,6 +109,9 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
+  # Apple rejects an App Store icon with transparency (code 90717) — flatten
+  # alpha onto white for iOS only, Android/Windows/Web keep full transparency.
+  remove_alpha_ios: true
   image_path: "assets/logo.png"
   windows:
     generate: true

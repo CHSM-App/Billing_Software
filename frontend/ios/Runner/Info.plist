@@ -45,5 +45,17 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Vittam needs camera access to take photos of menu items and products.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Vittam needs photo library access to select images for menu items and products.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Vittam uses Bluetooth to connect to your thermal receipt printer.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Vittam uses location to scan for nearby Bluetooth printers, as required by iOS.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>whatsapp</string>
+	</array>
 </dict>
 </plist>

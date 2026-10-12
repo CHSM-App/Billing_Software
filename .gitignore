@@ -48,3 +48,9 @@ frontend/ios/Runner/GoogleService-Info.plist
 # Downloaded by windows-release.yml before compiling installer.iss — not
 # committed, CI fetches the current one from Microsoft on every release build.
 frontend/windows/vc_redist.x64.exe
+
+# iOS signing material generated locally for manual App Store Connect setup —
+# private key/certificate/provisioning profile must never be committed.
+ios_distribution.*
+*.mobileprovision
+*_base64.txt
