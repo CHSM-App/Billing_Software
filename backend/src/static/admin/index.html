@@ -54,6 +54,8 @@
   table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
   thead th{text-align:left;padding:11px 14px;color:var(--muted);font-size:11px;text-transform:uppercase;
     letter-spacing:.6px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--panel2)}
+  thead th[data-sort]{cursor:pointer;user-select:none}
+  thead th[data-sort]:hover{color:var(--text)}
   tbody td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
   tbody tr:last-child td{border-bottom:none}
   tbody tr:hover{background:var(--panel2)}
@@ -157,18 +159,19 @@
       <table>
         <thead>
           <tr>
-            <th>Business</th>
-            <th>Owner</th>
-            <th>Registered</th>
-            <th>Last Active</th>
-            <th>Subscription</th>
-            <th>Expires</th>
-            <th>Staff</th>
-            <th>Bills</th>
-            <th>Items</th>
+            <th>#</th>
+            <th data-sort="name">Business</th>
+            <th data-sort="owner">Owner</th>
+            <th data-sort="created">Registered</th>
+            <th data-sort="last">Last Active</th>
+            <th data-sort="sub">Subscription</th>
+            <th data-sort="expires">Expires</th>
+            <th data-sort="staff">Staff</th>
+            <th data-sort="bills">Bills</th>
+            <th data-sort="items">Items</th>
             <th>Devices</th>
-            <th>WhatsApp</th>
-            <th>Verified</th>
+            <th data-sort="wa">WhatsApp</th>
+            <th data-sort="verified">Verified</th>
             <th></th>
           </tr>
         </thead>
@@ -411,11 +414,24 @@
         || (b.owner_name||'').toLowerCase().indexOf(q)>=0
         || (b.owner_phone||'').toLowerCase().indexOf(q)>=0;
     });
+    if(sortKey){
+      var get = SORTS[sortKey];
+      list.sort(function(a, b){
+        var x = get(a), y = get(b);
+        if(x == null) return y == null ? 0 : 1;   // blanks last, either direction
+        if(y == null) return -1;
+        return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
+      });
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('th[data-sort]'), function(th){
+      th.textContent = th.textContent.replace(/ [▲▼]$/, '')
+        + (th.getAttribute('data-sort')===sortKey ? (sortDir>0 ? ' ▲' : ' ▼') : '');
+    });
 
     var active = all.filter(function(b){ return b.subscription && b.subscription.status==='active'; }).length;
     $('counts').innerHTML = '<b>'+all.length+'</b> businesses &middot; <b>'+active+'</b> active';
 
-    var rows = list.map(function(b){
+    var rows = list.map(function(b, i){
       var sub = b.subscription;
       var dl = sub ? daysLeft(sub.expires_at) : null;
       var expClass = dl!=null && dl<0 ? 'red' : (dl!=null && dl<=3 ? 'amber' : 'gray');
@@ -424,6 +440,7 @@
       var wa = '<span class="chip '+(b.whatsapp_mode==='api'?'blue':'gray')+'">'+esc(b.whatsapp_mode)+'</span>';
       var ver = b.is_verified ? '<span class="chip green">yes</span>' : '<span class="chip red">no</span>';
       return '<tr>'
+        + '<td class="muted">'+(i+1)+'</td>'
         + '<td><div class="biz-name">'+esc(b.name)+'</div><div class="biz-sub">'+esc(b.phone)+' &middot; '+esc(typeLabel(b.business_type))+'</div></td>'
         + '<td>'+esc(b.owner_name||'—')+'<div class="biz-sub">'+esc(b.owner_phone||'')+'</div></td>'
         + '<td>'+fmtDate(b.created_at)+'</td>'
@@ -448,6 +465,31 @@
     });
   }
   $('search').addEventListener('input', render);
+
+  // Click a header to sort by it; click again to flip direction.
+  var sortKey = null, sortDir = 1;
+  function low(v){ return v ? String(v).toLowerCase() : null; }
+  function ts(v){ var t = v ? new Date(v).getTime() : NaN; return isNaN(t) ? null : t; }
+  var SORTS = {
+    name:     function(b){ return low(b.name); },
+    owner:    function(b){ return low(b.owner_name); },
+    created:  function(b){ return ts(b.created_at); },
+    last:     function(b){ return ts(b.last_active_at); },
+    sub:      function(b){ return b.subscription ? low(b.subscription.status) : null; },
+    expires:  function(b){ return b.subscription ? ts(b.subscription.expires_at) : null; },
+    staff:    function(b){ return b.staff_count || 0; },
+    bills:    function(b){ return b.bill_count || 0; },
+    items:    function(b){ return b.item_count || 0; },
+    wa:       function(b){ return low(b.whatsapp_mode); },
+    verified: function(b){ return b.is_verified ? 1 : 0; }
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('th[data-sort]'), function(th){
+    th.addEventListener('click', function(){
+      var k = th.getAttribute('data-sort');
+      if(sortKey === k) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+      render();
+    });
+  });
 
   // Stored value -> what people call it. The type is still restaurant_with_tables
   // in the DB, but there is only one kind of restaurant now.
