@@ -12,6 +12,7 @@ import '../../theme/app_theme.dart';
 /// exact frame the splash settled on, so the hand-off is seamless.
 class SplashLoadingView extends StatelessWidget {
   const SplashLoadingView({super.key});
+  
 
   @override
   Widget build(BuildContext context) {
