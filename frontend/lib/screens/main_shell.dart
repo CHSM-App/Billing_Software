@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/l10n_ext.dart';
@@ -43,6 +44,18 @@ class _MainShellState extends ConsumerState<MainShell>
   late final Animation<double> _railFadeAnim;
   StreamSubscription<String>? _realtimeSub;
   bool _deviceCheckInFlight = false;
+
+  /// Narrow layout: the bottom bar slides away while the user scrolls a page
+  /// down and comes back on the way up (YouTube-style). See [_onPageScroll].
+  final _navShown = AppBottomNavBar.shown;
+  double _navDrift = 0; // px the user has scrolled in the current direction
+  bool _userScrolling = false;
+  int _navShownFor = -1; // tab the bar was last reset for
+  bool _wasCurrent = true; // shell's route was on top at the last build
+
+  /// Scroll this far in one direction before the bar hides/shows, so a
+  /// wobbling thumb doesn't flicker it.
+  static const double _navToggleAfter = 24;
 
   @override
   void initState() {
@@ -388,6 +401,30 @@ class _MainShellState extends ConsumerState<MainShell>
     setState(() => _index = i);
   }
 
+  /// Hide the bottom bar after the user scrolls a page down, show it again
+  /// after scrolling back up or on reaching the top. Only finger-driven scrolls
+  /// (drags and the flings they release) move it — a jump-to-category or other
+  /// programmatic scroll never hides it. Sideways strips are ignored.
+  bool _onPageScroll(ScrollNotification n) {
+    if (n.metrics.axis != Axis.vertical) return false;
+    if (MediaQuery.sizeOf(context).width >= 720) return false; // rail, no bar
+    if (n is UserScrollNotification) {
+      _userScrolling = n.direction != ScrollDirection.idle;
+      _navDrift = 0;
+    } else if (n is ScrollUpdateNotification) {
+      if (n.metrics.extentBefore <= 0) {
+        _navShown.value = true;
+      } else if (_userScrolling && !n.metrics.outOfRange) {
+        // outOfRange: an iOS bounce at either end isn't a change of mind.
+        final d = n.scrollDelta ?? 0;
+        _navDrift = _navDrift.sign == d.sign ? _navDrift + d : d;
+        if (_navDrift > _navToggleAfter) _navShown.value = false;
+        if (_navDrift < -_navToggleAfter) _navShown.value = true;
+      }
+    }
+    return false;
+  }
+
   /// Push the offline queue, then reload everything that went stale offline.
   ///
   /// The refresh runs whether or not the sync succeeded. It used to hang off
@@ -443,6 +480,20 @@ class _MainShellState extends ConsumerState<MainShell>
         _navItems = items;
         final safeIndex = _index.clamp(0, items.length - 1);
         final isWide = MediaQuery.of(context).size.width >= 720;
+        // Coming back from a page pushed over the shell (which has no bottom
+        // bar) also brings the bar back, however it was left on the way in.
+        // isCurrentOf rebuilds the shell when that page pops — at the START of
+        // the pop, so the bar is already there as the page slides away.
+        final isCurrent = ModalRoute.isCurrentOf(context) ?? true;
+        final returned = isCurrent && !_wasCurrent;
+        _wasCurrent = isCurrent;
+        // Every way of landing on a tab (tap, back press, notification) starts
+        // with the bottom bar showing, wherever the last tab left it.
+        if (safeIndex != _navShownFor || isWide || returned) {
+          _navShownFor = safeIndex;
+          _navShown.value = true;
+          _navDrift = 0;
+        }
 
         final inGrace = widget.licenseStatus?.state == LicenseState.grace;
         final graceDays = widget.licenseStatus?.graceDaysRemaining ?? 0;
@@ -458,6 +509,10 @@ class _MainShellState extends ConsumerState<MainShell>
             setState(() => _index = 0);
           },
           child: Scaffold(
+          // Content runs under the floating glass bar (narrow layout). The
+          // Scaffold raises the body's bottom padding by the bar's height, and
+          // tab screens add that padding so nothing ends up hidden behind it.
+          extendBody: true,
           bottomNavigationBar: isWide ? null : _buildBottomNav(items, safeIndex),
           body: Column(
             children: [
@@ -496,9 +551,12 @@ class _MainShellState extends ConsumerState<MainShell>
                         child: _buildRail(items, safeIndex),
                       ),
                     Expanded(
-                      child: IndexedStack(
-                        index: safeIndex,
-                        children: items.map((e) => e.screen).toList(),
+                      child: NotificationListener<ScrollNotification>(
+                        onNotification: _onPageScroll,
+                        child: IndexedStack(
+                          index: safeIndex,
+                          children: items.map((e) => e.screen).toList(),
+                        ),
                       ),
                     ),
                   ],
@@ -565,35 +623,60 @@ class _MainShellState extends ConsumerState<MainShell>
     // bottom safe-area inset; otherwise the nav bar keeps it.
     final banner = ref.watch(connectivityBannerProvider);
     final barVisible = banner != ConnectivityBanner.online;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    // The Scaffold has extendBody, so page content scrolls under this whole
+    // area: a soft dark fade at the screen bottom, with the floating glass
+    // capsule above it. Only the capsule takes taps; the fade and the margins
+    // around the capsule let touches through to the content behind.
+    //
+    // Scrolling down slides this whole area (fade, glass, highlight, strip)
+    // below the screen edge as one piece; while hidden it ignores taps, so
+    // nothing invisible sits over the content. Its layout height is unchanged,
+    // so lists keep their bottom padding and nothing jumps.
+    return HidesWithNavBar(
+      child: Stack(
       children: [
-        Container(
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            border: const Border(top: BorderSide(color: AppColors.border)),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.textPrimary.withValues(alpha: 0.08),
-                blurRadius: 16,
-                offset: const Offset(0, -4),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  // Eased fade: stays clear near the top of the area, then
+                  // deepens towards the screen edge.
+                  colors: [
+                    AppColors.textPrimary.withValues(alpha: 0),
+                    AppColors.textPrimary.withValues(alpha: 0.10),
+                    AppColors.textPrimary.withValues(alpha: 0.28),
+                  ],
+                  stops: const [0, 0.45, 1],
+                ),
               ),
-            ],
-          ),
-          child: SafeArea(
-            top: false,
-            // While the bar is visible it hugs the bottom edge and takes the
-            // inset, so the nav bar must not also pad the bottom (double gap).
-            bottom: !barVisible,
-            child: AppBottomNavBar(
-              items: items,
-              selectedIndex: safeIndex,
-              onDestinationSelected: _onNav,
             ),
           ),
         ),
-        const ConnectivityBar(),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SafeArea(
+              top: false,
+              // While the bar is visible it hugs the bottom edge and takes the
+              // inset, so the capsule must not also pad the bottom (double gap).
+              bottom: !barVisible,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: AppBottomNavBar(
+                  items: items,
+                  selectedIndex: safeIndex,
+                  onDestinationSelected: _onNav,
+                ),
+              ),
+            ),
+            const ConnectivityBar(),
+          ],
+        ),
       ],
+      ),
     );
   }
 }

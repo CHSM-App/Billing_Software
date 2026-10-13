@@ -720,7 +720,8 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       bool gstEnabled = true,
-      ReceiptLabels? labels}) {
+      ReceiptLabels? labels,
+      ui.Image? logo}) {
     // Same content-fitted columns as the ASCII path, so both renderings of a
     // given bill divide the paper identically.
     final p = _fitProfile(basep, bill, gstEnabled, labels);
@@ -756,7 +757,8 @@ class PrinterService {
         cols: p.cols,
         sizeTitle: sizeTitle,
         sizeBody: sizeBody,
-        labels: labels));
+        labels: labels,
+        logo: logo));
 
     // Bill info (label left, value right)
     rows.add(ReceiptRow.cols([
@@ -923,8 +925,10 @@ class PrinterService {
     required double sizeTitle,
     required double sizeBody,
     ReceiptLabels? labels,
+    ui.Image? logo,
   }) {
     final rows = <ReceiptRow>[
+      if (logo != null) ReceiptRow.image(logo),
       ReceiptRow.center(businessName ?? labels?.defaultBusiness ?? 'BUSINESS',
           size: sizeTitle, bold: true),
     ];
@@ -962,7 +966,8 @@ class PrinterService {
       String? businessAddress,
       String? businessGstin,
       String? businessFssai,
-      ReceiptLabels? labels}) {
+      ReceiptLabels? labels,
+      ui.Image? logo}) {
     // Same sizes, and the same 58mm scale-down, as a bill receipt.
     final fs = basep.cols <= _cols58.cols ? 0.85 : 1.0;
     final sizeBody = 26 * fs;
@@ -983,7 +988,8 @@ class PrinterService {
         cols: basep.cols,
         sizeTitle: 34 * fs,
         sizeBody: sizeBody,
-        labels: labels);
+        labels: labels,
+        logo: logo);
 
     ReceiptRow line(String t) =>
         ReceiptRow.cols([ReceiptCell(t, widthFraction: 1.0)], size: sizeBody);
@@ -1126,6 +1132,7 @@ class PrinterService {
       String? businessFssai,
       bool gstEnabled = true,
       ReceiptLabels? labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     final profile = _profileForDots(paperDots);
     final rows = _buildReceiptRows(bill, profile,
@@ -1135,7 +1142,8 @@ class PrinterService {
         businessGstin: businessGstin,
         businessFssai: businessFssai,
         gstEnabled: gstEnabled,
-        labels: labels);
+        labels: labels,
+        logo: logo);
     return RasterLab.receiptPreviewPng(rows, width: paperDots);
   }
 
@@ -1148,6 +1156,7 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       ReceiptLabels? labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
@@ -1157,7 +1166,8 @@ class PrinterService {
         businessAddress: businessAddress,
         businessGstin: businessGstin,
         businessFssai: businessFssai,
-        labels: labels);
+        labels: labels,
+        logo: logo);
     final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
     await _printBytes(printer, raster, chunkSize: 0);
   }
@@ -1170,6 +1180,7 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       ReceiptLabels? labels,
+      ui.Image? logo,
       int paperDots = 576}) {
     final rows = _buildSettlementRows(settlement, _profileForDots(paperDots),
         businessName: businessName,
@@ -1177,7 +1188,8 @@ class PrinterService {
         businessAddress: businessAddress,
         businessGstin: businessGstin,
         businessFssai: businessFssai,
-        labels: labels);
+        labels: labels,
+        logo: logo);
     return RasterLab.receiptPreviewPng(rows, width: paperDots);
   }
 
@@ -1189,6 +1201,7 @@ class PrinterService {
       String? businessFssai,
       bool gstEnabled = true,
       ReceiptLabels? labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
@@ -1224,7 +1237,8 @@ class PrinterService {
         businessGstin: businessGstin,
         businessFssai: businessFssai,
         gstEnabled: gstEnabled,
-        labels: labels);
+        labels: labels,
+        logo: logo);
     final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
     await _printBytes(printer, raster, chunkSize: 0);
 
@@ -1269,6 +1283,7 @@ class PrinterService {
       String? businessFssai,
       bool gstEnabled = true,
       ReceiptLabels? labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     for (var i = 0; i < bills.length; i++) {
       await printBill(bills[i],
@@ -1279,6 +1294,7 @@ class PrinterService {
           businessFssai: businessFssai,
           gstEnabled: gstEnabled,
           labels: labels,
+          logo: logo,
           paperDots: paperDots);
       // Let the printer finish and the SPP link settle before the next job.
       if (i < bills.length - 1) {

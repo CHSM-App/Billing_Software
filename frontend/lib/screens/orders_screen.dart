@@ -4,6 +4,8 @@ import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
+import '../widgets/bottom_nav_bar.dart';
+import '../widgets/floating_bar_physics.dart';
 import '../widgets/shell_app_bar.dart';
 import 'tables_screen.dart';
 import 'open_drafts_screen.dart';
@@ -18,8 +20,8 @@ import 'online_orders_screen.dart';
 /// shared app bar, the TabBar, the refresh action, and the "add table" FAB
 /// (shown only on the Tables sub-tab, for owners).
 ///
-/// Tables (table restaurants), Open Orders and Online are always shown; Credit
-/// appears only while someone owes money.
+/// Order: Open Orders, Tables (table restaurants only), Online (only while the
+/// online store is enabled), Credit.
 class OrdersScreen extends ConsumerStatefulWidget {
   /// Whether to include the Tables (floor plan) sub-tab. True for table
   /// restaurants; false for retail / no-table businesses.
@@ -75,15 +77,26 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
   @override
   void dispose() {
     _tabController?.dispose();
+    _header.dispose();
     _searchAnimCtrl.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
 
+  /// Phone layout: the title row folds away with whichever sub-tab's list is
+  /// scrolled, while the sub-tab row stays pinned — see [FoldingHeader].
+  /// Pinned open while the search field (which lives in it) is in use.
+  late final FoldingHeader _header = FoldingHeader(
+    vsync: this,
+    extent: () => 50, // ShellAppBar's toolbar row
+    canFold: () => !_searchExpanded && MediaQuery.sizeOf(context).width < 720,
+  );
+
   void _toggleSearch() {
     setState(() => _searchExpanded = !_searchExpanded);
     if (_searchExpanded) {
+      _header.show();
       _searchAnimCtrl.forward();
       Future.delayed(const Duration(milliseconds: 250), () {
         if (mounted) _searchFocus.requestFocus();
@@ -188,6 +201,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
     // Rebuild on tab change so the FAB shows/hides with the active sub-tab.
     _tabController!.addListener(() {
       if (!_tabController!.indexIsChanging) return;
+      _header.show(); // the next sub-tab's list has its own scroll position
       setState(() {});
     });
   }
@@ -275,13 +289,17 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
     final int openCount = ref.watch(openDraftsProvider).valueOrNull?.length ?? 0;
     final int onlineCount = ref.watch(pendingOnlineOrderCountProvider);
 
+    final storeEnabled =
+        ref.watch(sessionProvider).valueOrNull?.storeEnabled ?? false;
+
     _syncTabs([
-      if (widget.showTables) _OrdersTab.tables,
       // Always shown, even when empty, so staff always know where to look —
       // a Credit tab that came and went with the dues read as a missing
       // feature. An empty one says no one owes money.
       _OrdersTab.openOrders,
-      _OrdersTab.online,
+      if (widget.showTables) _OrdersTab.tables,
+      // Online only while the shop runs its online store.
+      if (storeEnabled) _OrdersTab.online,
       _OrdersTab.credit,
     ]);
 
@@ -298,10 +316,30 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
     }
 
     final onTablesTab = _tabs[_tabController!.index] == _OrdersTab.tables;
+    // Folded on a phone, then widened (where it never folds): open it back up.
+    if (MediaQuery.sizeOf(context).width >= 720 && _header.bar.value < 1) {
+      _header.bar.value = 1;
+    }
 
     return Scaffold(
       body: Column(
         children: [
+          // The status-bar band stays put; the title row folds away beneath
+          // it while the sub-tab row (+ divider) always stays.
+          ColoredBox(
+            color: AppColors.surface,
+            child: SizedBox(
+                width: double.infinity,
+                height: MediaQuery.paddingOf(context).top),
+          ),
+          FoldAway(
+            bar: _header.bar.drive(Tween(
+                begin: (kTextTabBarHeight + 1) / (50 + kTextTabBarHeight + 1),
+                end: 1.0)),
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child:
           LayoutBuilder(builder: (context, bar) => ShellAppBar(
             // Bottom-bar root tab: never show a back arrow.
             automaticallyImplyLeading: false,
@@ -337,19 +375,30 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
               ],
             ),
           )),
+            ),
+          ),
           Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              // Switch tabs only by tapping the TabBar — no horizontal swipe.
-              // A swipe would also fight the Tables canvas's pan gesture.
-              physics: const NeverScrollableScrollPhysics(),
-              children: [for (final t in _tabs) _tabView(t)],
+            // The sub-tab screens build their own lists; this hands them the
+            // folding physics and listens to their scrolls.
+            child: _header.wrap(
+              context,
+              TabBarView(
+                controller: _tabController,
+                // Switch tabs only by tapping the TabBar — no horizontal swipe.
+                // A swipe would also fight the Tables canvas's pan gesture.
+                physics: const NeverScrollableScrollPhysics(),
+                children: [for (final t in _tabs) _tabView(t)],
+              ),
             ),
           ),
         ],
       ),
       floatingActionButton: (onTablesTab && userRole == 'owner')
-          ? FloatingActionButton.extended(
+          // Lifted clear of the floating glass nav bar.
+          ? Padding(
+              padding:
+                  EdgeInsets.only(bottom: AppBottomNavBar.fabLift(context)),
+              child: FloatingActionButton.extended(
               heroTag: 'addTableFab',
               onPressed: () {
                 final state = _tablesKey.currentState;
@@ -361,7 +410,8 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
               label: Text(l10n.tablesAddTable),
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
-            )
+            ),
+          )
           : null,
     );
   }

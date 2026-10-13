@@ -3628,4 +3628,38 @@ class AppLocalizationsEn extends AppLocalizations {
   String onlineOrderNewBody(String orderNumber, int count, String total) {
     return '$orderNumber · $count item(s) · $total';
   }
+
+  @override
+  String get logoChoose => 'Choose logo';
+
+  @override
+  String get logoRemove => 'Remove logo';
+
+  @override
+  String get logoPrintOnBills => 'Print logo on bills';
+
+  @override
+  String get logoUploaded => 'Logo updated';
+
+  @override
+  String get logoRemoved => 'Logo removed';
+
+  @override
+  String get logoAdjustTitle => 'Adjust logo';
+
+  @override
+  String get logoAdjustHint =>
+      'Pinch to zoom and drag to position. The area inside the frame is what prints.';
+
+  @override
+  String get logoShapeSquare => 'Square';
+
+  @override
+  String get logoShapeWide => 'Wide';
+
+  @override
+  String get logoReset => 'Reset';
+
+  @override
+  String get logoSave => 'Save logo';
 }

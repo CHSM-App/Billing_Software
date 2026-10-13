@@ -3639,4 +3639,38 @@ class AppLocalizationsMr extends AppLocalizations {
   String onlineOrderNewBody(String orderNumber, int count, String total) {
     return '$orderNumber · $count वस्तू · $total';
   }
+
+  @override
+  String get logoChoose => 'लोगो निवडा';
+
+  @override
+  String get logoRemove => 'लोगो काढा';
+
+  @override
+  String get logoPrintOnBills => 'बिलावर लोगो छापा';
+
+  @override
+  String get logoUploaded => 'लोगो अपडेट झाला';
+
+  @override
+  String get logoRemoved => 'लोगो काढला';
+
+  @override
+  String get logoAdjustTitle => 'लोगो जुळवा';
+
+  @override
+  String get logoAdjustHint =>
+      'झूम करण्यासाठी पिंच करा आणि जागा बदलण्यासाठी ओढा. चौकटीतील भागच छापला जाईल.';
+
+  @override
+  String get logoShapeSquare => 'चौकोनी';
+
+  @override
+  String get logoShapeWide => 'रुंद';
+
+  @override
+  String get logoReset => 'रीसेट';
+
+  @override
+  String get logoSave => 'लोगो सेव्ह करा';
 }

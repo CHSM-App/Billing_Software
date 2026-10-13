@@ -1,0 +1,1408 @@
+diff --git a/frontend/lib/api.dart b/frontend/lib/api.dart
+index dbb49fdd..0228bd0f 100644
+--- a/frontend/lib/api.dart
++++ b/frontend/lib/api.dart
+@@ -590,6 +590,10 @@ Future<void> deleteItem(String id) async {
+ 
+ // --- Item photos (owner-only; customer-facing on the QR menu) --------------
+ 
++/// One item's current photo URL (null when it has none), for the item form.
++Future<String?> getItemImageUrl(String id) async =>
++    _parse(await _authGet(Uri.parse('$baseUrl/items/$id')))['image_url'] as String?;
++
+ /// Owner-only list of items with their current [image_url]. Used by the Menu
+ /// Photos screen. The regular [getItems] omits image_url so photos never load
+ /// during billing.
+diff --git a/frontend/lib/screens/home_screen.dart b/frontend/lib/screens/home_screen.dart
+index 78e96595..d35513b9 100644
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -14,6 +14,8 @@ import '../providers/open_drafts_provider.dart';
+ import '../theme/app_theme.dart';
+ import '../widgets/app_widgets.dart';
+ import '../widgets/shell_app_bar.dart';
++import '../widgets/bottom_nav_bar.dart';
++import '../widgets/floating_bar_physics.dart';
+ import '../widgets/whatsapp_mark.dart';
+ import '../widgets/stock_target_picker.dart' show isRestaurantBusiness;
+ import '../widgets/skeletons.dart';
+@@ -179,6 +181,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+   // Search bar expand state
+   bool _searchExpanded = false;
+   late final AnimationController _searchAnimCtrl;
++
++  /// Phone layout: the app bar folds away with the item list while the
++  /// category strip stays pinned — see [FoldingHeader]. Pinned open while the
++  /// search field is in use.
++  late final FoldingHeader _header = FoldingHeader(
++    vsync: this,
++    extent: () => 51, // ShellAppBar: 50 toolbar + 1 divider
++    canFold: () => !_searchExpanded && MediaQuery.sizeOf(context).width < 720,
++  );
+   late final Animation<double> _searchAnim;
+   final _searchFocus = FocusNode();
+ 
+@@ -322,6 +333,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+     WidgetsBinding.instance.removeObserver(this);
+     HardwareKeyboard.instance.removeHandler(_globalKeyHandler);
+     _searchAnimCtrl.dispose();
++    _header.dispose();
+     _searchFocus.dispose();
+     _searchController.dispose();
+     _itemsScrollCtrl.dispose();
+@@ -3414,15 +3426,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+       _syncDiscount();
+     });
+ 
++    // A bar folded on a phone must not stay folded once the window is wide
++    // (where it no longer floats).
++    if (isWide && _header.bar.value < 1) _header.bar.value = 1;
++
+     return Scaffold(
+       backgroundColor: AppColors.background,
+       body: Column(
+         children: [
+-          // LayoutBuilder so the expanding search field can size itself against
+-          // the BAR's width rather than the window's — see _buildAppBar.
+-          LayoutBuilder(
+-            builder: (context, bar) =>
+-                _buildAppBar(businessName, userName, bar.maxWidth),
++          // The status-bar band stays put; the app bar folds away beneath it,
++          // so the category strip below ends up pinned right under the band.
++          ColoredBox(
++            color: AppColors.surface,
++            child: SizedBox(
++                width: double.infinity,
++                height: MediaQuery.paddingOf(context).top),
++          ),
++          FoldAway(
++            bar: _header.bar,
++            child: MediaQuery.removePadding(
++              context: context,
++              removeTop: true,
++              // LayoutBuilder so the expanding search field can size itself
++              // against the BAR's width rather than the window's — see
++              // _buildAppBar.
++              child: LayoutBuilder(
++                builder: (context, bar) =>
++                    _buildAppBar(businessName, userName, bar.maxWidth),
++              ),
++            ),
+           ),
+           Expanded(child: isWide ? _buildWideLayout() : _buildNarrowLayout()),
+         ],
+@@ -3545,6 +3577,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+               onPressed: () {
+                 setState(() => _searchExpanded = !_searchExpanded);
+                 if (_searchExpanded) {
++                  _header.show(); // the field lives in the bar
+                   _searchAnimCtrl.forward();
+                   Future.delayed(const Duration(milliseconds: 250), () {
+                     if (mounted) _searchFocus.requestFocus();
+@@ -3585,11 +3618,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+           // tables it saves a table draft; on the standalone billing page it
+           // saves a table-less "open order" everyone can create.
+           if (count > 0)
+-            Positioned(
+-              // Above the floating nav bar (its height is in the inset).
+-              bottom: AppSpacing.space16 + MediaQuery.paddingOf(context).bottom,
+-              left: AppSpacing.space16,
+-              right: AppSpacing.space16,
++            ValueListenableBuilder<bool>(
++              valueListenable: AppBottomNavBar.shown,
++              builder: (context, navShown, row) => AnimatedPositioned(
++                // Above the floating nav bar (its height is in the inset);
++                // when scrolling hides the bar, drop down with it to just
++                // above the system inset instead of hovering over the gap.
++                bottom: AppSpacing.space16 +
++                    (navShown
++                        ? MediaQuery.paddingOf(context).bottom
++                        : MediaQuery.viewPaddingOf(context).bottom),
++                left: AppSpacing.space16,
++                right: AppSpacing.space16,
++                duration: MediaQuery.disableAnimationsOf(context)
++                    ? Duration.zero
++                    : const Duration(milliseconds: 220),
++                curve: Curves.easeOutCubic,
++                child: row!,
++              ),
+               child: Row(
+                 children: [
+                   Expanded(
+@@ -3686,7 +3732,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+   // ---------------------------------------------------------------------------
+ 
+   Widget _buildItemsPanel() {
+-    return _buildItemList();
++    // The list's scrolls carry and settle the app bar's fold.
++    return NotificationListener<ScrollNotification>(
++      onNotification: _header.onScroll,
++      child: _buildItemList(),
++    );
+   }
+ 
+   /// "Retry" on the offline item list.
+@@ -3835,7 +3885,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+               onRefresh: refresh,
+               child: CustomScrollView(
+                 controller: _itemsScrollCtrl,
+-                physics: const AlwaysScrollableScrollPhysics(),
++                physics: _header.physics,
+                 slivers: [
+                   SliverFillRemaining(
+                     child: EmptyState(
+@@ -3853,6 +3903,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+               tree: tree,
+               cart: cart,
+               controller: _itemsScrollCtrl,
++              physics: _header.physics,
+               twoColumns: _twoColumns,
+               onToggleMajor: _toggleMajor,
+               onToggleSection: _toggleCategory,
+@@ -5384,6 +5435,7 @@ class _ExcelItemTable extends StatefulWidget {
+   final List<_MajorSection> tree;
+   final List<CartEntry> cart;
+   final ScrollController controller;
++  final ScrollPhysics physics;
+   final bool twoColumns;
+   final void Function(String major) onToggleMajor;
+   /// Called with the section's key (see [_CategorySection.key]), not its bare
+@@ -5401,6 +5453,7 @@ class _ExcelItemTable extends StatefulWidget {
+     required this.tree,
+     required this.cart,
+     required this.controller,
++    required this.physics,
+     required this.twoColumns,
+     required this.onToggleMajor,
+     required this.onToggleSection,
+@@ -5990,7 +6043,7 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
+ 
+     return CustomScrollView(
+       controller: widget.controller,
+-      physics: const AlwaysScrollableScrollPhysics(),
++      physics: widget.physics,
+       slivers: [
+         SliverPadding(
+           // + the floating nav bar's inset, so the last rows scroll above it.
+diff --git a/frontend/lib/screens/items_screen.dart b/frontend/lib/screens/items_screen.dart
+index 25b44c82..bc2559d0 100644
+--- a/frontend/lib/screens/items_screen.dart
++++ b/frontend/lib/screens/items_screen.dart
+@@ -1,6 +1,9 @@
++import 'dart:typed_data';
+ import 'package:flutter/material.dart';
+ import 'package:flutter_riverpod/flutter_riverpod.dart';
+ import 'package:barcode_widget/barcode_widget.dart';
++import 'package:image_picker/image_picker.dart';
++import '../utils/jpeg_compress.dart';
+ import '../l10n/l10n_ext.dart';
+ import '../models/models.dart';
+ import '../providers.dart';
+@@ -8,6 +11,7 @@ import '../theme/app_theme.dart';
+ import '../widgets/app_widgets.dart';
+ import '../widgets/category_tree_list.dart';
+ import '../widgets/bottom_nav_bar.dart';
++import '../widgets/floating_bar_physics.dart';
+ import '../widgets/shell_app_bar.dart';
+ import '../widgets/skeletons.dart';
+ import '../api.dart';
+@@ -92,10 +96,30 @@ class ItemsScreen extends ConsumerStatefulWidget {
+ }
+ 
+ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+-    with SingleTickerProviderStateMixin, CategoryTreeNav<ItemsScreen> {
++    with TickerProviderStateMixin, CategoryTreeNav<ItemsScreen> {
+   final _searchController = TextEditingController();
+   TabController? _tabController;
+   int _activeTab = 0;
++
++  /// The header — app bar, Items/Raw tabs, search box — folds away with the
++  /// list on a phone, as one block, while the major/minor strip below it stays
++  /// pinned. See [FoldingHeader].
++  late final FoldingHeader _header = FoldingHeader(
++    vsync: this,
++    extent: () => _topBarHeight + _searchBarHeight,
++    // Not while typing: the search box would fold away under the keyboard.
++    // (View, not MediaQuery — the Scaffolds above strip the keyboard inset.)
++    canFold: () =>
++        View.of(context).viewInsets.bottom == 0 &&
++        MediaQuery.sizeOf(context).width < 720,
++  );
++
++  /// ShellAppBar (50 + divider), plus the Items/Raw tab bar when it shows.
++  double get _topBarHeight =>
++      51 + ((_tabController?.length ?? 1) > 1 ? kTextTabBarHeight : 0);
++
++  /// [_searchBar]: 6 + 40 + 4.
++  static const double _searchBarHeight = 50;
+   // When on, the Items list renders a compact stock overview (name + remaining
+   // stock) in place, instead of the normal cards.
+   bool _showStock = false;
+@@ -127,6 +151,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+       ..addListener(() {
+         if (!(_tabController!.indexIsChanging)) {
+           setState(() => _activeTab = _tabController!.index);
++          _header.show(); // the Raw tab does not fold it
+         }
+       });
+     _activeTab = 0;
+@@ -136,6 +161,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+   void dispose() {
+     _searchController.dispose();
+     _tabController?.dispose();
++    _header.dispose();
+     disposeTreeNav();
+     super.dispose();
+   }
+@@ -402,10 +428,32 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+         .keys
+         .any((m) => m.isNotEmpty);
+     final onRawTab = withRawMaterials && _activeTab == 1;
++    // Folded on a phone, then widened (where it never folds): open it back up.
++    if (MediaQuery.sizeOf(context).width >= 720 && _header.bar.value < 1) {
++      _header.bar.value = 1;
++    }
+ 
+     return Scaffold(
+       body: Column(
+         children: [
++          // The status-bar band stays put; the header folds away beneath it.
++          ColoredBox(
++            color: AppColors.surface,
++            child: SizedBox(
++                width: double.infinity,
++                height: MediaQuery.paddingOf(context).top),
++          ),
++          // Folds first; the search box below it folds once this has gone, so
++          // the whole header slides up as one block.
++          FoldAway(
++            bar: FoldAway.slice(_header.bar,
++                below: _searchBarHeight,
++                height: _topBarHeight,
++                total: _topBarHeight + _searchBarHeight),
++            child: MediaQuery.removePadding(
++              context: context,
++              removeTop: true,
++              child: Column(mainAxisSize: MainAxisSize.min, children: [
+           // Bottom-bar root tab: never imply a back arrow. Without this,
+           // opening a dialog (add item / stock) pushes a route and flips
+           // Navigator.canPop() to true, making a stray back arrow appear.
+@@ -451,6 +499,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+                 Tab(text: l10n.itemsTabRawMaterials),
+               ],
+             ),
++              ]),
++            ),
++          ),
+           Expanded(
+             child: withRawMaterials
+                 ? TabBarView(
+@@ -465,8 +516,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+         ],
+       ),
+       floatingActionButton: userRole == 'owner'
+-          // Lifted clear of the floating glass nav bar.
+-          ? Padding(
++          // Lifted clear of the floating glass nav bar, and dropped out of
++          // sight along with it when scrolling hides the bar (2 = its own
++          // height plus the bottom margin, so it fully clears the edge).
++          ? HidesWithNavBar(
++              drop: 2,
++              child: Padding(
+               padding:
+                   EdgeInsets.only(bottom: AppBottomNavBar.fabLift(context)),
+               child: FloatingActionButton.extended(
+@@ -482,7 +537,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+               backgroundColor: AppColors.primary,
+               foregroundColor: Colors.white,
+             ),
+-          )
++          ),
++            )
+           : null,
+     );
+   }
+@@ -587,7 +643,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+         final Widget list;
+         if (items.isEmpty) {
+           list = CustomScrollView(
+-            physics: const AlwaysScrollableScrollPhysics(),
++            physics: _header.physics,
+             slivers: [
+               SliverFillRemaining(
+                 child: EmptyState(
+@@ -604,7 +660,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+         } else if (stockMode) {
+           final isWide = MediaQuery.of(context).size.width >= 720;
+           list = CustomScrollView(
+-            physics: const AlwaysScrollableScrollPhysics(),
++            physics: _header.physics,
+             slivers: [
+               _buildStockSliver(items, crossAxisCount: isWide ? 3 : 1),
+             ],
+@@ -613,12 +669,24 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+           list = _buildTreeList(tree, userRole, inventoryEnabled);
+         }
+ 
++        // The search box folds with the header above it; the major/minor
++        // strip does not, so it ends up pinned at the top.
+         return Column(
+           children: [
+-            _searchBar(inventoryEnabled: inventoryEnabled),
++            FoldAway(
++              bar: FoldAway.slice(_header.bar,
++                  below: 0,
++                  height: _searchBarHeight,
++                  total: _topBarHeight + _searchBarHeight),
++              child: _searchBar(inventoryEnabled: inventoryEnabled),
++            ),
+             if (strip != null) strip,
+             Expanded(
+-              child: RefreshIndicator(onRefresh: refresh, child: list),
++              // The list's scrolls carry and settle the header's fold.
++              child: NotificationListener<ScrollNotification>(
++                onNotification: _header.onScroll,
++                child: RefreshIndicator(onRefresh: refresh, child: list),
++              ),
+             ),
+           ],
+         );
+@@ -633,6 +701,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+     return CategoryTreeList(
+       tree: tree,
+       controller: treeScrollCtrl,
++      physics: _header.physics,
+       twoColumns: MediaQuery.of(context).size.width >= 900,
+       onToggleMajor: toggleMajor,
+       onToggleSection: toggleCategory,
+@@ -1251,9 +1320,17 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
+   final _barcodeCtrl = TextEditingController();
+   final _stockCtrl = TextEditingController();
+   final _lowStockCtrl = TextEditingController();
++  final _picker = ImagePicker();
+   String _unit = 'piece';
+   bool _saving = false;
+ 
++  /// The item's photo (customer-facing on the QR menu / online store).
++  /// [_photoUrl] is the stored one (fetched on edit); [_newPhoto] is a picked,
++  /// compressed JPEG not yet uploaded; [_photoRemoved] clears it on save.
++  String? _photoUrl;
++  Uint8List? _newPhoto;
++  bool _photoRemoved = false;
++
+   /// Whether the entered price already contains GST (an MRP) rather than being
+   /// a net price GST is added to. Only meaningful when GST is on and a tax rate
+   /// is set; billing back-calculates the net rate from an inclusive price.
+@@ -1334,9 +1411,109 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
+       _stockCtrl.text = item.stockQuantity?.toString() ?? '';
+       _lowStockCtrl.text = item.lowStockThreshold?.toString() ?? '';
+       _unit = _units.contains(item.unit) ? item.unit : 'piece';
++      // The items list never carries image_url, so look this one up.
++      getItemImageUrl(item.id).then((url) {
++        if (mounted) setState(() => _photoUrl = url);
++      }).catchError((_) {});
++    }
++  }
++
++  Future<void> _pickPhoto(ImageSource src) async {
++    final failMsg = context.l10n.menuPhotosUploadFailed;
++    try {
++      final picked = await _picker.pickImage(
++          source: src, maxWidth: 1600, maxHeight: 1600, imageQuality: 90);
++      if (picked == null) return;
++      final jpeg = await compressToJpeg(await picked.readAsBytes());
++      if (mounted) setState(() => _newPhoto = jpeg);
++    } catch (_) {
++      if (mounted) setState(() => _formError = failMsg);
+     }
+   }
+ 
++  void _showPhotoSheet(AppLocalizations l10n, bool hasPhoto) {
++    showModalBottomSheet(
++      context: context,
++      builder: (ctx) => SafeArea(
++        child: Column(
++          mainAxisSize: MainAxisSize.min,
++          children: [
++            ListTile(
++              leading: const Icon(Icons.photo_camera_outlined),
++              title: Text(l10n.menuPhotosPickCamera),
++              onTap: () {
++                Navigator.pop(ctx);
++                _pickPhoto(ImageSource.camera);
++              },
++            ),
++            ListTile(
++              leading: const Icon(Icons.photo_library_outlined),
++              title: Text(l10n.menuPhotosPickGallery),
++              onTap: () {
++                Navigator.pop(ctx);
++                _pickPhoto(ImageSource.gallery);
++              },
++            ),
++            if (hasPhoto)
++              ListTile(
++                leading:
++                    const Icon(Icons.delete_outline, color: AppColors.error),
++                title: Text(l10n.menuPhotosRemove,
++                    style: const TextStyle(color: AppColors.error)),
++                onTap: () {
++                  Navigator.pop(ctx);
++                  setState(() {
++                    _newPhoto = null;
++                    _photoRemoved = true;
++                  });
++                },
++              ),
++          ],
++        ),
++      ),
++    );
++  }
++
++  /// Thumbnail + add/change button for the item's photo.
++  Widget _buildPhotoField(AppLocalizations l10n) {
++    final showStored = _newPhoto == null && !_photoRemoved && _photoUrl != null;
++    final hasPhoto = _newPhoto != null || showStored;
++    final Widget placeholder = Container(
++      color: AppColors.surfaceVariant,
++      child: const Icon(Icons.image_outlined, color: AppColors.textDisabled),
++    );
++    return Row(
++      children: [
++        ClipRRect(
++          borderRadius: BorderRadius.circular(AppRadius.small),
++          child: SizedBox(
++            width: 64,
++            height: 64,
++            child: _newPhoto != null
++                ? Image.memory(_newPhoto!, fit: BoxFit.cover)
++                : showStored
++                    ? Image.network(itemImageUrl(_photoUrl!),
++                        fit: BoxFit.cover,
++                        errorBuilder: (_, __, ___) => placeholder)
++                    : placeholder,
++          ),
++        ),
++        const SizedBox(width: AppSpacing.space12),
++        // Expanded: the theme gives buttons an infinite min width, which a
++        // Row can't lay out (the whole dialog then fails to render).
++        Expanded(
++          child: OutlinedButton.icon(
++            onPressed: _saving ? null : () => _showPhotoSheet(l10n, hasPhoto),
++            icon: Icon(
++                hasPhoto ? Icons.edit_outlined : Icons.add_a_photo_outlined,
++                size: 18),
++            label: Text(hasPhoto ? l10n.menuPhotosChange : l10n.menuPhotosAdd),
++          ),
++        ),
++      ],
++    );
++  }
++
+   /// "Price already includes GST" toggle.
+   ///
+   /// This is the one setting an owner cannot infer from the price field alone:
+@@ -1731,6 +1908,22 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
+       final saved = _savedItem ?? await widget.onSaved(data, const []);
+       _savedItem = saved;
+ 
++      // Photo needs the item's id, so it goes up after the item is saved.
++      // Cleared once done, so a retry for failed variants doesn't re-upload.
++      try {
++        if (_newPhoto != null) {
++          _photoUrl = await uploadItemImage(saved.id, _newPhoto!);
++          _newPhoto = null;
++        } else if (_photoRemoved && _photoUrl != null) {
++          await deleteItemImage(saved.id);
++          _photoUrl = null;
++        }
++      } catch (_) {
++        if (!mounted) return;
++        setState(() => _formError = context.l10n.menuPhotosUploadFailed);
++        return;
++      }
++
+       if (_hasVariants && drafts.isNotEmpty) {
+         final created = <ItemVariant>[];
+         final failed = <String>[];
+@@ -2249,6 +2442,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
+                     ),
+                   ),
+                 ],
++                const SizedBox(height: AppSpacing.space12),
++                _buildPhotoField(l10n),
+               ],
+             ),
+             ),
+diff --git a/frontend/lib/screens/kitchen_screen.dart b/frontend/lib/screens/kitchen_screen.dart
+index 4abc1898..7fcd95dd 100644
+--- a/frontend/lib/screens/kitchen_screen.dart
++++ b/frontend/lib/screens/kitchen_screen.dart
+@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
+ import '../widgets/app_widgets.dart';
+ import '../widgets/skeletons.dart';
+ import '../widgets/shell_app_bar.dart';
++import '../widgets/floating_bar_physics.dart';
+ import '../services/notification_service.dart';
+ import '../services/printer_service.dart';
+ import '../storage.dart';
+@@ -33,7 +34,7 @@ class KitchenScreen extends ConsumerStatefulWidget {
+ }
+ 
+ class _KitchenScreenState extends ConsumerState<KitchenScreen>
+-    with SingleTickerProviderStateMixin {
++    with TickerProviderStateMixin {
+   List<Map<String, dynamic>> _orders = [];
+   bool _loading = true;
+   String? _error;
+@@ -54,7 +55,10 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
+   @override
+   void initState() {
+     super.initState();
+-    _tabController = TabController(length: 2, vsync: this);
++    // Switching Pending/Completed shows the title row again: the other tab's
++    // list has its own scroll position.
++    _tabController = TabController(length: 2, vsync: this)
++      ..addListener(_header.show);
+     _load();
+     NotificationService.instance.kitchenPing.addListener(_onPing);
+   }
+@@ -64,9 +68,18 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
+     NotificationService.instance.kitchenPing.removeListener(_onPing);
+     _chimePlayer.dispose();
+     _tabController.dispose();
++    _header.dispose();
+     super.dispose();
+   }
+ 
++  /// Phone layout: the title row folds away with the order list while the
++  /// Pending/Completed row stays pinned — see [FoldingHeader].
++  late final FoldingHeader _header = FoldingHeader(
++    vsync: this,
++    extent: () => 50, // ShellAppBar's toolbar row
++    canFold: () => MediaQuery.sizeOf(context).width < 720,
++  );
++
+   void _onPing() => _load(silent: true);
+ 
+   /// Print a kitchen ticket for each newly-arrived order, when the setting is
+@@ -265,9 +278,29 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
+     // ShellAppBar, not Scaffold.appBar: this screen is a tab inside the shell's
+     // IndexedStack, where AppBar's Scaffold-dependent layout does not render —
+     // which is why the bar (and everything in it) was invisible here.
++    // Folded on a phone, then widened (where it never folds): open it back up.
++    if (MediaQuery.sizeOf(context).width >= 720 && _header.bar.value < 1) {
++      _header.bar.value = 1;
++    }
+     return Scaffold(
+       backgroundColor: AppColors.background,
+       body: Column(children: [
++        // The status-bar band stays put; the title row folds away beneath it
++        // while the Pending/Completed row (+ divider) always stays.
++        ColoredBox(
++          color: AppColors.surface,
++          child: SizedBox(
++              width: double.infinity,
++              height: MediaQuery.paddingOf(context).top),
++        ),
++        FoldAway(
++          bar: _header.bar.drive(Tween(
++              begin: (kTextTabBarHeight + 1) / (50 + kTextTabBarHeight + 1),
++              end: 1.0)),
++          child: MediaQuery.removePadding(
++            context: context,
++            removeTop: true,
++            child:
+         ShellAppBar(
+           title: Text(l10n.kitchenTitle),
+           automaticallyImplyLeading: false,
+@@ -313,9 +346,12 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
+               Tab(text: l10n.kitchenTabCompleted),
+             ],
+           ),
++        ),
++          ),
+         ),
+         Expanded(
+-          child: _loading
++          // Hands the order lists the folding physics and listens to them.
++          child: _header.wrap(context, _loading
+               ? const KitchenSkeleton()
+               : _error != null && _orders.isEmpty
+                   ? ListView(
+@@ -350,7 +386,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
+                           ),
+                         ),
+                       ],
+-                    ),
++                    )),
+         ),
+       ]),
+     );
+diff --git a/frontend/lib/screens/main_shell.dart b/frontend/lib/screens/main_shell.dart
+index c3ce4cb4..d56b127c 100644
+--- a/frontend/lib/screens/main_shell.dart
++++ b/frontend/lib/screens/main_shell.dart
+@@ -1,6 +1,7 @@
+ import 'dart:async';
+ import 'package:flutter/foundation.dart';
+ import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart' show ScrollDirection;
+ import 'package:flutter/services.dart';
+ import 'package:flutter_riverpod/flutter_riverpod.dart';
+ import '../l10n/l10n_ext.dart';
+@@ -44,6 +45,18 @@ class _MainShellState extends ConsumerState<MainShell>
+   StreamSubscription<String>? _realtimeSub;
+   bool _deviceCheckInFlight = false;
+ 
++  /// Narrow layout: the bottom bar slides away while the user scrolls a page
++  /// down and comes back on the way up (YouTube-style). See [_onPageScroll].
++  final _navShown = AppBottomNavBar.shown;
++  double _navDrift = 0; // px the user has scrolled in the current direction
++  bool _userScrolling = false;
++  int _navShownFor = -1; // tab the bar was last reset for
++  bool _wasCurrent = true; // shell's route was on top at the last build
++
++  /// Scroll this far in one direction before the bar hides/shows, so a
++  /// wobbling thumb doesn't flicker it.
++  static const double _navToggleAfter = 24;
++
+   @override
+   void initState() {
+     super.initState();
+@@ -388,6 +401,30 @@ class _MainShellState extends ConsumerState<MainShell>
+     setState(() => _index = i);
+   }
+ 
++  /// Hide the bottom bar after the user scrolls a page down, show it again
++  /// after scrolling back up or on reaching the top. Only finger-driven scrolls
++  /// (drags and the flings they release) move it — a jump-to-category or other
++  /// programmatic scroll never hides it. Sideways strips are ignored.
++  bool _onPageScroll(ScrollNotification n) {
++    if (n.metrics.axis != Axis.vertical) return false;
++    if (MediaQuery.sizeOf(context).width >= 720) return false; // rail, no bar
++    if (n is UserScrollNotification) {
++      _userScrolling = n.direction != ScrollDirection.idle;
++      _navDrift = 0;
++    } else if (n is ScrollUpdateNotification) {
++      if (n.metrics.extentBefore <= 0) {
++        _navShown.value = true;
++      } else if (_userScrolling && !n.metrics.outOfRange) {
++        // outOfRange: an iOS bounce at either end isn't a change of mind.
++        final d = n.scrollDelta ?? 0;
++        _navDrift = _navDrift.sign == d.sign ? _navDrift + d : d;
++        if (_navDrift > _navToggleAfter) _navShown.value = false;
++        if (_navDrift < -_navToggleAfter) _navShown.value = true;
++      }
++    }
++    return false;
++  }
++
+   /// Push the offline queue, then reload everything that went stale offline.
+   ///
+   /// The refresh runs whether or not the sync succeeded. It used to hang off
+@@ -443,6 +480,20 @@ class _MainShellState extends ConsumerState<MainShell>
+         _navItems = items;
+         final safeIndex = _index.clamp(0, items.length - 1);
+         final isWide = MediaQuery.of(context).size.width >= 720;
++        // Coming back from a page pushed over the shell (which has no bottom
++        // bar) also brings the bar back, however it was left on the way in.
++        // isCurrentOf rebuilds the shell when that page pops — at the START of
++        // the pop, so the bar is already there as the page slides away.
++        final isCurrent = ModalRoute.isCurrentOf(context) ?? true;
++        final returned = isCurrent && !_wasCurrent;
++        _wasCurrent = isCurrent;
++        // Every way of landing on a tab (tap, back press, notification) starts
++        // with the bottom bar showing, wherever the last tab left it.
++        if (safeIndex != _navShownFor || isWide || returned) {
++          _navShownFor = safeIndex;
++          _navShown.value = true;
++          _navDrift = 0;
++        }
+ 
+         final inGrace = widget.licenseStatus?.state == LicenseState.grace;
+         final graceDays = widget.licenseStatus?.graceDaysRemaining ?? 0;
+@@ -500,9 +551,12 @@ class _MainShellState extends ConsumerState<MainShell>
+                         child: _buildRail(items, safeIndex),
+                       ),
+                     Expanded(
+-                      child: IndexedStack(
+-                        index: safeIndex,
+-                        children: items.map((e) => e.screen).toList(),
++                      child: NotificationListener<ScrollNotification>(
++                        onNotification: _onPageScroll,
++                        child: IndexedStack(
++                          index: safeIndex,
++                          children: items.map((e) => e.screen).toList(),
++                        ),
+                       ),
+                     ),
+                   ],
+@@ -573,7 +627,13 @@ class _MainShellState extends ConsumerState<MainShell>
+     // area: a soft dark fade at the screen bottom, with the floating glass
+     // capsule above it. Only the capsule takes taps; the fade and the margins
+     // around the capsule let touches through to the content behind.
+-    return Stack(
++    //
++    // Scrolling down slides this whole area (fade, glass, highlight, strip)
++    // below the screen edge as one piece; while hidden it ignores taps, so
++    // nothing invisible sits over the content. Its layout height is unchanged,
++    // so lists keep their bottom padding and nothing jumps.
++    return HidesWithNavBar(
++      child: Stack(
+       children: [
+         Positioned.fill(
+           child: IgnorePointer(
+@@ -616,6 +676,7 @@ class _MainShellState extends ConsumerState<MainShell>
+           ],
+         ),
+       ],
++      ),
+     );
+   }
+ }
+diff --git a/frontend/lib/screens/menu_photos_screen.dart b/frontend/lib/screens/menu_photos_screen.dart
+index bfeccb4c..665320e9 100644
+--- a/frontend/lib/screens/menu_photos_screen.dart
++++ b/frontend/lib/screens/menu_photos_screen.dart
+@@ -7,6 +7,15 @@ import '../theme/app_theme.dart';
+ import '../utils/jpeg_compress.dart';
+ import '../widgets/app_widgets.dart';
+ 
++/// Full URL for a stored image_url. The server returns a root-relative path
++/// like `/uploads/items/ITEM.jpg?v=123`; prefix it with the API host (baseUrl
++/// without its trailing `/api`) so Image.network can load it.
++String itemImageUrl(String relative) {
++  var host = baseUrl;
++  if (host.endsWith('/api')) host = host.substring(0, host.length - 4);
++  return '$host$relative';
++}
++
+ /// Owner-only screen for managing dish photos shown to customers on the QR
+ /// order menu. This is the ONLY place the owner works with item images — the
+ /// billing and item-management screens never load or show photos.
+@@ -75,15 +84,6 @@ class _MenuPhotosScreenState extends ConsumerState<MenuPhotosScreen> {
+     }).toList();
+   }
+ 
+-  /// Full URL for a stored image_url. The server returns a root-relative path
+-  /// like `/uploads/items/ITEM.jpg?v=123`; prefix it with the API host (baseUrl
+-  /// without its trailing `/api`) so Image.network can load it.
+-  String _imageUrl(String relative) {
+-    var host = baseUrl;
+-    if (host.endsWith('/api')) host = host.substring(0, host.length - 4);
+-    return '$host$relative';
+-  }
+-
+   Future<void> _pickAndUpload(Map<String, dynamic> item, ImageSource src) async {
+     final id = item['id'] as String;
+     // Capture the localized error text before any await so we don't touch
+@@ -292,7 +292,7 @@ class _MenuPhotosScreenState extends ConsumerState<MenuPhotosScreen> {
+                 children: [
+                   if (url != null)
+                     Image.network(
+-                      _imageUrl(url),
++                      itemImageUrl(url),
+                       fit: BoxFit.cover,
+                       errorBuilder: (_, __, ___) => _placeholder(),
+                     )
+diff --git a/frontend/lib/screens/orders_screen.dart b/frontend/lib/screens/orders_screen.dart
+index ea9a531d..744ea872 100644
+--- a/frontend/lib/screens/orders_screen.dart
++++ b/frontend/lib/screens/orders_screen.dart
+@@ -5,6 +5,7 @@ import '../providers.dart';
+ import '../providers/open_drafts_provider.dart';
+ import '../theme/app_theme.dart';
+ import '../widgets/bottom_nav_bar.dart';
++import '../widgets/floating_bar_physics.dart';
+ import '../widgets/shell_app_bar.dart';
+ import 'tables_screen.dart';
+ import 'open_drafts_screen.dart';
+@@ -19,8 +20,8 @@ import 'online_orders_screen.dart';
+ /// shared app bar, the TabBar, the refresh action, and the "add table" FAB
+ /// (shown only on the Tables sub-tab, for owners).
+ ///
+-/// Tables (table restaurants), Open Orders and Online are always shown; Credit
+-/// appears only while someone owes money.
++/// Order: Open Orders, Tables (table restaurants only), Online (only while the
++/// online store is enabled), Credit.
+ class OrdersScreen extends ConsumerStatefulWidget {
+   /// Whether to include the Tables (floor plan) sub-tab. True for table
+   /// restaurants; false for retail / no-table businesses.
+@@ -76,15 +77,26 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
+   @override
+   void dispose() {
+     _tabController?.dispose();
++    _header.dispose();
+     _searchAnimCtrl.dispose();
+     _searchController.dispose();
+     _searchFocus.dispose();
+     super.dispose();
+   }
+ 
++  /// Phone layout: the title row folds away with whichever sub-tab's list is
++  /// scrolled, while the sub-tab row stays pinned — see [FoldingHeader].
++  /// Pinned open while the search field (which lives in it) is in use.
++  late final FoldingHeader _header = FoldingHeader(
++    vsync: this,
++    extent: () => 50, // ShellAppBar's toolbar row
++    canFold: () => !_searchExpanded && MediaQuery.sizeOf(context).width < 720,
++  );
++
+   void _toggleSearch() {
+     setState(() => _searchExpanded = !_searchExpanded);
+     if (_searchExpanded) {
++      _header.show();
+       _searchAnimCtrl.forward();
+       Future.delayed(const Duration(milliseconds: 250), () {
+         if (mounted) _searchFocus.requestFocus();
+@@ -189,6 +201,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
+     // Rebuild on tab change so the FAB shows/hides with the active sub-tab.
+     _tabController!.addListener(() {
+       if (!_tabController!.indexIsChanging) return;
++      _header.show(); // the next sub-tab's list has its own scroll position
+       setState(() {});
+     });
+   }
+@@ -276,13 +289,17 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
+     final int openCount = ref.watch(openDraftsProvider).valueOrNull?.length ?? 0;
+     final int onlineCount = ref.watch(pendingOnlineOrderCountProvider);
+ 
++    final storeEnabled =
++        ref.watch(sessionProvider).valueOrNull?.storeEnabled ?? false;
++
+     _syncTabs([
+-      if (widget.showTables) _OrdersTab.tables,
+       // Always shown, even when empty, so staff always know where to look —
+       // a Credit tab that came and went with the dues read as a missing
+       // feature. An empty one says no one owes money.
+       _OrdersTab.openOrders,
+-      _OrdersTab.online,
++      if (widget.showTables) _OrdersTab.tables,
++      // Online only while the shop runs its online store.
++      if (storeEnabled) _OrdersTab.online,
+       _OrdersTab.credit,
+     ]);
+ 
+@@ -299,10 +316,30 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
+     }
+ 
+     final onTablesTab = _tabs[_tabController!.index] == _OrdersTab.tables;
++    // Folded on a phone, then widened (where it never folds): open it back up.
++    if (MediaQuery.sizeOf(context).width >= 720 && _header.bar.value < 1) {
++      _header.bar.value = 1;
++    }
+ 
+     return Scaffold(
+       body: Column(
+         children: [
++          // The status-bar band stays put; the title row folds away beneath
++          // it while the sub-tab row (+ divider) always stays.
++          ColoredBox(
++            color: AppColors.surface,
++            child: SizedBox(
++                width: double.infinity,
++                height: MediaQuery.paddingOf(context).top),
++          ),
++          FoldAway(
++            bar: _header.bar.drive(Tween(
++                begin: (kTextTabBarHeight + 1) / (50 + kTextTabBarHeight + 1),
++                end: 1.0)),
++            child: MediaQuery.removePadding(
++              context: context,
++              removeTop: true,
++              child:
+           LayoutBuilder(builder: (context, bar) => ShellAppBar(
+             // Bottom-bar root tab: never show a back arrow.
+             automaticallyImplyLeading: false,
+@@ -338,13 +375,20 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
+               ],
+             ),
+           )),
++            ),
++          ),
+           Expanded(
+-            child: TabBarView(
+-              controller: _tabController,
+-              // Switch tabs only by tapping the TabBar — no horizontal swipe.
+-              // A swipe would also fight the Tables canvas's pan gesture.
+-              physics: const NeverScrollableScrollPhysics(),
+-              children: [for (final t in _tabs) _tabView(t)],
++            // The sub-tab screens build their own lists; this hands them the
++            // folding physics and listens to their scrolls.
++            child: _header.wrap(
++              context,
++              TabBarView(
++                controller: _tabController,
++                // Switch tabs only by tapping the TabBar — no horizontal swipe.
++                // A swipe would also fight the Tables canvas's pan gesture.
++                physics: const NeverScrollableScrollPhysics(),
++                children: [for (final t in _tabs) _tabView(t)],
++              ),
+             ),
+           ),
+         ],
+diff --git a/frontend/lib/widgets/bottom_nav_bar.dart b/frontend/lib/widgets/bottom_nav_bar.dart
+index 76ccf65c..1d555430 100644
+--- a/frontend/lib/widgets/bottom_nav_bar.dart
++++ b/frontend/lib/widgets/bottom_nav_bar.dart
+@@ -43,10 +43,49 @@ class AppBottomNavBar extends StatefulWidget {
+     return lift > 0 ? lift : 0;
+   }
+ 
++  /// Whether the bar is showing or scrolled away (the shell drives it; see
++  /// MainShell._onPageScroll). Static: there is one shell, and tab screens
++  /// read it through [HidesWithNavBar] without the shell passing it down.
++  static final ValueNotifier<bool> shown = ValueNotifier(true);
++
+   @override
+   State<AppBottomNavBar> createState() => _AppBottomNavBarState();
+ }
+ 
++/// Slides [child] down off the screen, fading, while the bottom bar is
++/// scrolled away ([AppBottomNavBar.shown]), and keeps it from taking taps
++/// meanwhile. [drop] is how far to slide in [child]'s own heights.
++class HidesWithNavBar extends StatelessWidget {
++  const HidesWithNavBar({super.key, required this.child, this.drop = 1});
++
++  final Widget child;
++  final double drop;
++
++  @override
++  Widget build(BuildContext context) {
++    final duration = MediaQuery.disableAnimationsOf(context)
++        ? Duration.zero
++        : const Duration(milliseconds: 220);
++    return ValueListenableBuilder<bool>(
++      valueListenable: AppBottomNavBar.shown,
++      builder: (context, shown, child) => IgnorePointer(
++        ignoring: !shown,
++        child: AnimatedSlide(
++          offset: shown ? Offset.zero : Offset(0, drop),
++          duration: duration,
++          curve: Curves.easeOutCubic,
++          child: AnimatedOpacity(
++            opacity: shown ? 1 : 0,
++            duration: duration,
++            child: child,
++          ),
++        ),
++      ),
++      child: child,
++    );
++  }
++}
++
+ class _AppBottomNavBarState extends State<AppBottomNavBar>
+     with SingleTickerProviderStateMixin {
+   /// Highlight position in TAB units: 0 = first tab, 1.5 = halfway between the
+diff --git a/frontend/lib/widgets/category_tree_list.dart b/frontend/lib/widgets/category_tree_list.dart
+index fb741b92..209bd187 100644
+--- a/frontend/lib/widgets/category_tree_list.dart
++++ b/frontend/lib/widgets/category_tree_list.dart
+@@ -68,6 +68,7 @@ class TreeSpan {
+ class CategoryTreeList extends StatefulWidget {
+   final List<TreeMajor> tree;
+   final ScrollController controller;
++  final ScrollPhysics physics;
+   final bool twoColumns;
+   final void Function(String major) onToggleMajor;
+   final void Function(String sectionKey) onToggleSection;
+@@ -79,6 +80,7 @@ class CategoryTreeList extends StatefulWidget {
+     super.key,
+     required this.tree,
+     required this.controller,
++    this.physics = const AlwaysScrollableScrollPhysics(),
+     required this.twoColumns,
+     required this.onToggleMajor,
+     required this.onToggleSection,
+@@ -412,7 +414,7 @@ class _CategoryTreeListState extends State<CategoryTreeList>
+     final entries = _entries();
+     return CustomScrollView(
+       controller: widget.controller,
+-      physics: const AlwaysScrollableScrollPhysics(),
++      physics: widget.physics,
+       slivers: [
+         SliverPadding(
+           // + the floating nav bar's inset, so the last rows scroll above it.
+diff --git a/frontend/lib/widgets/floating_bar_physics.dart b/frontend/lib/widgets/floating_bar_physics.dart
+new file mode 100644
+index 00000000..e28d9d71
+--- /dev/null
++++ b/frontend/lib/widgets/floating_bar_physics.dart
+@@ -0,0 +1,179 @@
++import 'package:flutter/rendering.dart' show ScrollDirection;
++import 'package:flutter/widgets.dart';
++
++/// A header sitting ABOVE a scroll view that folds away with the content,
++/// YouTube-style, while anything between it and the list (the Billing /
++/// Items category strip) stays pinned at the top.
++///
++/// Usage: header pieces in [FoldAway]s on [bar]; the list gets [physics];
++/// a `NotificationListener<ScrollNotification>(onNotification: onScroll)`
++/// sits around the list.
++///
++///  * a finger drag is spent on the header first ([FloatingBarPhysics]), so
++///    the rows track the finger exactly while it folds or unfolds;
++///  * a fling carries the fold on at the list's speed, so a quick flick hides
++///    the whole header rather than leaving it half way;
++///  * once scrolling stops, a half-folded header finishes the way the user was
++///    going; at the top of the list it always opens.
++///
++/// Done outside the list's slivers so its scroll offsets still start at 0 —
++/// the jump-to-category and scroll-spy math is built on that. Programmatic
++/// scrolls (a category jump) never fold it.
++class FoldingHeader {
++  FoldingHeader({
++    required TickerProvider vsync,
++    required this.extent,
++    required this.canFold,
++  }) : bar = AnimationController(
++            vsync: vsync,
++            value: 1,
++            duration: const Duration(milliseconds: 260));
++
++  /// How much of the header shows: 0 = folded away, 1 = fully shown.
++  final AnimationController bar;
++
++  /// The header's full height. A callback: it can change (a tab bar coming
++  /// and going), and a Scrollable keeps its first physics object.
++  final double Function() extent;
++
++  /// False pins the header open (search in use, wide layout…).
++  final bool Function() canFold;
++
++  late final ScrollPhysics physics = FloatingBarPhysics(
++    bar: bar,
++    extent: extent,
++    canFloat: canFold,
++    parent: const AlwaysScrollableScrollPhysics(),
++  );
++
++  bool _userScrolling = false;
++  ScrollDirection _lastDir = ScrollDirection.idle;
++
++  /// Opens the header with the same easing as a snap.
++  void show() {
++    if (bar.value < 1 && !(bar.isAnimating && bar.velocity > 0)) {
++      bar.animateTo(1, curve: Curves.easeOutCubic);
++    }
++  }
++
++  /// For a screen whose lists are built by other widgets (tab views of other
++  /// screens): every scrollable below gets [physics] — their own physics
++  /// chain onto it — and their scrolls drive the fold.
++  Widget wrap(BuildContext context, Widget child) {
++    final config = ScrollConfiguration.of(context);
++    return NotificationListener<ScrollNotification>(
++      onNotification: onScroll,
++      child: ScrollConfiguration(
++        behavior: config.copyWith(
++            physics: physics.applyTo(config.getScrollPhysics(context))),
++        child: child,
++      ),
++    );
++  }
++
++  bool onScroll(ScrollNotification n) {
++    // Only vertical lists — not the sideways chip strips or tab pages.
++    // ponytail: no depth filter (tab-view lists sit inside a horizontal
++    // PageView); a vertical list nested in another would count twice.
++    if (n.metrics.axis != Axis.vertical) return false;
++    if (n is UserScrollNotification) {
++      _userScrolling = n.direction != ScrollDirection.idle;
++      if (_userScrolling) {
++        _lastDir = n.direction;
++      } else {
++        _settle(n.metrics);
++      }
++    } else if (n is ScrollUpdateNotification) {
++      if (n.metrics.extentBefore <= 0) {
++        show();
++      } else if (n.dragDetails == null && _userScrolling && canFold()) {
++        // The fling after a flick: keep folding/unfolding at its speed.
++        final d = n.scrollDelta ?? 0;
++        bar.value = (bar.value - d / extent()).clamp(0.0, 1.0);
++      }
++    }
++    return false;
++  }
++
++  void _settle(ScrollMetrics m) {
++    if (bar.value <= 0 || bar.value >= 1 || bar.isAnimating) return;
++    // reverse = moving further down the list = folding.
++    final fold = _lastDir == ScrollDirection.reverse && m.extentBefore > 0;
++    bar.animateTo(fold ? 0 : 1, curve: Curves.easeOutCubic);
++  }
++
++  void dispose() => bar.dispose();
++}
++
++/// Spends a finger drag on the header first — dragging up folds it, dragging
++/// down brings it back — and passes only the rest to the list.
++class FloatingBarPhysics extends ScrollPhysics {
++  const FloatingBarPhysics({
++    required this.bar,
++    required this.extent,
++    required this.canFloat,
++    super.parent,
++  });
++
++  /// How much of the bar shows: 0 = folded away, 1 = fully shown.
++  final AnimationController bar;
++
++  /// The bar's full height in logical pixels.
++  final double Function() extent;
++
++  /// False pins the bar open.
++  final bool Function() canFloat;
++
++  @override
++  FloatingBarPhysics applyTo(ScrollPhysics? ancestor) => FloatingBarPhysics(
++      bar: bar,
++      extent: extent,
++      canFloat: canFloat,
++      parent: buildParent(ancestor));
++
++  @override
++  double applyPhysicsToUserOffset(ScrollMetrics position, double offset) {
++    // Sideways scrollables (tab pages, chip strips) may inherit this physics
++    // through a ScrollConfiguration — they must never fold the bar.
++    if (position.axis == Axis.vertical && canFloat()) {
++      // offset < 0: finger moving up, i.e. further down the list.
++      final h = extent();
++      final next = (bar.value + offset / h).clamp(0.0, 1.0);
++      final used = (next - bar.value) * h;
++      if (used != 0) {
++        bar.value = next;
++        offset -= used;
++      }
++    }
++    return super.applyPhysicsToUserOffset(position, offset);
++  }
++}
++
++/// Shows the bottom share of [child] given by [bar] (1 = all), so it slides
++/// up out of sight as the header folds.
++///
++/// A header made of separate pieces folds as ONE block by giving each piece
++/// its own slice of the fold, top piece first: see [slice].
++class FoldAway extends AnimatedWidget {
++  const FoldAway({super.key, required Animation<double> bar, required this.child})
++      : super(listenable: bar);
++
++  /// [header]'s fold, narrowed to one piece: [below] px of header sit under
++  /// this piece and it is [height] px tall, out of [total]. The piece starts
++  /// folding only once everything above it has gone.
++  static Animation<double> slice(AnimationController header,
++          {required double below, required double height, required double total}) =>
++      header.drive(CurveTween(
++          curve: Interval(below / total, (below + height) / total)));
++
++  final Widget child;
++
++  @override
++  Widget build(BuildContext context) => ClipRect(
++        child: Align(
++          alignment: Alignment.bottomCenter,
++          heightFactor: (listenable as Animation<double>).value,
++          child: child,
++        ),
++      );
++}
+diff --git a/frontend/test/widgets/floating_bar_physics_test.dart b/frontend/test/widgets/floating_bar_physics_test.dart
+new file mode 100644
+index 00000000..de54ba9f
+--- /dev/null
++++ b/frontend/test/widgets/floating_bar_physics_test.dart
+@@ -0,0 +1,189 @@
++import 'package:Vittam/widgets/floating_bar_physics.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++/// The floating app bar soaks up a drag before the list moves, in both
++/// directions, and stays put when floating is switched off.
++void main() {
++  test('drag folds the bar first, the rest scrolls the list', () {
++    final bar = AnimationController(vsync: const TestVSync(), value: 1);
++    var float = true;
++    final physics =
++        FloatingBarPhysics(bar: bar, extent: () => 50, canFloat: () => float);
++    final metrics = FixedScrollMetrics(
++      minScrollExtent: 0,
++      maxScrollExtent: 1000,
++      pixels: 100,
++      viewportDimension: 500,
++      axisDirection: AxisDirection.down,
++      devicePixelRatio: 1,
++    );
++
++    // Finger up 30: all spent folding the bar, list doesn't move.
++    expect(physics.applyPhysicsToUserOffset(metrics, -30), 0);
++    expect(bar.value, closeTo(0.4, 1e-9));
++    // Finger up 40 more: 20 finishes folding, 20 scrolls the list.
++    expect(physics.applyPhysicsToUserOffset(metrics, -40), closeTo(-20, 1e-9));
++    expect(bar.value, 0);
++    // Finger down 60: 50 brings the bar back, 10 scrolls the list.
++    expect(physics.applyPhysicsToUserOffset(metrics, 60), closeTo(10, 1e-9));
++    expect(bar.value, 1);
++
++    // Pinned (search open / wide layout): the list gets the whole drag.
++    float = false;
++    expect(physics.applyPhysicsToUserOffset(metrics, -30), -30);
++    expect(bar.value, 1);
++    bar.dispose();
++  });
++
++  // The Items-page bug: a quick flick folded the app bar but left the tab
++  // row (and search box) showing. The fling must carry the whole header away,
++  // and coming back to the top must open it all again.
++  testWidgets('a flick folds the whole header; the top opens it',
++      (tester) async {
++    late FoldingHeader header;
++    await tester
++        .pumpWidget(MaterialApp(home: _Host(onHeader: (h) => header = h)));
++
++    Size sizeOf(String key) => tester.getSize(find.byKey(ValueKey(key)));
++    expect(sizeOf('top').height, 100);
++    expect(sizeOf('search').height, 50);
++
++    await tester.fling(find.text('row 0'), const Offset(0, -60), 2000);
++    await tester.pumpAndSettle();
++    expect(header.bar.value, 0);
++    expect(sizeOf('top').height, 0);
++    expect(sizeOf('search').height, 0);
++
++    await tester.fling(find.byType(ListView), const Offset(0, 300), 4000);
++    await tester.pumpAndSettle();
++    expect(header.bar.value, 1);
++    expect(sizeOf('top').height, 100);
++  });
++
++  testWidgets('wrap(): tab lists fold the header, sideways swipes do not',
++      (tester) async {
++    late FoldingHeader header;
++    await tester
++        .pumpWidget(MaterialApp(home: _WrapHost(onHeader: (h) => header = h)));
++
++    // A sideways swipe to the second tab leaves the header alone.
++    await tester.drag(find.text('a 0'), const Offset(-500, 0));
++    await tester.pumpAndSettle();
++    expect(find.text('b 0'), findsOneWidget);
++    expect(header.bar.value, 1);
++
++    // A slow vertical drag in that tab's list folds it (30 of its 50 px).
++    final g = await tester.startGesture(tester.getCenter(find.text('b 2')));
++    for (var i = 0; i < 6; i++) {
++      await g.moveBy(const Offset(0, -5));
++      await tester.pump();
++    }
++    expect(header.bar.value, lessThan(1));
++    await g.up();
++  });
++}
++
++/// Orders / Kitchen: lists built by other widgets, inside a swipeable tab view.
++class _WrapHost extends StatefulWidget {
++  const _WrapHost({required this.onHeader});
++  final ValueChanged<FoldingHeader> onHeader;
++  @override
++  State<_WrapHost> createState() => _WrapHostState();
++}
++
++class _WrapHostState extends State<_WrapHost> with TickerProviderStateMixin {
++  late final header =
++      FoldingHeader(vsync: this, extent: () => 50, canFold: () => true);
++  late final tabs = TabController(length: 2, vsync: this);
++
++  @override
++  void initState() {
++    super.initState();
++    widget.onHeader(header);
++  }
++
++  @override
++  void dispose() {
++    tabs.dispose();
++    header.dispose();
++    super.dispose();
++  }
++
++  Widget list(String tag) => ListView.builder(
++        // Its own physics, as the real tab screens have — must still chain
++        // onto the folding physics handed down by wrap().
++        physics: const AlwaysScrollableScrollPhysics(),
++        itemCount: 100,
++        itemExtent: 40,
++        itemBuilder: (_, i) => Text('$tag $i'),
++      );
++
++  @override
++  Widget build(BuildContext context) => Scaffold(
++        body: Column(children: [
++          FoldAway(
++            key: const ValueKey('title'),
++            bar: header.bar,
++            child: const SizedBox(height: 50),
++          ),
++          Expanded(
++            child: header.wrap(
++              context,
++              TabBarView(controller: tabs, children: [list('a'), list('b')]),
++            ),
++          ),
++        ]),
++      );
++}
++
++class _Host extends StatefulWidget {
++  const _Host({required this.onHeader});
++  final ValueChanged<FoldingHeader> onHeader;
++  @override
++  State<_Host> createState() => _HostState();
++}
++
++class _HostState extends State<_Host> with TickerProviderStateMixin {
++  late final header =
++      FoldingHeader(vsync: this, extent: () => 150, canFold: () => true);
++
++  @override
++  void initState() {
++    super.initState();
++    widget.onHeader(header);
++  }
++
++  @override
++  void dispose() {
++    header.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => Scaffold(
++        body: Column(children: [
++          FoldAway(
++            key: const ValueKey('top'),
++            bar: FoldAway.slice(header.bar, below: 50, height: 100, total: 150),
++            child: const SizedBox(height: 100),
++          ),
++          FoldAway(
++            key: const ValueKey('search'),
++            bar: FoldAway.slice(header.bar, below: 0, height: 50, total: 150),
++            child: const SizedBox(height: 50),
++          ),
++          Expanded(
++            child: NotificationListener<ScrollNotification>(
++              onNotification: header.onScroll,
++              child: ListView.builder(
++                physics: header.physics,
++                itemCount: 100,
++                itemExtent: 40,
++                itemBuilder: (_, i) => Text('row $i'),
++              ),
++            ),
++          ),
++        ]),
++      );
++}

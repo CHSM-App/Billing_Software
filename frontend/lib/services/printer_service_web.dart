@@ -123,6 +123,7 @@ class PrinterService {
       String? businessFssai,
       bool gstEnabled = true,
       dynamic labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     throw PrinterException('Receipt preview is not supported in the browser.');
   }
@@ -135,6 +136,7 @@ class PrinterService {
       String? businessFssai,
       bool gstEnabled = true,
       dynamic labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
@@ -147,6 +149,7 @@ class PrinterService {
       String? businessFssai,
       bool gstEnabled = true,
       dynamic labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
@@ -158,6 +161,7 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       dynamic labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     throw PrinterException('Receipt preview is not supported in the browser.');
   }
@@ -169,6 +173,7 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       dynamic labels,
+      ui.Image? logo,
       int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }

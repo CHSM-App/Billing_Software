@@ -7,7 +7,7 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'http://192.168.1.8:5000/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
           
@@ -590,6 +590,10 @@ Future<void> deleteItem(String id) async {
 
 // --- Item photos (owner-only; customer-facing on the QR menu) --------------
 
+/// One item's current photo URL (null when it has none), for the item form.
+Future<String?> getItemImageUrl(String id) async =>
+    _parse(await _authGet(Uri.parse('$baseUrl/items/$id')))['image_url'] as String?;
+
 /// Owner-only list of items with their current [image_url]. Used by the Menu
 /// Photos screen. The regular [getItems] omits image_url so photos never load
 /// during billing.
@@ -798,6 +802,41 @@ Future<String> uploadStorePaymentQr(List<int> jpegBytes) async {
 /// Remove the payment QR, so checkout stops asking customers to pay up front.
 Future<void> deleteStorePaymentQr() async {
   _parse(await _authDelete(Uri.parse('$baseUrl/businesses/store-qr')));
+}
+
+/// Upload the shop logo (owner only). Returns the stored public URL.
+Future<String> uploadBusinessLogo(List<int> jpegBytes) async {
+  final uri = Uri.parse('$baseUrl/businesses/logo');
+  final response = await _withAutoRefresh((h) {
+    final headers = Map<String, String>.from(h)..['Content-Type'] = 'image/jpeg';
+    return _put(uri, headers: headers, body: jpegBytes);
+  });
+  final body = _parse(response) as Map<String, dynamic>;
+  return body['logo_url'] as String;
+}
+
+/// Remove the shop logo (owner only).
+Future<void> deleteBusinessLogo() async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/businesses/logo')));
+}
+
+/// Bring this device's cached logo in line with the server's [url] and
+/// [printLogo] flag (from login, /license or the owner's own change). The
+/// bytes are only downloaded when the URL changed — its ?v= stamp changes on
+/// every upload. A failed download keeps the old copy; never throws.
+Future<void> syncBusinessLogo(String? url, bool printLogo) async {
+  await savePrintLogo(printLogo);
+  if (url == null || url.isEmpty) return saveLogo(null, null);
+  if (url == await getLogoUrl()) return;
+  try {
+    final origin = baseUrl.endsWith('/api')
+        ? baseUrl.substring(0, baseUrl.length - 4)
+        : baseUrl;
+    final res = await _get(Uri.parse(url.startsWith('http') ? url : '$origin$url'));
+    if (res.statusCode == 200) await saveLogo(url, res.bodyBytes);
+  } catch (e) {
+    dev.log('Logo sync failed: $e');
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -68,6 +68,7 @@ class TreeSpan {
 class CategoryTreeList extends StatefulWidget {
   final List<TreeMajor> tree;
   final ScrollController controller;
+  final ScrollPhysics physics;
   final bool twoColumns;
   final void Function(String major) onToggleMajor;
   final void Function(String sectionKey) onToggleSection;
@@ -79,6 +80,7 @@ class CategoryTreeList extends StatefulWidget {
     super.key,
     required this.tree,
     required this.controller,
+    this.physics = const AlwaysScrollableScrollPhysics(),
     required this.twoColumns,
     required this.onToggleMajor,
     required this.onToggleSection,
@@ -156,7 +158,7 @@ class CategoryTreeList extends StatefulWidget {
 
   /// maxScrollExtent once every fold animation has settled.
   static double settledMaxScroll(List<TreeMajor> tree, bool twoColumns,
-      {required double viewportHeight}) {
+      {required double viewportHeight, double bottomInset = 0}) {
     var h = 0.0;
     for (final m in tree) {
       if (m.major != null) h += majorHeaderExtent;
@@ -165,7 +167,8 @@ class CategoryTreeList extends StatefulWidget {
         h += _sectionHeight(s, twoColumns);
       }
     }
-    return (h + bottomPadding - viewportHeight).clamp(0.0, double.infinity);
+    return (h + bottomPadding + bottomInset - viewportHeight)
+        .clamp(0.0, double.infinity);
   }
 
   @override
@@ -411,11 +414,13 @@ class _CategoryTreeListState extends State<CategoryTreeList>
     final entries = _entries();
     return CustomScrollView(
       controller: widget.controller,
-      physics: const AlwaysScrollableScrollPhysics(),
+      physics: widget.physics,
       slivers: [
         SliverPadding(
-          padding:
-              const EdgeInsets.only(bottom: CategoryTreeList.bottomPadding),
+          // + the floating nav bar's inset, so the last rows scroll above it.
+          padding: EdgeInsets.only(
+              bottom: CategoryTreeList.bottomPadding +
+                  MediaQuery.paddingOf(context).bottom),
           sliver: SliverVariedExtentList(
             itemExtentBuilder: (i, _) =>
                 i >= entries.length ? null : entries[i].$2,
@@ -699,7 +704,8 @@ mixin CategoryTreeNav<T extends StatefulWidget> on State<T> {
     final pos = treeScrollCtrl.position;
     // Rows just opened are still unfolding, so clamp to the settled extent.
     final settled = CategoryTreeList.settledMaxScroll(_tree, _twoColumns,
-        viewportHeight: pos.viewportDimension);
+        viewportHeight: pos.viewportDimension,
+        bottomInset: MediaQuery.paddingOf(context).bottom);
     final target = offset.clamp(
         0.0, settled > pos.maxScrollExtent ? settled : pos.maxScrollExtent);
     _jumping = true;

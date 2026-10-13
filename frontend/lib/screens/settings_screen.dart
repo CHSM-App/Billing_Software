@@ -1,4 +1,6 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb; // used to hide printer tile on web
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -11,10 +13,12 @@ import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
+import '../utils/jpeg_compress.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/language_selector.dart';
 import '../widgets/shell_app_bar.dart';
 import 'login_screen.dart';
+import 'logo_adjust_screen.dart';
 // Printer screens use native-only packages — excluded on web.
 import 'printer_setup_screen.dart'
     if (dart.library.html) 'printer_setup_screen_web.dart';
@@ -91,7 +95,98 @@ class _SettingsContentState extends State<_SettingsContent>
         .check(isOnline: widget.ref.read(connectivityProvider))
         .then((status) {
       if (mounted) setState(() => _license = status);
+      // The license check also re-syncs the cached logo — pick up any change.
+      _loadLogo();
     });
+    _loadLogo();
+  }
+
+  // ── Shop logo (owner sets it; every device caches it for receipts) ─────────
+  Uint8List? _logo;
+  bool _printLogo = false;
+  bool _logoBusy = false;
+
+  Future<void> _loadLogo() async {
+    final bytes = await getLogoBytes();
+    final printLogo = await getPrintLogo();
+    if (mounted) setState(() { _logo = bytes; _printLogo = printLogo; });
+  }
+
+  void _logoSnack(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: isError ? AppColors.error : AppColors.success,
+    ));
+  }
+
+  /// Run a logo change with a spinner on the avatar, then refresh from cache.
+  Future<void> _logoTask(Future<void> Function() task, String done) async {
+    setState(() => _logoBusy = true);
+    try {
+      await task();
+      await _loadLogo();
+      if (mounted) _logoSnack(done);
+    } catch (_) {
+      if (mounted) _logoSnack(context.l10n.errorSomethingWentWrong, isError: true);
+    } finally {
+      if (mounted) setState(() => _logoBusy = false);
+    }
+  }
+
+  Future<void> _onLogoTap() async {
+    final l10n = context.l10n;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.image_outlined),
+            title: Text(l10n.logoChoose),
+            onTap: () => Navigator.pop(ctx, 'pick'),
+          ),
+          if (_logo != null)
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: AppColors.error),
+              title: Text(l10n.logoRemove),
+              onTap: () => Navigator.pop(ctx, 'remove'),
+            ),
+        ]),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'remove') {
+      await _logoTask(() async {
+        await deleteBusinessLogo();
+        await syncBusinessLogo(null, _printLogo);
+      }, l10n.logoRemoved);
+    } else if (action == 'pick') {
+      XFile? picked;
+      try {
+        picked = await ImagePicker().pickImage(
+            source: ImageSource.gallery, maxWidth: 1600, maxHeight: 1600);
+      } catch (_) {
+        if (mounted) _logoSnack(l10n.errorSomethingWentWrong, isError: true);
+        return;
+      }
+      if (picked == null) return;
+      final raw = await picked.readAsBytes();
+      if (!mounted) return;
+      // Let the owner frame the logo and confirm print permission first.
+      final adjusted = await Navigator.push<LogoAdjustResult>(
+        context,
+        MaterialPageRoute(
+            builder: (_) =>
+                LogoAdjustScreen(imageBytes: raw, printLogo: _printLogo)),
+      );
+      if (adjusted == null || !mounted) return;
+      await _logoTask(() async {
+        final url = await uploadBusinessLogo(await compressToJpeg(adjusted.png));
+        if (adjusted.printLogo != _printLogo) {
+          await updateBusinessProfile({'print_logo': adjusted.printLogo});
+        }
+        await syncBusinessLogo(url, adjusted.printLogo);
+      }, l10n.logoUploaded);
+    }
   }
 
   @override
@@ -174,7 +269,9 @@ class _SettingsContentState extends State<_SettingsContent>
               widget.ref.read(sessionProvider.notifier).refresh(),
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(AppSpacing.space16),
+            // + the floating nav bar's inset, so the last entry scrolls above it.
+            padding: const EdgeInsets.all(AppSpacing.space16).copyWith(
+                bottom: AppSpacing.space16 + MediaQuery.paddingOf(context).bottom),
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 520),
@@ -521,29 +618,59 @@ class _SettingsContentState extends State<_SettingsContent>
         children: [
           Row(
             children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.3),
-                      width: 2),
-                ),
-                child: Center(
-                  child: Text(
-                    session.userName.isNotEmpty
-                        ? session.userName[0].toUpperCase()
-                        : '?',
-                    style: const TextStyle(
-                      
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
+              // Shop logo when one is set, else the initial. Only the owner
+              // can tap it to change the logo.
+              GestureDetector(
+                onTap: isOwner && !_logoBusy ? _onLogoTap : null,
+                child: Stack(clipBehavior: Clip.none, children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: _logo != null
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.3),
+                          width: 2),
                     ),
+                    child: _logoBusy
+                        ? const Padding(
+                            padding: EdgeInsets.all(14),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : _logo != null
+                            // Fill the circle like a profile photo.
+                            ? Image.memory(_logo!,
+                                fit: BoxFit.cover, width: 56, height: 56)
+                            : Center(
+                                child: Text(
+                                  session.userName.isNotEmpty
+                                      ? session.userName[0].toUpperCase()
+                                      : '?',
+                                  style: const TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
                   ),
-                ),
+                  if (isOwner)
+                    Positioned(
+                      right: -2,
+                      bottom: -2,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                            color: Colors.white, shape: BoxShape.circle),
+                        child: const Icon(Icons.camera_alt_outlined,
+                            size: 12, color: AppColors.primary),
+                      ),
+                    ),
+                ]),
               ),
               const SizedBox(width: AppSpacing.space16),
               Expanded(

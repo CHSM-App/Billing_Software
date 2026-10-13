@@ -1228,5 +1228,16 @@
   "onlineOrderTotal": "एकूण",
   "onlineOrderNewTitle": "नवीन ऑनलाइन ऑर्डर",
   "onlineOrderNewBody": "{orderNumber} · {count} वस्तू · {total}",
-  "@onlineOrderNewBody": { "placeholders": { "orderNumber": { "type": "String" }, "count": { "type": "int" }, "total": { "type": "String" } } }
+  "@onlineOrderNewBody": { "placeholders": { "orderNumber": { "type": "String" }, "count": { "type": "int" }, "total": { "type": "String" } } },
+  "logoChoose": "लोगो निवडा",
+  "logoRemove": "लोगो काढा",
+  "logoPrintOnBills": "बिलावर लोगो छापा",
+  "logoUploaded": "लोगो अपडेट झाला",
+  "logoRemoved": "लोगो काढला",
+  "logoAdjustTitle": "लोगो जुळवा",
+  "logoAdjustHint": "झूम करण्यासाठी पिंच करा आणि जागा बदलण्यासाठी ओढा. चौकटीतील भागच छापला जाईल.",
+  "logoShapeSquare": "चौकोनी",
+  "logoShapeWide": "रुंद",
+  "logoReset": "रीसेट",
+  "logoSave": "लोगो सेव्ह करा"
 }

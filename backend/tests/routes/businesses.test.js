@@ -174,3 +174,43 @@ describe('PUT /api/businesses/profile — GST toggle guard', () => {
     expect(res.status).toBe(200);
   });
 });
+
+// ------------------------------------------------------------------
+// Shop logo upload — owner-only, JPEG-only (same guard as the store QR).
+// ------------------------------------------------------------------
+describe('PUT /api/businesses/logo', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+
+  test('rejects a non-JPEG body', async () => {
+    const res = await request(app)
+      .put('/api/businesses/logo')
+      .set(authHeader())
+      .set('Content-Type', 'image/jpeg')
+      .send(Buffer.from('<svg/>'));
+    expect(res.status).toBe(400);
+  });
+
+  test('a cashier cannot change the logo', async () => {
+    const res = await request(app)
+      .put('/api/businesses/logo')
+      .set(authHeader({ role: 'cashier' }))
+      .set('Content-Type', 'image/jpeg')
+      .send(jpeg);
+    expect(res.status).toBe(403);
+  });
+
+  test('owner upload stores the file and returns a cache-busted URL', async () => {
+    const res = await request(app)
+      .put('/api/businesses/logo')
+      .set(authHeader())
+      .set('Content-Type', 'image/jpeg')
+      .send(jpeg);
+    expect(res.status).toBe(200);
+    expect(res.body.logo_url).toMatch(/^\/uploads\/logo\/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\.jpg\?v=\d+$/);
+    const file = path.join(__dirname, '..', '..', 'uploads', 'logo', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jpg');
+    expect(fs.existsSync(file)).toBe(true);
+    fs.unlinkSync(file);
+  });
+});

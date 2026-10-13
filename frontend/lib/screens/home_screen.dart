@@ -14,6 +14,8 @@ import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/bottom_nav_bar.dart';
+import '../widgets/floating_bar_physics.dart';
 import '../widgets/whatsapp_mark.dart';
 import '../widgets/stock_target_picker.dart' show isRestaurantBusiness;
 import '../widgets/skeletons.dart';
@@ -179,6 +181,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // Search bar expand state
   bool _searchExpanded = false;
   late final AnimationController _searchAnimCtrl;
+
+  /// Phone layout: the app bar folds away with the item list while the
+  /// category strip stays pinned — see [FoldingHeader]. Pinned open while the
+  /// search field is in use.
+  late final FoldingHeader _header = FoldingHeader(
+    vsync: this,
+    extent: () => 51, // ShellAppBar: 50 toolbar + 1 divider
+    canFold: () => !_searchExpanded && MediaQuery.sizeOf(context).width < 720,
+  );
   late final Animation<double> _searchAnim;
   final _searchFocus = FocusNode();
 
@@ -322,6 +333,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_globalKeyHandler);
     _searchAnimCtrl.dispose();
+    _header.dispose();
     _searchFocus.dispose();
     _searchController.dispose();
     _itemsScrollCtrl.dispose();
@@ -666,6 +678,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _tree,
       _twoColumns,
       viewportHeight: pos.viewportDimension,
+      bottomInset: MediaQuery.paddingOf(context).bottom,
     );
     final target = offset.clamp(
         0.0, settledMax > pos.maxScrollExtent ? settledMax : pos.maxScrollExtent);
@@ -3413,15 +3426,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _syncDiscount();
     });
 
+    // A bar folded on a phone must not stay folded once the window is wide
+    // (where it no longer floats).
+    if (isWide && _header.bar.value < 1) _header.bar.value = 1;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          // LayoutBuilder so the expanding search field can size itself against
-          // the BAR's width rather than the window's — see _buildAppBar.
-          LayoutBuilder(
-            builder: (context, bar) =>
-                _buildAppBar(businessName, userName, bar.maxWidth),
+          // The status-bar band stays put; the app bar folds away beneath it,
+          // so the category strip below ends up pinned right under the band.
+          ColoredBox(
+            color: AppColors.surface,
+            child: SizedBox(
+                width: double.infinity,
+                height: MediaQuery.paddingOf(context).top),
+          ),
+          FoldAway(
+            bar: _header.bar,
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              // LayoutBuilder so the expanding search field can size itself
+              // against the BAR's width rather than the window's — see
+              // _buildAppBar.
+              child: LayoutBuilder(
+                builder: (context, bar) =>
+                    _buildAppBar(businessName, userName, bar.maxWidth),
+              ),
+            ),
           ),
           Expanded(child: isWide ? _buildWideLayout() : _buildNarrowLayout()),
         ],
@@ -3544,6 +3577,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               onPressed: () {
                 setState(() => _searchExpanded = !_searchExpanded);
                 if (_searchExpanded) {
+                  _header.show(); // the field lives in the bar
                   _searchAnimCtrl.forward();
                   Future.delayed(const Duration(milliseconds: 250), () {
                     if (mounted) _searchFocus.requestFocus();
@@ -3584,10 +3618,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           // tables it saves a table draft; on the standalone billing page it
           // saves a table-less "open order" everyone can create.
           if (count > 0)
-            Positioned(
-              bottom: AppSpacing.space16,
-              left: AppSpacing.space16,
-              right: AppSpacing.space16,
+            ValueListenableBuilder<bool>(
+              valueListenable: AppBottomNavBar.shown,
+              builder: (context, navShown, row) => AnimatedPositioned(
+                // Above the floating nav bar (its height is in the inset);
+                // when scrolling hides the bar, drop down with it to just
+                // above the system inset instead of hovering over the gap.
+                bottom: AppSpacing.space16 +
+                    (navShown
+                        ? MediaQuery.paddingOf(context).bottom
+                        : MediaQuery.viewPaddingOf(context).bottom),
+                left: AppSpacing.space16,
+                right: AppSpacing.space16,
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: row!,
+              ),
               child: Row(
                 children: [
                   Expanded(
@@ -3657,7 +3705,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           builder: (ctx, setSheet) {
             // Expose the sheet's setter so credit-error changes (driven from
             // button handlers) can rebuild the sheet, not just the parent.
-            _sheetSetState = setSheet;
+            // Guarded on ctx.mounted: the sheet rebuilds during its close
+            // animation, re-assigning this AFTER whenComplete nulled it — the
+            // stale setter then threw "setState() after dispose" on the next
+            // save, leaving the save button stuck loading.
+            _sheetSetState = (fn) {
+              if (ctx.mounted) setSheet(fn);
+            };
             return AnimatedPadding(
               padding: EdgeInsets.only(bottom: keyboardHeight),
               duration: const Duration(milliseconds: 200),
@@ -3684,7 +3738,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // ---------------------------------------------------------------------------
 
   Widget _buildItemsPanel() {
-    return _buildItemList();
+    // The list's scrolls carry and settle the app bar's fold.
+    return NotificationListener<ScrollNotification>(
+      onNotification: _header.onScroll,
+      child: _buildItemList(),
+    );
   }
 
   /// "Retry" on the offline item list.
@@ -3833,7 +3891,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               onRefresh: refresh,
               child: CustomScrollView(
                 controller: _itemsScrollCtrl,
-                physics: const AlwaysScrollableScrollPhysics(),
+                physics: _header.physics,
                 slivers: [
                   SliverFillRemaining(
                     child: EmptyState(
@@ -3851,6 +3909,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               tree: tree,
               cart: cart,
               controller: _itemsScrollCtrl,
+              physics: _header.physics,
               twoColumns: _twoColumns,
               onToggleMajor: _toggleMajor,
               onToggleSection: _toggleCategory,
@@ -5382,6 +5441,7 @@ class _ExcelItemTable extends StatefulWidget {
   final List<_MajorSection> tree;
   final List<CartEntry> cart;
   final ScrollController controller;
+  final ScrollPhysics physics;
   final bool twoColumns;
   final void Function(String major) onToggleMajor;
   /// Called with the section's key (see [_CategorySection.key]), not its bare
@@ -5399,6 +5459,7 @@ class _ExcelItemTable extends StatefulWidget {
     required this.tree,
     required this.cart,
     required this.controller,
+    required this.physics,
     required this.twoColumns,
     required this.onToggleMajor,
     required this.onToggleSection,
@@ -5595,9 +5656,11 @@ class _ExcelItemTable extends StatefulWidget {
     List<_MajorSection> tree,
     bool twoColumns, {
     required double viewportHeight,
+    double bottomInset = 0,
   }) =>
       (columnHeaderHeight +
               bottomPadding +
+              bottomInset +
               _contentHeight(tree, twoColumns) -
               viewportHeight)
           .clamp(0.0, double.infinity);
@@ -5986,11 +6049,13 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
 
     return CustomScrollView(
       controller: widget.controller,
-      physics: const AlwaysScrollableScrollPhysics(),
+      physics: widget.physics,
       slivers: [
         SliverPadding(
-          padding:
-              const EdgeInsets.only(bottom: _ExcelItemTable.bottomPadding),
+          // + the floating nav bar's inset, so the last rows scroll above it.
+          padding: EdgeInsets.only(
+              bottom: _ExcelItemTable.bottomPadding +
+                  MediaQuery.paddingOf(context).bottom),
           // Row extents shrink/grow while a group folds, so everything below
           // slides along with it.
           sliver: SliverVariedExtentList(

@@ -6381,6 +6381,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{orderNumber} · {count} item(s) · {total}'**
   String onlineOrderNewBody(String orderNumber, int count, String total);
+
+  /// No description provided for @logoChoose.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose logo'**
+  String get logoChoose;
+
+  /// No description provided for @logoRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove logo'**
+  String get logoRemove;
+
+  /// No description provided for @logoPrintOnBills.
+  ///
+  /// In en, this message translates to:
+  /// **'Print logo on bills'**
+  String get logoPrintOnBills;
+
+  /// No description provided for @logoUploaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Logo updated'**
+  String get logoUploaded;
+
+  /// No description provided for @logoRemoved.
+  ///
+  /// In en, this message translates to:
+  /// **'Logo removed'**
+  String get logoRemoved;
+
+  /// No description provided for @logoAdjustTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Adjust logo'**
+  String get logoAdjustTitle;
+
+  /// No description provided for @logoAdjustHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinch to zoom and drag to position. The area inside the frame is what prints.'**
+  String get logoAdjustHint;
+
+  /// No description provided for @logoShapeSquare.
+  ///
+  /// In en, this message translates to:
+  /// **'Square'**
+  String get logoShapeSquare;
+
+  /// No description provided for @logoShapeWide.
+  ///
+  /// In en, this message translates to:
+  /// **'Wide'**
+  String get logoShapeWide;
+
+  /// No description provided for @logoReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get logoReset;
+
+  /// No description provided for @logoSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save logo'**
+  String get logoSave;
 }
 
 class _AppLocalizationsDelegate

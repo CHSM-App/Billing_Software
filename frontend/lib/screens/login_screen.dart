@@ -268,6 +268,9 @@ class _LoginScreenState extends ConsumerState<_LoginView>
         defaultSacCode: business['default_sac_code'] as String?,
         fssaiNumber: business['fssai_number'] as String?,
       );
+      // Cache the shop logo too, so it prints on receipts offline.
+      await syncBusinessLogo(
+          business['logo_url'] as String?, business['print_logo'] == true);
       NotificationService.instance.init();
       await ref.read(sessionProvider.notifier).refresh();
       ref.invalidate(itemsProvider);

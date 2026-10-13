@@ -19,12 +19,20 @@ Uint8List compressJpegSync(Uint8List bytes) {
   if (decoded == null) return bytes; // not decodable — send as-is, server validates
   const maxEdge = 1000;
   img.Image out = decoded;
+  // JPEG has no alpha: transparent pixels (a PNG logo's background) would
+  // encode as black. Flatten onto white first.
+  if (decoded.hasAlpha) {
+    out = img.compositeImage(
+        img.Image(width: decoded.width, height: decoded.height)
+          ..clear(img.ColorRgb8(255, 255, 255)),
+        decoded);
+  }
   final longEdge = decoded.width > decoded.height ? decoded.width : decoded.height;
   if (longEdge > maxEdge) {
     if (decoded.width >= decoded.height) {
-      out = img.copyResize(decoded, width: maxEdge);
+      out = img.copyResize(out, width: maxEdge);
     } else {
-      out = img.copyResize(decoded, height: maxEdge);
+      out = img.copyResize(out, height: maxEdge);
     }
   }
   return img.encodeJpg(out, quality: 80);

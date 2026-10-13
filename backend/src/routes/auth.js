@@ -381,7 +381,7 @@ router.post('/login', loginLimiter, async (req, res) => {
                b.inventory_enabled, b.has_barcode_scanner, b.address,
                b.phone AS business_phone,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
-               b.round_off_enabled, b.store_enabled,
+               b.round_off_enabled, b.store_enabled, b.logo_url, b.print_logo,
                s.allow_mobile, s.allow_desktop, s.allow_online_store, s.allow_customers
         FROM users u
         JOIN businesses b ON u.business_id = b.id
@@ -515,6 +515,10 @@ router.post('/login', loginLimiter, async (req, res) => {
         default_sac_code: row.default_sac_code ?? null,
         fssai_number: row.fssai_number ?? null,
         round_off_enabled: !!row.round_off_enabled,
+        // Shop logo + the owner's opt-in to print it, cached on every device
+        // (staff too) so receipts can carry it offline.
+        logo_url: row.logo_url ?? null,
+        print_logo: !!row.print_logo,
         // Online store master switch. Sent at login so a CASHIER's shell knows
         // whether to poll the order queue — the business profile that carries
         // this is owner-only, so they could not find out any other way.

@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -300,6 +302,39 @@ class AuthStorage {
     return (p == null || p.isEmpty) ? 'INV' : p;
   }
 
+  // Shop logo, cached as bytes so receipts can print it offline. logo_url is
+  // the server path it was downloaded from (with its ?v= stamp), so a re-sync
+  // only downloads again when the owner actually changed the logo.
+  static const _keyLogoUrl = 'logo_url';
+  static const _keyLogoB64 = 'logo_b64';
+  static const _keyPrintLogo = 'print_logo';
+
+  Future<String?> getLogoUrl() async =>
+      (await SharedPreferences.getInstance()).getString(_keyLogoUrl);
+
+  /// Store the downloaded logo for [url], or clear both when [url] is null.
+  Future<void> saveLogo(String? url, List<int>? bytes) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (url == null || bytes == null) {
+      await prefs.remove(_keyLogoUrl);
+      await prefs.remove(_keyLogoB64);
+      return;
+    }
+    await prefs.setString(_keyLogoB64, base64Encode(bytes));
+    await prefs.setString(_keyLogoUrl, url);
+  }
+
+  Future<Uint8List?> getLogoBytes() async {
+    final b64 = (await SharedPreferences.getInstance()).getString(_keyLogoB64);
+    return b64 == null ? null : base64Decode(b64);
+  }
+
+  Future<void> savePrintLogo(bool on) async =>
+      (await SharedPreferences.getInstance()).setBool(_keyPrintLogo, on);
+
+  Future<bool> getPrintLogo() async =>
+      (await SharedPreferences.getInstance()).getBool(_keyPrintLogo) ?? false;
+
   // Charge-description suggestions (Delivery, Packaging, ...) cached per
   // business as a JSON list, so the billing screen can offer them instantly
   // and while offline. Keyed by business so a different login on the same
@@ -561,6 +596,11 @@ Future<String?> getUserId()                    => AuthStorage.instance.getUserId
 Future<void>    clearSession()                 => AuthStorage.instance.clearSession();
 Future<void>    saveBillPrefix(String prefix)  => AuthStorage.instance.saveBillPrefix(prefix);
 Future<String>  getBillPrefix()                => AuthStorage.instance.getBillPrefix();
+Future<String?> getLogoUrl()                   => AuthStorage.instance.getLogoUrl();
+Future<void>    saveLogo(String? url, List<int>? bytes) => AuthStorage.instance.saveLogo(url, bytes);
+Future<Uint8List?> getLogoBytes()              => AuthStorage.instance.getLogoBytes();
+Future<void>    savePrintLogo(bool on)         => AuthStorage.instance.savePrintLogo(on);
+Future<bool>    getPrintLogo()                 => AuthStorage.instance.getPrintLogo();
 Future<void>    saveCachedChargeSuggestions(String businessId, String json) =>
     AuthStorage.instance.saveChargeSuggestions(businessId, json);
 Future<String?> getCachedChargeSuggestions(String businessId) =>

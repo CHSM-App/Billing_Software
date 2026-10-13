@@ -1,0 +1,837 @@
+diff --git a/frontend/lib/screens/credit_screen.dart b/frontend/lib/screens/credit_screen.dart
+index d7a35341..85188968 100644
+--- a/frontend/lib/screens/credit_screen.dart
++++ b/frontend/lib/screens/credit_screen.dart
+@@ -86,7 +86,9 @@ class CreditScreen extends ConsumerWidget {
+         return RefreshIndicator(
+           onRefresh: () => ref.read(creditCustomersProvider.notifier).reload(),
+           child: ListView.separated(
+-            padding: const EdgeInsets.all(AppSpacing.space12),
++            // + the floating nav bar's inset, so the last entry scrolls above it.
++            padding: const EdgeInsets.all(AppSpacing.space12).copyWith(
++                bottom: AppSpacing.space12 + MediaQuery.paddingOf(context).bottom),
+             itemCount: customers.length,
+             separatorBuilder: (_, __) =>
+                 const SizedBox(height: AppSpacing.space8),
+diff --git a/frontend/lib/screens/home_screen.dart b/frontend/lib/screens/home_screen.dart
+index 20e03624..78e96595 100644
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -666,6 +666,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+       _tree,
+       _twoColumns,
+       viewportHeight: pos.viewportDimension,
++      bottomInset: MediaQuery.paddingOf(context).bottom,
+     );
+     final target = offset.clamp(
+         0.0, settledMax > pos.maxScrollExtent ? settledMax : pos.maxScrollExtent);
+@@ -3585,7 +3586,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+           // saves a table-less "open order" everyone can create.
+           if (count > 0)
+             Positioned(
+-              bottom: AppSpacing.space16,
++              // Above the floating nav bar (its height is in the inset).
++              bottom: AppSpacing.space16 + MediaQuery.paddingOf(context).bottom,
+               left: AppSpacing.space16,
+               right: AppSpacing.space16,
+               child: Row(
+@@ -5595,9 +5597,11 @@ class _ExcelItemTable extends StatefulWidget {
+     List<_MajorSection> tree,
+     bool twoColumns, {
+     required double viewportHeight,
++    double bottomInset = 0,
+   }) =>
+       (columnHeaderHeight +
+               bottomPadding +
++              bottomInset +
+               _contentHeight(tree, twoColumns) -
+               viewportHeight)
+           .clamp(0.0, double.infinity);
+@@ -5989,8 +5993,10 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
+       physics: const AlwaysScrollableScrollPhysics(),
+       slivers: [
+         SliverPadding(
+-          padding:
+-              const EdgeInsets.only(bottom: _ExcelItemTable.bottomPadding),
++          // + the floating nav bar's inset, so the last rows scroll above it.
++          padding: EdgeInsets.only(
++              bottom: _ExcelItemTable.bottomPadding +
++                  MediaQuery.paddingOf(context).bottom),
+           // Row extents shrink/grow while a group folds, so everything below
+           // slides along with it.
+           sliver: SliverVariedExtentList(
+diff --git a/frontend/lib/screens/items_screen.dart b/frontend/lib/screens/items_screen.dart
+index c9c8f43b..25b44c82 100644
+--- a/frontend/lib/screens/items_screen.dart
++++ b/frontend/lib/screens/items_screen.dart
+@@ -7,6 +7,7 @@ import '../providers.dart';
+ import '../theme/app_theme.dart';
+ import '../widgets/app_widgets.dart';
+ import '../widgets/category_tree_list.dart';
++import '../widgets/bottom_nav_bar.dart';
+ import '../widgets/shell_app_bar.dart';
+ import '../widgets/skeletons.dart';
+ import '../api.dart';
+@@ -464,7 +465,11 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+         ],
+       ),
+       floatingActionButton: userRole == 'owner'
+-          ? FloatingActionButton.extended(
++          // Lifted clear of the floating glass nav bar.
++          ? Padding(
++              padding:
++                  EdgeInsets.only(bottom: AppBottomNavBar.fabLift(context)),
++              child: FloatingActionButton.extended(
+               // Explicit tag to avoid the shared default hero tag colliding with
+               // other FABs kept alive in the shell's IndexedStack.
+               heroTag: 'addItemFab',
+@@ -476,7 +481,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+                   : l10n.itemsAddItem),
+               backgroundColor: AppColors.primary,
+               foregroundColor: Colors.white,
+-            )
++            ),
++          )
+           : null,
+     );
+   }
+@@ -648,8 +654,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
+   /// across N columns, each keeping its natural height, packed into the
+   /// shortest column so there are no big gaps.
+   Widget _buildStockSliver(List<Item> items, {int crossAxisCount = 1}) {
+-    const padding = EdgeInsets.fromLTRB(
+-        AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96);
++    final padding = EdgeInsets.fromLTRB(AppSpacing.space8, AppSpacing.space4,
++        AppSpacing.space8, 96 + MediaQuery.paddingOf(context).bottom);
+ 
+     if (crossAxisCount <= 1) {
+       return SliverPadding(
+diff --git a/frontend/lib/screens/kitchen_screen.dart b/frontend/lib/screens/kitchen_screen.dart
+index fdf3b362..4abc1898 100644
+--- a/frontend/lib/screens/kitchen_screen.dart
++++ b/frontend/lib/screens/kitchen_screen.dart
+@@ -429,7 +429,9 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
+ 
+       return SingleChildScrollView(
+         physics: const AlwaysScrollableScrollPhysics(),
+-        padding: const EdgeInsets.all(padding),
++        // + the floating nav bar's inset, so the last cards scroll above it.
++        padding: const EdgeInsets.all(padding).copyWith(
++            bottom: padding + MediaQuery.paddingOf(context).bottom),
+         child: Row(
+           crossAxisAlignment: CrossAxisAlignment.start,
+           children: [
+diff --git a/frontend/lib/screens/main_shell.dart b/frontend/lib/screens/main_shell.dart
+index 5974c803..c3ce4cb4 100644
+--- a/frontend/lib/screens/main_shell.dart
++++ b/frontend/lib/screens/main_shell.dart
+@@ -458,6 +458,10 @@ class _MainShellState extends ConsumerState<MainShell>
+             setState(() => _index = 0);
+           },
+           child: Scaffold(
++          // Content runs under the floating glass bar (narrow layout). The
++          // Scaffold raises the body's bottom padding by the bar's height, and
++          // tab screens add that padding so nothing ends up hidden behind it.
++          extendBody: true,
+           bottomNavigationBar: isWide ? null : _buildBottomNav(items, safeIndex),
+           body: Column(
+             children: [
+@@ -565,34 +569,52 @@ class _MainShellState extends ConsumerState<MainShell>
+     // bottom safe-area inset; otherwise the nav bar keeps it.
+     final banner = ref.watch(connectivityBannerProvider);
+     final barVisible = banner != ConnectivityBanner.online;
+-    return Column(
+-      mainAxisSize: MainAxisSize.min,
++    // The Scaffold has extendBody, so page content scrolls under this whole
++    // area: a soft dark fade at the screen bottom, with the floating glass
++    // capsule above it. Only the capsule takes taps; the fade and the margins
++    // around the capsule let touches through to the content behind.
++    return Stack(
+       children: [
+-        Container(
+-          decoration: BoxDecoration(
+-            color: AppColors.surface,
+-            border: const Border(top: BorderSide(color: AppColors.border)),
+-            boxShadow: [
+-              BoxShadow(
+-                color: AppColors.textPrimary.withValues(alpha: 0.08),
+-                blurRadius: 16,
+-                offset: const Offset(0, -4),
++        Positioned.fill(
++          child: IgnorePointer(
++            child: DecoratedBox(
++              decoration: BoxDecoration(
++                gradient: LinearGradient(
++                  begin: Alignment.topCenter,
++                  end: Alignment.bottomCenter,
++                  // Eased fade: stays clear near the top of the area, then
++                  // deepens towards the screen edge.
++                  colors: [
++                    AppColors.textPrimary.withValues(alpha: 0),
++                    AppColors.textPrimary.withValues(alpha: 0.10),
++                    AppColors.textPrimary.withValues(alpha: 0.28),
++                  ],
++                  stops: const [0, 0.45, 1],
++                ),
+               ),
+-            ],
+-          ),
+-          child: SafeArea(
+-            top: false,
+-            // While the bar is visible it hugs the bottom edge and takes the
+-            // inset, so the nav bar must not also pad the bottom (double gap).
+-            bottom: !barVisible,
+-            child: AppBottomNavBar(
+-              items: items,
+-              selectedIndex: safeIndex,
+-              onDestinationSelected: _onNav,
+             ),
+           ),
+         ),
+-        const ConnectivityBar(),
++        Column(
++          mainAxisSize: MainAxisSize.min,
++          children: [
++            SafeArea(
++              top: false,
++              // While the bar is visible it hugs the bottom edge and takes the
++              // inset, so the capsule must not also pad the bottom (double gap).
++              bottom: !barVisible,
++              child: Padding(
++                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
++                child: AppBottomNavBar(
++                  items: items,
++                  selectedIndex: safeIndex,
++                  onDestinationSelected: _onNav,
++                ),
++              ),
++            ),
++            const ConnectivityBar(),
++          ],
++        ),
+       ],
+     );
+   }
+diff --git a/frontend/lib/screens/online_orders_screen.dart b/frontend/lib/screens/online_orders_screen.dart
+index 46128709..954f46ec 100644
+--- a/frontend/lib/screens/online_orders_screen.dart
++++ b/frontend/lib/screens/online_orders_screen.dart
+@@ -125,7 +125,9 @@ class _OnlineOrdersBodyState extends ConsumerState<_OnlineOrdersBody> {
+           onRefresh: () => ref.read(onlineOrdersProvider.notifier).reload(),
+           child: ListView(
+             physics: const AlwaysScrollableScrollPhysics(),
+-            padding: const EdgeInsets.all(AppSpacing.space16),
++            // + the floating nav bar's inset, so the last entry scrolls above it.
++            padding: const EdgeInsets.all(AppSpacing.space16).copyWith(
++                bottom: AppSpacing.space16 + MediaQuery.paddingOf(context).bottom),
+             children: [
+               if (pending.isNotEmpty) ...[
+                 _sectionLabel(context, '${l10n.onlineOrdersWaiting} (${pending.length})'),
+diff --git a/frontend/lib/screens/open_drafts_screen.dart b/frontend/lib/screens/open_drafts_screen.dart
+index 0fd58340..01b40eeb 100644
+--- a/frontend/lib/screens/open_drafts_screen.dart
++++ b/frontend/lib/screens/open_drafts_screen.dart
+@@ -133,7 +133,9 @@ class OpenDraftsScreen extends ConsumerWidget {
+                   ),
+                 ])
+               : ListView.separated(
+-                  padding: const EdgeInsets.all(AppSpacing.space12),
++                  // + the floating nav bar's inset, so the last entry scrolls above it.
++                  padding: const EdgeInsets.all(AppSpacing.space12).copyWith(
++                      bottom: AppSpacing.space12 + MediaQuery.paddingOf(context).bottom),
+                   itemCount: shown.length,
+                   separatorBuilder: (_, __) =>
+                       const SizedBox(height: AppSpacing.space8),
+diff --git a/frontend/lib/screens/orders_screen.dart b/frontend/lib/screens/orders_screen.dart
+index 04b9f185..ea9a531d 100644
+--- a/frontend/lib/screens/orders_screen.dart
++++ b/frontend/lib/screens/orders_screen.dart
+@@ -4,6 +4,7 @@ import '../l10n/l10n_ext.dart';
+ import '../providers.dart';
+ import '../providers/open_drafts_provider.dart';
+ import '../theme/app_theme.dart';
++import '../widgets/bottom_nav_bar.dart';
+ import '../widgets/shell_app_bar.dart';
+ import 'tables_screen.dart';
+ import 'open_drafts_screen.dart';
+@@ -349,7 +350,11 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
+         ],
+       ),
+       floatingActionButton: (onTablesTab && userRole == 'owner')
+-          ? FloatingActionButton.extended(
++          // Lifted clear of the floating glass nav bar.
++          ? Padding(
++              padding:
++                  EdgeInsets.only(bottom: AppBottomNavBar.fabLift(context)),
++              child: FloatingActionButton.extended(
+               heroTag: 'addTableFab',
+               onPressed: () {
+                 final state = _tablesKey.currentState;
+@@ -361,7 +366,8 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
+               label: Text(l10n.tablesAddTable),
+               backgroundColor: AppColors.primary,
+               foregroundColor: Colors.white,
+-            )
++            ),
++          )
+           : null,
+     );
+   }
+diff --git a/frontend/lib/screens/tables_screen.dart b/frontend/lib/screens/tables_screen.dart
+index 5472f64b..450144df 100644
+--- a/frontend/lib/screens/tables_screen.dart
++++ b/frontend/lib/screens/tables_screen.dart
+@@ -10,6 +10,7 @@ import '../models/models.dart';
+ import '../providers.dart';
+ import '../theme/app_theme.dart';
+ import '../widgets/app_widgets.dart';
++import '../widgets/bottom_nav_bar.dart';
+ import '../widgets/shell_app_bar.dart';
+ import '../widgets/skeletons.dart';
+ import 'home_screen.dart';
+@@ -401,7 +402,11 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
+         Expanded(child: body),
+       ]),
+       floatingActionButton: userRole == 'owner'
+-          ? FloatingActionButton.extended(
++          // Lifted clear of the floating glass nav bar.
++          ? Padding(
++              padding:
++                  EdgeInsets.only(bottom: AppBottomNavBar.fabLift(context)),
++              child: FloatingActionButton.extended(
+               // Explicit tag: all tab screens live in the shell's IndexedStack
+               // at once, so tag-less FABs would share the default hero tag and
+               // collide ("multiple heroes share the same tag").
+@@ -411,7 +416,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
+               label: Text(l10n.tablesAddTable),
+               backgroundColor: AppColors.primary,
+               foregroundColor: Colors.white,
+-            )
++            ),
++          )
+           : null,
+     );
+   }
+diff --git a/frontend/lib/widgets/bottom_nav_bar.dart b/frontend/lib/widgets/bottom_nav_bar.dart
+index d48aa313..76ccf65c 100644
+--- a/frontend/lib/widgets/bottom_nav_bar.dart
++++ b/frontend/lib/widgets/bottom_nav_bar.dart
+@@ -1,8 +1,21 @@
++import 'dart:ui' show ImageFilter;
++
+ import 'package:flutter/material.dart';
++import 'package:flutter/physics.dart';
++import 'package:flutter/services.dart' show HapticFeedback;
+ import '../theme/app_theme.dart';
+ import 'nav_item.dart';
+ 
+-class AppBottomNavBar extends StatelessWidget {
++/// Floating "glass" bottom bar: a capsule that hovers above the bottom edge,
++/// blurs whatever scrolls behind it, and slides a highlight pill to the
++/// selected tab. The shell lays page content underneath it (extendBody), so
++/// this widget only draws the capsule — margins and safe-area are the caller's.
++///
++/// The highlight moves on a spring (WhatsApp-on-iPhone feel): a tap springs it
++/// to the new tab, keeping its current speed if it was already moving, so
++/// rapid taps glide instead of jumping. It can also be dragged with a finger —
++/// it tracks the thumb, and letting go selects the tab under it.
++class AppBottomNavBar extends StatefulWidget {
+   final List<NavItem> items;
+   final int selectedIndex;
+   final ValueChanged<int> onDestinationSelected;
+@@ -14,51 +27,265 @@ class AppBottomNavBar extends StatelessWidget {
+     required this.onDestinationSelected,
+   });
+ 
++  static const double height = 56;
++
++  /// Never stretch the capsule across a tablet: past this width the tabs
++  /// drift too far apart to scan.
++  static const double maxWidth = 520;
++
++  /// Extra bottom offset for a tab's floatingActionButton. A Scaffold lifts
++  /// its FAB only past the SYSTEM inset (viewPadding); the glass bar's height
++  /// lives in `padding` (the shell's extendBody), so the FAB would otherwise
++  /// sit hidden behind the bar. Zero on wide layouts and pushed screens.
++  static double fabLift(BuildContext context) {
++    final mq = MediaQuery.of(context);
++    final lift = mq.padding.bottom - mq.viewPadding.bottom;
++    return lift > 0 ? lift : 0;
++  }
++
++  @override
++  State<AppBottomNavBar> createState() => _AppBottomNavBarState();
++}
++
++class _AppBottomNavBarState extends State<AppBottomNavBar>
++    with SingleTickerProviderStateMixin {
++  /// Highlight position in TAB units: 0 = first tab, 1.5 = halfway between the
++  /// second and third. Unbounded so the spring can run freely; drawing clamps.
++  late final AnimationController _pos =
++      AnimationController.unbounded(vsync: this, value: _target.toDouble());
++
++  /// Near-critically damped: a quick, decisive glide with only a hint of
++  /// settle, no visible bounce.
++  static final _spring =
++      SpringDescription.withDampingRatio(mass: 1, stiffness: 520, ratio: 0.86);
++
++  int get _target =>
++      widget.selectedIndex.clamp(0, widget.items.length - 1).toInt();
++
++  bool _dragging = false;
++
++  @override
++  void didUpdateWidget(AppBottomNavBar old) {
++    super.didUpdateWidget(old);
++    if (old.items.length != widget.items.length) {
++      // Tabs appeared/disappeared (role or Orders badge rules): no slide
++      // across a layout that just changed under it.
++      _pos.value = _target.toDouble();
++    } else if (old.selectedIndex != widget.selectedIndex && !_dragging) {
++      _springTo(_target);
++    }
++  }
++
++  @override
++  void dispose() {
++    _pos.dispose();
++    super.dispose();
++  }
++
++  void _springTo(int index) {
++    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
++      _pos.value = index.toDouble(); // reduced motion: jump, don't slide
++      return;
++    }
++    // Starts from wherever the pill is NOW, at the speed it is moving now —
++    // that is what keeps rapid taps smooth.
++    _pos.animateWith(
++        SpringSimulation(_spring, _pos.value, index.toDouble(), _pos.velocity));
++  }
++
++  // ── Thumb dragging ────────────────────────────────────────────────────────
++  /// The tab the pill is over during a drag; -1 before the drag's first move.
++  int _dragTab = -1;
++
++  void _dragTo(double dx, double slotW) {
++    _pos.value = (dx / slotW - 0.5).clamp(0.0, widget.items.length - 1.0);
++    // A light tick each time the pill crosses onto another tab, like an iOS
++    // picker wheel, so the thumb feels the tabs it passes.
++    final tab = _pos.value.round();
++    if (tab != _dragTab) {
++      if (_dragTab != -1) HapticFeedback.selectionClick();
++      _dragTab = tab;
++    }
++  }
++
++  void _dragEnd() {
++    // A plain tap also reports a drag "cancel" — only a real drag may pick.
++    if (!_dragging) return;
++    _dragging = false;
++    _dragTab = -1;
++    final i = _pos.value.round();
++    _springTo(i);
++    if (i != widget.selectedIndex) {
++      HapticFeedback.lightImpact(); // a firmer bump when a new tab is picked
++      widget.onDestinationSelected(i);
++    }
++  }
++
+   @override
+   Widget build(BuildContext context) {
+-    return SizedBox(
+-      height: 54,
+-      child: Row(
+-        children: List.generate(items.length, (i) {
+-          final item = items[i];
+-          final selected = i == selectedIndex;
+-          return Expanded(
+-            child: GestureDetector(
+-              onTap: () => onDestinationSelected(i),
+-              behavior: HitTestBehavior.opaque,
+-              child: Column(
+-                mainAxisAlignment: MainAxisAlignment.center,
+-                children: [
+-                  AnimatedContainer(
+-                    duration: const Duration(milliseconds: 200),
+-                    curve: Curves.easeInOut,
+-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+-                    decoration: BoxDecoration(
+-                      color: selected ? AppColors.primaryLight : Colors.transparent,
+-                      borderRadius: BorderRadius.circular(12),
+-                    ),
+-                    child: item.badged(Icon(
+-                      selected ? item.iconFilled : item.iconOutlined,
+-                      size: 20,
+-                      color: selected ? AppColors.primary : AppColors.textSecondary,
+-                    )),
+-                  ),
+-                  const SizedBox(height: 2),
+-                  Text(
+-                    item.label,
+-                    style: TextStyle(
+-                      fontSize: 10,
+-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+-                      color: selected ? AppColors.primary : AppColors.textSecondary,
+-                    ),
+-                    maxLines: 1,
+-                    overflow: TextOverflow.ellipsis,
++    final items = widget.items;
++    const h = AppBottomNavBar.height;
++    final radius = BorderRadius.circular(h / 2);
++    return Center(
++      child: ConstrainedBox(
++        constraints: const BoxConstraints(maxWidth: AppBottomNavBar.maxWidth),
++        child: RepaintBoundary(
++          // Shadow lives OUTSIDE the clip — ClipRRect would cut it off.
++          child: DecoratedBox(
++            decoration: BoxDecoration(
++              borderRadius: radius,
++              boxShadow: [
++                BoxShadow(
++                  color: AppColors.textPrimary.withValues(alpha: 0.16),
++                  blurRadius: 24,
++                  offset: const Offset(0, 8),
++                ),
++                BoxShadow(
++                  color: AppColors.textPrimary.withValues(alpha: 0.06),
++                  blurRadius: 4,
++                  offset: const Offset(0, 1),
++                ),
++              ],
++            ),
++            child: ClipRRect(
++              borderRadius: radius,
++              // ponytail: one blur layer at sigma 18 — if low-end Android
++              // stutters, drop the sigma or swap for a solid ~92% fill.
++              child: BackdropFilter(
++                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
++                child: Container(
++                  height: h,
++                  padding: const EdgeInsets.all(4),
++                  decoration: BoxDecoration(
++                    color: AppColors.surface.withValues(alpha: 0.75),
++                    borderRadius: radius,
++                    // Light rim so the glass edge reads over any background.
++                    border: Border.all(
++                        color: Colors.white.withValues(alpha: 0.6)),
+                   ),
+-                ],
++                  // Slot width is measured, never hard-coded, so the pill
++                  // lines up on any screen width and tab count.
++                  child: LayoutBuilder(builder: (context, box) {
++                    final slotW = box.maxWidth / items.length;
++                    return GestureDetector(
++                      behavior: HitTestBehavior.opaque,
++                      onHorizontalDragStart: (d) {
++                        _dragging = true;
++                        _pos.stop();
++                        _dragTo(d.localPosition.dx, slotW);
++                      },
++                      onHorizontalDragUpdate: (d) =>
++                          _dragTo(d.localPosition.dx, slotW),
++                      onHorizontalDragEnd: (_) => _dragEnd(),
++                      onHorizontalDragCancel: _dragEnd,
++                      child: AnimatedBuilder(
++                        animation: _pos,
++                        builder: (context, _) {
++                          final p =
++                              _pos.value.clamp(0.0, items.length - 1.0);
++                          return Stack(
++                            children: [
++                              Positioned(
++                                left: p * slotW,
++                                top: 0,
++                                bottom: 0,
++                                width: slotW,
++                                child: DecoratedBox(
++                                  decoration: BoxDecoration(
++                                    // Indigo tint, a step darker than
++                                    // primaryLight so the active tab reads
++                                    // clearly on the glass.
++                                    color: AppColors.primary
++                                        .withValues(alpha: 0.18),
++                                    borderRadius: BorderRadius.circular(h / 2),
++                                  ),
++                                ),
++                              ),
++                              Row(
++                                children: List.generate(items.length, (i) {
++                                  // 1 when the pill sits on this tab, fading
++                                  // to 0 one slot away — colours follow the
++                                  // pill as it glides instead of snapping.
++                                  final t = (1 - (p - i).abs()).clamp(0.0, 1.0);
++                                  return Expanded(
++                                    child: _NavButton(
++                                      item: items[i],
++                                      selected: i == widget.selectedIndex,
++                                      emphasis: t,
++                                      onTap: () =>
++                                          widget.onDestinationSelected(i),
++                                    ),
++                                  );
++                                }),
++                              ),
++                            ],
++                          );
++                        },
++                      ),
++                    );
++                  }),
++                ),
++              ),
++            ),
++          ),
++        ),
++      ),
++    );
++  }
++}
++
++class _NavButton extends StatelessWidget {
++  final NavItem item;
++
++  /// The real selection — drives accessibility, not visuals.
++  final bool selected;
++
++  /// 0..1: how much the moving highlight covers this tab right now.
++  final double emphasis;
++  final VoidCallback onTap;
++
++  const _NavButton({
++    required this.item,
++    required this.selected,
++    required this.emphasis,
++    required this.onTap,
++  });
++
++  @override
++  Widget build(BuildContext context) {
++    final color =
++        Color.lerp(AppColors.textSecondary, AppColors.primary, emphasis)!;
++    final lit = emphasis > 0.5;
++    return Semantics(
++      button: true,
++      selected: selected,
++      label: item.label,
++      excludeSemantics: true,
++      child: GestureDetector(
++        onTap: onTap,
++        behavior: HitTestBehavior.opaque,
++        child: Column(
++          mainAxisAlignment: MainAxisAlignment.center,
++          children: [
++            item.badged(Icon(
++              lit ? item.iconFilled : item.iconOutlined,
++              size: 20,
++              color: color,
++            )),
++            const SizedBox(height: 1),
++            Text(
++              item.label,
++              maxLines: 1,
++              overflow: TextOverflow.ellipsis,
++              style: TextStyle(
++                fontSize: 10,
++                fontWeight: FontWeight.lerp(
++                    FontWeight.w500, FontWeight.w700, emphasis),
++                color: color,
+               ),
+             ),
+-          );
+-        }),
++          ],
++        ),
+       ),
+     );
+   }
+diff --git a/frontend/lib/widgets/category_tree_list.dart b/frontend/lib/widgets/category_tree_list.dart
+index e56143da..fb741b92 100644
+--- a/frontend/lib/widgets/category_tree_list.dart
++++ b/frontend/lib/widgets/category_tree_list.dart
+@@ -156,7 +156,7 @@ class CategoryTreeList extends StatefulWidget {
+ 
+   /// maxScrollExtent once every fold animation has settled.
+   static double settledMaxScroll(List<TreeMajor> tree, bool twoColumns,
+-      {required double viewportHeight}) {
++      {required double viewportHeight, double bottomInset = 0}) {
+     var h = 0.0;
+     for (final m in tree) {
+       if (m.major != null) h += majorHeaderExtent;
+@@ -165,7 +165,8 @@ class CategoryTreeList extends StatefulWidget {
+         h += _sectionHeight(s, twoColumns);
+       }
+     }
+-    return (h + bottomPadding - viewportHeight).clamp(0.0, double.infinity);
++    return (h + bottomPadding + bottomInset - viewportHeight)
++        .clamp(0.0, double.infinity);
+   }
+ 
+   @override
+@@ -414,8 +415,10 @@ class _CategoryTreeListState extends State<CategoryTreeList>
+       physics: const AlwaysScrollableScrollPhysics(),
+       slivers: [
+         SliverPadding(
+-          padding:
+-              const EdgeInsets.only(bottom: CategoryTreeList.bottomPadding),
++          // + the floating nav bar's inset, so the last rows scroll above it.
++          padding: EdgeInsets.only(
++              bottom: CategoryTreeList.bottomPadding +
++                  MediaQuery.paddingOf(context).bottom),
+           sliver: SliverVariedExtentList(
+             itemExtentBuilder: (i, _) =>
+                 i >= entries.length ? null : entries[i].$2,
+@@ -699,7 +702,8 @@ mixin CategoryTreeNav<T extends StatefulWidget> on State<T> {
+     final pos = treeScrollCtrl.position;
+     // Rows just opened are still unfolding, so clamp to the settled extent.
+     final settled = CategoryTreeList.settledMaxScroll(_tree, _twoColumns,
+-        viewportHeight: pos.viewportDimension);
++        viewportHeight: pos.viewportDimension,
++        bottomInset: MediaQuery.paddingOf(context).bottom);
+     final target = offset.clamp(
+         0.0, settled > pos.maxScrollExtent ? settled : pos.maxScrollExtent);
+     _jumping = true;
+diff --git a/frontend/test/widgets/bottom_nav_bar_test.dart b/frontend/test/widgets/bottom_nav_bar_test.dart
+new file mode 100644
+index 00000000..b69a17df
+--- /dev/null
++++ b/frontend/test/widgets/bottom_nav_bar_test.dart
+@@ -0,0 +1,123 @@
++import 'package:Vittam/theme/app_theme.dart';
++import 'package:Vittam/widgets/bottom_nav_bar.dart';
++import 'package:Vittam/widgets/nav_item.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++/// The floating glass bar: taps still route to the right tab, the blur is
++/// really there, and the red badge count still shows.
++void main() {
++  testWidgets('taps select a tab; blur and badge render', (tester) async {
++    final tapped = <int>[];
++    await tester.pumpWidget(MaterialApp(
++      theme: buildAppTheme('en'),
++      home: Scaffold(
++        body: Align(
++          alignment: Alignment.bottomCenter,
++          child: AppBottomNavBar(
++            items: const [
++              NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
++                  'Billing', SizedBox()),
++              NavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Items',
++                  SizedBox(),
++                  badge: 3),
++              NavItem(Icons.person_outline, Icons.person, 'Profile',
++                  SizedBox()),
++            ],
++            selectedIndex: 0,
++            onDestinationSelected: tapped.add,
++          ),
++        ),
++      ),
++    ));
++
++    await tester.tap(find.text('Items'));
++    expect(tapped, [1]);
++    expect(find.byType(BackdropFilter), findsOneWidget);
++    expect(find.text('3'), findsOneWidget);
++  });
++
++  testWidgets('dragging the highlight selects the tab under the thumb',
++      (tester) async {
++    final picked = <int>[];
++    await tester.pumpWidget(MaterialApp(
++      home: Scaffold(
++        body: Align(
++          alignment: Alignment.bottomCenter,
++          child: SizedBox(
++            width: 300,
++            child: AppBottomNavBar(
++              items: const [
++                NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
++                    'Billing', SizedBox()),
++                NavItem(Icons.inventory_2_outlined, Icons.inventory_2,
++                    'Items', SizedBox()),
++                NavItem(Icons.person_outline, Icons.person, 'Profile',
++                    SizedBox()),
++              ],
++              selectedIndex: 0,
++              onDestinationSelected: picked.add,
++            ),
++          ),
++        ),
++      ),
++    ));
++
++    final haptics = <String?>[];
++    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
++        SystemChannels.platform, (call) async {
++      if (call.method == 'HapticFeedback.vibrate') haptics.add(call.arguments);
++      return null;
++    });
++    addTearDown(() => tester.binding.defaultBinaryMessenger
++        .setMockMethodCallHandler(SystemChannels.platform, null));
++
++    // Thumb lands on Billing and slides all the way across to Profile, in
++    // small steps the way a real finger reports them.
++    final g = await tester.startGesture(tester.getCenter(find.text('Billing')));
++    for (var i = 0; i < 11; i++) {
++      await g.moveBy(const Offset(20, 0));
++      await tester.pump();
++    }
++    await g.up();
++    await tester.pumpAndSettle();
++    expect(picked, [2]);
++    // A tick per tab crossed (Items, Profile), then a bump for the pick.
++    expect(haptics, [
++      'HapticFeedbackType.selectionClick',
++      'HapticFeedbackType.selectionClick',
++      'HapticFeedbackType.lightImpact',
++    ]);
++  });
++
++  testWidgets('a plain tap mid-slide still selects only the tapped tab',
++      (tester) async {
++    final picked = <int>[];
++    Widget bar(int sel) => MaterialApp(
++          home: Scaffold(
++            body: Align(
++              alignment: Alignment.bottomCenter,
++              child: AppBottomNavBar(
++                items: const [
++                  NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
++                      'Billing', SizedBox()),
++                  NavItem(Icons.inventory_2_outlined, Icons.inventory_2,
++                      'Items', SizedBox()),
++                  NavItem(Icons.person_outline, Icons.person, 'Profile',
++                      SizedBox()),
++                ],
++                selectedIndex: sel,
++                onDestinationSelected: picked.add,
++              ),
++            ),
++          ),
++        );
++    await tester.pumpWidget(bar(0));
++    await tester.pumpWidget(bar(2)); // highlight starts sliding to Profile
++    await tester.pump(const Duration(milliseconds: 40));
++    await tester.tap(find.text('Items')); // quick second tap mid-slide
++    await tester.pumpAndSettle();
++    expect(picked, [1]);
++  });
++}
+diff --git a/frontend/lib/screens/settings_screen.dart b/frontend/lib/screens/settings_screen.dart
+index 954a98d1..189f9c99 100644
+--- a/frontend/lib/screens/settings_screen.dart
++++ b/frontend/lib/screens/settings_screen.dart
+@@ -174,7 +269,9 @@ class _SettingsContentState extends State<_SettingsContent>
+               widget.ref.read(sessionProvider.notifier).refresh(),
+           child: SingleChildScrollView(
+             physics: const AlwaysScrollableScrollPhysics(),
+-            padding: const EdgeInsets.all(AppSpacing.space16),
++            // + the floating nav bar's inset, so the last entry scrolls above it.
++            padding: const EdgeInsets.all(AppSpacing.space16).copyWith(
++                bottom: AppSpacing.space16 + MediaQuery.paddingOf(context).bottom),
+             child: Center(
+               child: ConstrainedBox(
+                 constraints: const BoxConstraints(maxWidth: 520),

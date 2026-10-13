@@ -582,6 +582,17 @@ class RasterLab {
         final hh = (r.light ? 1.5 : (r.bold ? 3.0 : 2.0)) * ss;
         measured.add(_MRow.rule(hh, light: r.light));
         totalH += hh + (r.light ? gapY * 0.5 : gapY);
+      } else if (r.image != null) {
+        // Centred image (shop logo): at most half the paper wide and 160 dots
+        // tall, aspect kept. ponytail: printed via the plain 1-bit threshold
+        // in _pack, no dithering — flat logos print clean, photo-like ones
+        // don't; add Floyd–Steinberg here if shops complain.
+        final img = r.image!;
+        final k = [contentW * 0.5 / img.width, 160 * ss / img.height]
+            .reduce((a, b) => a < b ? a : b);
+        final w = img.width * k, h = img.height * k;
+        measured.add(_MRow.image(img, w, h));
+        totalH += h + gapY;
       } else if (r.isCenter) {
         final p = mk(r.cells.first.text, r.size, TextAlign.center, r.bold,
             contentW, italic: r.italic);
@@ -632,6 +643,15 @@ class RasterLab {
         // Must match the spacing used when measuring, or every row below this
         // one drifts out of the height that was reserved for it.
         y += m.height + (m.light ? gapY * 0.5 : gapY);
+      } else if (m.image != null) {
+        final img = m.image!;
+        canvas.drawImageRect(
+          img,
+          Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+          Rect.fromLTWH((renderW - m.imageW) / 2, y, m.imageW, m.height),
+          Paint()..filterQuality = FilterQuality.high,
+        );
+        y += m.height + gapY;
       } else if (m.isCenter) {
         canvas.drawParagraph(m.paras.first, Offset(padX, y));
         y += m.height + gapY;
@@ -1166,7 +1186,13 @@ class ReceiptRow {
       this.isCenter = false,
       this.isRule = false,
       this.verticalRules = false,
-      this.light = false});
+      this.light = false,
+      this.image});
+
+  /// A centred picture (the shop logo), scaled to fit — see _renderRows.
+  final ui.Image? image;
+  factory ReceiptRow.image(ui.Image image) =>
+      ReceiptRow._(const [], image: image);
 
   factory ReceiptRow.center(String t,
           {double size = 24, bool bold = false, bool italic = false}) =>
@@ -1199,11 +1225,17 @@ class _MRow {
   final bool isRule;
   final bool verticalRules;
   final bool light;
+  final ui.Image? image;
+  final double imageW;
   const _MRow._(this.paras, this.colWidths, this.height,
       {this.isCenter = false,
       this.isRule = false,
       this.verticalRules = false,
-      this.light = false});
+      this.light = false,
+      this.image,
+      this.imageW = 0});
+  factory _MRow.image(ui.Image img, double w, double h) =>
+      _MRow._(const [], null, h, image: img, imageW: w);
   factory _MRow.center(ui.Paragraph p, double h) =>
       _MRow._([p], null, h, isCenter: true);
   factory _MRow.cols(List<ui.Paragraph> ps, List<double> colWidths, double h,

@@ -10,6 +10,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/bottom_nav_bar.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
 import 'home_screen.dart';
@@ -401,7 +402,11 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
         Expanded(child: body),
       ]),
       floatingActionButton: userRole == 'owner'
-          ? FloatingActionButton.extended(
+          // Lifted clear of the floating glass nav bar.
+          ? Padding(
+              padding:
+                  EdgeInsets.only(bottom: AppBottomNavBar.fabLift(context)),
+              child: FloatingActionButton.extended(
               // Explicit tag: all tab screens live in the shell's IndexedStack
               // at once, so tag-less FABs would share the default hero tag and
               // collide ("multiple heroes share the same tag").
@@ -411,7 +416,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
               label: Text(l10n.tablesAddTable),
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
-            )
+            ),
+          )
           : null,
     );
   }

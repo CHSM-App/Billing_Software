@@ -174,6 +174,11 @@ class LicenseService {
       if (data['allow_customers'] is bool) {
         await updateCustomersEnabled(data['allow_customers'] as bool);
       }
+      // Shop logo + print opt-in: how an owner's change reaches staff devices.
+      if (data['print_logo'] is bool) {
+        await syncBusinessLogo(
+            data['logo_url'] as String?, data['print_logo'] as bool);
+      }
 
       final result = _evaluate(
         status:          data['status'] as String,

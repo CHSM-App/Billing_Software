@@ -108,7 +108,7 @@ router.get('/s/:token', async (req, res) => {
         SELECT s.id, s.customer_name, s.customer_phone, s.mode, s.total, s.created_at,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
-               bs.gst_number, bs.fssai_number, bs.logo_url, bs.bill_footer_note
+               bs.gst_number, bs.fssai_number, bs.logo_url, bs.print_logo, bs.bill_footer_note
         FROM credit_settlements s
         JOIN businesses bs ON bs.id = s.business_id
         WHERE s.receipt_token = @token
@@ -167,7 +167,7 @@ router.get('/s/:token', async (req, res) => {
 <body>
 <div class="receipt">
   <div class="top-bar">
-    ${s.logo_url ? '<img src="' + esc(s.logo_url) + '" class="logo" alt=""/>' : ''}
+    ${s.logo_url && s.print_logo ? '<img src="' + esc(s.logo_url) + '" class="logo" alt=""/>' : ''}
     <div class="shop-name">${esc(s.shop_name)}</div>
     <div class="shop-sub">
       ${addressLine ? addressLine + '<br/>' : ''}
@@ -258,7 +258,7 @@ router.get('/:token', async (req, res) => {
                t.table_number,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
-               bs.gst_number, bs.fssai_number, bs.logo_url, bs.bill_footer_note,
+               bs.gst_number, bs.fssai_number, bs.logo_url, bs.print_logo, bs.bill_footer_note,
                bs.gst_enabled, bs.default_sac_code
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
@@ -420,7 +420,7 @@ router.get('/:token', async (req, res) => {
 
   <!-- Header -->
   <div class="top-bar">
-    ${bill.logo_url ? '<img src="' + esc(bill.logo_url) + '" class="logo" alt=""/>' : ''}
+    ${bill.logo_url && bill.print_logo ? '<img src="' + esc(bill.logo_url) + '" class="logo" alt=""/>' : ''}
     <div class="shop-name">${esc(bill.shop_name)}</div>
     <div class="shop-sub">
       ${addressLine ? addressLine + '<br/>' : ''}

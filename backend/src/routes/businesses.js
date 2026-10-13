@@ -18,7 +18,7 @@ const PROFILE_COLUMNS = `
   inventory_enabled, has_barcode_scanner,
   self_order_enabled,
   gst_number, pan_number, fssai_number, email, website,
-  city, state, pincode, logo_url,
+  city, state, pincode, logo_url, print_logo,
   bill_prefix, bill_footer_note,
   gst_enabled, default_sac_code, round_off_enabled,
   store_enabled, store_token, store_delivery_enabled,
@@ -143,6 +143,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     pan_number,
     fssai_number,
     logo_url,
+    print_logo,
     bill_prefix,
     bill_footer_note,
     self_order_enabled,
@@ -248,6 +249,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     pan_number,
     fssai_number,
     logo_url,
+    print_logo,
     bill_prefix,
     bill_footer_note,
     self_order_enabled,
@@ -283,7 +285,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
         SELECT
           name, address, phone, email, website,
           city, state, pincode, gst_number, pan_number, fssai_number,
-          logo_url, bill_prefix, bill_footer_note,
+          logo_url, print_logo, bill_prefix, bill_footer_note,
           gst_enabled, default_sac_code, round_off_enabled,
           store_enabled, store_delivery_enabled,
           store_delivery_charge, store_advance_percent, store_payment_required,
@@ -497,6 +499,50 @@ router.delete('/store-qr', requireAuth, ownerOnly, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Shop logo. Same shape as the payment QR above. Uploading only stores it —
+// whether it prints on bills is the separate print_logo flag (PUT /profile).
+// ---------------------------------------------------------------------------
+const LOGO_DIR = path.join(__dirname, '..', '..', 'uploads', 'logo');
+try { fs.mkdirSync(LOGO_DIR, { recursive: true }); } catch (_) {}
+
+// PUT /api/businesses/logo — replace the logo. Body is the JPEG bytes.
+router.put('/logo', requireAuth, ownerOnly, jpegBody, async (req, res) => {
+  if (!isJpeg(req.body)) {
+    return res.status(400).json({ error: 'A JPEG image body is required' });
+  }
+  try {
+    await poolConnect;
+    const fileName = `${req.user.business_id}.jpg`;
+    await fs.promises.writeFile(path.join(LOGO_DIR, fileName), req.body);
+    const logoUrl = `/uploads/logo/${fileName}?v=${Date.now()}`;
+
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.user.business_id)
+      .input('url', sql.NVarChar(1000), logoUrl)
+      .query('UPDATE businesses SET logo_url = @url WHERE id = @id');
+
+    return res.json({ logo_url: logoUrl });
+  } catch (err) {
+    logger.error({ err }, 'Upload logo error');
+    return res.status(500).json({ error: 'Failed to save the logo' });
+  }
+});
+
+// DELETE /api/businesses/logo — remove it (file left on disk, like the QR).
+router.delete('/logo', requireAuth, ownerOnly, async (req, res) => {
+  try {
+    await poolConnect;
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, req.user.business_id)
+      .query('UPDATE businesses SET logo_url = NULL WHERE id = @id');
+    return res.json({ logo_url: null });
+  } catch (err) {
+    logger.error({ err }, 'Delete logo error');
+    return res.status(500).json({ error: 'Failed to remove the logo' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -519,6 +565,7 @@ function _formatBusiness(row) {
     state:               row.state ?? null,
     pincode:             row.pincode ?? null,
     logo_url:            row.logo_url ?? null,
+    print_logo:          !!row.print_logo,
     bill_prefix:         row.bill_prefix ?? 'INV',
     bill_footer_note:    row.bill_footer_note ?? null,
     gst_enabled:         !!row.gst_enabled,
@@ -554,6 +601,7 @@ function _sqlTypeFor(key) {
     pan_number:       sql.NVarChar(10),
     fssai_number:     sql.NVarChar(20),
     logo_url:         sql.NVarChar(1000),
+    print_logo:       sql.Bit,
     bill_prefix:      sql.NVarChar(10),
     bill_footer_note: sql.NVarChar(500),
     self_order_enabled: sql.Bit,

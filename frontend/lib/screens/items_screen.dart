@@ -1,12 +1,17 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:barcode_widget/barcode_widget.dart';
+import 'package:image_picker/image_picker.dart';
+import '../utils/jpeg_compress.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/category_tree_list.dart';
+import '../widgets/bottom_nav_bar.dart';
+import '../widgets/floating_bar_physics.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
 import '../api.dart';
@@ -91,10 +96,30 @@ class ItemsScreen extends ConsumerStatefulWidget {
 }
 
 class _ItemsScreenState extends ConsumerState<ItemsScreen>
-    with SingleTickerProviderStateMixin, CategoryTreeNav<ItemsScreen> {
+    with TickerProviderStateMixin, CategoryTreeNav<ItemsScreen> {
   final _searchController = TextEditingController();
   TabController? _tabController;
   int _activeTab = 0;
+
+  /// The header — app bar, Items/Raw tabs, search box — folds away with the
+  /// list on a phone, as one block, while the major/minor strip below it stays
+  /// pinned. See [FoldingHeader].
+  late final FoldingHeader _header = FoldingHeader(
+    vsync: this,
+    extent: () => _topBarHeight + _searchBarHeight,
+    // Not while typing: the search box would fold away under the keyboard.
+    // (View, not MediaQuery — the Scaffolds above strip the keyboard inset.)
+    canFold: () =>
+        View.of(context).viewInsets.bottom == 0 &&
+        MediaQuery.sizeOf(context).width < 720,
+  );
+
+  /// ShellAppBar (50 + divider), plus the Items/Raw tab bar when it shows.
+  double get _topBarHeight =>
+      51 + ((_tabController?.length ?? 1) > 1 ? kTextTabBarHeight : 0);
+
+  /// [_searchBar]: 6 + 40 + 4.
+  static const double _searchBarHeight = 50;
   // When on, the Items list renders a compact stock overview (name + remaining
   // stock) in place, instead of the normal cards.
   bool _showStock = false;
@@ -126,6 +151,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
       ..addListener(() {
         if (!(_tabController!.indexIsChanging)) {
           setState(() => _activeTab = _tabController!.index);
+          _header.show(); // the Raw tab does not fold it
         }
       });
     _activeTab = 0;
@@ -135,6 +161,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   void dispose() {
     _searchController.dispose();
     _tabController?.dispose();
+    _header.dispose();
     disposeTreeNav();
     super.dispose();
   }
@@ -401,10 +428,32 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         .keys
         .any((m) => m.isNotEmpty);
     final onRawTab = withRawMaterials && _activeTab == 1;
+    // Folded on a phone, then widened (where it never folds): open it back up.
+    if (MediaQuery.sizeOf(context).width >= 720 && _header.bar.value < 1) {
+      _header.bar.value = 1;
+    }
 
     return Scaffold(
       body: Column(
         children: [
+          // The status-bar band stays put; the header folds away beneath it.
+          ColoredBox(
+            color: AppColors.surface,
+            child: SizedBox(
+                width: double.infinity,
+                height: MediaQuery.paddingOf(context).top),
+          ),
+          // Folds first; the search box below it folds once this has gone, so
+          // the whole header slides up as one block.
+          FoldAway(
+            bar: FoldAway.slice(_header.bar,
+                below: _searchBarHeight,
+                height: _topBarHeight,
+                total: _topBarHeight + _searchBarHeight),
+            child: MediaQuery.removePadding(
+              context: context,
+              removeTop: true,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
           // Bottom-bar root tab: never imply a back arrow. Without this,
           // opening a dialog (add item / stock) pushes a route and flips
           // Navigator.canPop() to true, making a stray back arrow appear.
@@ -450,6 +499,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                 Tab(text: l10n.itemsTabRawMaterials),
               ],
             ),
+              ]),
+            ),
+          ),
           Expanded(
             child: withRawMaterials
                 ? TabBarView(
@@ -464,7 +516,15 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         ],
       ),
       floatingActionButton: userRole == 'owner'
-          ? FloatingActionButton.extended(
+          // Lifted clear of the floating glass nav bar, and dropped out of
+          // sight along with it when scrolling hides the bar (2 = its own
+          // height plus the bottom margin, so it fully clears the edge).
+          ? HidesWithNavBar(
+              drop: 2,
+              child: Padding(
+              padding:
+                  EdgeInsets.only(bottom: AppBottomNavBar.fabLift(context)),
+              child: FloatingActionButton.extended(
               // Explicit tag to avoid the shared default hero tag colliding with
               // other FABs kept alive in the shell's IndexedStack.
               heroTag: 'addItemFab',
@@ -476,6 +536,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                   : l10n.itemsAddItem),
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
+            ),
+          ),
             )
           : null,
     );
@@ -581,7 +643,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         final Widget list;
         if (items.isEmpty) {
           list = CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
+            physics: _header.physics,
             slivers: [
               SliverFillRemaining(
                 child: EmptyState(
@@ -598,7 +660,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         } else if (stockMode) {
           final isWide = MediaQuery.of(context).size.width >= 720;
           list = CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
+            physics: _header.physics,
             slivers: [
               _buildStockSliver(items, crossAxisCount: isWide ? 3 : 1),
             ],
@@ -607,12 +669,24 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           list = _buildTreeList(tree, userRole, inventoryEnabled);
         }
 
+        // The search box folds with the header above it; the major/minor
+        // strip does not, so it ends up pinned at the top.
         return Column(
           children: [
-            _searchBar(inventoryEnabled: inventoryEnabled),
+            FoldAway(
+              bar: FoldAway.slice(_header.bar,
+                  below: 0,
+                  height: _searchBarHeight,
+                  total: _topBarHeight + _searchBarHeight),
+              child: _searchBar(inventoryEnabled: inventoryEnabled),
+            ),
             if (strip != null) strip,
             Expanded(
-              child: RefreshIndicator(onRefresh: refresh, child: list),
+              // The list's scrolls carry and settle the header's fold.
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _header.onScroll,
+                child: RefreshIndicator(onRefresh: refresh, child: list),
+              ),
             ),
           ],
         );
@@ -627,6 +701,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     return CategoryTreeList(
       tree: tree,
       controller: treeScrollCtrl,
+      physics: _header.physics,
       twoColumns: MediaQuery.of(context).size.width >= 900,
       onToggleMajor: toggleMajor,
       onToggleSection: toggleCategory,
@@ -648,8 +723,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   /// across N columns, each keeping its natural height, packed into the
   /// shortest column so there are no big gaps.
   Widget _buildStockSliver(List<Item> items, {int crossAxisCount = 1}) {
-    const padding = EdgeInsets.fromLTRB(
-        AppSpacing.space8, AppSpacing.space4, AppSpacing.space8, 96);
+    final padding = EdgeInsets.fromLTRB(AppSpacing.space8, AppSpacing.space4,
+        AppSpacing.space8, 96 + MediaQuery.paddingOf(context).bottom);
 
     if (crossAxisCount <= 1) {
       return SliverPadding(
@@ -1245,8 +1320,16 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _barcodeCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
   final _lowStockCtrl = TextEditingController();
+  final _picker = ImagePicker();
   String _unit = 'piece';
   bool _saving = false;
+
+  /// The item's photo (customer-facing on the QR menu / online store).
+  /// [_photoUrl] is the stored one (fetched on edit); [_newPhoto] is a picked,
+  /// compressed JPEG not yet uploaded; [_photoRemoved] clears it on save.
+  String? _photoUrl;
+  Uint8List? _newPhoto;
+  bool _photoRemoved = false;
 
   /// Whether the entered price already contains GST (an MRP) rather than being
   /// a net price GST is added to. Only meaningful when GST is on and a tax rate
@@ -1328,7 +1411,107 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _stockCtrl.text = item.stockQuantity?.toString() ?? '';
       _lowStockCtrl.text = item.lowStockThreshold?.toString() ?? '';
       _unit = _units.contains(item.unit) ? item.unit : 'piece';
+      // The items list never carries image_url, so look this one up.
+      getItemImageUrl(item.id).then((url) {
+        if (mounted) setState(() => _photoUrl = url);
+      }).catchError((_) {});
     }
+  }
+
+  Future<void> _pickPhoto(ImageSource src) async {
+    final failMsg = context.l10n.menuPhotosUploadFailed;
+    try {
+      final picked = await _picker.pickImage(
+          source: src, maxWidth: 1600, maxHeight: 1600, imageQuality: 90);
+      if (picked == null) return;
+      final jpeg = await compressToJpeg(await picked.readAsBytes());
+      if (mounted) setState(() => _newPhoto = jpeg);
+    } catch (_) {
+      if (mounted) setState(() => _formError = failMsg);
+    }
+  }
+
+  void _showPhotoSheet(AppLocalizations l10n, bool hasPhoto) {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text(l10n.menuPhotosPickCamera),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickPhoto(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(l10n.menuPhotosPickGallery),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickPhoto(ImageSource.gallery);
+              },
+            ),
+            if (hasPhoto)
+              ListTile(
+                leading:
+                    const Icon(Icons.delete_outline, color: AppColors.error),
+                title: Text(l10n.menuPhotosRemove,
+                    style: const TextStyle(color: AppColors.error)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    _newPhoto = null;
+                    _photoRemoved = true;
+                  });
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Thumbnail + add/change button for the item's photo.
+  Widget _buildPhotoField(AppLocalizations l10n) {
+    final showStored = _newPhoto == null && !_photoRemoved && _photoUrl != null;
+    final hasPhoto = _newPhoto != null || showStored;
+    final Widget placeholder = Container(
+      color: AppColors.surfaceVariant,
+      child: const Icon(Icons.image_outlined, color: AppColors.textDisabled),
+    );
+    return Row(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadius.small),
+          child: SizedBox(
+            width: 64,
+            height: 64,
+            child: _newPhoto != null
+                ? Image.memory(_newPhoto!, fit: BoxFit.cover)
+                : showStored
+                    ? Image.network(itemImageUrl(_photoUrl!),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => placeholder)
+                    : placeholder,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.space12),
+        // Expanded: the theme gives buttons an infinite min width, which a
+        // Row can't lay out (the whole dialog then fails to render).
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _saving ? null : () => _showPhotoSheet(l10n, hasPhoto),
+            icon: Icon(
+                hasPhoto ? Icons.edit_outlined : Icons.add_a_photo_outlined,
+                size: 18),
+            label: Text(hasPhoto ? l10n.menuPhotosChange : l10n.menuPhotosAdd),
+          ),
+        ),
+      ],
+    );
   }
 
   /// "Price already includes GST" toggle.
@@ -1724,6 +1907,22 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       // again would leave a duplicate behind.
       final saved = _savedItem ?? await widget.onSaved(data, const []);
       _savedItem = saved;
+
+      // Photo needs the item's id, so it goes up after the item is saved.
+      // Cleared once done, so a retry for failed variants doesn't re-upload.
+      try {
+        if (_newPhoto != null) {
+          _photoUrl = await uploadItemImage(saved.id, _newPhoto!);
+          _newPhoto = null;
+        } else if (_photoRemoved && _photoUrl != null) {
+          await deleteItemImage(saved.id);
+          _photoUrl = null;
+        }
+      } catch (_) {
+        if (!mounted) return;
+        setState(() => _formError = context.l10n.menuPhotosUploadFailed);
+        return;
+      }
 
       if (_hasVariants && drafts.isNotEmpty) {
         final created = <ItemVariant>[];
@@ -2243,6 +2442,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     ),
                   ),
                 ],
+                const SizedBox(height: AppSpacing.space12),
+                _buildPhotoField(l10n),
               ],
             ),
             ),

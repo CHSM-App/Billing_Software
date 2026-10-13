@@ -40,6 +40,8 @@ router.get('/', requireAuth, async (req, res) => {
         s.is_trial,
         s.updated_at,
         b.store_enabled,
+        b.logo_url,
+        b.print_logo,
         -- The caller's role AS IT IS NOW, not as their 8-hour access token
         -- claims. This endpoint is hit on every app open/resume, so it is where
         -- a device finds out its role was changed underneath it.
@@ -100,6 +102,10 @@ router.get('/', requireAuth, async (req, res) => {
       // the DB, or on another device reaches this device without a re-login.
       store_enabled: !!sub.store_enabled &&
         (sub.allow_online_store == null ? true : !!sub.allow_online_store),
+      // Shop logo + print opt-in. Staff can't read the owner-only profile, so
+      // this is how an owner's logo change reaches their devices.
+      logo_url: sub.logo_url ?? null,
+      print_logo: !!sub.print_logo,
       // Null when the user row is gone (deleted staff) — the client treats
       // any mismatch with its cached role, including null, as "log out".
       current_role: sub.current_role ?? null,

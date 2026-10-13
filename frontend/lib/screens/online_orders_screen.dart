@@ -125,7 +125,9 @@ class _OnlineOrdersBodyState extends ConsumerState<_OnlineOrdersBody> {
           onRefresh: () => ref.read(onlineOrdersProvider.notifier).reload(),
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(AppSpacing.space16),
+            // + the floating nav bar's inset, so the last entry scrolls above it.
+            padding: const EdgeInsets.all(AppSpacing.space16).copyWith(
+                bottom: AppSpacing.space16 + MediaQuery.paddingOf(context).bottom),
             children: [
               if (pending.isNotEmpty) ...[
                 _sectionLabel(context, '${l10n.onlineOrdersWaiting} (${pending.length})'),

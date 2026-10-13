@@ -128,6 +128,7 @@ class InvoicePdf {
     String? defaultSacCode,
     required bool gstEnabled,
     String? footerNote,
+    Uint8List? logo,
   }) async {
     final devanagari = await _loadDevanagari();
 
@@ -205,6 +206,10 @@ class InvoicePdf {
                     fontStyle: pw.FontStyle.italic)),
           ),
           build: (context) => [
+            if (logo != null) ...[
+              pw.Center(child: pw.Image(pw.MemoryImage(logo), height: 60)),
+              pw.SizedBox(height: 6),
+            ],
             pw.Center(
               // "Tax Invoice" is a GST term: it means the document carries a
               // tax breakdown a buyer can claim input credit against. With GST
@@ -247,6 +252,7 @@ class InvoicePdf {
     String? gstin,
     String? fssai,
     String? footerNote,
+    Uint8List? logo,
   }) async {
     final devanagari = await _loadDevanagari();
     final shaped = ShapedText();
@@ -290,6 +296,10 @@ class InvoicePdf {
                 fontStyle: pw.FontStyle.italic)),
       ),
       build: (context) => [
+        if (logo != null) ...[
+          pw.Center(child: pw.Image(pw.MemoryImage(logo), height: 60)),
+          pw.SizedBox(height: 6),
+        ],
         pw.Center(
           child: pw.Text('Payment Receipt',
               style:

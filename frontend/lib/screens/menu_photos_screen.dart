@@ -7,6 +7,15 @@ import '../theme/app_theme.dart';
 import '../utils/jpeg_compress.dart';
 import '../widgets/app_widgets.dart';
 
+/// Full URL for a stored image_url. The server returns a root-relative path
+/// like `/uploads/items/ITEM.jpg?v=123`; prefix it with the API host (baseUrl
+/// without its trailing `/api`) so Image.network can load it.
+String itemImageUrl(String relative) {
+  var host = baseUrl;
+  if (host.endsWith('/api')) host = host.substring(0, host.length - 4);
+  return '$host$relative';
+}
+
 /// Owner-only screen for managing dish photos shown to customers on the QR
 /// order menu. This is the ONLY place the owner works with item images — the
 /// billing and item-management screens never load or show photos.
@@ -73,15 +82,6 @@ class _MenuPhotosScreenState extends ConsumerState<MenuPhotosScreen> {
       final cat = '${i['category'] ?? ''}'.toLowerCase();
       return name.contains(q) || cat.contains(q);
     }).toList();
-  }
-
-  /// Full URL for a stored image_url. The server returns a root-relative path
-  /// like `/uploads/items/ITEM.jpg?v=123`; prefix it with the API host (baseUrl
-  /// without its trailing `/api`) so Image.network can load it.
-  String _imageUrl(String relative) {
-    var host = baseUrl;
-    if (host.endsWith('/api')) host = host.substring(0, host.length - 4);
-    return '$host$relative';
   }
 
   Future<void> _pickAndUpload(Map<String, dynamic> item, ImageSource src) async {
@@ -292,7 +292,7 @@ class _MenuPhotosScreenState extends ConsumerState<MenuPhotosScreen> {
                 children: [
                   if (url != null)
                     Image.network(
-                      _imageUrl(url),
+                      itemImageUrl(url),
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => _placeholder(),
                     )

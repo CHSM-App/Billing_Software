@@ -86,7 +86,9 @@ class CreditScreen extends ConsumerWidget {
         return RefreshIndicator(
           onRefresh: () => ref.read(creditCustomersProvider.notifier).reload(),
           child: ListView.separated(
-            padding: const EdgeInsets.all(AppSpacing.space12),
+            // + the floating nav bar's inset, so the last entry scrolls above it.
+            padding: const EdgeInsets.all(AppSpacing.space12).copyWith(
+                bottom: AppSpacing.space12 + MediaQuery.paddingOf(context).bottom),
             itemCount: customers.length,
             separatorBuilder: (_, __) =>
                 const SizedBox(height: AppSpacing.space8),

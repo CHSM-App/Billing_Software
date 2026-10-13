@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
@@ -26,6 +27,23 @@ class ReceiptPreview {
 /// All three billing callsites (finalize, history reprint, credit settle)
 /// gather the same header fields, so they route through here to stay identical.
 class ReceiptOutput {
+  /// The cached shop logo, or null unless the owner opted in to printing it.
+  static Future<Uint8List?> _logoBytes() async =>
+      await getPrintLogo() ? await getLogoBytes() : null;
+
+  /// [_logoBytes] decoded for the thermal raster. A corrupt cache just means
+  /// no logo — it must never stop a bill printing.
+  static Future<ui.Image?> _logoImage() async {
+    final bytes = await _logoBytes();
+    if (bytes == null) return null;
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      return (await codec.getNextFrame()).image;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// True when the currently-selected paper size is a PDF page size (A5/A4),
   /// i.e. NOT a thermal roll. Callsites use this to decide whether an active
   /// thermal printer is required before emitting.
@@ -66,6 +84,7 @@ class ReceiptOutput {
         businessFssai: businessFssai,
         gstEnabled: gstEnabled,
         labels: labels,
+        logo: await _logoImage(),
         paperDots: PaperSizes.thermalDots(size),
       );
       return;
@@ -84,6 +103,7 @@ class ReceiptOutput {
       defaultSacCode: defaultSacCode,
       gstEnabled: gstEnabled,
       footerNote: footerNote,
+      logo: await _logoBytes(),
     );
 
     await Printing.layoutPdf(
@@ -117,6 +137,7 @@ class ReceiptOutput {
         businessGstin: businessGstin,
         businessFssai: businessFssai,
         labels: labels,
+        logo: await _logoImage(),
         paperDots: PaperSizes.thermalDots(size),
       );
       return;
@@ -131,6 +152,7 @@ class ReceiptOutput {
       gstin: businessGstin,
       fssai: businessFssai,
       footerNote: footerNote,
+      logo: await _logoBytes(),
     );
     await Printing.layoutPdf(
       onLayout: (_) async => bytes,
@@ -165,6 +187,7 @@ class ReceiptOutput {
         businessFssai: businessFssai,
         gstEnabled: gstEnabled,
         labels: labels,
+        logo: await _logoImage(),
         paperDots: PaperSizes.thermalDots(size),
       );
       return ReceiptPreview(bytes: png, isPdf: false);
@@ -182,6 +205,7 @@ class ReceiptOutput {
       defaultSacCode: defaultSacCode,
       gstEnabled: gstEnabled,
       footerNote: footerNote,
+      logo: await _logoBytes(),
     );
     return ReceiptPreview(bytes: bytes, isPdf: true);
   }

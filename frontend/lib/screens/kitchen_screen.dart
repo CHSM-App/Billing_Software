@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/skeletons.dart';
 import '../widgets/shell_app_bar.dart';
+import '../widgets/floating_bar_physics.dart';
 import '../services/notification_service.dart';
 import '../services/printer_service.dart';
 import '../storage.dart';
@@ -33,7 +34,7 @@ class KitchenScreen extends ConsumerStatefulWidget {
 }
 
 class _KitchenScreenState extends ConsumerState<KitchenScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   List<Map<String, dynamic>> _orders = [];
   bool _loading = true;
   String? _error;
@@ -54,7 +55,10 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    // Switching Pending/Completed shows the title row again: the other tab's
+    // list has its own scroll position.
+    _tabController = TabController(length: 2, vsync: this)
+      ..addListener(_header.show);
     _load();
     NotificationService.instance.kitchenPing.addListener(_onPing);
   }
@@ -64,8 +68,17 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
     NotificationService.instance.kitchenPing.removeListener(_onPing);
     _chimePlayer.dispose();
     _tabController.dispose();
+    _header.dispose();
     super.dispose();
   }
+
+  /// Phone layout: the title row folds away with the order list while the
+  /// Pending/Completed row stays pinned — see [FoldingHeader].
+  late final FoldingHeader _header = FoldingHeader(
+    vsync: this,
+    extent: () => 50, // ShellAppBar's toolbar row
+    canFold: () => MediaQuery.sizeOf(context).width < 720,
+  );
 
   void _onPing() => _load(silent: true);
 
@@ -265,9 +278,29 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
     // ShellAppBar, not Scaffold.appBar: this screen is a tab inside the shell's
     // IndexedStack, where AppBar's Scaffold-dependent layout does not render —
     // which is why the bar (and everything in it) was invisible here.
+    // Folded on a phone, then widened (where it never folds): open it back up.
+    if (MediaQuery.sizeOf(context).width >= 720 && _header.bar.value < 1) {
+      _header.bar.value = 1;
+    }
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(children: [
+        // The status-bar band stays put; the title row folds away beneath it
+        // while the Pending/Completed row (+ divider) always stays.
+        ColoredBox(
+          color: AppColors.surface,
+          child: SizedBox(
+              width: double.infinity,
+              height: MediaQuery.paddingOf(context).top),
+        ),
+        FoldAway(
+          bar: _header.bar.drive(Tween(
+              begin: (kTextTabBarHeight + 1) / (50 + kTextTabBarHeight + 1),
+              end: 1.0)),
+          child: MediaQuery.removePadding(
+            context: context,
+            removeTop: true,
+            child:
         ShellAppBar(
           title: Text(l10n.kitchenTitle),
           automaticallyImplyLeading: false,
@@ -314,8 +347,11 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
             ],
           ),
         ),
+          ),
+        ),
         Expanded(
-          child: _loading
+          // Hands the order lists the folding physics and listens to them.
+          child: _header.wrap(context, _loading
               ? const KitchenSkeleton()
               : _error != null && _orders.isEmpty
                   ? ListView(
@@ -350,7 +386,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
                           ),
                         ),
                       ],
-                    ),
+                    )),
         ),
       ]),
     );
@@ -429,7 +465,9 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
 
       return SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(padding),
+        // + the floating nav bar's inset, so the last cards scroll above it.
+        padding: const EdgeInsets.all(padding).copyWith(
+            bottom: padding + MediaQuery.paddingOf(context).bottom),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

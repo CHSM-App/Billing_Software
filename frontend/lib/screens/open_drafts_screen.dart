@@ -133,7 +133,9 @@ class OpenDraftsScreen extends ConsumerWidget {
                   ),
                 ])
               : ListView.separated(
-                  padding: const EdgeInsets.all(AppSpacing.space12),
+                  // + the floating nav bar's inset, so the last entry scrolls above it.
+                  padding: const EdgeInsets.all(AppSpacing.space12).copyWith(
+                      bottom: AppSpacing.space12 + MediaQuery.paddingOf(context).bottom),
                   itemCount: shown.length,
                   separatorBuilder: (_, __) =>
                       const SizedBox(height: AppSpacing.space8),
