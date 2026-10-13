@@ -54,3 +54,6 @@ frontend/windows/vc_redist.x64.exe
 ios_distribution.*
 *.mobileprovision
 *_base64.txt
+
+appstore_screenshots
+appstore_screenshots_ipad
