@@ -148,8 +148,21 @@ class PrinterService {
     ];
   }
 
+  /// iOS: print_bluetooth_thermal creates its CBCentralManager on the first
+  /// plugin call, and its state reads .unknown for a moment after — so the
+  /// first permission/enabled check or scan after launch comes back
+  /// false/empty. Wait (up to ~2s) for it to report powered on. No-op off iOS.
+  Future<void> _waitForIosBt() async {
+    if (!Platform.isIOS) return;
+    for (var i = 0; i < 10; i++) {
+      if (await PrintBluetoothThermal.bluetoothEnabled) return;
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+  }
+
   Future<List<Printer>> _listClassicBt() async {
     try {
+      await _waitForIosBt();
       final paired = await PrintBluetoothThermal.pairedBluetooths;
       return paired
           .map((d) => Printer(
@@ -234,6 +247,7 @@ class PrinterService {
       return true;
     }
     try {
+      await _waitForIosBt();
       final permitted =
           await PrintBluetoothThermal.isPermissionBluetoothGranted;
       if (!permitted) return false;
@@ -392,7 +406,7 @@ class PrinterService {
           ? item.quantity.toInt().toString()
           : item.quantity.toStringAsFixed(1);
       if (q.length > qty) qty = q.length;
-      final pr = item.unitPrice.toStringAsFixed(2);
+      final pr = item.receiptPrice.toStringAsFixed(2);
       if (pr.length > price) price = pr.length;
       if (withGst) {
         final g = _itemGstLabel(item, gstEnabled);
@@ -601,6 +615,9 @@ class PrinterService {
     }
     lines.add(
         '${labels?.date ?? 'Date:'} ${_formatDate(bill.billDate.toLocal())}');
+    if (bill.billedByFirst != null) {
+      lines.add('${labels?.billedBy ?? 'Cashier:'} ${bill.billedByFirst}');
+    }
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
       lines.add('${labels?.customer ?? 'Cust:'} ${bill.customerName}');
     }
@@ -629,7 +646,7 @@ class PrinterService {
       // Wrap the name within its column instead of truncating, so a long name
       // prints in full across several lines while staying inside the name
       // column (qty/price/total sit on the first line only).
-      final nameLines = _wrapNameToCol(item.itemName, p.nameCols);
+      final nameLines = _wrapNameToCol(item.receiptName, p.nameCols);
       final firstName = nameLines.isEmpty ? '' : nameLines.first;
       // Total column shows the NET line price (unit price × qty, before tax) —
       // consistent for retail and restaurant. Tax is summed once at the bottom.
@@ -638,7 +655,7 @@ class PrinterService {
         p,
         firstName,
         qty,
-        item.unitPrice.toStringAsFixed(2),
+        item.receiptPrice.toStringAsFixed(2),
         _itemGstLabel(item, gstEnabled),
         netLine.toStringAsFixed(2),
       ));
@@ -776,6 +793,13 @@ class PrinterService {
           '${labels?.date ?? 'Date:'} ${_formatDate(bill.billDate.toLocal())}',
           widthFraction: 1.0),
     ], size: sizeBody));
+    // Who settled it — tells staff apart now that prices can be edited.
+    if (bill.billedByFirst != null) {
+      rows.add(ReceiptRow.cols([
+        ReceiptCell('${labels?.billedBy ?? 'Cashier:'} ${bill.billedByFirst}',
+            widthFraction: 1.0),
+      ], size: sizeBody));
+    }
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
       rows.add(ReceiptRow.cols([
         ReceiptCell('${labels?.customer ?? 'Cust:'} ${bill.customerName}',
@@ -844,9 +868,9 @@ class PrinterService {
       // consistent for retail and restaurant. Tax is summed once at the bottom.
       final netLine = item.unitPrice * item.quantity;
       rows.add(itemRow(
-        item.itemName,
+        item.receiptName,
         qty,
-        item.unitPrice.toStringAsFixed(2),
+        item.receiptPrice.toStringAsFixed(2),
         _itemGstLabel(item, gstEnabled),
         netLine.toStringAsFixed(2),
       ));
@@ -1477,6 +1501,7 @@ class PrinterService {
       throw PrinterException('Printer address not set');
     }
     try {
+      await _waitForIosBt();
       final permitted =
           await PrintBluetoothThermal.isPermissionBluetoothGranted;
       if (!permitted) {
@@ -1537,6 +1562,7 @@ class PrinterService {
       throw PrinterException('Printer address not set');
     }
     try {
+      await _waitForIosBt();
       final permitted =
           await PrintBluetoothThermal.isPermissionBluetoothGranted;
       if (!permitted) throw PrinterException('Bluetooth permission not granted');

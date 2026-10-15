@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../l10n/l10n_ext.dart';
@@ -129,12 +130,17 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
 
   Future<void> _scan() async {
     final l10n = context.l10n;
-    // Request Bluetooth permissions on Android before listing paired devices
-    final statuses = await [
-      Permission.bluetoothConnect,
-      Permission.bluetoothScan,
-      Permission.location,
-    ].request();
+    // Request Bluetooth permissions before listing devices. bluetoothConnect/
+    // bluetoothScan are Android-only — on iOS they report permanentlyDenied
+    // without prompting, so iOS asks for Permission.bluetooth instead.
+    final statuses = await (defaultTargetPlatform == TargetPlatform.iOS
+            ? [Permission.bluetooth]
+            : [
+                Permission.bluetoothConnect,
+                Permission.bluetoothScan,
+                Permission.location,
+              ])
+        .request();
 
     final denied = statuses.values.any((s) => s.isDenied || s.isPermanentlyDenied);
     if (denied) {

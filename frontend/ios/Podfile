@@ -41,6 +41,11 @@ post_install do |installer|
 
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.1'
+      # permission_handler compiles every iOS permission out unless enabled
+      # here; without this, Permission.bluetooth returns permanentlyDenied
+      # without ever prompting.
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'PERMISSION_BLUETOOTH=1'
     end
   end
 end

@@ -82,6 +82,22 @@ class CartNotifier extends Notifier<List<CartEntry>> {
     }
   }
 
+  /// This bill's price and discount for one line (order-card row editor).
+  /// [price] null = back to the catalog price; [pct] set = % discount, else
+  /// [amt] ₹ off the line.
+  void setLineOverride(String key, {double? price, double? pct, double amt = 0}) {
+    state = [
+      for (final e in state)
+        e.key == key
+            ? e.copyWith(
+                clearOverrides: true,
+                priceOverride: price,
+                discountPct: pct,
+                discountAmt: pct == null ? amt : 0)
+            : e
+    ];
+  }
+
   void clear() => state = [];
 
   /// Rebuild the cart from a saved bill/draft.
@@ -97,22 +113,31 @@ class CartNotifier extends Notifier<List<CartEntry>> {
     final merged = <String, CartEntry>{};
     for (final entry in _entriesFromBill(bill, catalog)) {
       final existing = merged[entry.key];
+      // ponytail: the first row's price wins when one dish's rows carry
+      // different price overrides; discounts add up.
       merged[entry.key] = existing == null
           ? entry
-          : existing.copyWith(quantity: existing.quantity + entry.quantity);
+          : existing.copyWith(
+              quantity: existing.quantity + entry.quantity,
+              discountAmt: existing.discountAmt + entry.discountAmt);
     }
     state = merged.values.toList();
   }
 
   Iterable<CartEntry> _entriesFromBill(Bill bill, List<Item> catalog) {
+    final gstEnabled = ref.read(gstEnabledProvider);
     return bill.items.map((bi) {
+      // bill_items.unit_price is the DISCOUNTED net rate; add the line
+      // discount back to get the rate the line was priced at.
+      final preNet = bi.unitPrice +
+          (bi.quantity > 0 ? bi.discountAmount / bi.quantity : 0.0);
       final catalogItem = catalog.firstWhere(
         (i) => i.id == bi.itemId,
         orElse: () => Item(
           id: bi.itemId ?? bi.id,
           businessId: '',
           name: bi.itemName,
-          price: bi.unitPrice,
+          price: preNet,
           taxRate: bi.taxRate,
           isActive: true,
         ),
@@ -130,10 +155,23 @@ class CartNotifier extends Notifier<List<CartEntry>> {
           itemId: catalogItem.id,
           // Recover the label from "Name (Label)" when possible.
           label: _labelFromName(bi.itemName),
-          price: bi.unitPrice,
+          price: preNet,
         );
       }
-      return CartEntry(item: catalogItem, variant: variant, quantity: bi.quantity);
+      final entry = CartEntry(
+          item: catalogItem,
+          variant: variant,
+          quantity: bi.quantity,
+          discountAmt: bi.discountAmount);
+      // Priced off-catalog on the order card → restore it as an override, in
+      // the same form the cashier typed it (gross for an MRP item). A catalog
+      // price changed since the draft was saved also lands here, keeping the
+      // draft at the price it was opened with.
+      if ((entry.netPrice(gstEnabled) - preNet).abs() < 0.005) return entry;
+      final t = (bi.taxRate ?? 0) / 100;
+      return entry.copyWith(
+          priceOverride:
+              catalogItem.priceInclusiveTax ? preNet * (1 + t) : preNet);
     });
   }
 

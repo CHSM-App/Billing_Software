@@ -688,6 +688,22 @@ describe('duplicate item names', () => {
     expect(mockRequest.inputs.exclude_id).toBeUndefined();
   });
 
+  test('POST rejects an Item No another item already uses', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // name free
+      .mockResolvedValueOnce({
+        recordset: [{ id: 'other-item-id', name: 'Masala Dosa' }],
+        rowsAffected: [1],
+      });
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Idli', price: 40, item_no: ' 101 ' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/101.*Masala Dosa/);
+    expect(mockRequest.inputs.item_no).toBe('101');
+  });
+
   test('a soft-deleted item does not reserve its name', async () => {
     // The check filters on is_active = 1, so a deleted "Rice" frees the name.
     mockRequest.query

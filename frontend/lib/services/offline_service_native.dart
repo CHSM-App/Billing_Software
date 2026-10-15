@@ -93,7 +93,8 @@ class OfflineService {
       // 13 was the paused stock-batches build (see STOCK_BATCHES.md). Kept so
       // a device that ran it never opens its DB at a lower version.
       // 14: offline_bills.payments — the parts of a split bill.
-      version: 14,
+      // 15: cached_items.item_no.
+      version: 15,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
       // Self-heal: _createSchema is all IF NOT EXISTS, so this is a no-op on a
@@ -193,6 +194,7 @@ class OfflineService {
         business_id    TEXT    NOT NULL,
         name           TEXT    NOT NULL,
         barcode        TEXT,
+        item_no        TEXT,
         -- Two free-text grouping levels, mirroring items.major_category /
         -- items.category. Both nullable — an item may carry neither.
         major_category TEXT,
@@ -342,6 +344,15 @@ class OfflineService {
         await db.execute('ALTER TABLE offline_bills ADD COLUMN payments TEXT');
       }
     }
+    if (oldVersion < 15) {
+      // v14 → v15: cached_items gains item_no so the "(101)" label and number
+      // search work offline. Additive; the next sync fills it in.
+      // Guarded: a DB coming from < 12 just rebuilt the table with it.
+      final cols = await db.rawQuery('PRAGMA table_info(cached_items)');
+      if (!cols.any((c) => c['name'] == 'item_no')) {
+        await db.execute('ALTER TABLE cached_items ADD COLUMN item_no TEXT');
+      }
+    }
   }
 
   /// Cache of bills and drafts fetched FROM the server.
@@ -393,6 +404,7 @@ class OfflineService {
           'business_id': businessId,
           'name': item.name,
           'barcode': item.barcode,
+          'item_no': item.itemNo,
           'major_category': item.majorCategory,
           'category': item.category,
           'price': item.price,
@@ -686,6 +698,7 @@ class OfflineService {
       businessId: row['business_id'] as String,
       name: row['name'] as String,
       barcode: row['barcode'] as String?,
+      itemNo: row['item_no'] as String?,
       majorCategory: row['major_category'] as String?,
       category: row['category'] as String?,
       // Null for a variant-only item — reading it as non-null threw for exactly
@@ -944,6 +957,7 @@ class OfflineService {
         unitPrice: (li['unit_price'] as num?)?.toDouble() ?? 0,
         taxRate: (li['tax_rate'] as num?)?.toDouble(),
         lineTotal: (li['line_total'] as num?)?.toDouble() ?? 0,
+        discountAmount: (li['discount_amount'] as num?)?.toDouble() ?? 0,
       );
     }).toList();
     return Bill(

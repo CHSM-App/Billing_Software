@@ -13,6 +13,8 @@ CREATE TABLE businesses (
     is_verified          BIT          NOT NULL DEFAULT 0,
     -- GST (added via migration 025) — optional, OFF by default.
     gst_enabled      BIT              NOT NULL DEFAULT 0,   -- master toggle for all GST UI/receipt
+    -- Show items.item_no on the billing page as "(101) Masala Dosa" (migration 056).
+    show_item_no     BIT              NOT NULL CONSTRAINT DF_businesses_show_item_no DEFAULT 0,
     default_sac_code NVARCHAR(10)     NULL,   -- bill-level fallback HSN/SAC (e.g. restaurant 9963)
     -- Extended profile fields (added via migration 005)
     gst_number       NVARCHAR(15)     NULL,   -- 15-char GSTIN
@@ -100,6 +102,10 @@ CREATE TABLE items (
     -- already inside it and billing back-calculates the net rate.
     price_inclusive_tax BIT          NOT NULL DEFAULT 0,
     hsn_code        NVARCHAR(10)     NULL,   -- optional per-item HSN/SAC (GST)
+    -- Optional shop-assigned number ("101"); searchable in billing. Unique among
+    -- active items, enforced in routes/items.js. businesses.show_item_no decides
+    -- whether billing shows it as "(101) Masala Dosa".
+    item_no         NVARCHAR(30)     NULL,
     stock_quantity  DECIMAL(10,2)    NULL,
     unit            NVARCHAR(20)     NOT NULL DEFAULT 'piece',
     is_active       BIT              NOT NULL DEFAULT 1,
@@ -177,6 +183,9 @@ CREATE TABLE bills (
     payment_mode        NVARCHAR(20)     NOT NULL, -- 'cash', 'upi', 'card', 'credit', 'other'
     status              NVARCHAR(20)     NOT NULL DEFAULT 'finalized', -- 'draft', 'finalized', 'voided'
     created_by_user_id  UNIQUEIDENTIFIER NOT NULL,
+    -- Who settled it ("Billed by" on receipts/History). Migration 057; NULL on
+    -- older bills, which fall back to created_by_user_id when read.
+    finalized_by_user_id UNIQUEIDENTIFIER NULL,
     client_bill_id      NVARCHAR(36)     NULL,     -- idempotency key from Flutter offline queue (UUID v4)
     created_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
 
@@ -193,6 +202,9 @@ CREATE TABLE bills (
     -- NO ACTION: bills are financial records and must survive staff deletion.
     CONSTRAINT FK_bills_created_by_user
         FOREIGN KEY (created_by_user_id) REFERENCES users (id)
+        ON UPDATE NO ACTION ON DELETE NO ACTION,
+    CONSTRAINT FK_bills_finalized_by_user
+        FOREIGN KEY (finalized_by_user_id) REFERENCES users (id)
         ON UPDATE NO ACTION ON DELETE NO ACTION,
 
     CONSTRAINT UQ_bills_business_bill_number
@@ -216,6 +228,9 @@ CREATE TABLE bill_items (
     tax_rate    DECIMAL(5,2)     NULL,
     hsn_code    NVARCHAR(10)     NULL,   -- snapshot of the item's HSN/SAC at sale time
     line_total  DECIMAL(10,2)    NOT NULL,
+    -- ₹ off this line's net from the order card (migration 055). Display only:
+    -- unit_price is already the discounted net rate.
+    discount_amount DECIMAL(10,2) NOT NULL CONSTRAINT DF_bill_items_discount_amount DEFAULT 0,
 
     -- CASCADE: line items are owned by the bill.
     CONSTRAINT FK_bill_items_bill

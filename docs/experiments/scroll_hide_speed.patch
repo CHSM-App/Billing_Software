@@ -1,0 +1,54 @@
+diff --git a/frontend/lib/widgets/bottom_nav_bar.dart b/frontend/lib/widgets/bottom_nav_bar.dart
+index ed1065f..84b651b 100644
+--- a/frontend/lib/widgets/bottom_nav_bar.dart
++++ b/frontend/lib/widgets/bottom_nav_bar.dart
+@@ -49,6 +49,12 @@ class AppBottomNavBar extends StatefulWidget {
+   /// read it through [HidesWithNavBar] without the shell passing it down.
+   static final ValueNotifier<bool> shown = ValueNotifier(true);
+ 
++  /// How the bar (and anything riding with it, like the Billing cart row)
++  /// slides away and back on scroll: unhurried, easing in and out so it
++  /// glides rather than snaps. Raise the duration for a slower glide.
++  static const hideDuration = Duration(milliseconds: 420);
++  static const hideCurve = Curves.easeInOutCubic;
++
+   @override
+   State<AppBottomNavBar> createState() => _AppBottomNavBarState();
+ }
+@@ -66,7 +72,7 @@ class HidesWithNavBar extends StatelessWidget {
+   Widget build(BuildContext context) {
+     final duration = MediaQuery.disableAnimationsOf(context)
+         ? Duration.zero
+-        : const Duration(milliseconds: 220);
++        : AppBottomNavBar.hideDuration;
+     return ValueListenableBuilder<bool>(
+       valueListenable: AppBottomNavBar.shown,
+       builder: (context, shown, child) => IgnorePointer(
+@@ -74,10 +80,11 @@ class HidesWithNavBar extends StatelessWidget {
+         child: AnimatedSlide(
+           offset: shown ? Offset.zero : Offset(0, drop),
+           duration: duration,
+-          curve: Curves.easeOutCubic,
++          curve: AppBottomNavBar.hideCurve,
+           child: AnimatedOpacity(
+             opacity: shown ? 1 : 0,
+             duration: duration,
++            curve: AppBottomNavBar.hideCurve,
+             child: child,
+           ),
+         ),
+diff --git a/frontend/lib/screens/home_screen.dart b/frontend/lib/screens/home_screen.dart
+index 10fd4a5..7f55a89 100644
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -3632,8 +3632,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+                 right: AppSpacing.space16,
+                 duration: MediaQuery.disableAnimationsOf(context)
+                     ? Duration.zero
+-                    : const Duration(milliseconds: 220),
+-                curve: Curves.easeOutCubic,
++                    : AppBottomNavBar.hideDuration,
++                curve: AppBottomNavBar.hideCurve,
+                 child: row!,
+               ),
+               child: Row(

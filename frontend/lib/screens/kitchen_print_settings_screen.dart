@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -75,11 +76,15 @@ class _KitchenPrintSettingsScreenState
   }
 
   Future<void> _scan() async {
-    final statuses = await [
-      Permission.bluetoothConnect,
-      Permission.bluetoothScan,
-      Permission.location,
-    ].request();
+    // bluetoothConnect/bluetoothScan are Android-only; iOS needs .bluetooth.
+    final statuses = await (defaultTargetPlatform == TargetPlatform.iOS
+            ? [Permission.bluetooth]
+            : [
+                Permission.bluetoothConnect,
+                Permission.bluetoothScan,
+                Permission.location,
+              ])
+        .request();
     if (statuses.values.any((s) => s.isDenied || s.isPermanentlyDenied)) {
       _snack('Bluetooth permission denied.', isError: true);
       return;

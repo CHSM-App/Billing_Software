@@ -254,6 +254,7 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
         paymentMode: b.paymentMode,
         status: status,
         createdByUserId: b.createdByUserId,
+        billedBy: b.billedBy,
         createdAt: b.createdAt,
         finalizedAt: b.finalizedAt,
         items: b.items,

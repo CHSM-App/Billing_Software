@@ -11,6 +11,7 @@ class ReceiptLabels {
   final String date;
   final String customer;
   final String customerPhone;
+  final String billedBy;
   final String colItem;
   final String colQty;
   final String colPrice;
@@ -64,6 +65,7 @@ class ReceiptLabels {
     required this.date,
     required this.customer,
     required this.customerPhone,
+    required this.billedBy,
     required this.colItem,
     required this.colQty,
     required this.colPrice,
@@ -107,6 +109,7 @@ class ReceiptLabels {
         date: l10n.receiptDate,
         customer: l10n.receiptCustomer,
         customerPhone: l10n.receiptCustomerPhone,
+        billedBy: l10n.receiptBilledBy,
         colItem: l10n.receiptColItem,
         colQty: l10n.receiptColQty,
         colPrice: l10n.receiptColPrice,

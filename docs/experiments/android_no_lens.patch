@@ -1,0 +1,105 @@
+diff --git a/frontend/lib/widgets/bottom_nav_bar.dart b/frontend/lib/widgets/bottom_nav_bar.dart
+index 84b651b..2a0ec9f 100644
+--- a/frontend/lib/widgets/bottom_nav_bar.dart
++++ b/frontend/lib/widgets/bottom_nav_bar.dart
+@@ -1,5 +1,6 @@
+ import 'dart:ui' show FragmentProgram, FragmentShader, ImageFilter;
+ 
++import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/physics.dart';
+ import 'package:flutter/rendering.dart';
+@@ -143,11 +144,19 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+   /// samples the wrong spot (backdrop texture not screen-sized).
+   static const _waterDrop = true;
+ 
++  /// No glass lens on Android: on low-powered phones its extra backdrop pass
++  /// (shader or [RawMagnifier]) made tab changes lag. Android keeps every
++  /// other behaviour: the frosted bar, the indigo pill sliding on the spring
++  /// and stretching, the bar breathing, press/drag, scroll-hide. iOS (and
++  /// desktop) keep the lens.
++  static bool get _lensEnabled =>
++      defaultTargetPlatform != TargetPlatform.android;
++
+   /// The liquid-glass lens shader (shaders/lens.frag), or null where the
+   /// engine can't run shader filters: Skia (older Android GL devices) and
+   /// widget tests. The lens then falls back to a plain [RawMagnifier].
+   static final Future<FragmentProgram?> _lensProgram =
+-      _waterDrop && ImageFilter.isShaderFilterSupported
++      _waterDrop && _lensEnabled && ImageFilter.isShaderFilterSupported
+           ? FragmentProgram.fromAsset('shaders/lens.frag')
+               .then<FragmentProgram?>((p) => p, onError: (_) => null)
+           : Future.value(null);
+@@ -344,12 +353,14 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+                                     // reads clearly on the glass. Swollen:
+                                     // mostly clear glass (the lens on top
+                                     // draws the rim and shadow).
++                                    // (No lens on Android: the pill keeps
++                                    // its tint while it moves.)
+                                     color: Color.lerp(
+                                         AppColors.primary
+                                             .withValues(alpha: 0.18),
+                                         AppColors.surface
+                                             .withValues(alpha: 0.25),
+-                                        s),
++                                        _lensEnabled ? s : 0),
+                                     borderRadius: BorderRadius.circular(h),
+                                   ),
+                                 ),
+@@ -378,7 +389,7 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+                               // lift and the thick-glass edge on top. Above
+                               // the icons, so it never takes their taps. At
+                               // rest it is gone and everything is crisp.
+-                              if (s > 0.01)
++                              if (s > 0.01 && _lensEnabled)
+                                 Positioned(
+                                   left: p * slotW - widen,
+                                   top: -grow,
+diff --git a/frontend/test/widgets/bottom_nav_bar_test.dart b/frontend/test/widgets/bottom_nav_bar_test.dart
+index b10e8e2..fb524ef 100644
+--- a/frontend/test/widgets/bottom_nav_bar_test.dart
++++ b/frontend/test/widgets/bottom_nav_bar_test.dart
+@@ -1,6 +1,7 @@
+ import 'package:Vittam/theme/app_theme.dart';
+ import 'package:Vittam/widgets/bottom_nav_bar.dart';
+ import 'package:Vittam/widgets/nav_item.dart';
++import 'package:flutter/foundation.dart';
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart';
+ import 'package:flutter_test/flutter_test.dart';
+@@ -98,8 +99,12 @@ void main() {
+     ]);
+   });
+ 
+-  testWidgets('highlight swells into a lens while sliding, settles to one slot',
++  // iOS: the glass lens rides on the moving pill. Android: no lens (it lagged
++  // on low-powered phones) but the pill still slides, stretches and settles,
++  // and the bar still breathes.
++  testWidgets('highlight swells while sliding (lens on iOS only), settles',
+       (tester) async {
++    final ios = defaultTargetPlatform == TargetPlatform.iOS;
+     Widget bar(int sel) => MaterialApp(
+           home: Scaffold(
+             body: Align(
+@@ -134,8 +139,8 @@ void main() {
+     // Swollen: wider, and taller than the capsule (spills past its edges).
+     expect(moving.width, greaterThan(rest.width));
+     expect(moving.height, greaterThan(rest.height + 8));
+-    // A real magnifying lens rides on top while it moves.
+-    expect(find.byType(RawMagnifier), findsOneWidget);
++    // A real magnifying lens rides on top while it moves, on iOS only.
++    expect(find.byType(RawMagnifier), ios ? findsOneWidget : findsNothing);
+     // The whole bar breathes a little bigger with it.
+     expect(glass().width, greaterThan(restBar.width + 3));
+     await tester.pumpAndSettle();
+@@ -145,7 +150,9 @@ void main() {
+     expect(pill().left, closeTo(rest.left + 2 * rest.width, 0.5));
+     expect(glass(), restBar);
+     expect(find.byType(RawMagnifier), findsNothing); // gone at rest
+-  });
++  },
++      variant: const TargetPlatformVariant(
++          {TargetPlatform.iOS, TargetPlatform.android}));
+ 
+   testWidgets('pressing the selected tab squishes the lens, release settles it',
+       (tester) async {

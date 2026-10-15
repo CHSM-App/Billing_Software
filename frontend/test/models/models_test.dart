@@ -104,6 +104,31 @@ void main() {
       expect(item.isActive, isTrue);
     });
 
+    test('BillItem.receiptPrice shows the rate before the line discount', () {
+      BillItem line(double unit, double disc) => BillItem.fromJson({
+            'item_name': 'Chilli', 'quantity': 2, 'unit_price': unit,
+            'line_total': unit * 2, 'discount_amount': disc,
+          });
+      // 2 × 180 less 50 is stored as 155/unit; the receipt still says 180.
+      expect(line(155, 50).receiptPrice, 180);
+      expect(line(155, 50).unitPrice * 2, 310);
+      // No discount (or an edited price, already in unit_price): unchanged.
+      expect(line(150, 0).receiptPrice, 150);
+    });
+
+    test('item_no shows on billingName only when the shop turns it on', () {
+      Item make(String? no) => Item.fromJson({
+            'id': 'i', 'business_id': 'b', 'name': 'Masala Dosa',
+            'item_no': no, 'is_active': 1,
+          });
+      expect(make('101').billingName(true), '(101) Masala Dosa');
+      expect(make('101').copyWithVariants(const []).billingName(true),
+          '(101) Masala Dosa');
+      expect(make('101').billingName(false), 'Masala Dosa');
+      expect(make(null).billingName(true), 'Masala Dosa');
+      expect(make('').billingName(true), 'Masala Dosa');
+    });
+
     test('parses major_category and carries it through copyWithVariants', () {
       final item = Item.fromJson({
         'id': 'item-1a',
@@ -260,6 +285,16 @@ void main() {
       'created_at': '2024-01-15T10:00:00.000Z',
       'items': [],
     };
+
+    test('billed_by: full name kept, first name for receipts', () {
+      final b = Bill.fromJson({...billJson, 'billed_by': '  Ramesh  Patil '});
+      expect(b.billedBy, '  Ramesh  Patil ');
+      expect(b.billedByFirst, 'Ramesh');
+      // Unknown (offline / older shapes) or blank: nothing to print.
+      expect(Bill.fromJson(billJson).billedByFirst, isNull);
+      expect(Bill.fromJson({...billJson, 'billed_by': '  '}).billedByFirst,
+          isNull);
+    });
 
     test('billDate is the finalize time; a held bill keeps its order time', () {
       // Held on the 7th, settled on the 12th: dated the 12th.
@@ -602,6 +637,64 @@ void main() {
       final copy = entry.copyWith();
       expect(copy.quantity, 3);
       expect(copy.item.id, 'item-1');
+    });
+
+    // ── Order-card price edit + line discount ──────────────────
+    // The discount comes off the NET line; tax is charged on what is left.
+    // Wire form mirrors applyLineOverrides in backend/src/routes/bills.js.
+
+    test('price override + % discount, exclusive item with GST', () {
+      final entry = CartEntry(
+          item: makeItem(taxRate: 10.0),
+          quantity: 2,
+          priceOverride: 40,
+          discountPct: 10);
+      expect(entry.lineDiscount(true), 8.0); // 10% of 80
+      expect(entry.lineNet(true), 72.0);
+      expect(entry.lineTax(true), closeTo(7.2, 1e-9));
+      expect(entry.lineTotal(true), closeTo(79.2, 1e-9));
+      expect(entry.discountedNetPrice(true), 36.0); // what the server stores
+      expect(entry.overridePayload(true),
+          {'price_override': 40.0, 'discount_amount': 8.0});
+    });
+
+    test('% discount scales with quantity, ₹ discount does not', () {
+      final pct = CartEntry(item: makeItem(), quantity: 1, discountPct: 10);
+      final amt = CartEntry(item: makeItem(), quantity: 1, discountAmt: 5);
+      expect(pct.copyWith(quantity: 3).lineDiscount(true), 15.0);
+      expect(amt.copyWith(quantity: 3).lineDiscount(true), 5.0);
+    });
+
+    test('₹ discount is clamped to the line when quantity drops', () {
+      final entry = CartEntry(item: makeItem(), quantity: 1, discountAmt: 80);
+      expect(entry.lineDiscount(true), 50.0);
+      expect(entry.lineNet(true), 0.0);
+    });
+
+    test('MRP item: override is gross; discount comes off the net', () {
+      final entry = CartEntry(
+          item: makeItem(taxRate: 10.0, inclusive: true),
+          quantity: 1,
+          priceOverride: 110,
+          discountAmt: 10);
+      expect(entry.netPrice(true), closeTo(100.0, 1e-9));
+      expect(entry.lineNet(true), closeTo(90.0, 1e-9));
+      expect(entry.lineTotal(true), closeTo(99.0, 1e-9));
+      expect(entry.overridePayload(true)['price_override'],
+          closeTo(100.0, 1e-9)); // net goes on the wire
+    });
+
+    test('catalog line sends no override fields', () {
+      expect(CartEntry(item: makeItem(), quantity: 2).overridePayload(true),
+          isEmpty);
+    });
+
+    test('copyWith clearOverrides resets price and discount', () {
+      final entry = CartEntry(
+          item: makeItem(), quantity: 1, priceOverride: 30, discountPct: 5);
+      final cleared = entry.copyWith(clearOverrides: true);
+      expect(cleared.effectivePrice, 50.0);
+      expect(cleared.lineDiscount(true), 0.0);
     });
   });
 

@@ -143,8 +143,9 @@ class InvoicePdf {
     await shaped.add('For: $businessName', bold: true, maxWidth: 200);
     for (final b in bills) {
       await shaped.add(b.customerName, fontSize: 11, bold: true, maxWidth: 260);
+      await shaped.add(b.billedByFirst, fontSize: 11, bold: true, maxWidth: 200);
       for (final i in b.items) {
-        await shaped.add(i.itemName, maxWidth: 220);
+        await shaped.add(i.receiptName, maxWidth: 220);
       }
     }
 
@@ -221,7 +222,8 @@ class InvoicePdf {
             ),
             pw.SizedBox(height: 8),
             _headerBox(businessName, address, phone, gstin, fssai,
-                bill.displayNumber, dateStr, shaped),
+                bill.displayNumber, dateStr, shaped,
+                billedBy: bill.billedByFirst),
             _billToBox(bill, shaped),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money, shaped),
             pw.SizedBox(height: 10),
@@ -399,7 +401,8 @@ class InvoicePdf {
   // --- Header box: business (left) | Invoice No/Date (right) --------------
   static pw.Widget _headerBox(String name, String? address, String? phone,
       String? gstin, String? fssai, String billNumber, String dateStr,
-      ShapedText shaped, {String numberLabel = 'Invoice No.'}) {
+      ShapedText shaped,
+      {String numberLabel = 'Invoice No.', String? billedBy}) {
     final left = <pw.Widget>[
       shaped.widget(name,
           fontSize: 15,
@@ -452,23 +455,44 @@ class InvoicePdf {
                   border: pw.Border(bottom: pw.BorderSide(width: 0.8))),
               child: _kvCell(numberLabel, billNumber),
             ),
-            pw.Container(width: double.infinity, child: _kvCell('Date', dateStr)),
+            pw.Container(
+              width: double.infinity,
+              decoration: billedBy == null
+                  ? null
+                  : const pw.BoxDecoration(
+                      border: pw.Border(bottom: pw.BorderSide(width: 0.8))),
+              child: _kvCell('Date', dateStr),
+            ),
+            // Who settled it. Shaped, since a staff name may be in Marathi.
+            if (billedBy != null)
+              pw.Container(
+                width: double.infinity,
+                child: _kvCell('Cashier', billedBy,
+                    value: shaped.widget(billedBy,
+                        fontSize: 11,
+                        bold: true,
+                        style: pw.TextStyle(
+                            fontSize: 11, fontWeight: pw.FontWeight.bold))),
+              ),
           ]),
         ]),
       ],
     );
   }
 
-  static pw.Widget _kvCell(String k, String v) => pw.Padding(
+  /// [value] replaces the plain text of [v] — for a shaped (Devanagari) value.
+  static pw.Widget _kvCell(String k, String v, {pw.Widget? value}) =>
+      pw.Padding(
         padding: const pw.EdgeInsets.all(8),
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text(k, style: const pw.TextStyle(fontSize: 9)),
             pw.SizedBox(height: 2),
-            pw.Text(v,
-                style: pw.TextStyle(
-                    fontSize: 11, fontWeight: pw.FontWeight.bold)),
+            value ??
+                pw.Text(v,
+                    style: pw.TextStyle(
+                        fontSize: 11, fontWeight: pw.FontWeight.bold)),
           ],
         ),
       );
@@ -564,12 +588,12 @@ class InvoicePdf {
         pw.Container(
           alignment: pw.Alignment.centerLeft,
           padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          child: shaped.widget(i.itemName, style: cellStyle),
+          child: shaped.widget(i.receiptName, style: cellStyle),
         ),
       ];
       if (anyHsn) cells.add(cell(codeOf(i), align: pw.Alignment.center));
       cells.add(cell(formatQty(i.quantity), align: pw.Alignment.centerRight));
-      cells.add(cell(money(i.unitPrice), align: pw.Alignment.centerRight));
+      cells.add(cell(money(i.receiptPrice), align: pw.Alignment.centerRight));
       if (showGst) {
         final rate = i.taxRate ?? 0;
         cells.add(cell(

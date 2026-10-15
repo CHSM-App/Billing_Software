@@ -29,6 +29,25 @@ final kitchenReadyCountProvider = StateProvider<int>((_) => 0);
 class KitchenScreen extends ConsumerStatefulWidget {
   const KitchenScreen({super.key});
 
+  /// The status a tap moves [item] to for this user, or null when they cannot
+  /// touch it. Mirrors the server's rules in routes/kitchen.js: the chef ticks
+  /// pending <-> ready; everyone else marks a ready dish delivered (or undoes).
+  static String? nextStatus(String role, Map<String, dynamic> item) {
+    final current = item['kitchen_status'] as String? ?? 'pending';
+    if (role == 'kitchen') {
+      return switch (current) {
+        'pending' => 'ready',
+        'ready' => 'pending',
+        _ => null,
+      };
+    }
+    return switch (current) {
+      'ready' => 'delivered',
+      'delivered' => 'ready',
+      _ => null,
+    };
+  }
+
   @override
   ConsumerState<KitchenScreen> createState() => _KitchenScreenState();
 }
@@ -170,27 +189,8 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
     ref.read(kitchenReadyCountProvider.notifier).state = n;
   }
 
-  /// The status a tap moves [item] to for this user, or null when they cannot
-  /// touch it. Mirrors the server's rules in routes/kitchen.js: the chef ticks
-  /// pending <-> ready; everyone else marks a ready dish delivered (or undoes).
-  static String? nextStatus(String role, Map<String, dynamic> item) {
-    final current = item['kitchen_status'] as String? ?? 'pending';
-    if (role == 'kitchen') {
-      return switch (current) {
-        'pending' => 'ready',
-        'ready' => 'pending',
-        _ => null,
-      };
-    }
-    return switch (current) {
-      'ready' => 'delivered',
-      'delivered' => 'ready',
-      _ => null,
-    };
-  }
-
   Future<void> _toggle(Map<String, dynamic> item) async {
-    final next = nextStatus(ref.read(userRoleProvider), item);
+    final next = KitchenScreen.nextStatus(ref.read(userRoleProvider), item);
     if (next == null) return;
     final id = item['id'] as String;
     if (_busy.contains(id)) return;
@@ -318,7 +318,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
                   builder: (_) => const KitchenPrintSettingsScreen(),
                 )),
               ),
-            _ReadyToServeToggle(
+            ReadyToServeToggle(
               count: readyCount,
               selected: _readyOnly,
               tooltip: l10n.kitchenReadyOnly,
@@ -422,81 +422,94 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
     }
 
     final role = ref.read(userRoleProvider);
-    return LayoutBuilder(builder: (context, constraints) {
-      const spacing = AppSpacing.space8;
-      const padding = AppSpacing.space12;
-      // How many columns fit, aiming for ~240px per card so small devices show
-      // an extra column. Each card takes an equal share of the width and keeps
-      // its natural height (grows with its dish count), never a fixed grid box.
-      final cols =
-          ((constraints.maxWidth - padding * 2) / 240).floor().clamp(1, 5);
-      final cardWidth =
-          (constraints.maxWidth - padding * 2 - spacing * (cols - 1)) / cols;
-
-      // Masonry layout: place each order into the currently shortest column so
-      // cards pack tightly top-to-bottom with no gaps between them. Height is
-      // estimated from the header + one row per dish.
-      final columns = List.generate(cols, (_) => <Widget>[]);
-      final columnHeights = List.filled(cols, 0.0);
-      for (int i = 0; i < orders.length; i++) {
-        final order = orders[i];
-        int target = 0;
-        for (int c = 1; c < cols; c++) {
-          if (columnHeights[c] < columnHeights[target]) target = c;
-        }
-        final itemCount = (order['items'] as List).length;
-        // ~40px header + ~30px per dish row; exact value is irrelevant, it only
-        // needs to order columns by relative fullness.
-        columnHeights[target] += 40 + itemCount * 30 + spacing;
-        columns[target].add(Padding(
-          padding: EdgeInsets.only(bottom: spacing),
-          child: _OrderCard(
-            order: order,
+    return kitchenMasonry(
+      itemCounts: [for (final o in orders) (o['items'] as List).length],
+      cards: [
+        for (int i = 0; i < orders.length; i++)
+          _OrderCard(
+            order: orders[i],
             // Queue position — orders are oldest-first, so #1 is prepared first.
             sequence: i + 1,
-            label: _orderLabel(order),
+            label: _orderLabel(orders[i]),
             busy: _busy,
             role: role,
             onToggle: _toggle,
             onMarkCompleted: _markOrderCompleted,
           ),
-        ));
-      }
-
-      return SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        // + the floating nav bar's inset, so the last cards scroll above it.
-        padding: const EdgeInsets.all(padding).copyWith(
-            bottom: padding + MediaQuery.paddingOf(context).bottom),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (int c = 0; c < cols; c++) ...[
-              if (c > 0) const SizedBox(width: spacing),
-              SizedBox(
-                width: cardWidth,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: columns[c],
-                ),
-              ),
-            ],
-          ],
-        ),
-      );
-    });
+      ],
+    );
   }
+}
+
+/// Scrollable masonry of order cards — shared by the Kitchen page and the
+/// Orders page's Open Orders. [itemCounts] (dish rows per card) is only used to
+/// estimate card heights for packing.
+Widget kitchenMasonry(
+    {required List<Widget> cards, required List<int> itemCounts}) {
+  return LayoutBuilder(builder: (context, constraints) {
+    const spacing = AppSpacing.space8;
+    const padding = AppSpacing.space12;
+    // How many columns fit, aiming for ~240px per card so small devices show
+    // an extra column. Each card takes an equal share of the width and keeps
+    // its natural height (grows with its dish count), never a fixed grid box.
+    final cols =
+        ((constraints.maxWidth - padding * 2) / 240).floor().clamp(1, 5);
+    final cardWidth =
+        (constraints.maxWidth - padding * 2 - spacing * (cols - 1)) / cols;
+
+    // Masonry layout: place each order into the currently shortest column so
+    // cards pack tightly top-to-bottom with no gaps between them. Height is
+    // estimated from the header + one row per dish.
+    final columns = List.generate(cols, (_) => <Widget>[]);
+    final columnHeights = List.filled(cols, 0.0);
+    for (int i = 0; i < cards.length; i++) {
+      int target = 0;
+      for (int c = 1; c < cols; c++) {
+        if (columnHeights[c] < columnHeights[target]) target = c;
+      }
+      // ~40px header + ~30px per dish row; exact value is irrelevant, it only
+      // needs to order columns by relative fullness.
+      columnHeights[target] += 40 + itemCounts[i] * 30 + spacing;
+      columns[target].add(Padding(
+        padding: const EdgeInsets.only(bottom: spacing),
+        child: cards[i],
+      ));
+    }
+
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      // + the floating nav bar's inset, so the last cards scroll above it.
+      padding: const EdgeInsets.all(padding).copyWith(
+          bottom: padding + MediaQuery.paddingOf(context).bottom),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (int c = 0; c < cols; c++) ...[
+            if (c > 0) const SizedBox(width: spacing),
+            SizedBox(
+              width: cardWidth,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: columns[c],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  });
 }
 
 /// Header pill that filters Pending down to dishes waiting to be served: a
 /// bell plus the live ready count. Outlined when off, solid green when on.
-class _ReadyToServeToggle extends StatelessWidget {
+class ReadyToServeToggle extends StatelessWidget {
   final int count;
   final bool selected;
   final String tooltip;
   final VoidCallback onTap;
 
-  const _ReadyToServeToggle({
+  const ReadyToServeToggle({
+    super.key,
     required this.count,
     required this.selected,
     required this.tooltip,
@@ -548,7 +561,7 @@ class _ReadyToServeToggle extends StatelessWidget {
 /// Order-age label for a kitchen card: "Just now" (<1 min), "N min ago"
 /// (<1 hr), and the local clock time (e.g. "02:45 PM") once an hour or more has
 /// passed. [createdAtIso] is the UTC ISO timestamp from the API.
-String _orderTimeLabel(BuildContext context, String? createdAtIso) {
+String orderTimeLabel(BuildContext context, String? createdAtIso) {
   if (createdAtIso == null) return '';
   final created = DateTime.tryParse(createdAtIso);
   if (created == null) return '';
@@ -630,7 +643,7 @@ class _OrderCard extends StatelessWidget {
                 ),
                 Builder(builder: (context) {
                   final timeLabel =
-                      _orderTimeLabel(context, order['created_at'] as String?);
+                      orderTimeLabel(context, order['created_at'] as String?);
                   if (timeLabel.isEmpty) return const SizedBox.shrink();
                   return Padding(
                     padding: const EdgeInsets.only(right: 6),
@@ -709,7 +722,7 @@ class _OrderCard extends StatelessWidget {
             children: [
               for (int i = 0; i < items.length; i++) ...[
                 if (i > 0) const Divider(height: 1),
-                _ItemTile(
+                KitchenItemTile(
                   item: items[i],
                   role: role,
                   busy: busy,
@@ -756,13 +769,14 @@ class _OrderCard extends StatelessWidget {
 /// complete — visible to every role (chef, owner, waiter), not just a
 /// strikethrough. The chef taps to toggle pending/ready; floor staff tap a
 /// ready dish to mark it delivered (and again to undo).
-class _ItemTile extends StatefulWidget {
+class KitchenItemTile extends StatefulWidget {
   final Map<String, dynamic> item;
   final String role;
   final Set<String> busy;
   final Future<void> Function(Map<String, dynamic>) onToggle;
 
-  const _ItemTile({
+  const KitchenItemTile({
+    super.key,
     required this.item,
     required this.role,
     required this.busy,
@@ -770,10 +784,10 @@ class _ItemTile extends StatefulWidget {
   });
 
   @override
-  State<_ItemTile> createState() => _ItemTileState();
+  State<KitchenItemTile> createState() => _KitchenItemTileState();
 }
 
-class _ItemTileState extends State<_ItemTile>
+class _KitchenItemTileState extends State<KitchenItemTile>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _scale;
@@ -798,7 +812,7 @@ class _ItemTileState extends State<_ItemTile>
   }
 
   @override
-  void didUpdateWidget(_ItemTile oldWidget) {
+  void didUpdateWidget(KitchenItemTile oldWidget) {
     super.didUpdateWidget(oldWidget);
     // React to readiness changing (e.g. a realtime refresh flips the status):
     // animate the circle in when it becomes ready, out when it's un-ticked.
@@ -832,7 +846,7 @@ class _ItemTileState extends State<_ItemTile>
     // Compact custom row instead of ListTile, which forces a ~48px min height
     // even when dense. This packs more dishes into each card.
     final enabled =
-        _KitchenScreenState.nextStatus(widget.role, item) != null &&
+        KitchenScreen.nextStatus(widget.role, item) != null &&
             !widget.busy.contains(id);
     return InkWell(
       onTap: enabled ? () => widget.onToggle(item) : null,

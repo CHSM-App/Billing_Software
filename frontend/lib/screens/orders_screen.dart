@@ -10,6 +10,7 @@ import '../widgets/shell_app_bar.dart';
 import 'tables_screen.dart';
 import 'open_drafts_screen.dart';
 import 'credit_screen.dart';
+import 'kitchen_screen.dart';
 import 'online_orders_screen.dart';
 
 /// The "Orders" bottom-nav tab: one screen hosting everything with work still
@@ -52,6 +53,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
   late final Animation<double> _searchAnim;
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
+
+  // "Ready to serve" filter on Open Orders — same toggle as the Kitchen page.
+  bool _readyOnly = false;
 
   @override
   void initState() {
@@ -265,7 +269,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
         return TablesScreen(key: _tablesKey, embedded: true);
       case _OrdersTab.openOrders:
         return OpenDraftsScreen(
-            embedded: true, query: _searchController.text);
+            embedded: true,
+            query: _searchController.text,
+            readyOnly: _readyOnly);
       case _OrdersTab.credit:
         return const CreditScreen(embedded: true);
       case _OrdersTab.online:
@@ -291,6 +297,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
 
     final storeEnabled =
         ref.watch(sessionProvider).valueOrNull?.storeEnabled ?? false;
+    final businessType = ref.watch(sessionProvider).valueOrNull?.businessType;
+    final isRestaurant = businessType == 'restaurant_with_tables' ||
+        businessType == 'restaurant_no_tables';
+    final readyCount = ref.watch(openOrdersReadyCountProvider);
 
     _syncTabs([
       // Always shown, even when empty, so staff always know where to look —
@@ -350,6 +360,20 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
             ),
             actions: [
               _buildSearch(l10n, bar.maxWidth),
+              if (isRestaurant && !_searchExpanded)
+                ReadyToServeToggle(
+                  count: readyCount,
+                  selected: _readyOnly,
+                  tooltip: l10n.kitchenReadyOnly,
+                  onTap: () {
+                    setState(() => _readyOnly = !_readyOnly);
+                    // The filter lives on Open Orders — bring it forward.
+                    final i = _tabs.indexOf(_OrdersTab.openOrders);
+                    if (_readyOnly && _tabController!.index != i) {
+                      _tabController!.animateTo(i);
+                    }
+                  },
+                ),
               IconButton(
                 icon: const Icon(Icons.refresh_outlined),
                 onPressed: _refresh,

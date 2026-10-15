@@ -13,6 +13,9 @@ class SessionData {
   final bool gstEnabled;
   final bool roundOffEnabled;
 
+  /// Show each item's number on the billing page as "(101) Masala Dosa".
+  final bool showItemNo;
+
   /// Online store master switch. Gates whether the shell polls the online-order
   /// queue and shows its tab at all.
   final bool storeEnabled;
@@ -31,6 +34,7 @@ class SessionData {
     required this.hasBarcodeScanner,
     required this.gstEnabled,
     required this.roundOffEnabled,
+    this.showItemNo = false,
     required this.storeEnabled,
     this.customersEnabled = true,
   });
@@ -60,6 +64,7 @@ class SessionData {
         hasBarcodeScanner: m['has_barcode_scanner'] == true,
         gstEnabled: m['gst_enabled'] == true,
         roundOffEnabled: m['round_off_enabled'] == true,
+        showItemNo: m['show_item_no'] == true,
         storeEnabled: m['store_enabled'] == true,
         customersEnabled: m['customers_enabled'] != false,
       );
@@ -126,3 +131,8 @@ final gstEnabledProvider = Provider<bool>((ref) =>
 // and the bill totals behave exactly as before.
 final roundOffEnabledProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.roundOffEnabled ?? false);
+
+// Item No on the billing page. When false (the default), billing shows plain
+// item names; the number stays searchable either way.
+final showItemNoProvider = Provider<bool>((ref) =>
+    ref.watch(sessionProvider).valueOrNull?.showItemNo ?? false);

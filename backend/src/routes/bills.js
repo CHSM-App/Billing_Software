@@ -262,6 +262,27 @@ function resolveNetPriceAndRate(dbItem, variant, gstEnabled) {
   return { unitPrice: netUnitPrice(grossOrNet, taxRate, inclusive), taxRate };
 }
 
+// Per-line price edit / discount from the order card. `price_override` is the
+// NET pre-discount rate and `discount_amount` the ₹ off the line's net, both
+// optional. The stored unit_price is the DISCOUNTED net rate, so every
+// taxable = qty × unit_price query (reports, GST summary, receipts) follows the
+// edit with no change; discount_amount is kept alongside for display.
+//
+// `allowed` is true only for an owner or cashier (canReprice). Anyone else gets
+// `carried` — a draft's existing values (update-items) — in place of the
+// request's, so a waiter neither changes nor wipes the cashier's edits.
+const canReprice = (user) => user.role === 'owner' || user.role === 'cashier';
+function applyLineOverrides(i, resolvedNet, qty, allowed, carried) {
+  const src = allowed ? i : (carried || {});
+  const p = parseFloat(src.price_override);
+  const net = Number.isFinite(p) && p >= 0 ? p : resolvedNet;
+  const d = parseFloat(src.discount_amount);
+  const discount = Number.isFinite(d) && d > 0
+    ? parseFloat(Math.min(d, qty * net).toFixed(2))
+    : 0;
+  return { unitPrice: qty > 0 ? (qty * net - discount) / qty : net, discount };
+}
+
 // Thrown when a line has no price on either the variant or its parent item —
 // data that should be unreachable (a sized item's variants all carry prices),
 // but billing NaN would be far worse than a clear 400.
@@ -511,6 +532,9 @@ async function fetchBill(billId, businessId) {
              b.payment_status, b.settled_at, b.settled_payment_mode, b.credit_amount,
              b.credit_collected,
              b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token,
+             -- "Billed by": who settled it, else (older bills, drafts) who
+             -- started it.
+             COALESCE(fu.name, cu.name) AS billed_by,
              t.table_number,
              -- Payment the CUSTOMER already made online, for a bill that began
              -- life as an online-store order. Joined rather than copied onto
@@ -525,6 +549,8 @@ async function fetchBill(billId, businessId) {
       FROM bills b
       LEFT JOIN tables t ON t.id = b.table_id
       LEFT JOIN online_orders o ON o.bill_id = b.id
+      LEFT JOIN users fu ON fu.id = b.finalized_by_user_id
+      LEFT JOIN users cu ON cu.id = b.created_by_user_id
       WHERE b.id = @id AND b.business_id = @business_id
     `);
 
@@ -534,7 +560,7 @@ async function fetchBill(billId, businessId) {
   const itemsResult = await pool.request()
     .input('bill_id', sql.UniqueIdentifier, billId)
     .query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total,
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount,
              kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id = @bill_id
@@ -711,8 +737,10 @@ router.post('/', requireAuth, async (req, res) => {
         // Variant price overrides item price when set; otherwise fall back.
         // GST off → tax ignored entirely (rate treated as null, line tax 0).
         // Inclusive-priced items are converted to their net rate here.
-        const { unitPrice, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
-        if (unitPrice == null) throw new PricelessLineError(dbItem.name);
+        const { unitPrice: catalogNet, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
+        if (catalogNet == null) throw new PricelessLineError(dbItem.name);
+        const { unitPrice, discount } = applyLineOverrides(
+          i, catalogNet, qty, canReprice(req.user));
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         const lineTotal = qty * unitPrice + lineTax;
@@ -727,6 +755,7 @@ router.post('/', requireAuth, async (req, res) => {
           tax_rate: taxRate,
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat(lineTotal.toFixed(2)),
+          discount_amount: discount,
         };
       });
       subtotal = parseFloat(subtotal.toFixed(2));
@@ -831,14 +860,16 @@ router.post('/', requireAuth, async (req, res) => {
                              subtotal, tax_amount, discount_amount, charges_amount, additional_charges,
                              total, round_off, payment_mode, payment_status, credit_amount, status,
                              created_by_user_id, client_bill_id, receipt_token,
-                             created_at, finalized_at)
+                             created_at, finalized_at, finalized_by_user_id)
           OUTPUT INSERTED.id
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
                   @subtotal, @tax_amount, @discount_amount, @charges_amount, @additional_charges,
                   @total, @round_off, @payment_mode, @payment_status, @credit_amount, @status,
                   @created_by_user_id, @client_bill_id, @receipt_token,
                   COALESCE(@sale_time, SYSUTCDATETIME()),
-                  CASE WHEN @status = 'finalized' THEN COALESCE(@sale_time, SYSUTCDATETIME()) END)
+                  CASE WHEN @status = 'finalized' THEN COALESCE(@sale_time, SYSUTCDATETIME()) END,
+                  -- Settled in one step: the creator is also the biller.
+                  CASE WHEN @status = 'finalized' THEN @created_by_user_id END)
         `);
 
       const billId = billResult.recordset[0].id;
@@ -864,11 +895,12 @@ router.post('/', requireAuth, async (req, res) => {
             .input(`unit_price${i}`, sql.Decimal(12, 4), li.unit_price)
             .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
+            .input(`discount_amount${i}`, sql.Decimal(10, 2), li.discount_amount || 0)
             .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i})`;
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i})`;
         });
         await insertReq.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount)
           VALUES ${rows.join(', ')}
         `);
       }
@@ -1014,8 +1046,11 @@ router.get('/', requireAuth, async (req, res) => {
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
              b.total, b.round_off, b.payment_mode, b.status,
              b.payment_status, b.credit_amount, b.credit_collected,
-             b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token
+             b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token,
+             COALESCE(fu.name, cu.name) AS billed_by
       FROM bills b
+      LEFT JOIN users fu ON fu.id = b.finalized_by_user_id
+      LEFT JOIN users cu ON cu.id = b.created_by_user_id
       WHERE ${where}
       ORDER BY ${billDate} DESC
     `);
@@ -1024,7 +1059,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total,
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount,
              kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id IN (${billClause})
@@ -1086,7 +1121,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total,
+      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount,
              kitchen_status, kitchen_done_at
       FROM bill_items
       WHERE bill_id IN (${billClause})
@@ -1337,9 +1372,11 @@ async function finalizeWithTenders(billId, businessId, { mode, split, collection
         billMode === 'credit' || creditPart ? 'unpaid' : 'paid')
       .input('credit_amount', sql.Decimal(10, 2), creditPart)
       .input('credit_collected', sql.Decimal(10, 2), collected > 0 ? collected : null)
+      .input('finalized_by_user_id', sql.UniqueIdentifier, req.user.user_id)
       .query(`
         UPDATE bills
         SET status = 'finalized', finalized_at = SYSUTCDATETIME(),
+            finalized_by_user_id = @finalized_by_user_id,
             payment_mode = @payment_mode,
             payment_status = @payment_status, credit_amount = @credit_amount,
             credit_collected = @credit_collected
@@ -1390,11 +1427,14 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
         .input('id', sql.UniqueIdentifier, req.params.id)
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .input('payment_mode', sql.NVarChar(20), payment_mode ?? null)
+        .input('finalized_by_user_id', sql.UniqueIdentifier, req.user.user_id)
         .query(`
           UPDATE bills
           SET status = 'finalized',
               -- The sale date: a bill held for days is dated when settled.
               finalized_at = SYSUTCDATETIME(),
+              -- Who settled it — "Billed by" (the waiter who held it is the creator).
+              finalized_by_user_id = @finalized_by_user_id,
               payment_mode = COALESCE(@payment_mode, payment_mode),
               -- Derived from the INCOMING mode, not the stored one: switching a
               -- held bill to credit has to make it unpaid, or it never reaches
@@ -1542,8 +1582,10 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         const qty = parseFloat(i.quantity);
         // GST off → tax ignored entirely (rate treated as null, line tax 0).
         // Inclusive-priced items are converted to their net rate here.
-        const { unitPrice, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
-        if (unitPrice == null) throw new PricelessLineError(dbItem.name);
+        const { unitPrice: catalogNet, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
+        if (catalogNet == null) throw new PricelessLineError(dbItem.name);
+        const { unitPrice, discount } = applyLineOverrides(
+          i, catalogNet, qty, canReprice(req.user));
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
@@ -1555,6 +1597,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           tax_rate: taxRate,
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
+          discount_amount: discount,
         };
       });
 
@@ -1585,11 +1628,12 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
             .input(`unit_price${i}`, sql.Decimal(12, 4), li.unit_price)
             .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
+            .input(`discount_amount${i}`, sql.Decimal(10, 2), li.discount_amount || 0)
             .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i})`;
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i})`;
         });
         await insertReq2.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount)
           VALUES ${rows2.join(', ')}
         `);
       }
@@ -1781,14 +1825,41 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
 
       const recipeMap = await loadRecipeMap(transaction, req.user.business_id, items);
 
+      // Snapshot old items for audit + stock restore. Kitchen fields are read
+      // too so a dish the kitchen already marked ready keeps that status when the
+      // waiter edits the order (this endpoint replaces all lines, so without this
+      // the checkboxes would reset — see the kitchen-status carry-over below).
+      // Read before pricing so a waiter's edit can carry the cashier's per-line
+      // price/discount over (see applyLineOverrides).
+      const oldItemsResult = await transaction.request()
+        .input('bill_id', sql.UniqueIdentifier, req.params.id)
+        .query('SELECT item_id, variant_id, item_name, quantity, unit_price, discount_amount, kitchen_status, kitchen_done_at FROM bill_items WHERE bill_id = @bill_id');
+      previousLineItems = oldItemsResult.recordset;
+
+      // ponytail: first prior row per item+variant wins; a dish split across
+      // rows with different overrides keeps only the first one's.
+      const priorOverrides = {};
+      for (const old of previousLineItems) {
+        const k = `${old.item_id || ''}|${old.variant_id || ''}`;
+        const q = parseFloat(old.quantity) || 0;
+        const d = parseFloat(old.discount_amount) || 0;
+        priorOverrides[k] ||= {
+          price_override: parseFloat(old.unit_price) + (q > 0 ? d / q : 0),
+          discount_amount: d,
+        };
+      }
+
       const lineItems = items.map((i) => {
         const dbItem = itemMap[i.item_id];
         const variant = i.variant_id ? variantMap[i.variant_id] : null;
         const qty = parseFloat(i.quantity);
         // GST off → tax ignored entirely (rate treated as null, line tax 0).
         // Inclusive-priced items are converted to their net rate here.
-        const { unitPrice, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
-        if (unitPrice == null) throw new PricelessLineError(dbItem.name);
+        const { unitPrice: catalogNet, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
+        if (catalogNet == null) throw new PricelessLineError(dbItem.name);
+        const { unitPrice, discount } = applyLineOverrides(
+          i, catalogNet, qty, canReprice(req.user),
+          priorOverrides[`${i.item_id || ''}|${i.variant_id || ''}`]);
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
@@ -1800,6 +1871,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           tax_rate: taxRate,
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
+          discount_amount: discount,
         };
       });
 
@@ -1809,15 +1881,6 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       // rejects edits that are perfectly valid — an item whose draft consumed
       // all of its stock could not even have its quantity REDUCED. The guarded
       // decrement below runs after the restore and is the real check.
-
-      // Snapshot old items for audit + stock restore. Kitchen fields are read
-      // too so a dish the kitchen already marked ready keeps that status when the
-      // waiter edits the order (this endpoint replaces all lines, so without this
-      // the checkboxes would reset — see the kitchen-status carry-over below).
-      const oldItemsResult = await transaction.request()
-        .input('bill_id', sql.UniqueIdentifier, req.params.id)
-        .query('SELECT item_id, variant_id, item_name, quantity, unit_price, kitchen_status, kitchen_done_at FROM bill_items WHERE bill_id = @bill_id');
-      previousLineItems = oldItemsResult.recordset;
 
       // Build a per-dish pool of prior kitchen statuses keyed by identity
       // (item + variant + name). Each new line consumes one matching prior status
@@ -1876,13 +1939,14 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
             .input(`unit_price${i}`, sql.Decimal(12, 4), li.unit_price)
             .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
+            .input(`discount_amount${i}`, sql.Decimal(10, 2), li.discount_amount || 0)
             .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total)
             .input(`kitchen_status${i}`, sql.NVarChar(20), k.kitchen_status)
             .input(`kitchen_done_at${i}`, sql.DateTime2, k.kitchen_done_at);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @kitchen_status${i}, @kitchen_done_at${i})`;
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i}, @kitchen_status${i}, @kitchen_done_at${i})`;
         });
         await insertReq3.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, kitchen_status, kitchen_done_at)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount, kitchen_status, kitchen_done_at)
           VALUES ${rows3.join(', ')}
         `);
       }

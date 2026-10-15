@@ -440,6 +440,15 @@ class _SettingsContentState extends State<_SettingsContent>
                         title: l10n.settingsRoundOff,
                         subtitle: l10n.settingsRoundOffSubtitle,
                       ),
+                      // Item No on billing — off by default. When on, items
+                      // with a number show as "(101) Masala Dosa" on billing.
+                      const SizedBox(height: AppSpacing.space8),
+                      _BusinessFlagToggle(
+                        field: 'show_item_no',
+                        icon: Icons.tag,
+                        title: l10n.settingsShowItemNo,
+                        subtitle: l10n.settingsShowItemNoSubtitle,
+                      ),
                       const SizedBox(height: AppSpacing.space24),
 
                       _sectionLabel(context, l10n.settingsSectionTeam),
@@ -1079,6 +1088,9 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
         await ref.read(sessionProvider.notifier).refresh();
       } else if (widget.field == 'gst_enabled') {
         await updateGstEnabled(value);
+        await ref.read(sessionProvider.notifier).refresh();
+      } else if (widget.field == 'show_item_no') {
+        await updateShowItemNo(value);
         await ref.read(sessionProvider.notifier).refresh();
       } else if (widget.field == 'round_off_enabled') {
         await updateRoundOffEnabled(value);

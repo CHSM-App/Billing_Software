@@ -71,6 +71,26 @@ describe('GET /receipt/:token', () => {
     expect(res.text).toContain('Alice');
   });
 
+  test('HTML shows "Cashier" with the first name only', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ ...sampleBillRow, billed_by: 'Ramesh Patil' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.text).toContain('Cashier');
+    expect(res.text).toContain('Ramesh');
+    expect(res.text).not.toContain('Patil');
+  });
+
+  test('HTML omits "Cashier" when the biller is unknown', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleBillRow], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.text).not.toContain('Cashier');
+  });
+
   test('HTML includes item details', async () => {
     mockRequest.query
       .mockResolvedValueOnce({ recordset: [sampleBillRow], rowsAffected: [1] })

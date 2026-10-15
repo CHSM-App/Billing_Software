@@ -112,6 +112,9 @@ class Item {
   final String name;
   final String? barcode;
 
+  /// Optional shop-assigned number ("101"); billing search matches it.
+  final String? itemNo;
+
   /// Coarse grouping above [category] — "Chinese" to its "Chinese Starters".
   /// Free text and optional, exactly like [category]: null on every item saved
   /// before major categories existed, and on any item whose owner leaves the
@@ -156,6 +159,7 @@ class Item {
     required this.businessId,
     required this.name,
     this.barcode,
+    this.itemNo,
     this.majorCategory,
     this.category,
     this.price,
@@ -175,6 +179,7 @@ class Item {
         businessId: j['business_id'],
         name: j['name'],
         barcode: j['barcode'],
+        itemNo: j['item_no'] as String?,
         majorCategory: j['major_category'],
         category: j['category'],
         price: j['price'] != null ? double.parse(j['price'].toString()) : null,
@@ -200,6 +205,11 @@ class Item {
   /// Whether the cashier must pick a size before this item can be added.
   bool get hasVariants => variants.isNotEmpty;
 
+  /// Name as the billing page shows it: "(101) Masala Dosa" when the shop has
+  /// turned on [showItemNo] (Settings). Bills still store the plain [name].
+  String billingName(bool showItemNo) =>
+      showItemNo && (itemNo?.isNotEmpty ?? false) ? '($itemNo) $name' : name;
+
   /// Same item with a different set of sizes. Used to re-attach variants when a
   /// partial API response omits them, so a sized item never degrades into a
   /// plain one (which would bill at the base price).
@@ -208,6 +218,7 @@ class Item {
         businessId: businessId,
         name: name,
         barcode: barcode,
+        itemNo: itemNo,
         majorCategory: majorCategory,
         category: category,
         price: price,
@@ -307,6 +318,12 @@ class BillItem {
   final double? taxRate;
   final String? hsnCode;
   final double lineTotal;
+  /// ₹ taken off this line on the order card. Display only: [unitPrice] is
+  /// already the discounted net rate, so totals never subtract it again.
+  final double discountAmount;
+  /// 'pending' | 'ready' | 'delivered' — the dish's kitchen progress. Only the
+  /// draft-bill responses carry it; null elsewhere (and on offline drafts).
+  final String? kitchenStatus;
 
   BillItem({
     required this.id,
@@ -319,7 +336,22 @@ class BillItem {
     this.taxRate,
     this.hsnCode,
     required this.lineTotal,
+    this.discountAmount = 0,
+    this.kitchenStatus,
   });
+
+  /// Customer-facing line name: notes the item discount, e.g.
+  /// "Egg Biryani (Disc ₹20.00)". Kitchen tickets keep plain [itemName].
+  String get receiptName => discountAmount > 0
+      ? '$itemName (Disc ₹${discountAmount.toStringAsFixed(2)})'
+      : itemName;
+
+  /// The receipt's Price column: the rate BEFORE the line discount. A discount
+  /// must not look like a price change — 2 × ₹180 less ₹50 prints as Price
+  /// 180, Total 310, not Price 155. Recovered from the stored discounted
+  /// [unitPrice]; an edited price is already in [unitPrice], so it shows.
+  double get receiptPrice =>
+      quantity > 0 ? unitPrice + discountAmount / quantity : unitPrice;
 
   factory BillItem.fromJson(Map<String, dynamic> j) => BillItem(
         // The credit endpoints return a receipt-only item shape without id /
@@ -335,6 +367,9 @@ class BillItem {
         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
         hsnCode: j['hsn_code'] as String?,
         lineTotal: double.parse(j['line_total'].toString()),
+        discountAmount:
+            double.tryParse((j['discount_amount'] ?? 0).toString()) ?? 0.0,
+        kitchenStatus: j['kitchen_status'] as String?,
       );
 }
 
@@ -437,6 +472,12 @@ class Bill {
   /// settlement. Defaults to 'paid' for older bills / partial responses.
   final String paymentStatus;
   final String createdByUserId;
+
+  /// Name of the staff member who settled the bill ("Billed by"), or of the
+  /// one who started it on older bills and drafts. Null when unknown — a
+  /// queued offline bill, or a bill shape that doesn't carry it.
+  final String? billedBy;
+
   /// When the bill was first written — for a held order, the ORDER time.
   final DateTime createdAt;
   /// When the sale was finalized. Null for a draft, and for an unsynced
@@ -500,6 +541,13 @@ class Bill {
 
   /// The final amount the customer pays: total, less discount, plus round-off.
   double get grandTotal => total - discountAmount + roundOff;
+
+  /// First name of [billedBy] — "Ramesh" from "Ramesh Patil" — for receipts
+  /// and History; enough to tell staff apart. Null when unknown or blank.
+  String? get billedByFirst {
+    final n = billedBy?.trim() ?? '';
+    return n.isEmpty ? null : n.split(RegExp(r'\s+')).first;
+  }
 
   /// What an unpaid bill still owes: its credit part (else the whole bill),
   /// less what has been paid on it. Same rule as the server's DUE
@@ -570,6 +618,7 @@ class Bill {
     required this.status,
     this.paymentStatus = 'paid',
     required this.createdByUserId,
+    this.billedBy,
     required this.createdAt,
     this.finalizedAt,
     required this.items,
@@ -612,6 +661,7 @@ class Bill {
         status: j['status'] ?? 'finalized',
         paymentStatus: j['payment_status'] ?? 'paid',
         createdByUserId: j['created_by_user_id'] ?? '',
+        billedBy: j['billed_by'] as String?,
         createdAt: DateTime.parse(j['created_at']),
         finalizedAt: j['finalized_at'] == null
             ? null

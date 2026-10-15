@@ -144,6 +144,8 @@ class OpenDraftsNotifier extends AsyncNotifier<List<Bill>> {
                 unitPrice: (li['unit_price'] as num).toDouble(),
                 taxRate: (li['tax_rate'] as num?)?.toDouble(),
                 lineTotal: (li['line_total'] as num).toDouble(),
+                discountAmount:
+                    (li['discount_amount'] as num?)?.toDouble() ?? 0,
               ))
           .toList(),
     );
@@ -158,3 +160,13 @@ final openDraftsProvider =
 /// Orders tab appears in the shell. Defaults to false until the list loads.
 final hasOpenDraftsProvider = Provider<bool>((ref) =>
     (ref.watch(openDraftsProvider).valueOrNull ?? const []).isNotEmpty);
+
+/// Dishes the kitchen has marked ready that nobody has served yet, across all
+/// open orders — the count on the Orders page's "Ready to serve" toggle.
+final openOrdersReadyCountProvider = Provider<int>((ref) {
+  var n = 0;
+  for (final b in ref.watch(openDraftsProvider).valueOrNull ?? const <Bill>[]) {
+    n += b.items.where((i) => i.kitchenStatus == 'ready').length;
+  }
+  return n;
+});

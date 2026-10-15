@@ -138,7 +138,7 @@ router.get('/customers/:phone/bills', requireAuth, async (req, res) => {
     const itemsReq = pool.request();
     ids.forEach((id, i) => itemsReq.input(`id${i}`, sql.UniqueIdentifier, id));
     const itemsResult = await itemsReq.query(`
-      SELECT bill_id, item_name, quantity, unit_price, tax_rate, line_total
+      SELECT bill_id, item_name, quantity, unit_price, tax_rate, line_total, discount_amount
       FROM bill_items
       WHERE bill_id IN (${params})
     `);
@@ -290,7 +290,7 @@ router.post('/settle', requireAuth, cashierOrOwner, async (req, res) => {
     const itemsReq = pool.request();
     ids.forEach((id, i) => itemsReq.input(`id${i}`, sql.UniqueIdentifier, id));
     const itemsResult = await itemsReq.query(`
-      SELECT bill_id, item_name, quantity, unit_price, tax_rate, line_total
+      SELECT bill_id, item_name, quantity, unit_price, tax_rate, line_total, discount_amount
       FROM bill_items
       WHERE bill_id IN (${params2})
     `);

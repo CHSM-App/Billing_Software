@@ -256,6 +256,8 @@ router.get('/:token', async (req, res) => {
                b.total, b.round_off, b.payment_mode, b.created_at, b.finalized_at,
                b.payment_status, b.settled_payment_mode, b.credit_amount, b.credit_collected,
                t.table_number,
+               -- Who settled it (else who started it, on older bills).
+               COALESCE(fu.name, cu.name) AS billed_by,
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
                bs.gst_number, bs.fssai_number, bs.logo_url, bs.print_logo, bs.bill_footer_note,
@@ -263,6 +265,8 @@ router.get('/:token', async (req, res) => {
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
         LEFT JOIN tables t ON t.id = b.table_id
+        LEFT JOIN users fu ON fu.id = b.finalized_by_user_id
+        LEFT JOIN users cu ON cu.id = b.created_by_user_id
         WHERE b.receipt_token = @token AND b.status = 'finalized'
       `);
 
@@ -275,7 +279,7 @@ router.get('/:token', async (req, res) => {
     const itemsResult = await pool.request()
       .input('token', sql.NVarChar(16), token)
       .query(`
-        SELECT bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total
+        SELECT bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount
         FROM bill_items bi
         JOIN bills b ON b.id = bi.bill_id
         WHERE b.receipt_token = @token
@@ -319,6 +323,8 @@ router.get('/:token', async (req, res) => {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit', hour12: true,
     });
+    // First name only — enough to tell staff apart without printing surnames.
+    const billedBy = String(bill.billed_by || '').trim().split(/\s+/)[0];
 
     const addrParts = [bill.address, bill.city, bill.state, bill.pincode].filter(Boolean);
     const addressLine = addrParts.length ? esc(addrParts.join(', ')) : '';
@@ -397,10 +403,16 @@ router.get('/:token', async (req, res) => {
 
     const itemRows = items.map((i) => {
       const qty = Number(i.quantity) % 1 === 0 ? Number(i.quantity) : fmt(i.quantity);
+      // Rate BEFORE the line discount: unit_price is stored discounted, but a
+      // discount must not read as a price change (2 × 180 less 50 → Rate 180,
+      // not 155). Same as BillItem.receiptPrice in the app.
+      const rate = Number(i.quantity) > 0
+        ? Number(i.unit_price) + Number(i.discount_amount || 0) / Number(i.quantity)
+        : Number(i.unit_price);
       return `<tr>
-          <td class="item-name">${esc(i.item_name)}${showHsnCol ? '<span class="hsn">' + esc(codeFor(i)) + '</span>' : ''}</td>
+          <td class="item-name">${esc(i.item_name)}${Number(i.discount_amount) > 0 ? ' (Disc &#8377;' + fmt(i.discount_amount) + ')' : ''}${showHsnCol ? '<span class="hsn">' + esc(codeFor(i)) + '</span>' : ''}</td>
           <td class="r col-qty">${qty}</td>
-          <td class="r col-rate">&#8377;${fmt(i.unit_price)}</td>
+          <td class="r col-rate">&#8377;${fmt(rate)}</td>
           <td class="r amount col-amt">&#8377;${fmt(i.line_total)}</td>
         </tr>`;
     }).join('');
@@ -451,6 +463,11 @@ router.get('/:token', async (req, res) => {
       <div class="label">Payment</div>
       <div class="value"><span class="badge${isUnpaidCredit ? ' badge-credit' : ''}">${esc(payLabel)}</span></div>
     </div>
+    ${billedBy ? `
+    <div class="meta-item">
+      <div class="label">Cashier</div>
+      <div class="value">${esc(billedBy)}</div>
+    </div>` : ''}
   </div>
 
   ${bill.customer_name || bill.customer_phone ? `

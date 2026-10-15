@@ -1,0 +1,841 @@
+diff --git a/frontend/lib/widgets/bottom_nav_bar.dart b/frontend/lib/widgets/bottom_nav_bar.dart
+index 1d55543..ed1065f 100644
+--- a/frontend/lib/widgets/bottom_nav_bar.dart
++++ b/frontend/lib/widgets/bottom_nav_bar.dart
+@@ -1,7 +1,8 @@
+-import 'dart:ui' show ImageFilter;
++import 'dart:ui' show FragmentProgram, FragmentShader, ImageFilter;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/physics.dart';
++import 'package:flutter/rendering.dart';
+ import 'package:flutter/services.dart' show HapticFeedback;
+ import '../theme/app_theme.dart';
+ import 'nav_item.dart';
+@@ -87,22 +88,74 @@ class HidesWithNavBar extends StatelessWidget {
+ }
+ 
+ class _AppBottomNavBarState extends State<AppBottomNavBar>
+-    with SingleTickerProviderStateMixin {
++    with TickerProviderStateMixin {
+   /// Highlight position in TAB units: 0 = first tab, 1.5 = halfway between the
+   /// second and third. Unbounded so the spring can run freely; drawing clamps.
+   late final AnimationController _pos =
+       AnimationController.unbounded(vsync: this, value: _target.toDouble());
+ 
+-  /// Near-critically damped: a quick, decisive glide with only a hint of
+-  /// settle, no visible bounce.
++  /// Near-critically damped: a slow, deliberate glide (~400ms for a one-tab
++  /// hop) so the glass can be felt, with only a hint of settle and no visible
++  /// bounce. Raise the stiffness to shift faster (300 = ~300ms, 520 = ~200ms).
+   static final _spring =
+-      SpringDescription.withDampingRatio(mass: 1, stiffness: 520, ratio: 0.86);
++      SpringDescription.withDampingRatio(mass: 1, stiffness: 180, ratio: 0.86);
+ 
+   int get _target =>
+       widget.selectedIndex.clamp(0, widget.items.length - 1).toInt();
+ 
+   bool _dragging = false;
+ 
++  /// 0..1: how far the lens is swollen because a finger is on it: 1 while a
++  /// thumb drags it, ~0.45 while the selected tab is only pressed (a subtle
++  /// squish). Eases in and out (see [_hold]), so it never pops in size.
++  late final AnimationController _held = AnimationController(vsync: this);
++
++  /// 0..1: how swollen the lens is right now. While the spring moves, the
++  /// tinted pill grows into a larger, clearer lens with a thick glass edge that
++  /// spills ~5px past the capsule, and the whole bar breathes ~2% bigger; both
++  /// ease back as the spring settles (as in the iOS reference). Driven by
++  /// velocity (tabs/sec, ~4.7 peak on a one-tab hop), so it rises and falls
++  /// smoothly and quick re-taps keep it swollen instead of flickering. A thumb
++  /// drag sets the value directly (velocity 0), so [_held] swells it instead;
++  /// the larger of the two wins, so releasing hands over without a dip.
++  double get _swell =>
++      (_pos.velocity.abs() * 0.25).clamp(_held.value, 1.0).toDouble();
++
++  void _hold(double to) {
++    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
++      _held.value = to; // reduced motion: no grow/shrink tween
++    } else {
++      // Quicker to swell (140ms) than to settle back (220ms).
++      _held.animateTo(to,
++          duration: Duration(milliseconds: to > _held.value ? 140 : 220));
++    }
++  }
++
++  /// Off switch for the liquid-glass shader (falls back to [RawMagnifier]).
++  /// ponytail: on-device look not yet confirmed; flip to false if the rim
++  /// samples the wrong spot (backdrop texture not screen-sized).
++  static const _waterDrop = true;
++
++  /// The liquid-glass lens shader (shaders/lens.frag), or null where the
++  /// engine can't run shader filters: Skia (older Android GL devices) and
++  /// widget tests. The lens then falls back to a plain [RawMagnifier].
++  static final Future<FragmentProgram?> _lensProgram =
++      _waterDrop && ImageFilter.isShaderFilterSupported
++          ? FragmentProgram.fromAsset('shaders/lens.frag')
++              .then<FragmentProgram?>((p) => p, onError: (_) => null)
++          : Future.value(null);
++  FragmentShader? _lensShader;
++
++  @override
++  void initState() {
++    super.initState();
++    _lensProgram.then((p) {
++      if (p != null && mounted) {
++        setState(() => _lensShader = p.fragmentShader());
++      }
++    });
++  }
++
+   @override
+   void didUpdateWidget(AppBottomNavBar old) {
+     super.didUpdateWidget(old);
+@@ -118,6 +171,8 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+   @override
+   void dispose() {
+     _pos.dispose();
++    _held.dispose();
++    _lensShader?.dispose();
+     super.dispose();
+   }
+ 
+@@ -152,6 +207,7 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+     if (!_dragging) return;
+     _dragging = false;
+     _dragTab = -1;
++    _hold(0);
+     final i = _pos.value.round();
+     _springTo(i);
+     if (i != widget.selectedIndex) {
+@@ -165,7 +221,13 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+     final items = widget.items;
+     const h = AppBottomNavBar.height;
+     final radius = BorderRadius.circular(h / 2);
+-    return Center(
++    // The whole bar breathes ~2% bigger with the lens (see [_swell]). It
++    // scales the finished layer, so layout and tap slots don't move.
++    return AnimatedBuilder(
++      animation: Listenable.merge([_pos, _held]),
++      builder: (context, bar) =>
++          Transform.scale(scale: 1 + 0.02 * _swell, child: bar),
++      child: Center(
+       child: ConstrainedBox(
+         constraints: const BoxConstraints(maxWidth: AppBottomNavBar.maxWidth),
+         child: RepaintBoundary(
+@@ -186,31 +248,61 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+                 ),
+               ],
+             ),
+-            child: ClipRRect(
+-              borderRadius: radius,
+-              // ponytail: one blur layer at sigma 18 — if low-end Android
+-              // stutters, drop the sigma or swap for a solid ~92% fill.
+-              child: BackdropFilter(
+-                filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+-                child: Container(
+-                  height: h,
+-                  padding: const EdgeInsets.all(4),
+-                  decoration: BoxDecoration(
+-                    color: AppColors.surface.withValues(alpha: 0.75),
++            // Only the glass is clipped; the highlight and icons sit on top
++            // unclipped, so the moving lens can swell past the capsule edge.
++            child: Stack(
++              clipBehavior: Clip.none,
++              children: [
++                Positioned.fill(
++                  child: ClipRRect(
+                     borderRadius: radius,
+-                    // Light rim so the glass edge reads over any background.
+-                    border: Border.all(
+-                        color: Colors.white.withValues(alpha: 0.6)),
++                    // ponytail: one blur layer at sigma 18 — if low-end
++                    // Android stutters, drop the sigma or swap for a solid
++                    // ~92% fill.
++                    child: BackdropFilter(
++                      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
++                      child: DecoratedBox(
++                        decoration: BoxDecoration(
++                          color: AppColors.surface.withValues(alpha: 0.75),
++                          borderRadius: radius,
++                          // Light rim so the glass edge reads over any
++                          // background.
++                          border: Border.all(
++                              color: Colors.white.withValues(alpha: 0.6)),
++                        ),
++                      ),
++                    ),
+                   ),
++                ),
++                Container(
++                  height: h,
++                  padding: const EdgeInsets.all(4),
+                   // Slot width is measured, never hard-coded, so the pill
+                   // lines up on any screen width and tab count.
+                   child: LayoutBuilder(builder: (context, box) {
+                     final slotW = box.maxWidth / items.length;
+-                    return GestureDetector(
++                    // Pressing the selected tab squishes the lens a little;
++                    // letting go eases it back. Raw pointer events, so taps
++                    // and drags below are untouched (and a drag that starts
++                    // from the press takes the lens on to full size).
++                    return Listener(
++                      onPointerDown: (d) {
++                        if ((d.localPosition.dx / slotW).floor() == _target) {
++                          _hold(0.45);
++                        }
++                      },
++                      onPointerUp: (_) {
++                        if (!_dragging) _hold(0);
++                      },
++                      onPointerCancel: (_) {
++                        if (!_dragging) _hold(0);
++                      },
++                      child: GestureDetector(
+                       behavior: HitTestBehavior.opaque,
+                       onHorizontalDragStart: (d) {
+                         _dragging = true;
+                         _pos.stop();
++                        _hold(1);
+                         _dragTo(d.localPosition.dx, slotW);
+                       },
+                       onHorizontalDragUpdate: (d) =>
+@@ -218,25 +310,40 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+                       onHorizontalDragEnd: (_) => _dragEnd(),
+                       onHorizontalDragCancel: _dragEnd,
+                       child: AnimatedBuilder(
+-                        animation: _pos,
++                        animation: Listenable.merge([_pos, _held]),
+                         builder: (context, _) {
+                           final p =
+                               _pos.value.clamp(0.0, items.length - 1.0);
++                          final s = _swell; // see [_swell]
++                          final grow = 9 * s;
++                          // Moving, the lens spans ~1.35 tabs, as in the
++                          // reference.
++                          final widen = 0.175 * s * slotW;
++                          final lensSize = Size(slotW + 2 * widen,
++                              box.maxHeight + 2 * grow);
+                           return Stack(
++                            clipBehavior: Clip.none,
+                             children: [
+                               Positioned(
+-                                left: p * slotW,
+-                                top: 0,
+-                                bottom: 0,
+-                                width: slotW,
++                                key: const ValueKey('navHighlight'),
++                                left: p * slotW - widen,
++                                width: lensSize.width,
++                                top: -grow,
++                                bottom: -grow,
+                                 child: DecoratedBox(
+                                   decoration: BoxDecoration(
+-                                    // Indigo tint, a step darker than
+-                                    // primaryLight so the active tab reads
+-                                    // clearly on the glass.
+-                                    color: AppColors.primary
+-                                        .withValues(alpha: 0.18),
+-                                    borderRadius: BorderRadius.circular(h / 2),
++                                    // At rest: indigo tint, a step darker
++                                    // than primaryLight so the active tab
++                                    // reads clearly on the glass. Swollen:
++                                    // mostly clear glass (the lens on top
++                                    // draws the rim and shadow).
++                                    color: Color.lerp(
++                                        AppColors.primary
++                                            .withValues(alpha: 0.18),
++                                        AppColors.surface
++                                            .withValues(alpha: 0.25),
++                                        s),
++                                    borderRadius: BorderRadius.circular(h),
+                                   ),
+                                 ),
+                               ),
+@@ -257,18 +364,114 @@ class _AppBottomNavBarState extends State<AppBottomNavBar>
+                                   );
+                                 }),
+                               ),
++                              // The lens itself, only while it is swollen:
++                              // it magnifies what is under it (icons, labels,
++                              // the page behind the glass) up to 1.4x, like
++                              // the iOS reference, with a white rim, a soft
++                              // lift and the thick-glass edge on top. Above
++                              // the icons, so it never takes their taps. At
++                              // rest it is gone and everything is crisp.
++                              if (s > 0.01)
++                                Positioned(
++                                  left: p * slotW - widen,
++                                  top: -grow,
++                                  child: IgnorePointer(
++                                    child: _lensShader == null
++                                        ? RawMagnifier(
++                                            size: lensSize,
++                                            magnificationScale: 1 + 0.4 * s,
++                                            decoration: MagnifierDecoration(
++                                              shape: StadiumBorder(
++                                                  side: BorderSide(
++                                                      color: Colors.white
++                                                          .withValues(
++                                                              alpha: 0.9 * s))),
++                                              shadows: [
++                                                BoxShadow(
++                                                  color: AppColors.textPrimary
++                                                      .withValues(
++                                                          alpha: 0.12 * s),
++                                                  blurRadius: 12,
++                                                  offset: const Offset(0, 4),
++                                                ),
++                                              ],
++                                            ),
++                                            child: CustomPaint(
++                                                painter: _LensEdgePainter(s)),
++                                          )
++                                        // Impeller: the real liquid-glass
++                                        // lens. The shader lights its own
++                                        // rim; only a faint edge line is
++                                        // drawn over it to define the
++                                        // silhouette.
++                                        : SizedBox.fromSize(
++                                            size: lensSize,
++                                            child: Stack(children: [
++                                              // Contact shadow, only OUTSIDE
++                                              // the lens, so the glass never
++                                              // refracts a dark smear inward.
++                                              Positioned.fill(
++                                                child: ClipPath(
++                                                  clipper: _OutsideStadium(),
++                                                  child: DecoratedBox(
++                                                    decoration: ShapeDecoration(
++                                                      shape:
++                                                          const StadiumBorder(),
++                                                      shadows: [
++                                                        BoxShadow(
++                                                          color: AppColors
++                                                              .textPrimary
++                                                              .withValues(
++                                                                  alpha:
++                                                                      0.16 * s),
++                                                          blurRadius: 10,
++                                                          offset: const Offset(
++                                                              0, 3),
++                                                        ),
++                                                      ],
++                                                    ),
++                                                  ),
++                                                ),
++                                              ),
++                                              DecoratedBox(
++                                                position: DecorationPosition
++                                                    .foreground,
++                                                decoration: ShapeDecoration(
++                                                  shape: StadiumBorder(
++                                                      side: BorderSide(
++                                                          color: Colors.white
++                                                              .withValues(
++                                                                  alpha: 0.35 *
++                                                                      s))),
++                                                ),
++                                                child: ClipPath.shape(
++                                                  shape: const StadiumBorder(),
++                                                  child: _WaterDropLens(
++                                                    shader: _lensShader!,
++                                                    swell: s,
++                                                    magnification:
++                                                        1 + 0.4 * s,
++                                                  ),
++                                                ),
++                                              ),
++                                            ]),
++                                          ),
++                                  ),
++                                ),
+                             ],
+                           );
+                         },
+                       ),
++                      ),
+                     );
+                   }),
+                 ),
+-              ),
++              ],
+             ),
+           ),
+         ),
+       ),
++      ),
+     );
+   }
+ }
+@@ -303,7 +506,12 @@ class _NavButton extends StatelessWidget {
+       child: GestureDetector(
+         onTap: onTap,
+         behavior: HitTestBehavior.opaque,
+-        child: Column(
++        // The tab is a fixed 48px tall: past ~1.8x system text size the label
++        // would overflow it. Cap at 1.6x, as iOS and Material tab bars cap
++        // theirs; labels still grow 60% for large-text users.
++        child: MediaQuery.withClampedTextScaling(
++          maxScaleFactor: 1.6,
++          child: Column(
+           mainAxisAlignment: MainAxisAlignment.center,
+           children: [
+             item.badged(Icon(
+@@ -325,7 +533,133 @@ class _NavButton extends StatelessWidget {
+             ),
+           ],
+         ),
++        ),
+       ),
+     );
+   }
+ }
++
++/// The moving lens's thick glass edge: a soft dark band just inside the rim,
++/// where a concave lens bends light the most, and a bright line where light
++/// catches the upper inner edge. Both fade in with [s]; the centre stays
++/// clear. Drawn over the lens's magnified image.
++// ponytail: shaded, not refracted. Really warping the content at the rim
++// needs a fragment shader (ImageFilter.shader, Impeller-only, so not on older
++// Android GL devices); add it only if this reads flat on a device.
++class _LensEdgePainter extends CustomPainter {
++  _LensEdgePainter(this.s);
++
++  final double s;
++
++  @override
++  void paint(Canvas canvas, Size size) {
++    if (s <= 0) return;
++    final rrect = RRect.fromRectAndRadius(
++        Offset.zero & size, Radius.circular(size.height / 2));
++    canvas.save();
++    canvas.clipRRect(rrect);
++    // Inner shadow: a wide blurred stroke on the rim with its outer half
++    // clipped away leaves a band that deepens toward the edge.
++    canvas.drawRRect(
++        rrect,
++        Paint()
++          ..style = PaintingStyle.stroke
++          ..strokeWidth = 12
++          ..color = AppColors.textPrimary.withValues(alpha: 0.14 * s)
++          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
++    // Highlight: the same rim nudged down, so only its upper arc lands inside.
++    canvas.drawRRect(
++        rrect.shift(const Offset(0, 1.5)),
++        Paint()
++          ..style = PaintingStyle.stroke
++          ..strokeWidth = 2
++          ..color = Colors.white.withValues(alpha: 0.8 * s)
++          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1));
++    canvas.restore();
++  }
++
++  @override
++  bool shouldRepaint(_LensEdgePainter old) => old.s != s;
++}
++
++/// Runs the water-drop shader (shaders/lens.frag) as a backdrop filter over
++/// its own box. The lens rect is read at paint time, after layout, in the
++/// physical pixels the shader sees, so the refraction never trails the lens
++/// by a frame — including while the whole bar is scaled.
++class _WaterDropLens extends SingleChildRenderObjectWidget {
++  const _WaterDropLens({
++    required this.shader,
++    required this.swell,
++    required this.magnification,
++  }) : super(child: const SizedBox.expand());
++
++  final FragmentShader shader;
++  final double swell;
++  final double magnification;
++
++  @override
++  _RenderWaterDropLens createRenderObject(BuildContext context) =>
++      _RenderWaterDropLens(shader, swell, magnification,
++          MediaQuery.devicePixelRatioOf(context));
++
++  @override
++  void updateRenderObject(
++      BuildContext context, _RenderWaterDropLens renderObject) {
++    renderObject
++      ..shader = shader
++      ..swell = swell
++      ..magnification = magnification
++      ..dpr = MediaQuery.devicePixelRatioOf(context)
++      ..markNeedsPaint();
++  }
++}
++
++class _RenderWaterDropLens extends RenderProxyBox {
++  _RenderWaterDropLens(this.shader, this.swell, this.magnification, this.dpr);
++
++  FragmentShader shader;
++  double swell;
++  double magnification;
++  double dpr;
++
++  @override
++  bool get alwaysNeedsCompositing => true;
++
++  @override
++  BackdropFilterLayer? get layer => super.layer as BackdropFilterLayer?;
++
++  @override
++  void paint(PaintingContext context, Offset offset) {
++    // Logical global rect (getTransformTo(null) stops below the RenderView).
++    final r = MatrixUtils.transformRect(
++        getTransformTo(null), Offset.zero & size);
++    shader
++      // Floats 0-1 are u_size, which the engine fills in.
++      ..setFloat(2, r.left * dpr)
++      ..setFloat(3, r.top * dpr)
++      ..setFloat(4, r.width * dpr)
++      ..setFloat(5, r.height * dpr)
++      ..setFloat(6, swell)
++      ..setFloat(7, magnification);
++    layer ??= BackdropFilterLayer();
++    layer!.filter = ImageFilter.shader(shader);
++    context.pushLayer(layer!, super.paint, offset);
++  }
++}
++
++/// Everything except the inside of a stadium the size of the box: lets the
++/// lens's contact shadow show around the glass without darkening the glass.
++class _OutsideStadium extends CustomClipper<Path> {
++  @override
++  Path getClip(Size size) {
++    final box = Offset.zero & size;
++    return Path()
++      ..fillType = PathFillType.evenOdd
++      ..addRect(box.inflate(40)) // room for the shadow's blur and offset
++      ..addRRect(
++          RRect.fromRectAndRadius(box, Radius.circular(size.height / 2)));
++  }
++
++  @override
++  bool shouldReclip(_OutsideStadium oldClipper) => false; // size-only
++}
+diff --git a/frontend/pubspec.yaml b/frontend/pubspec.yaml
+index fd50b61b..08a4d58c 100644
+--- a/frontend/pubspec.yaml
++++ b/frontend/pubspec.yaml
+@@ -90,6 +90,9 @@ flutter:
+     - assets/logo.png
+     - assets/sounds/new_order.mp3
+ 
++  shaders:
++    - shaders/lens.frag
++
+   fonts:
+     - family: Mangal
+       fonts:
+diff --git a/frontend/shaders/lens.frag b/frontend/shaders/lens.frag
+new file mode 100644
+index 00000000..4396c7e3
+--- /dev/null
++++ b/frontend/shaders/lens.frag
+@@ -0,0 +1,90 @@
++#version 460 core
++
++// Liquid-glass lens for the bottom nav highlight (see bottom_nav_bar.dart).
++// Runs as a BackdropFilter on Impeller, clipped to the lens's stadium shape,
++// over the LIVE backdrop (no screen capture). On Impeller (Flutter 3.38) the
++// fragment coordinates are full-frame physical pixels, the same space as
++// u_lens.
++//
++// Optical model, a glass slab with a flat middle and a rounded rim:
++//  - middle: plain magnification, lightly frosted;
++//  - rim band: the surface curves away on a circular profile, so refraction
++//    grows smoothly toward the edge and samples from beyond the rim;
++//  - dispersion: blue bends most, red least, so content edges at the rim
++//    pick up thin blue/purple and yellow fringes;
++//  - light: a Fresnel rim plus a thin specular from the upper left (and a
++//    faint opposite arc), brighter over bright backgrounds.
++
++#include <flutter/runtime_effect.glsl>
++
++uniform vec2 u_size;    // set by the engine: input texture size (px)
++uniform vec4 u_lens;    // lens rect in input-texture px: x, y, w, h
++uniform float u_swell;  // 0..1: how formed the lens is
++uniform float u_mag;    // magnification in the middle
++
++uniform sampler2D u_input;
++
++out vec4 frag_color;
++
++vec3 sampleAt(vec2 p) {
++  vec2 uv = p / u_size;
++#ifdef IMPELLER_TARGET_OPENGLES
++#ifndef IMPELLER_OPENGLES_UNFLIPPED_DEPRECATED
++  // Older Android phones without Vulkan run Impeller on OpenGL ES, whose
++  // framebuffer is Y-flipped up to engine 3.44; newer engines unflip it and
++  // define this macro, so the flip must not apply twice.
++  uv.y = 1.0 - uv.y;
++#endif
++#endif
++  // Impeller's backdrop alpha is not a transparency signal (it can read 0
++  // over dark content), so the glass treats the backdrop as opaque.
++  return texture(u_input, uv).rgb;
++}
++
++void main() {
++  vec2 p = FlutterFragCoord().xy;
++  vec2 hs = u_lens.zw * 0.5;
++  vec2 c = u_lens.xy + hs;
++  vec2 q = p - c;
++  float r = min(hs.x, hs.y);
++
++  // Stadium: v points from the nearest spot on its spine to p, so its length
++  // is r at the rim; e is the depth inside the rim, n the outward normal.
++  vec2 v = vec2(sign(q.x) * max(abs(q.x) - (hs.x - r), 0.0), q.y);
++  float len = length(v);
++  float e = max(r - len, 0.0);
++  vec2 n = len > 0.001 ? v / len : vec2(0.0, 1.0);
++
++  // Rim band: t = 0 in the flat middle, 1 at the rim. The circular profile
++  // stays flat inside and turns steep right at the edge.
++  float band = r * 0.6;
++  float t = clamp(1.0 - e / band, 0.0, 1.0);
++  float bend = 1.0 - sqrt(max(1.0 - t * t, 0.0));
++
++  vec2 base = c + q / u_mag;
++  vec2 o = n * bend * band * 1.1 * u_swell;
++
++  // Dispersion, concentrated where the rim bends light hardest.
++  float disp = 0.14 * u_swell;
++  vec3 col = vec3(sampleAt(base + o * (1.0 - disp)).r,
++                  sampleAt(base + o).g,
++                  sampleAt(base + o * (1.0 + disp)).b);
++
++  // Light frost in the middle: a faint milky lift, no blur, so what is
++  // under the lens stays readable.
++  col = mix(col, vec3(1.0), 0.07 * u_swell * (1.0 - t));
++
++  // Edge light. Fresnel: grazing angles near the rim reflect more.
++  float luma = dot(col, vec3(0.299, 0.587, 0.114));
++  float fresnel = pow(t, 4.0) * 0.18;
++  // A thin specular line along the rim (about 1.5% of the lens height),
++  // strongest facing the light at the upper left, with a faint far arc.
++  float line = 1.0 - smoothstep(0.0, r * 0.09, e);
++  vec2 light = normalize(vec2(-0.55, -0.85));
++  float facing = pow(max(dot(n, light), 0.0), 3.0)
++               + 0.35 * pow(max(dot(n, -light), 0.0), 4.0);
++  float spec = line * (0.25 + 0.75 * facing) * 0.65;
++  col += (fresnel + spec) * mix(0.55, 1.0, luma) * u_swell;
++
++  frag_color = vec4(min(col, vec3(1.0)), 1.0);
++}
+diff --git a/frontend/test/widgets/bottom_nav_bar_test.dart b/frontend/test/widgets/bottom_nav_bar_test.dart
+index b69a17df..b10e8e27 100644
+--- a/frontend/test/widgets/bottom_nav_bar_test.dart
++++ b/frontend/test/widgets/bottom_nav_bar_test.dart
+@@ -73,6 +73,9 @@ void main() {
+     addTearDown(() => tester.binding.defaultBinaryMessenger
+         .setMockMethodCallHandler(SystemChannels.platform, null));
+ 
++    Rect pill() => tester.getRect(find.byKey(const ValueKey('navHighlight')));
++    final rest = pill();
++
+     // Thumb lands on Billing and slides all the way across to Profile, in
+     // small steps the way a real finger reports them.
+     final g = await tester.startGesture(tester.getCenter(find.text('Billing')));
+@@ -80,9 +83,13 @@ void main() {
+       await g.moveBy(const Offset(20, 0));
+       await tester.pump();
+     }
++    // Held under the thumb it is the big clear lens, spilling past the bar.
++    await tester.pump(const Duration(milliseconds: 200));
++    expect(pill().height, greaterThan(rest.height + 8));
+     await g.up();
+     await tester.pumpAndSettle();
+     expect(picked, [2]);
++    expect(pill().height, closeTo(rest.height, 0.5)); // shrinks on release
+     // A tick per tab crossed (Items, Profile), then a bump for the pick.
+     expect(haptics, [
+       'HapticFeedbackType.selectionClick',
+@@ -91,6 +98,90 @@ void main() {
+     ]);
+   });
+ 
++  testWidgets('highlight swells into a lens while sliding, settles to one slot',
++      (tester) async {
++    Widget bar(int sel) => MaterialApp(
++          home: Scaffold(
++            body: Align(
++              alignment: Alignment.bottomCenter,
++              child: SizedBox(
++                width: 308, // 300 inside the 4px padding → 100 per slot
++                child: AppBottomNavBar(
++                  items: const [
++                    NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
++                        'Billing', SizedBox()),
++                    NavItem(Icons.inventory_2_outlined, Icons.inventory_2,
++                        'Items', SizedBox()),
++                    NavItem(Icons.person_outline, Icons.person, 'Profile',
++                        SizedBox()),
++                  ],
++                  selectedIndex: sel,
++                  onDestinationSelected: (_) {},
++                ),
++              ),
++            ),
++          ),
++        );
++    Rect pill() => tester.getRect(find.byKey(const ValueKey('navHighlight')));
++
++    await tester.pumpWidget(bar(0));
++    final rest = pill();
++    Rect glass() => tester.getRect(find.byType(BackdropFilter));
++    final restBar = glass();
++    await tester.pumpWidget(bar(2));
++    await tester.pump(const Duration(milliseconds: 60));
++    final moving = pill();
++    // Swollen: wider, and taller than the capsule (spills past its edges).
++    expect(moving.width, greaterThan(rest.width));
++    expect(moving.height, greaterThan(rest.height + 8));
++    // A real magnifying lens rides on top while it moves.
++    expect(find.byType(RawMagnifier), findsOneWidget);
++    // The whole bar breathes a little bigger with it.
++    expect(glass().width, greaterThan(restBar.width + 3));
++    await tester.pumpAndSettle();
++    // Back to a plain slot, two slots over.
++    expect(pill().width, closeTo(rest.width, 0.5));
++    expect(pill().height, closeTo(rest.height, 0.5));
++    expect(pill().left, closeTo(rest.left + 2 * rest.width, 0.5));
++    expect(glass(), restBar);
++    expect(find.byType(RawMagnifier), findsNothing); // gone at rest
++  });
++
++  testWidgets('pressing the selected tab squishes the lens, release settles it',
++      (tester) async {
++    final picked = <int>[];
++    await tester.pumpWidget(MaterialApp(
++      home: Scaffold(
++        body: Align(
++          alignment: Alignment.bottomCenter,
++          child: AppBottomNavBar(
++            items: const [
++              NavItem(Icons.receipt_long_outlined, Icons.receipt_long,
++                  'Billing', SizedBox()),
++              NavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Items',
++                  SizedBox()),
++            ],
++            selectedIndex: 0,
++            onDestinationSelected: picked.add,
++          ),
++        ),
++      ),
++    ));
++    Rect pill() => tester.getRect(find.byKey(const ValueKey('navHighlight')));
++    final rest = pill();
++
++    final g = await tester.startGesture(tester.getCenter(find.text('Billing')));
++    await tester.pump(); // first frame starts the animation's clock
++    await tester.pump(const Duration(milliseconds: 200));
++    // A subtle swell: bigger than at rest, well short of the full drag lens.
++    expect(pill().height, greaterThan(rest.height + 4));
++    expect(pill().height, lessThan(rest.height + 12));
++    await g.up();
++    await tester.pumpAndSettle();
++    expect(pill().size, rest.size);
++    expect(picked, [0]); // the tap still went through
++  });
++
+   testWidgets('a plain tap mid-slide still selects only the tapped tab',
+       (tester) async {
+     final picked = <int>[];
+@@ -120,4 +211,93 @@ void main() {
+     await tester.pumpAndSettle();
+     expect(picked, [1]);
+   });
++
++  // Phone widths from the smallest supported (320) to just under the shell's
++  // 720px rail cutoff; every tab count the shell can build (2 for kitchen,
++  // up to 5 for a restaurant owner); normal and largest accessibility text;
++  // Android and iOS with their own safe areas and pixel densities. The bar
++  // must never overflow, keep 48px+ touch targets and its 56px height, and
++  // lay out identically on both platforms.
++  testWidgets('responsive: widths, tab counts, text scale, iOS == Android',
++      (tester) async {
++    addTearDown(tester.view.reset);
++    const all = [
++      NavItem(Icons.receipt_long_outlined, Icons.receipt_long, 'Billing',
++          SizedBox()),
++      NavItem(Icons.inventory_2_outlined, Icons.inventory_2, 'Items',
++          SizedBox(),
++          badge: 12),
++      NavItem(Icons.table_restaurant_outlined, Icons.table_restaurant,
++          'Orders', SizedBox(),
++          badge: 108),
++      NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu, 'Kitchen',
++          SizedBox(),
++          badge: 3),
++      NavItem(Icons.person_outline, Icons.person, 'Profile', SizedBox()),
++    ];
++    final platforms = {
++      // platform: (pixel ratio, bottom safe area)
++      TargetPlatform.android: (2.625, 24.0), // gesture-nav inset
++      TargetPlatform.iOS: (3.0, 34.0), // home indicator
++    };
++    for (final width in [320.0, 360.0, 393.0, 412.0, 430.0, 719.0]) {
++      for (final count in [2, 4, 5]) {
++        for (final scale in [1.0, 2.0]) {
++          final rects = <TargetPlatform, Rect>{};
++          for (final MapEntry(key: platform, value: (dpr, inset))
++              in platforms.entries) {
++            tester.view.devicePixelRatio = dpr;
++            tester.view.physicalSize = Size(width, 800) * dpr;
++            tester.view.padding = FakeViewPadding(bottom: inset * dpr);
++            await tester.pumpWidget(MaterialApp(
++              theme: ThemeData(platform: platform),
++              builder: (context, child) => MediaQuery(
++                data: MediaQuery.of(context)
++                    .copyWith(textScaler: TextScaler.linear(scale)),
++                child: child!,
++              ),
++              // Wrapped the way MainShell._buildBottomNav wraps it.
++              home: Scaffold(
++                body: Align(
++                  alignment: Alignment.bottomCenter,
++                  child: Column(mainAxisSize: MainAxisSize.min, children: [
++                    SafeArea(
++                      top: false,
++                      child: Padding(
++                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
++                        child: AppBottomNavBar(
++                          items: all.take(count).toList(),
++                          selectedIndex: count - 1,
++                          onDestinationSelected: (_) {},
++                        ),
++                      ),
++                    ),
++                  ]),
++                ),
++              ),
++            ));
++            final where = '$platform w=$width tabs=$count text=$scale';
++            expect(tester.takeException(), isNull, reason: where);
++            final bar = tester.getRect(find.byType(BackdropFilter));
++            expect(bar.height, AppBottomNavBar.height, reason: where);
++            expect(bar.left, greaterThanOrEqualTo(16), reason: where);
++            expect(bar.right, lessThanOrEqualTo(width - 16), reason: where);
++            // Clear of the home indicator / gesture bar.
++            expect(bar.bottom, lessThanOrEqualTo(800 - inset - 8),
++                reason: where);
++            // Each tab is a touch target of at least 48x48.
++            expect((bar.width - 8) / count, greaterThanOrEqualTo(48),
++                reason: where);
++            rects[platform] = bar;
++          }
++          final a = rects[TargetPlatform.android]!;
++          final i = rects[TargetPlatform.iOS]!;
++          // Same width and height; iOS sits 10px higher only because its
++          // home-indicator inset is 34 vs 24.
++          expect(i.size, a.size, reason: 'w=$width tabs=$count text=$scale');
++          expect(a.top - i.top, closeTo(10, 0.01));
++        }
++      }
++    }
++  });
+ }

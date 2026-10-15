@@ -360,8 +360,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                       .bodySmall
                       ?.copyWith(color: AppColors.textSecondary),
                 ),
-                if (bill.customerName != null)
-                  Text(bill.customerName!,
+                // Customer and biller share one line — the card's height is
+                // fixed, so "Billed by" must not add a row of its own.
+                if (bill.customerName != null || bill.billedByFirst != null)
+                  Text(
+                      [
+                        if (bill.customerName != null) bill.customerName!,
+                        if (bill.billedByFirst != null)
+                          l10n.historyBilledBy(bill.billedByFirst!),
+                      ].join('  ·  '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context)
@@ -536,6 +543,14 @@ class BillDetailDialog extends StatelessWidget {
                       .bodySmall
                       ?.copyWith(color: AppColors.textSecondary),
                 ),
+              if (bill.billedByFirst != null)
+                Text(
+                  l10n.historyBilledBy(bill.billedByFirst!),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: AppColors.textSecondary),
+                ),
               if (bill.customerName != null) ...[
                 const SizedBox(height: AppSpacing.space4),
                 Text(bill.customerName!,
@@ -558,7 +573,7 @@ class BillDetailDialog extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            '${item.itemName} × ${item.quantity % 1 == 0 ? item.quantity.toInt() : item.quantity}',
+                            '${item.receiptName} × ${item.quantity % 1 == 0 ? item.quantity.toInt() : item.quantity}',
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodyMedium,

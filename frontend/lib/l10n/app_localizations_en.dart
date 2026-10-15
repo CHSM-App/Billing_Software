@@ -220,6 +220,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get openOrdersNoMatches => 'No open orders match your search.';
 
   @override
+  String get openOrdersOpenBill => 'Open bill';
+
+  @override
   String get customersTitle => 'Customers';
 
   @override
@@ -606,6 +609,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsRoundOffSubtitle =>
       'Round the final payable to the nearest rupee and show the adjustment on the bill';
+
+  @override
+  String get settingsShowItemNo => 'Show item no on billing';
+
+  @override
+  String get settingsShowItemNoSubtitle =>
+      'Items with an Item No show as (101) Item name on the billing page';
 
   @override
   String get settingsManageStaff => 'Manage Staff';
@@ -1006,6 +1016,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get receiptCustomerPhone => 'Ph:';
 
   @override
+  String get receiptBilledBy => 'Cashier:';
+
+  @override
   String get receiptColItem => 'Item';
 
   @override
@@ -1166,6 +1179,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingPreviewReceipt => 'Preview receipt';
+
+  @override
+  String get billingScrollDown => 'Scroll down';
 
   @override
   String get billingPrinterReady => 'Printer connected';
@@ -1362,6 +1378,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingDiscountRupees => 'Discount ₹';
+
+  @override
+  String get cartItemPrice => 'Price';
+
+  @override
+  String get cartItemDiscPct => 'Disc %';
+
+  @override
+  String get cartItemDiscAmt => 'Disc ₹';
 
   @override
   String get billingTotalAmount => 'Total Amount';
@@ -1737,6 +1762,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsFieldHsnHint => 'e.g. 9963 for restaurant service';
+
+  @override
+  String get itemsFieldItemNo => 'Item No (optional)';
+
+  @override
+  String get itemsFieldItemNoHint => 'e.g. 101 — search billing by this number';
 
   @override
   String get itemsFieldBarcode => 'Barcode (optional)';
@@ -2117,6 +2148,11 @@ class AppLocalizationsEn extends AppLocalizations {
       one: '1 item',
     );
     return '$_temp0';
+  }
+
+  @override
+  String historyBilledBy(String name) {
+    return 'Billed by $name';
   }
 
   @override

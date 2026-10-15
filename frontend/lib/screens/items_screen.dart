@@ -172,7 +172,9 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     return items.where((i) {
       final name = i.name.toLowerCase();
       final category = (i.category ?? '').toLowerCase();
-      return name.contains(q) || category.contains(q);
+      return name.contains(q) ||
+          category.contains(q) ||
+          (i.itemNo ?? '').toLowerCase().contains(q);
     }).toList();
   }
 
@@ -1317,6 +1319,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _priceCtrl = TextEditingController();
   final _taxCtrl = TextEditingController();
   final _hsnCtrl = TextEditingController();
+  final _itemNoCtrl = TextEditingController();
   final _barcodeCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
   final _lowStockCtrl = TextEditingController();
@@ -1399,6 +1402,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     final item = widget.item;
     if (item != null) {
       _nameCtrl.text = item.name;
+      _itemNoCtrl.text = item.itemNo ?? '';
       _majorCtrl.text = item.majorCategory ?? '';
       _categoryCtrl.text = item.category ?? '';
       // ?? '' — a sized item has no price of its own, and `null.toString()`
@@ -1664,6 +1668,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _priceCtrl.dispose();
     _taxCtrl.dispose();
     _hsnCtrl.dispose();
+    _itemNoCtrl.dispose();
     _barcodeCtrl.dispose();
     _stockCtrl.dispose();
     _lowStockCtrl.dispose();
@@ -1872,6 +1877,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
 
     final data = {
       'name': _nameCtrl.text.trim(),
+      // Always sent so clearing the number is persisted.
+      'item_no': _itemNoCtrl.text.trim().isNotEmpty ? _itemNoCtrl.text.trim() : null,
       if (_majorCtrl.text.trim().isNotEmpty)
         'major_category': _majorCtrl.text.trim(),
       if (_categoryCtrl.text.trim().isNotEmpty) 'category': _categoryCtrl.text.trim(),
@@ -2250,6 +2257,12 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   capitalizeWords: true,
                   validator: (v) =>
                       v == null || v.isEmpty ? l10n.commonRequired : null,
+                ),
+                const SizedBox(height: AppSpacing.space12),
+                AppTextField(
+                  label: l10n.itemsFieldItemNo,
+                  controller: _itemNoCtrl,
+                  hint: l10n.itemsFieldItemNoHint,
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 _buildMajorCategoryField(context, l10n),

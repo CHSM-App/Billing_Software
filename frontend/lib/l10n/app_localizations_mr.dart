@@ -220,6 +220,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get openOrdersNoMatches => 'शोधाशी जुळणारी कोणतीही खुली ऑर्डर नाही.';
 
   @override
+  String get openOrdersOpenBill => 'बिल उघडा';
+
+  @override
   String get customersTitle => 'ग्राहक';
 
   @override
@@ -608,6 +611,13 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get settingsRoundOffSubtitle =>
       'अंतिम देय रक्कम जवळच्या रुपयात करा आणि बिलावर फरक दाखवा';
+
+  @override
+  String get settingsShowItemNo => 'बिलिंगवर आयटम क्र. दाखवा';
+
+  @override
+  String get settingsShowItemNoSubtitle =>
+      'आयटम क्र. असलेले आयटम बिलिंगवर (101) आयटमचे नाव असे दिसतील';
 
   @override
   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
@@ -1009,6 +1019,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get receiptCustomerPhone => 'फोन:';
 
   @override
+  String get receiptBilledBy => 'कॅशियर:';
+
+  @override
   String get receiptColItem => 'वस्तू';
 
   @override
@@ -1169,6 +1182,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingPreviewReceipt => 'पावती पहा';
+
+  @override
+  String get billingScrollDown => 'खाली जा';
 
   @override
   String get billingPrinterReady => 'प्रिंटर जोडलेला आहे';
@@ -1366,6 +1382,15 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingDiscountRupees => 'सूट ₹';
+
+  @override
+  String get cartItemPrice => 'किंमत';
+
+  @override
+  String get cartItemDiscPct => 'सूट %';
+
+  @override
+  String get cartItemDiscAmt => 'सूट ₹';
 
   @override
   String get billingTotalAmount => 'एकूण रक्कम';
@@ -1743,6 +1768,13 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsFieldHsnHint => 'उदा. रेस्टॉरंट सेवेसाठी ९९६३';
+
+  @override
+  String get itemsFieldItemNo => 'आयटम क्र. (ऐच्छिक)';
+
+  @override
+  String get itemsFieldItemNoHint =>
+      'उदा. 101 — बिलिंगमध्ये या क्रमांकाने शोधा';
 
   @override
   String get itemsFieldBarcode => 'बारकोड (ऐच्छिक)';
@@ -2124,6 +2156,11 @@ class AppLocalizationsMr extends AppLocalizations {
       one: '1 वस्तू',
     );
     return '$_temp0';
+  }
+
+  @override
+  String historyBilledBy(String name) {
+    return 'बिल केले: $name';
   }
 
   @override

@@ -257,6 +257,7 @@ class _LoginScreenState extends ConsumerState<_LoginView>
         hasBarcodeScanner: business['has_barcode_scanner'] == true,
         gstEnabled: business['gst_enabled'] == true,
         roundOffEnabled: business['round_off_enabled'] == true,
+        showItemNo: business['show_item_no'] == true,
         storeEnabled: business['store_enabled'] == true,
         customersEnabled: business['allow_customers'] != false,
       );

@@ -135,6 +135,11 @@ class _MainShellState extends ConsumerState<MainShell>
       case 'kitchen':
         // The Kitchen screen listens to this ping and reloads its queue.
         NotificationService.instance.pingKitchen();
+        // Open Orders shows each dish's kitchen status too (the chef has no
+        // Orders page, so skip the fetch there).
+        if (ref.read(sessionProvider).valueOrNull?.userRole != 'kitchen') {
+          ref.read(openDraftsProvider.notifier).refreshSilently();
+        }
         break;
       case 'tables':
         ref.read(tablesProvider.notifier).refreshSilently();

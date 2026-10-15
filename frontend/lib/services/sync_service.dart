@@ -182,6 +182,7 @@ class SyncService {
                 'item_id':  li['item_id'],
                 if (li['variant_id'] != null) 'variant_id': li['variant_id'],
                 'quantity': li['quantity'],
+                ..._overrides(li),
               })
           .toList(),
       if (row['table_id']       != null) 'table_id':       row['table_id'],
@@ -210,6 +211,14 @@ class SyncService {
           .toIso8601String(),
     };
   }
+
+  /// A line's order-card price edit / discount, replayed so the server stores
+  /// what was printed. Absent on lines at catalog price (and on old rows).
+  Map<String, dynamic> _overrides(Map<String, dynamic> li) => {
+        if (li['price_override'] != null) 'price_override': li['price_override'],
+        if (li['discount_amount'] != null)
+          'discount_amount': li['discount_amount'],
+      };
 
   /// `additional_charges` entry for a sync payload, decoded from the JSON the
   /// offline row stores. Omitted entirely when the bill carries none.
@@ -241,6 +250,7 @@ class SyncService {
                 'item_id':  li['item_id'],
                 if (li['variant_id'] != null) 'variant_id': li['variant_id'],
                 'quantity': li['quantity'],
+                ..._overrides(li),
               })
           .toList(),
       if (row['table_id']       != null) 'table_id':       row['table_id'],

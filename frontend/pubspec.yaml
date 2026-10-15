@@ -90,6 +90,9 @@ flutter:
     - assets/logo.png
     - assets/sounds/new_order.mp3
 
+  shaders:
+    - shaders/lens.frag
+
   fonts:
     - family: Mangal
       fonts:

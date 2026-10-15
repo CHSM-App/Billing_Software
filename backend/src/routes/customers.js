@@ -252,7 +252,7 @@ router.get('/:id/bills', async (req, res) => {
         ORDER BY b.created_at DESC, b.id;
 
         SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity,
-               bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total
+               bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount
         FROM @page p JOIN bill_items bi ON bi.bill_id = p.id;
       `);
 

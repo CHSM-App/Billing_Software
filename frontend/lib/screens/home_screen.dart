@@ -130,6 +130,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _autoOpenedFirstCategory = false;
   // Variant items (by id) whose size rows are unfolded beneath them in place.
   final Set<String> _expandedVariantItems = {};
+  // The one order-card row whose price/discount editor is open (by
+  // CartEntry.key); tapping another row moves it there.
+  String? _expandedCartKey;
   bool _showCustomerFields = true;
   // How the bill is paid: rows of [mode][amount] at the bottom of the cart.
   // One row is an ordinary single-mode bill; "+" adds a row and splits it.
@@ -194,6 +197,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final _searchFocus = FocusNode();
 
   final _searchController = TextEditingController();
+
+  /// Wide-layout order panel scroll, and whether it is already at the bottom —
+  /// drives the "scroll down" button, which hides once there.
+  final _cartScrollCtrl = ScrollController();
+  final _cartAtBottom = ValueNotifier<bool>(true);
+  // The same pair for the phone cart sheet's own scroll view.
+  final _sheetScrollCtrl = ScrollController();
+  final _sheetAtBottom = ValueNotifier<bool>(true);
   final _customerNameController = TextEditingController();
   final _customerPhoneController = TextEditingController();
   final _discountPctController = TextEditingController();
@@ -336,6 +347,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _header.dispose();
     _searchFocus.dispose();
     _searchController.dispose();
+    _cartScrollCtrl.dispose();
+    _cartAtBottom.dispose();
+    _sheetScrollCtrl.dispose();
+    _sheetAtBottom.dispose();
     _itemsScrollCtrl.dispose();
     _catStripCtrl.dispose();
     _activeCategory.dispose();
@@ -480,7 +495,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // soup rather than nothing. Same rule the Items screen has always used
       // (items_screen.dart _filtered).
       return item.name.toLowerCase().contains(query) ||
-          (item.category?.toLowerCase().contains(query) ?? false);
+          (item.category?.toLowerCase().contains(query) ?? false) ||
+          (item.itemNo?.toLowerCase().contains(query) ?? false);
     }).toList();
   }
 
@@ -938,10 +954,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   void _selectAllPayAmount(_PayRow row) {
     // After the tap has placed its caret, or the caret wins.
+    final c = row.amountController;
+    final before = c.text;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final c = row.amountController;
+      // Already typing? Then this select-all is late — applying it would select
+      // the first digit for the second to replace (8344 → 344, 2000 → 000).
+      if (c.text != before) return;
       c.selection = TextSelection(baseOffset: 0, extentOffset: c.text.length);
     });
+    // Run it on the very next frame rather than whenever one happens next.
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   void _onPayRowsChanged() {
@@ -1639,11 +1661,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   List<Map<String, dynamic>> get _cartPayload {
     final cart = ref.read(cartProvider);
+    final gstEnabled = ref.read(gstEnabledProvider);
     return cart
         .map((e) => {
               'item_id': e.item.id,
               if (e.variant != null) 'variant_id': e.variant!.id,
               'quantity': e.quantity,
+              ...e.overridePayload(gstEnabled),
             })
         .toList();
   }
@@ -1786,7 +1810,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           'variant_id': e.variant?.id,
           'item_name': e.displayName,
           'quantity': e.quantity,
-          'unit_price': e.netPrice(gstEnabled),
+          // Discounted net rate, as the server stores it; the override fields
+          // ride along so sync can replay them (sync_service.dart).
+          'unit_price': e.discountedNetPrice(gstEnabled),
+          ...e.overridePayload(gstEnabled),
           'tax_rate': taxRate,
           'line_total': double.parse((lineSub + lineTax).toStringAsFixed(2)),
         };
@@ -1850,6 +1877,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         paymentMode: _draftMode,
         status: 'draft',
         createdByUserId: userId,
+        billedBy: ref.read(userNameProvider),
         createdAt: DateTime.now(),
         items: lineItems
             .map((li) => BillItem(
@@ -1862,6 +1890,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   unitPrice: (li['unit_price'] as double),
                   taxRate: li['tax_rate'] as double?,
                   lineTotal: (li['line_total'] as double),
+                  discountAmount:
+                      (li['discount_amount'] as num?)?.toDouble() ?? 0,
                 ))
             .toList(),
       );
@@ -2913,7 +2943,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           'variant_id': e.variant?.id,
           'item_name': e.displayName,
           'quantity': e.quantity,
-          'unit_price': e.netPrice(gstEnabled),
+          // Discounted net rate, as the server stores it; the override fields
+          // ride along so sync can replay them (sync_service.dart).
+          'unit_price': e.discountedNetPrice(gstEnabled),
+          ...e.overridePayload(gstEnabled),
           'tax_rate': taxRate,
           'line_total':
               double.parse((lineSub + lineTax).toStringAsFixed(2)),
@@ -2983,6 +3016,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         creditAmount: _splitCreditAmount,
         status: 'finalized',
         createdByUserId: userId,
+        billedBy: ref.read(userNameProvider),
         createdAt: DateTime.now(),
         items: lineItems
             .map((li) => BillItem(
@@ -2995,6 +3029,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   unitPrice: (li['unit_price'] as double),
                   taxRate: li['tax_rate'] as double?,
                   lineTotal: (li['line_total'] as double),
+                  discountAmount:
+                      (li['discount_amount'] as num?)?.toDouble() ?? 0,
                 ))
             .toList(),
       );
@@ -3047,9 +3083,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         variantId: e.variant?.id,
         itemName: e.displayName,
         quantity: e.quantity,
-        unitPrice: e.netPrice(gstEnabled),
+        unitPrice: e.discountedNetPrice(gstEnabled),
         taxRate: gstEnabled ? e.item.taxRate : null,
         lineTotal: double.parse((lineSub + lineTax).toStringAsFixed(2)),
+        discountAmount: e.lineDiscount(gstEnabled),
       );
     }).toList();
     // Discount on NET subtotal; tax charged on the discounted net (bill-level:
@@ -3090,6 +3127,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       collected: _collectedDues,
       status: 'preview',
       createdByUserId: '',
+      billedBy: ref.read(userNameProvider),
       createdAt: DateTime.now(),
       items: items,
     );
@@ -3632,8 +3670,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 right: AppSpacing.space16,
                 duration: MediaQuery.disableAnimationsOf(context)
                     ? Duration.zero
-                    : const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
+                    : AppBottomNavBar.hideDuration,
+                curve: AppBottomNavBar.hideCurve,
                 child: row!,
               ),
               child: Row(
@@ -3720,10 +3758,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.of(sheetCtx).size.height * 0.88,
                 ),
-                child: SingleChildScrollView(
-                  primary: false,
-                  physics: const ClampingScrollPhysics(),
-                  child: _buildCartPanel(inSheet: true),
+                // A long order scrolls inside the sheet; the "Scroll down"
+                // button (as on the side panel) jumps to the Settle row.
+                child: Stack(
+                  children: [
+                    NotificationListener<Notification>(
+                      onNotification: (n) =>
+                          _trackCartScroll(n, _sheetAtBottom),
+                      child: SingleChildScrollView(
+                        controller: _sheetScrollCtrl,
+                        physics: const ClampingScrollPhysics(),
+                        // Keep the last row clear of the phone's gesture /
+                        // 3-button bar (0 while the keyboard is up).
+                        padding: EdgeInsets.only(
+                            bottom: MediaQuery.paddingOf(sheetCtx).bottom),
+                        child: _buildCartPanel(inSheet: true),
+                      ),
+                    ),
+                    _scrollDownButton(_sheetAtBottom, _sheetScrollCtrl,
+                        bottom: AppSpacing.space12 +
+                            MediaQuery.paddingOf(sheetCtx).bottom),
+                  ],
                 ),
               ),
             );
@@ -4062,23 +4117,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
       return Container(
         color: AppColors.surface,
-        child: LayoutBuilder(builder: (context, panel) {
-          // The footer is a non-flex child, so the Column gives it its full
-          // natural height and hands only the leftover to the item list. On a
-          // short window (or once Customer details expands) that natural height
-          // can exceed the panel and the Column overflows — the yellow stripe
-          // under the Settle button. Cap it here, where the panel's real height
-          // is known: a non-flex child of a Column is laid out with an UNBOUNDED
-          // main axis, so a LayoutBuilder inside _wrapFooter would only ever see
-          // infinity. Past the cap the footer scrolls internally instead of
-          // painting out of bounds, and the list keeps its share.
-          final footerMax = !inSheet && panel.hasBoundedHeight
-              ? panel.maxHeight * 0.75
-              : double.infinity;
-          return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: inSheet ? MainAxisSize.min : MainAxisSize.max,
-          children: [
+        child: _cartPanelLayout(
+          inSheet: inSheet,
+          empty: cart.isEmpty,
+          header: [
             if (inSheet)
               Center(
                 child: Container(
@@ -4186,45 +4228,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
-            // Scrollable cart items — takes all available space
-            if (cart.isEmpty)
-              // Empty cart: a compact icon + message. In the wide layout it
-              // takes the leftover space via Expanded so the pinned footer sits
-              // at the BOTTOM of the panel, in the same place it occupies once
-              // items are added — the controls must not jump as the first item
-              // goes in.
-              //
-              // Center is load-bearing, not decoration: Expanded forces a tight
-              // height on its child, and the placeholder's own height is fixed,
-              // so on a short window it painted past the bounds (the yellow
-              // "BOTTOM OVERFLOWED" stripe). Center relaxes that to a loose
-              // constraint and the scroll view inside absorbs the rest.
-              //
-              // The sheet is min-sized and scrolls as a whole, so no Expanded.
-              (inSheet
-                  ? _emptyCartPlaceholder(l10n)
-                  : Expanded(
-                      child: Center(child: _emptyCartPlaceholder(l10n))))
-            else if (inSheet)
-              // In bottom sheet: not constrained, just list
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: cart.map((e) => _buildCartRow(e)).toList(),
-              )
-            else
-              // In wide layout: scrollable list that takes remaining space.
-              // This is the ONLY scrollable region of the panel.
-              Expanded(
-                child: ListView(
+          ],
+          items: cart.isEmpty
+              ? _emptyCartPlaceholder(l10n)
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: cart.map((e) => _buildCartRow(e)).toList(),
                 ),
-              ),
-
-            // Footer (payment, customer, discount, totals, actions) — pinned to
-            // the bottom; scrolls only once it outgrows [footerMax].
-            _wrapFooter(
-              footerMax,
-              [
+          // Footer (payment, customer, discount, totals, actions).
+          footer: [
             const Divider(height: 1),
 
             // Inline credit validation message — shown inside the card (no
@@ -4984,73 +4996,209 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 ],
               ),
             ),
-              ],
-            ),
           ],
-          );
-        }),
+        ),
       );
     });
   }
 
-  /// The cart footer — payment mode, customer fields, discounts, totals and the
-  /// action buttons.
+  /// Lays out the cart panel: [header] on top, then the [items], then the
+  /// [footer] (payment, customer, discounts, totals, actions).
   ///
-  /// It is PINNED to the bottom and, up to [maxHeight], does not scroll: only
-  /// the items list above it scrolls. Previously the footer was a loose
-  /// [Flexible] wrapped in a [SingleChildScrollView], so it competed with the
-  /// item list for vertical space — a long order pushed Payment Mode and the
-  /// Save/WhatsApp buttons into their own scroll region, and the cashier had to
-  /// scroll the panel to reach them. Keeping it fixed means the controls are
-  /// always in the same place.
+  /// In the bottom sheet everything is min-sized; the sheet scrolls as a whole.
   ///
-  /// Fixed height alone overflowed, though: as a non-flex child the footer asks
-  /// for its full natural height, and on a short window (or with Customer
-  /// details expanded) that is more than the panel has. [maxHeight] bounds it,
-  /// so the rare too-tall case scrolls inside the footer rather than painting
-  /// past the bottom edge — the controls stay reachable either way.
-  ///
-  /// [maxHeight] is [double.infinity] in the bottom sheet: there the whole sheet
-  /// scrolls and the surrounding column is min-sized, so the children render
-  /// inline exactly as before.
-  Widget _wrapFooter(double maxHeight, List<Widget> children) {
-    final column = Column(
+  /// In the wide layout the header stays put and items + footer scroll TOGETHER,
+  /// like the sheet. It used to be the items list alone that scrolled, with the
+  /// footer pinned and allowed up to 75% of the panel — so a few lines (or one
+  /// expanded to edit its price) were squeezed into a sliver. Now a short order
+  /// still keeps the footer at the bottom (the column is floored at the
+  /// viewport height and spaceBetween hands the slack to the gap above it), and
+  /// a long one simply scrolls down to Settle.
+  Widget _cartPanelLayout({
+    required bool inSheet,
+    required bool empty,
+    required List<Widget> header,
+    required Widget items,
+    required List<Widget> footer,
+  }) {
+    final footerColumn = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: children,
+      children: footer,
     );
-    if (maxHeight == double.infinity) return column;
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      child: SingleChildScrollView(child: column),
+    if (inSheet) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [...header, items, footerColumn],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ...header,
+        Expanded(
+          child: Stack(
+            children: [
+              LayoutBuilder(
+                builder: (context, box) => NotificationListener<Notification>(
+                  onNotification: _trackCartScroll,
+                  child: SingleChildScrollView(
+                    controller: _cartScrollCtrl,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: box.maxHeight),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          // Empty cart: a leading blank makes spaceBetween
+                          // centre the placeholder in the space above the
+                          // footer, so the footer sits where it will be once
+                          // the first item goes in.
+                          if (empty) const SizedBox.shrink(),
+                          items,
+                          footerColumn,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              _scrollDownButton(_cartAtBottom, _cartScrollCtrl),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
+  /// "Scroll down" — shown only while there is more below, so a long order's
+  /// Settle button is one tap away. Used by the side panel and the phone
+  /// cart sheet, each with its own scroll view and [atBottom] flag.
+  Widget _scrollDownButton(
+      ValueNotifier<bool> atBottom, ScrollController ctrl,
+      {double bottom = AppSpacing.space12}) {
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: bottom,
+      child: ValueListenableBuilder<bool>(
+        valueListenable: atBottom,
+        builder: (context, isAtBottom, _) => IgnorePointer(
+          ignoring: isAtBottom,
+          child: AnimatedOpacity(
+            opacity: isAtBottom ? 0 : 1,
+            duration: const Duration(milliseconds: 200),
+            child: Center(
+              child: FloatingActionButton.small(
+                heroTag: null,
+                tooltip: context.l10n.billingScrollDown,
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                onPressed: () => ctrl.animateTo(
+                  ctrl.position.maxScrollExtent,
+                  duration: const Duration(milliseconds: 350),
+                  curve: Curves.easeOutCubic,
+                ),
+                child: const Icon(Icons.keyboard_double_arrow_down),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Keeps [_cartAtBottom] current. Metrics notifications fire when the content
+  /// grows or shrinks (an item added, Customer details opened), not only on
+  /// scroll, so the button tracks both. depth 0 = the panel's own scroll view,
+  /// not a text field scrolling inside it.
+  ///
+  /// "At bottom" is generous on purpose: the button only matters once the
+  /// Settle row is out of view. Below that row sits just the printer status
+  /// line (~40px) and the row itself is ~85px, so under ~120px of remaining
+  /// scroll Settle is still on screen — showing the button there only covered
+  /// it.
+  bool _trackCartScroll(Notification n, [ValueNotifier<bool>? into]) {
+    final ScrollMetrics? m = n is ScrollNotification
+        ? n.metrics
+        : n is ScrollMetricsNotification
+            ? n.metrics
+            : null;
+    if (m != null &&
+        m.axis == Axis.vertical &&
+        (n as ViewportNotificationMixin).depth == 0) {
+      (into ?? _cartAtBottom).value = m.extentAfter < 120;
+    }
+    return false;
+  }
+
+  void _toggleCartRow(String key) {
+    setState(() => _expandedCartKey = _expandedCartKey == key ? null : key);
+    _sheetSetState?.call(() {});
+  }
+
   Widget _buildCartRow(CartEntry entry) {
-    return Padding(
+    final gstEnabled = ref.read(gstEnabledProvider);
+    // Repricing is a cashier/owner call, like the bill discount; the server
+    // ignores a waiter's overrides anyway (applyLineOverrides in bills.js).
+    final canEdit = ref.read(userRoleProvider) != 'server';
+    final expanded = canEdit && _expandedCartKey == entry.key;
+    final lineNet = entry.lineNet(gstEnabled);
+    // The same line at catalog price, undiscounted — struck through beside the
+    // edited figure so the cashier sees what changed.
+    final catalogNet =
+        CartEntry(item: entry.item, variant: entry.variant, quantity: entry.quantity)
+            .lineNet(gstEnabled);
+    final edited = (catalogNet - lineNet).abs() >= 0.005;
+    final amountStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w600,
+        );
+    final row = Padding(
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.space16, vertical: 6.0),
       child: Row(
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(entry.displayName,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
+            child: InkWell(
+              onTap: canEdit ? () => _toggleCartRow(entry.key) : null,
+              borderRadius: BorderRadius.circular(AppRadius.small),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(entry.billingDisplayName(ref.watch(showItemNoProvider)),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w500,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  Row(
+                    children: [
+                      if (edited) ...[
+                        Text(
+                          '₹${catalogNet.toStringAsFixed(2)}',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: AppColors.textSecondary,
+                                decoration: TextDecoration.lineThrough,
+                              ),
                         ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                Text(
-                  // Net (pre-tax) line amount — tax is shown in the totals below.
-                  '₹${entry.lineNet(ref.read(gstEnabledProvider)).toStringAsFixed(2)}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ],
+                        const SizedBox(width: 6),
+                      ],
+                      // Net (pre-tax) line amount — tax is shown in the totals below.
+                      Text('₹${lineNet.toStringAsFixed(2)}', style: amountStyle),
+                      if (canEdit)
+                        AnimatedRotation(
+                          turns: expanded ? 0.5 : 0,
+                          duration: const Duration(milliseconds: 420),
+                          curve: Curves.easeInOutCubic,
+                          child: const Icon(Icons.expand_more,
+                              size: 16, color: AppColors.textSecondary),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
           Container(
@@ -5087,6 +5235,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ],
       ),
     );
+    if (!canEdit) return row;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        row,
+        // Slides + fades open AND closed. A bare AnimatedSize only animated the
+        // gap: the editor popped in at full strength and vanished instantly on
+        // collapse. AnimatedSwitcher keeps the outgoing editor alive while it
+        // shrinks away, anchored to the top so it unrolls from the row above.
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 420),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, anim) => SizeTransition(
+            sizeFactor: anim,
+            axisAlignment: -1,
+            child: FadeTransition(opacity: anim, child: child),
+          ),
+          layoutBuilder: (current, previous) => Stack(
+            alignment: Alignment.topCenter,
+            children: [...previous, if (current != null) current],
+          ),
+          child: expanded
+              ? _CartLineEditor(
+                  key: ValueKey('edit-${entry.key}'),
+                  entry: entry,
+                  gstEnabled: gstEnabled,
+                  onChanged: ({double? price, double? pct, double amt = 0}) =>
+                      ref.read(cartProvider.notifier).setLineOverride(
+                          entry.key,
+                          price: price,
+                          pct: pct,
+                          amt: amt),
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
   }
 
   Widget _qtyButton(IconData icon, VoidCallback onTap) {
@@ -5100,6 +5287,147 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+}
+
+// ---------------------------------------------------------------------------
+// Price | Disc % | Disc ₹ editor under an order-card row — this bill's price
+// for the line and a line discount. Every keystroke goes straight to the cart
+// (so the totals follow live, like the bill-level discount pair) and the
+// discount field NOT being typed in is re-derived from the updated entry.
+// ---------------------------------------------------------------------------
+class _CartLineEditor extends StatefulWidget {
+  final CartEntry entry;
+  final bool gstEnabled;
+  final void Function({double? price, double? pct, double amt}) onChanged;
+
+  const _CartLineEditor({
+    super.key,
+    required this.entry,
+    required this.gstEnabled,
+    required this.onChanged,
+  });
+
+  @override
+  State<_CartLineEditor> createState() => _CartLineEditorState();
+}
+
+class _CartLineEditorState extends State<_CartLineEditor> {
+  late final TextEditingController _price;
+  late final TextEditingController _pct;
+  late final TextEditingController _amt;
+  // Which discount field the cashier typed last: "10%" scales with quantity,
+  // "₹50" stays ₹50 (same rule as the bill-level pair, _syncDiscount).
+  late bool _byPct;
+  bool _syncing = false;
+
+  static String _fmt(double v) =>
+      v % 1 == 0 ? v.toInt().toString() : v.toStringAsFixed(2);
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.entry;
+    _byPct = e.discountPct != null;
+    _price = TextEditingController(text: _fmt(e.effectivePrice));
+    _pct = TextEditingController(
+        text: e.discountPct != null ? _fmt(e.discountPct!) : '');
+    // A ₹ discount is stored as typed — restore it, or reopening the editor
+    // showed only the derived % with the ₹ field blank.
+    _amt = TextEditingController(
+        text: !_byPct && e.discountAmt > 0 ? _fmt(e.discountAmt) : '');
+    _syncDerived();
+    _price.addListener(_push);
+    _pct.addListener(() {
+      if (_syncing) return;
+      _byPct = true;
+      _push();
+    });
+    _amt.addListener(() {
+      if (_syncing) return;
+      _byPct = false;
+      _push();
+    });
+  }
+
+  @override
+  void didUpdateWidget(_CartLineEditor old) {
+    super.didUpdateWidget(old);
+    // Quantity or price moved → the derived discount field follows.
+    _syncDerived();
+  }
+
+  /// Refill the discount field the cashier is NOT typing in from the entry.
+  void _syncDerived() {
+    final e = widget.entry;
+    final disc = e.lineDiscount(widget.gstEnabled);
+    _syncing = true;
+    if (_byPct) {
+      final t = disc > 0 ? disc.toStringAsFixed(2) : '';
+      if (_amt.text != t) _amt.text = t;
+    } else {
+      final base = e.netPrice(widget.gstEnabled) * e.quantity;
+      final pct = base > 0 && disc > 0 ? disc / base * 100 : 0.0;
+      final t = pct > 0 ? pct.toStringAsFixed(2) : '';
+      if (_pct.text != t) _pct.text = t;
+    }
+    _syncing = false;
+  }
+
+  void _push() {
+    if (_syncing) return;
+    final e = widget.entry;
+    final typed = double.tryParse(_price.text.trim());
+    // Blank, or the catalog price itself → no override.
+    final price = typed == null || (typed - e.catalogPrice).abs() < 0.005
+        ? null
+        : typed;
+    final pct = _byPct ? double.tryParse(_pct.text.trim()) : null;
+    widget.onChanged(
+      price: price,
+      pct: pct != null && pct > 0 ? pct : null,
+      amt: _byPct ? 0 : (double.tryParse(_amt.text.trim()) ?? 0),
+    );
+  }
+
+  @override
+  void dispose() {
+    _price.dispose();
+    _pct.dispose();
+    _amt.dispose();
+    super.dispose();
+  }
+
+  Widget _field(String label, TextEditingController c) => Expanded(
+        child: AppTextField(
+          label: label,
+          controller: c,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+          ],
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Padding(
+      // Top room for the floated label: at 2px it rose above the editor's
+      // bounds and was clipped.
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.space16, AppSpacing.space8, AppSpacing.space16,
+          AppSpacing.space8),
+      child: Row(
+        children: [
+          _field(l10n.cartItemPrice, _price),
+          const SizedBox(width: AppSpacing.space8),
+          _field(l10n.cartItemDiscPct, _pct),
+          const SizedBox(width: AppSpacing.space8),
+          _field(l10n.cartItemDiscAmt, _amt),
+        ],
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -5173,23 +5501,28 @@ class _CartQtyFieldState extends State<_CartQtyField> {
     return SizedBox(
       width: widget.allowDecimal ? 48 : 36,
       height: 30,
-      child: TextField(
-        controller: _ctrl,
-        focusNode: _focus,
-        textAlign: TextAlign.center,
-        keyboardType: widget.allowDecimal
-            ? const TextInputType.numberWithOptions(decimal: true)
-            : TextInputType.number,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-        decoration: const InputDecoration(
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(vertical: 4),
-          border: InputBorder.none,
+      // Center is load-bearing: a single-line field lays out at its natural
+      // height (~20px) at the TOP of a taller box, and textAlignVertical can't
+      // move it — so the digit and the theme's pill sat above the − / + icons.
+      child: Center(
+        child: TextField(
+          controller: _ctrl,
+          focusNode: _focus,
+          textAlign: TextAlign.center,
+          keyboardType: widget.allowDecimal
+              ? const TextInputType.numberWithOptions(decimal: true)
+              : TextInputType.number,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+          decoration: const InputDecoration(
+            isDense: true,
+            contentPadding: EdgeInsets.zero,
+            border: InputBorder.none,
+          ),
+          onSubmitted: (_) => _commit(),
+          onTapOutside: (_) => _focus.unfocus(),
         ),
-        onSubmitted: (_) => _commit(),
-        onTapOutside: (_) => _focus.unfocus(),
       ),
     );
   }
@@ -6193,7 +6526,7 @@ class _PrinterStatusLine extends ConsumerWidget {
 // Single row in the Excel table — animated highlight when in cart
 // ---------------------------------------------------------------------------
 
-class _ExcelItemRow extends StatefulWidget {
+class _ExcelItemRow extends ConsumerStatefulWidget {
   /// How far a size row's accent rail is inset from the row's left edge, so a
   /// size reads as sitting *under* its parent dish rather than beside it.
   static const double _railIndent = 16;
@@ -6235,7 +6568,8 @@ class _ExcelItemRow extends StatefulWidget {
   // item so it gets the inline stepper and swipe gestures.
   bool get isVariantRow => variant != null;
   bool get treatAsVariantItem => variant == null && item.hasVariants;
-  String get rowName => variant != null ? variant!.label : item.name;
+  String rowName(bool showItemNo) =>
+      variant != null ? variant!.label : item.billingName(showItemNo);
   /// Null for a variant PARENT row: the item owns no price and its sizes differ,
   /// so no single figure is correct — [rowPriceLabel] shows their range instead.
   double? get rowPrice => variant?.price ?? item.price;
@@ -6252,10 +6586,10 @@ class _ExcelItemRow extends StatefulWidget {
   }
 
   @override
-  State<_ExcelItemRow> createState() => _ExcelItemRowState();
+  ConsumerState<_ExcelItemRow> createState() => _ExcelItemRowState();
 }
 
-class _ExcelItemRowState extends State<_ExcelItemRow>
+class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
     with TickerProviderStateMixin {
   late final AnimationController _swipeCtrl;
   late final TextEditingController _qtyTextCtrl;
@@ -6459,7 +6793,7 @@ class _ExcelItemRowState extends State<_ExcelItemRow>
                     // Item name (or size label for a variant row)
                     Expanded(
                       child: Text(
-                        widget.rowName,
+                        widget.rowName(ref.watch(showItemNoProvider)),
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight:

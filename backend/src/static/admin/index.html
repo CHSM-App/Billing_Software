@@ -59,6 +59,9 @@
   tbody td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
   tbody tr:last-child td{border-bottom:none}
   tbody tr:hover{background:var(--panel2)}
+  /* Owner filled the account-deletion form — the whole row goes red. */
+  tbody tr.deleting{background:rgba(239,68,68,.16);box-shadow:inset 3px 0 0 #ef4444}
+  tbody tr.deleting:hover{background:rgba(239,68,68,.24)}
   .biz-name{font-weight:600;white-space:normal;min-width:150px}
   .biz-sub{color:var(--muted);font-size:12px}
   .chip{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:var(--chip)}
@@ -390,7 +393,9 @@
     var d = new Date(s); if(isNaN(d)) return null;
     return Math.ceil((d - new Date())/(24*60*60*1000));
   }
-  function esc(v){ return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  // Quotes too: some values (e.g. a deletion reason from the public form) go
+  // inside attributes.
+  function esc(v){ return (v==null?'':String(v)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
   function statusChip(sub){
     if(!sub) return '<span class="chip gray">none</span>';
@@ -439,9 +444,14 @@
       var staff = sub ? (b.staff_count+' / '+(sub.max_staff==null?'∞':sub.max_staff)) : b.staff_count;
       var wa = '<span class="chip '+(b.whatsapp_mode==='api'?'blue':'gray')+'">'+esc(b.whatsapp_mode)+'</span>';
       var ver = b.is_verified ? '<span class="chip green">yes</span>' : '<span class="chip red">no</span>';
-      return '<tr>'
+      var del = b.deletion_request;
+      // Reason (if they gave one) on hover; requested date in the tooltip too.
+      var delChip = del ? '<div><span class="chip red" title="'
+        + esc('Requested '+fmtDate(del.requested_at)+(del.reason ? ' — '+del.reason : ''))+'">'
+        + 'Deletion requested &middot; deletes '+fmtDate(del.scheduled_for)+'</span></div>' : '';
+      return '<tr'+(del ? ' class="deleting"' : '')+'>'
         + '<td class="muted">'+(i+1)+'</td>'
-        + '<td><div class="biz-name">'+esc(b.name)+'</div><div class="biz-sub">'+esc(b.phone)+' &middot; '+esc(typeLabel(b.business_type))+'</div></td>'
+        + '<td><div class="biz-name">'+esc(b.name)+'</div><div class="biz-sub">'+esc(b.phone)+' &middot; '+esc(typeLabel(b.business_type))+'</div>'+delChip+'</td>'
         + '<td>'+esc(b.owner_name||'—')+'<div class="biz-sub">'+esc(b.owner_phone||'')+'</div></td>'
         + '<td>'+fmtDate(b.created_at)+'</td>'
         + '<td>'+fmtLastActive(b.last_active_at)+'</td>'

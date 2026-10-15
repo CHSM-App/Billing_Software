@@ -301,6 +301,46 @@ describe('POST /api/bills', () => {
     expect(res.status).toBe(201);
   });
 
+  // Order-card price edit + item discount: an owner/cashier's override is
+  // stored as the DISCOUNTED net rate (so reports follow it) with the ₹ off kept
+  // in discount_amount; a waiter's override is ignored.
+  test.each([
+    // role,    unit_price, discount, line_total
+    ['owner',   18, 8, 36],   // (2 × 22 − 8) / 2
+    ['cashier', 18, 8, 36],
+    ['server',  50, 0, 100],  // catalog price, override ignored
+  ])('item override as %s', async (role, unit, disc, lineTotal) => {
+    const inputs = {};
+    const txQueryMock = jest.fn()
+      .mockResolvedValueOnce({ recordset: [{ inventory_enabled: false }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ cnt: 0 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID }], rowsAffected: [1] })
+      .mockResolvedValue({ recordset: [], rowsAffected: [1] });
+    mockTransaction.request.mockImplementation(() => {
+      const r = { input: jest.fn((k, _t, v) => { inputs[k] = v; return r; }), query: txQueryMock };
+      return r;
+    });
+    // Every pool query (fetchBill and friends) just returns a fresh bill row.
+    mockRequest.query.mockImplementation(() =>
+      Promise.resolve({ recordset: [{ ...sampleBill }], rowsAffected: [1] }));
+
+    const res = await request(app)
+      .post('/api/bills')
+      .set(authHeader({ role }))
+      .send({
+        items: [{ item_id: ITEM_ID, quantity: 2, price_override: 22, discount_amount: 8 }],
+        payment_mode: 'cash',
+        status: 'draft',
+      });
+    expect(res.status).toBe(201);
+    expect(inputs.unit_price0).toBeCloseTo(unit, 4);
+    expect(inputs.discount_amount0).toBe(disc);
+    expect(inputs.line_total0).toBe(lineTotal);
+  });
+
   test('rejects a variant item billed without a size', async () => {
     // Regression: Chicken 65 has sizes (half 180 / Full 280) but a base price of
     // 230. Scanning its ITEM-level barcode used to add it with no variant_id,
@@ -588,6 +628,20 @@ describe('PUT /api/bills/:id/finalize', () => {
       .put(`/api/bills/${BILL_ID}/finalize`)
       .set(authHeader());
     expect(res.status).toBe(200);
+  });
+
+  test('records the caller as the biller (finalized_by_user_id)', async () => {
+    // The waiter who held the order is the creator; whoever settles it is
+    // "Billed by" on the receipt and in History.
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID, table_id: null, bill_number: 'INV-0001' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+
+    await request(app)
+      .put(`/api/bills/${BILL_ID}/finalize`)
+      .set(authHeader());
+    expect(mockRequest.inputs.finalized_by_user_id).toBe(USER_ID);
   });
 
   test('returns 404 when draft bill not found', async () => {

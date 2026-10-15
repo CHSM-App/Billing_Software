@@ -157,10 +157,17 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
            WHERE bl.business_id = b.id
              AND bl.status = 'finalized') AS bill_count,
         (SELECT COUNT(*) FROM items it
-           WHERE it.business_id = b.id AND it.is_active = 1) AS item_count
+           WHERE it.business_id = b.id AND it.is_active = 1) AS item_count,
+        adr.created_at    AS deletion_requested_at,
+        adr.scheduled_for AS deletion_scheduled_for,
+        adr.reason        AS deletion_reason
       FROM businesses b
       LEFT JOIN users u ON u.business_id = b.id AND u.role = 'owner'
       LEFT JOIN subscriptions s ON s.business_id = b.id
+      -- The owner filled the account-deletion form (landing page). At most one
+      -- pending row per business (UX_adr_business_pending), so no fan-out.
+      LEFT JOIN account_deletion_requests adr
+        ON adr.business_id = b.id AND adr.status = 'pending'
       ORDER BY b.created_at DESC
     `);
 
@@ -191,6 +198,11 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
       staff_count:       r.staff_count,
       bill_count:        r.bill_count,
       item_count:        r.item_count,
+      deletion_request: r.deletion_requested_at == null ? null : {
+        requested_at:  r.deletion_requested_at,
+        scheduled_for: r.deletion_scheduled_for,
+        reason:        r.deletion_reason ?? null,
+      },
     }));
 
     return res.json({ businesses });

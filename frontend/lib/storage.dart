@@ -137,6 +137,7 @@ class AuthStorage {
   static const _keyHasBarcodeScanner = 'has_barcode_scanner';
   static const _keyGstEnabled       = 'gst_enabled';
   static const _keyRoundOffEnabled  = 'round_off_enabled';
+  static const _keyShowItemNo       = 'show_item_no';
   // Online store master switch. Cached in the session so the shell knows
   // whether to poll the online-order queue at all, without a profile fetch
   // (which is owner-only — a cashier could never answer the question).
@@ -195,6 +196,7 @@ class AuthStorage {
     bool hasBarcodeScanner = false,
     bool gstEnabled = false,
     bool roundOffEnabled = false,
+    bool showItemNo = false,
     bool storeEnabled = false,
     bool customersEnabled = true,
   }) async {
@@ -217,6 +219,7 @@ class AuthStorage {
       prefs.setBool(_keyHasBarcodeScanner, hasBarcodeScanner),
       prefs.setBool(_keyGstEnabled, gstEnabled),
       prefs.setBool(_keyRoundOffEnabled, roundOffEnabled),
+      prefs.setBool(_keyShowItemNo, showItemNo),
       prefs.setBool(_keyStoreEnabled, storeEnabled),
       prefs.setBool(_keyCustomersEnabled, customersEnabled),
     ]);
@@ -247,6 +250,11 @@ class AuthStorage {
   Future<void> updateRoundOffEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyRoundOffEnabled, enabled);
+  }
+
+  Future<void> updateShowItemNo(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowItemNo, enabled);
   }
 
   Future<void> updateStoreEnabled(bool enabled) async {
@@ -513,6 +521,7 @@ class AuthStorage {
       'has_barcode_scanner': prefs.getBool(_keyHasBarcodeScanner) ?? false,
       'gst_enabled'      : prefs.getBool(_keyGstEnabled) ?? false,
       'round_off_enabled': prefs.getBool(_keyRoundOffEnabled) ?? false,
+      'show_item_no'     : prefs.getBool(_keyShowItemNo) ?? false,
       'store_enabled'    : prefs.getBool(_keyStoreEnabled) ?? false,
       'customers_enabled': prefs.getBool(_keyCustomersEnabled) ?? true,
     };
@@ -567,6 +576,7 @@ Future<void> saveSession({
   bool hasBarcodeScanner = false,
   bool gstEnabled = false,
   bool roundOffEnabled = false,
+  bool showItemNo = false,
   bool storeEnabled = false,
   bool customersEnabled = true,
 }) => AuthStorage.instance.saveSession(
@@ -582,6 +592,7 @@ Future<void> saveSession({
       hasBarcodeScanner: hasBarcodeScanner,
       gstEnabled: gstEnabled,
       roundOffEnabled: roundOffEnabled,
+      showItemNo: showItemNo,
       storeEnabled: storeEnabled,
       customersEnabled: customersEnabled,
     );
@@ -628,6 +639,7 @@ Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInv
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);
 Future<void>    updateRoundOffEnabled(bool e)  => AuthStorage.instance.updateRoundOffEnabled(e);
+Future<void>    updateShowItemNo(bool e)       => AuthStorage.instance.updateShowItemNo(e);
 Future<void>    updateStoreEnabled(bool e)     => AuthStorage.instance.updateStoreEnabled(e);
 Future<void>    updateCustomersEnabled(bool e) => AuthStorage.instance.updateCustomersEnabled(e);
 Future<void>    saveGstProfile({String? gstNumber, String? businessAddress, String? businessPhone, String? defaultSacCode, String? fssaiNumber}) =>

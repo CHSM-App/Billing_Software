@@ -482,6 +482,12 @@ abstract class AppLocalizations {
   /// **'No open orders match your search.'**
   String get openOrdersNoMatches;
 
+  /// No description provided for @openOrdersOpenBill.
+  ///
+  /// In en, this message translates to:
+  /// **'Open bill'**
+  String get openOrdersOpenBill;
+
   /// No description provided for @customersTitle.
   ///
   /// In en, this message translates to:
@@ -1129,6 +1135,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Round the final payable to the nearest rupee and show the adjustment on the bill'**
   String get settingsRoundOffSubtitle;
+
+  /// No description provided for @settingsShowItemNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Show item no on billing'**
+  String get settingsShowItemNo;
+
+  /// No description provided for @settingsShowItemNoSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Items with an Item No show as (101) Item name on the billing page'**
+  String get settingsShowItemNoSubtitle;
 
   /// No description provided for @settingsManageStaff.
   ///
@@ -1874,6 +1892,12 @@ abstract class AppLocalizations {
   /// **'Ph:'**
   String get receiptCustomerPhone;
 
+  /// No description provided for @receiptBilledBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Cashier:'**
+  String get receiptBilledBy;
+
   /// No description provided for @receiptColItem.
   ///
   /// In en, this message translates to:
@@ -2192,6 +2216,12 @@ abstract class AppLocalizations {
   /// **'Preview receipt'**
   String get billingPreviewReceipt;
 
+  /// No description provided for @billingScrollDown.
+  ///
+  /// In en, this message translates to:
+  /// **'Scroll down'**
+  String get billingScrollDown;
+
   /// No description provided for @billingPrinterReady.
   ///
   /// In en, this message translates to:
@@ -2497,6 +2527,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Discount ₹'**
   String get billingDiscountRupees;
+
+  /// No description provided for @cartItemPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get cartItemPrice;
+
+  /// No description provided for @cartItemDiscPct.
+  ///
+  /// In en, this message translates to:
+  /// **'Disc %'**
+  String get cartItemDiscPct;
+
+  /// No description provided for @cartItemDiscAmt.
+  ///
+  /// In en, this message translates to:
+  /// **'Disc ₹'**
+  String get cartItemDiscAmt;
 
   /// No description provided for @billingTotalAmount.
   ///
@@ -3123,6 +3171,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'e.g. 9963 for restaurant service'**
   String get itemsFieldHsnHint;
+
+  /// No description provided for @itemsFieldItemNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Item No (optional)'**
+  String get itemsFieldItemNo;
+
+  /// No description provided for @itemsFieldItemNoHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. 101 — search billing by this number'**
+  String get itemsFieldItemNoHint;
 
   /// No description provided for @itemsFieldBarcode.
   ///
@@ -3795,6 +3855,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count, plural, =1{1 item} other{{count} items}}'**
   String historyItemCount(int count);
+
+  /// No description provided for @historyBilledBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Billed by {name}'**
+  String historyBilledBy(String name);
 
   /// No description provided for @historyBillMeta.
   ///
