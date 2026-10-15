@@ -180,6 +180,26 @@ describe('POST /api/login', () => {
     expect(res.body.user.role).toBe('owner');
   });
 
+  test.each([
+    [1, true],
+    [0, false],
+    [undefined, false], // DB before migration 056
+  ])('session carries show_item_no (%p → %p)', async (col, expected) => {
+    const userRow = { ...(await makeUserRow()), show_item_no: col };
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [userRow], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
+
+    const res = await request(app)
+      .post('/api/login')
+      .send({ phone: OWNER_PHONE, pin: VALID_PIN });
+
+    expect(res.status).toBe(200);
+    expect(res.body.business.show_item_no).toBe(expected);
+    expect(mockRequest.query.mock.calls[0][0]).toMatch(/b\.show_item_no/);
+  });
+
   test('returns 400 when phone or pin is missing', async () => {
     const res = await request(app).post('/api/login').send({ phone: OWNER_PHONE });
     expect(res.status).toBe(400);

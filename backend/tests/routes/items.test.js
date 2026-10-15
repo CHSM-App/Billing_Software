@@ -71,6 +71,19 @@ describe('GET /api/items', () => {
     expect(res.body[0].name).toBe('Rice');
   });
 
+  test('search matches the Item No as well as the name, and returns it', async () => {
+    mockRequest.recordset = [{ ...sampleItem, item_no: '101' }];
+    const res = await request(app)
+      .get('/api/items?search=101')
+      .set(authHeader());
+    expect(res.status).toBe(200);
+    expect(res.body[0].item_no).toBe('101');
+    const sqlText = mockRequest.query.mock.calls[0][0];
+    expect(sqlText).toMatch(/\(name LIKE @search OR item_no LIKE @search\)/);
+    expect(sqlText).toMatch(/SELECT id, business_id, name, barcode, item_no,/);
+    expect(mockRequest.inputs.search).toBe('%101%');
+  });
+
   test('returns empty array when no items', async () => {
     mockRequest.recordset = [];
     const res = await request(app)
@@ -702,6 +715,103 @@ describe('duplicate item names', () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/101.*Masala Dosa/);
     expect(mockRequest.inputs.item_no).toBe('101');
+  });
+
+  test('POST saves a trimmed Item No when it is free', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // name free
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // number free
+      .mockResolvedValueOnce({ recordset: [{ ...sampleItem, item_no: '101' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50, item_no: ' 101 ' });
+    expect(res.status).toBe(201);
+    expect(res.body.item_no).toBe('101');
+    expect(mockRequest.inputs.item_no).toBe('101');
+    const insertSql = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /INSERT INTO items/.test(s));
+    expect(insertSql).toMatch(/@item_no/);
+  });
+
+  test.each([undefined, '', '   '])(
+    'POST with Item No %p skips the number check and stores NULL', async (itemNo) => {
+      mockRequest.query
+        .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // name free
+        .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+        .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+      const res = await request(app)
+        .post('/api/items')
+        .set(authHeader({ role: 'owner' }))
+        .send({ name: 'Rice', price: 50, item_no: itemNo });
+      expect(res.status).toBe(201);
+      expect(mockRequest.inputs.item_no).toBeNull();
+      const sqls = mockRequest.query.mock.calls.map((c) => c[0]);
+      expect(sqls.some((s) => /LOWER\(@item_no\)/.test(s))).toBe(false);
+    });
+
+  test('POST rejects an Item No longer than 30 characters', async () => {
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50, item_no: '1'.repeat(31) });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Item No/);
+  });
+
+  test('the Item No check is case-insensitive and active-only', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ id: 'x', name: 'Masala Dosa' }], rowsAffected: [1] });
+    await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Idli', price: 40, item_no: 'a1' });
+    const check = mockRequest.query.mock.calls[1][0];
+    expect(check).toMatch(/is_active = 1/);
+    expect(check).toMatch(/LOWER\(LTRIM\(RTRIM\(item_no\)\)\) = LOWER\(@item_no\)/);
+  });
+
+  test('PUT rejects taking another item\'s Item No, excluding itself', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] }) // ownership
+      .mockResolvedValueOnce({ recordset: [{ id: 'other-item-id', name: 'Masala Dosa' }], rowsAffected: [1] });
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ item_no: '101' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('Item No "101" is already used by "Masala Dosa"');
+    expect(mockRequest.inputs.exclude_id).toBe(ITEM_ID);
+  });
+
+  test('PUT keeping its own Item No is fine', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // excludes itself
+      .mockResolvedValueOnce({ recordset: [{ ...sampleItem, item_no: '101' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ item_no: '101' });
+    expect(res.status).toBe(200);
+    expect(res.body.item_no).toBe('101');
+  });
+
+  test('PUT with an empty Item No clears it (and counts as a field to update)', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app)
+      .put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' }))
+      .send({ item_no: '' });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.item_no).toBeNull();
+    const updateSql = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /UPDATE items/.test(s));
+    expect(updateSql).toMatch(/item_no = @item_no/);
   });
 
   test('a soft-deleted item does not reserve its name', async () => {

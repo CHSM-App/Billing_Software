@@ -1,3 +1,4 @@
+import 'package:Vittam/models/cart_entry.dart';
 import 'package:Vittam/models/models.dart';
 import 'package:Vittam/providers/cart_provider.dart';
 import 'package:Vittam/providers/session_provider.dart';
@@ -761,6 +762,221 @@ void main() {
       final container = makeContainer(inventoryEnabled: true);
       expect(
           container.read(cartProvider.notifier).stockShortfall('nope'), isNull);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Order-card price edit + line discount
+  // ─────────────────────────────────────────────────────────────
+  group('CartNotifier.setLineOverride', () {
+    ProviderContainer withRiceAndDal() {
+      final c = makeContainer(gstEnabled: false);
+      c.read(cartProvider.notifier)
+        ..addItem(makeItem())
+        ..addItem(makeItem(id: 'item-2', name: 'Dal', price: 30));
+      c.read(cartProvider.notifier).setQty('item-1', 2);
+      return c;
+    }
+
+    test('price + ₹ discount reprice one line and the cart totals', () {
+      final c = withRiceAndDal();
+      c.read(cartProvider.notifier).setLineOverride('item-1', price: 22, amt: 8);
+      final rice = c.read(cartProvider).first;
+      expect(rice.priceOverride, 22);
+      expect(rice.discountAmt, 8);
+      expect(rice.discountPct, isNull);
+      expect(rice.lineNet(false), 36);
+      // Dal untouched.
+      expect(c.read(cartProvider).last.priceOverride, isNull);
+      expect(c.read(cartSubtotalProvider), 36 + 30);
+      expect(c.read(cartTotalProvider), 66);
+    });
+
+    test('a % discount drops any ₹ amount', () {
+      final c = withRiceAndDal();
+      final n = c.read(cartProvider.notifier);
+      n.setLineOverride('item-1', amt: 8);
+      n.setLineOverride('item-1', pct: 10, amt: 8);
+      final rice = c.read(cartProvider).first;
+      expect(rice.discountPct, 10);
+      expect(rice.discountAmt, 0);
+      expect(rice.lineDiscount(false), 10); // 10% of 100
+    });
+
+    test('switching back to ₹ drops the %', () {
+      final c = withRiceAndDal();
+      final n = c.read(cartProvider.notifier);
+      n.setLineOverride('item-1', pct: 10);
+      n.setLineOverride('item-1', amt: 5);
+      final rice = c.read(cartProvider).first;
+      expect(rice.discountPct, isNull);
+      expect(rice.lineDiscount(false), 5);
+    });
+
+    test('no price and no discount resets the line to catalog', () {
+      final c = withRiceAndDal();
+      final n = c.read(cartProvider.notifier);
+      n.setLineOverride('item-1', price: 22, pct: 50);
+      n.setLineOverride('item-1');
+      final rice = c.read(cartProvider).first;
+      expect(rice.priceOverride, isNull);
+      expect(rice.discountPct, isNull);
+      expect(rice.discountAmt, 0);
+      expect(rice.overridePayload(false), isEmpty);
+      expect(rice.lineNet(false), 100);
+    });
+
+    test('targets one size of a sized item by its key', () {
+      final c = makeContainer(gstEnabled: false);
+      final half = makeVariant(id: 'v-half', label: 'Half', price: 180);
+      final full = makeVariant(id: 'v-full', label: 'Full', price: 280);
+      final item = makeItem(variants: [half, full]);
+      c.read(cartProvider.notifier)
+        ..addItem(item, variant: half)
+        ..addItem(item, variant: full);
+      c.read(cartProvider.notifier).setLineOverride('item-1:v-full', amt: 30);
+      final cart = c.read(cartProvider);
+      expect(cart.firstWhere((e) => e.key == 'item-1:v-half').discountAmt, 0);
+      expect(cart.firstWhere((e) => e.key == 'item-1:v-full').lineNet(false), 250);
+    });
+
+    test('quantity changes keep the override', () {
+      final c = withRiceAndDal();
+      final n = c.read(cartProvider.notifier);
+      n.setLineOverride('item-1', price: 40, pct: 10);
+      n.changeQty('item-1', 1);
+      final rice = c.read(cartProvider).first;
+      expect(rice.quantity, 3);
+      expect(rice.priceOverride, 40);
+      expect(rice.lineDiscount(false), 12); // 10% of 120
+    });
+  });
+
+  group('CartNotifier.loadFromBill — order-card overrides', () {
+    Bill billWith(List<BillItem> items) => Bill(
+          id: 'bill-1',
+          businessId: 'biz-1',
+          billNumber: 'INV-0001',
+          subtotal: 0,
+          taxAmount: 0,
+          total: 0,
+          paymentMode: 'cash',
+          status: 'draft',
+          createdByUserId: 'user-1',
+          createdAt: DateTime.now(),
+          items: items,
+        );
+    BillItem line(
+            {String itemId = 'item-1',
+            double qty = 2,
+            required double unit,
+            double disc = 0,
+            double? taxRate}) =>
+        BillItem(
+            id: 'bi-$itemId-$unit',
+            billId: 'bill-1',
+            itemId: itemId,
+            itemName: 'Rice',
+            quantity: qty,
+            unitPrice: unit,
+            taxRate: taxRate,
+            lineTotal: unit * qty,
+            discountAmount: disc);
+
+    test('a repriced, discounted line comes back as the cashier typed it', () {
+      // Stored: 2 × (22 − 8/2) = 18/unit, discount 8.
+      final c = makeContainer(gstEnabled: false);
+      c.read(cartProvider.notifier)
+          .loadFromBill(billWith([line(unit: 18, disc: 8)]), [makeItem()]);
+      final e = c.read(cartProvider).single;
+      expect(e.priceOverride, closeTo(22, 1e-9));
+      expect(e.discountAmt, 8);
+      expect(e.lineNet(false), closeTo(36, 1e-9));
+      expect(e.overridePayload(false),
+          {'price_override': closeTo(22, 1e-9), 'discount_amount': 8.0});
+    });
+
+    test('a discount-only line keeps the catalog price (no override)', () {
+      final c = makeContainer(gstEnabled: false);
+      c.read(cartProvider.notifier)
+          .loadFromBill(billWith([line(unit: 45, disc: 10)]), [makeItem()]);
+      final e = c.read(cartProvider).single;
+      expect(e.priceOverride, isNull);
+      expect(e.discountAmt, 10);
+      expect(e.lineNet(false), 90);
+    });
+
+    test('an untouched line loads with no overrides', () {
+      final c = makeContainer(gstEnabled: false);
+      c.read(cartProvider.notifier)
+          .loadFromBill(billWith([line(unit: 50)]), [makeItem()]);
+      expect(c.read(cartProvider).single.overridePayload(false), isEmpty);
+    });
+
+    test('a catalog price changed since the draft keeps the draft price', () {
+      final c = makeContainer(gstEnabled: false);
+      c.read(cartProvider.notifier).loadFromBill(
+          billWith([line(unit: 50)]), [makeItem(price: 60)]);
+      final e = c.read(cartProvider).single;
+      expect(e.priceOverride, 50);
+      expect(e.lineNet(false), 100);
+    });
+
+    test('MRP item: a price edit is restored as GROSS', () {
+      // Catalog MRP 110 at 10% (net 100). Repriced to net 80.
+      final c = makeContainer();
+      final mrp = makeItem(price: 110, taxRate: 10, priceInclusiveTax: true);
+      c.read(cartProvider.notifier)
+          .loadFromBill(billWith([line(unit: 80, taxRate: 10)]), [mrp]);
+      final e = c.read(cartProvider).single;
+      expect(e.priceOverride, closeTo(88, 1e-9));
+      expect(e.netPrice(true), closeTo(80, 1e-9));
+    });
+
+    test('MRP item: a discount alone is not mistaken for a price edit', () {
+      final c = makeContainer();
+      final mrp = makeItem(price: 110, taxRate: 10, priceInclusiveTax: true);
+      c.read(cartProvider.notifier).loadFromBill(
+          billWith([line(unit: 90, disc: 20, taxRate: 10)]), [mrp]);
+      final e = c.read(cartProvider).single;
+      expect(e.priceOverride, isNull);
+      expect(e.discountAmt, 20);
+    });
+
+    test('an item gone from the catalog is rebuilt at its pre-discount rate', () {
+      final c = makeContainer(gstEnabled: false);
+      c.read(cartProvider.notifier)
+          .loadFromBill(billWith([line(itemId: 'gone', unit: 45, disc: 10)]), []);
+      final e = c.read(cartProvider).single;
+      expect(e.item.price, 50);
+      expect(e.priceOverride, isNull);
+      expect(e.lineNet(false), 90);
+    });
+
+    test('duplicate rows merge: quantities and ₹ discounts add up', () {
+      final c = makeContainer(gstEnabled: false);
+      c.read(cartProvider.notifier).loadFromBill(
+          billWith([line(unit: 47.5, disc: 5), line(qty: 1, unit: 47, disc: 3)]),
+          [makeItem()]);
+      final e = c.read(cartProvider).single;
+      expect(e.quantity, 3);
+      expect(e.discountAmt, 8);
+      expect(e.lineNet(false), 142);
+    });
+
+    test('a % discount round-trips as its ₹ amount', () {
+      // Cashier: 2 × 50 at 10% off → server stores 45/unit, discount 10.
+      final typed = CartEntry(item: makeItem(), quantity: 2, discountPct: 10);
+      final sent = typed.overridePayload(false);
+      expect(sent, {'discount_amount': 10.0});
+      final c = makeContainer(gstEnabled: false);
+      c.read(cartProvider.notifier).loadFromBill(
+          billWith([line(unit: typed.discountedNetPrice(false), disc: 10)]),
+          [makeItem()]);
+      final e = c.read(cartProvider).single;
+      expect(e.lineNet(false), typed.lineNet(false));
+      expect(e.discountPct, isNull);
+      expect(e.discountAmt, 10);
     });
   });
 }

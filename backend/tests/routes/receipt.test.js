@@ -91,6 +91,75 @@ describe('GET /receipt/:token', () => {
     expect(res.text).not.toContain('Cashier');
   });
 
+  // unit_price is stored discounted; the receipt shows the rate before the
+  // line discount and notes the discount on the name (2 × 180 less 50).
+  test('a discounted line shows its pre-discount rate and "(Disc ₹x)"', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleBillRow], rowsAffected: [1] })
+      .mockResolvedValueOnce({
+        recordset: [{ item_name: 'Chilli Paneer', quantity: 2, unit_price: 155, line_total: 310, discount_amount: 50 }],
+        rowsAffected: [1],
+      });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.text).toContain('Chilli Paneer (Disc &#8377;50.00)');
+    expect(res.text).toMatch(/col-rate">&#8377;180\.00/);
+    expect(res.text).not.toMatch(/col-rate">&#8377;155\.00/);
+    expect(res.text).toMatch(/col-amt">&#8377;310\.00/);
+  });
+
+  test.each([0, null, undefined])('discount_amount %p prints no "(Disc" note', async (disc) => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleBillRow], rowsAffected: [1] })
+      .mockResolvedValueOnce({
+        recordset: [{ item_name: 'Rice', quantity: 2, unit_price: 50, line_total: 100, discount_amount: disc }],
+        rowsAffected: [1],
+      });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.text).not.toContain('(Disc');
+    expect(res.text).toMatch(/col-rate">&#8377;50\.00/);
+  });
+
+  test('a zero-quantity line falls back to unit_price for the rate', async () => {
+    mockRequest.query
+      // round_off set: the shared row lacks it, which prints its own NaN.
+      .mockResolvedValueOnce({ recordset: [{ ...sampleBillRow, round_off: 0 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({
+        recordset: [{ item_name: 'Rice', quantity: 0, unit_price: 50, line_total: 0, discount_amount: 5 }],
+        rowsAffected: [1],
+      });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.status).toBe(200);
+    expect(res.text).not.toContain('NaN');
+    expect(res.text).not.toContain('Infinity');
+    expect(res.text).toMatch(/col-rate">&#8377;50\.00/);
+  });
+
+  test('the biller name is HTML-escaped', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ ...sampleBillRow, billed_by: '<b>Eve</b> X' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.text).not.toContain('<b>Eve</b>');
+    expect(res.text).toContain('&lt;b&gt;Eve&lt;/b&gt;');
+  });
+
+  test('a blank biller name omits "Cashier"', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ ...sampleBillRow, billed_by: '   ' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.text).not.toContain('Cashier');
+  });
+
+  test('the bill query falls back from settler to creator', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleBillRow], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+    await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(mockRequest.query.mock.calls[0][0]).toMatch(/COALESCE\(fu\.name, cu\.name\) AS billed_by/);
+    expect(mockRequest.query.mock.calls[1][0]).toMatch(/bi\.discount_amount/);
+  });
+
   test('HTML includes item details', async () => {
     mockRequest.query
       .mockResolvedValueOnce({ recordset: [sampleBillRow], rowsAffected: [1] })

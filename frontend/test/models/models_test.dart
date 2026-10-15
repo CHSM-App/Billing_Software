@@ -696,6 +696,110 @@ void main() {
       expect(cleared.effectivePrice, 50.0);
       expect(cleared.lineDiscount(true), 0.0);
     });
+
+    test('copyWith keeps overrides unless told otherwise', () {
+      final entry = CartEntry(
+          item: makeItem(), quantity: 1, priceOverride: 30, discountAmt: 4);
+      final more = entry.copyWith(quantity: 2);
+      expect(more.priceOverride, 30);
+      expect(more.discountAmt, 4);
+      expect(more.lineNet(true), 56.0);
+    });
+
+    test('catalogPrice ignores the override; effectivePrice uses it', () {
+      final entry =
+          CartEntry(item: makeItem(), quantity: 1, priceOverride: 30);
+      expect(entry.catalogPrice, 50.0);
+      expect(entry.effectivePrice, 30.0);
+    });
+
+    test('% discount on a taxed line: tax on what is left', () {
+      final entry = CartEntry(
+          item: makeItem(taxRate: 18.0), quantity: 4, discountPct: 25);
+      expect(entry.lineDiscount(true), 50.0); // 25% of 200
+      expect(entry.lineTax(true), closeTo(27.0, 1e-9)); // 18% of 150
+      expect(entry.lineTotal(true), closeTo(177.0, 1e-9));
+    });
+
+    test('100% off is a free line, never negative', () {
+      final entry = CartEntry(
+          item: makeItem(taxRate: 10.0), quantity: 2, discountPct: 150);
+      expect(entry.lineDiscount(true), 100.0);
+      expect(entry.lineNet(true), 0.0);
+      expect(entry.lineTotal(true), 0.0);
+    });
+
+    test('a negative ₹ discount is treated as none', () {
+      final entry = CartEntry(item: makeItem(), quantity: 1, discountAmt: -5);
+      expect(entry.lineDiscount(true), 0.0);
+      expect(entry.overridePayload(true), isEmpty);
+    });
+
+    test('lineDiscount rounds to paise like the server', () {
+      // 1/3 of ₹10 = 3.333… → 3.33
+      final entry = CartEntry(
+          item: makeItem(), quantity: 1, priceOverride: 10, discountPct: 100 / 3);
+      expect(entry.lineDiscount(true), 3.33);
+    });
+
+    test('discountedNetPrice at qty 0 falls back to the net rate (no NaN)', () {
+      final entry = CartEntry(item: makeItem(), quantity: 0, discountAmt: 5);
+      expect(entry.discountedNetPrice(true), 50.0);
+    });
+
+    test('discount-only line sends only discount_amount', () {
+      final entry = CartEntry(item: makeItem(), quantity: 2, discountAmt: 7);
+      expect(entry.overridePayload(true), {'discount_amount': 7.0});
+    });
+
+    test('billingDisplayName adds (No) before the name, size after', () {
+      final item = Item.fromJson({
+        'id': 'i', 'business_id': 'b', 'name': 'Biryani',
+        'item_no': '12', 'is_active': 1,
+      });
+      final v = ItemVariant(id: 'v', itemId: 'i', label: 'Half', price: 120);
+      final sized = CartEntry(item: item, variant: v, quantity: 1);
+      expect(sized.billingDisplayName(true), '(12) Biryani (Half)');
+      expect(sized.billingDisplayName(false), 'Biryani (Half)');
+      // The bill itself keeps the plain name.
+      expect(sized.displayName, 'Biryani (Half)');
+    });
+  });
+
+  group('BillItem — line discount', () {
+    test('fromJson reads discount_amount as number, string or absent', () {
+      BillItem parse(Object? d) => BillItem.fromJson({
+            'item_name': 'Rice', 'quantity': 1, 'unit_price': 45,
+            'line_total': 45, 'discount_amount': d,
+          });
+      expect(parse(5).discountAmount, 5.0);
+      expect(parse('5.50').discountAmount, 5.5); // mssql DECIMAL as text
+      expect(parse(null).discountAmount, 0.0);
+      expect(parse('junk').discountAmount, 0.0);
+    });
+
+    test('receiptName notes the discount; plain otherwise', () {
+      final d = BillItem(id: '1', billId: 'b', itemName: 'Egg Biryani',
+          quantity: 1, unitPrice: 180, lineTotal: 180, discountAmount: 20);
+      expect(d.receiptName, 'Egg Biryani (Disc ₹20.00)');
+      final plain = BillItem(id: '2', billId: 'b', itemName: 'Egg Biryani',
+          quantity: 1, unitPrice: 200, lineTotal: 200);
+      expect(plain.receiptName, 'Egg Biryani');
+    });
+
+    test('receiptPrice at qty 0 is the stored unit price', () {
+      final z = BillItem(id: '1', billId: 'b', itemName: 'X',
+          quantity: 0, unitPrice: 50, lineTotal: 0, discountAmount: 5);
+      expect(z.receiptPrice, 50);
+    });
+
+    test('kitchen_status is parsed when present', () {
+      final j = {'item_name': 'Dal', 'quantity': 1, 'unit_price': 30,
+          'line_total': 30};
+      expect(BillItem.fromJson({...j, 'kitchen_status': 'ready'}).kitchenStatus,
+          'ready');
+      expect(BillItem.fromJson(j).kitchenStatus, isNull);
+    });
   });
 
   // ─────────────────────────────────────────────────────────────

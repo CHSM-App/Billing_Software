@@ -157,4 +157,58 @@ void main() {
         await OfflineService.instance.getCachedItemsWithStatus('biz-1');
     expect(result.items.single.price, isNull);
   });
+
+  // Item No (v15): "(101)" label and number search must work offline too.
+  test('item_no survives the round trip (the v15 column)', () async {
+    final withNo = Item.fromJson({
+      'id': 'a', 'business_id': 'biz-1', 'name': 'Masala Dosa',
+      'item_no': '101', 'price': 80, 'is_active': 1,
+    });
+    await OfflineService.instance
+        .replaceItemCache([withNo, _item('b')], 'biz-1');
+
+    final items =
+        (await OfflineService.instance.getCachedItemsWithStatus('biz-1')).items;
+    expect(items.firstWhere((i) => i.id == 'a').itemNo, '101');
+    expect(items.firstWhere((i) => i.id == 'b').itemNo, isNull);
+  });
+
+  test('a v14 device upgrades to v15 and gains cached_items.item_no', () async {
+    final path =
+        '${await databaseFactory.getDatabasesPath()}/billing_offline.db';
+    await databaseFactory.deleteDatabase(path);
+    // The v14 item cache: today's table without item_no. The rest of the
+    // schema is restored by init's self-heal.
+    final old = await databaseFactory.openDatabase(path,
+        options: OpenDatabaseOptions(
+          version: 14,
+          onCreate: (db, _) => db.execute('''
+            CREATE TABLE cached_items (
+              id TEXT NOT NULL PRIMARY KEY, business_id TEXT NOT NULL,
+              name TEXT NOT NULL, barcode TEXT, major_category TEXT,
+              category TEXT, price REAL, tax_rate REAL,
+              price_inclusive_tax INTEGER NOT NULL DEFAULT 0,
+              stock_quantity REAL, unit TEXT NOT NULL DEFAULT 'piece',
+              is_active INTEGER NOT NULL DEFAULT 1, cached_at INTEGER NOT NULL)
+          '''),
+        ));
+    await old.close();
+
+    await OfflineService.instance.init();
+
+    // Same single instance the service holds — inspect it, don't close it.
+    final db = await databaseFactory.openDatabase(path);
+    final cols = await db.rawQuery('PRAGMA table_info(cached_items)');
+    expect(cols.map((c) => c['name']), contains('item_no'));
+    expect(await db.getVersion(), 15);
+
+    // And the cache works end to end on the upgraded table.
+    await OfflineService.instance.replaceItemCache([
+      Item.fromJson({'id': 'a', 'business_id': 'biz-1', 'name': 'Idli',
+          'item_no': '7', 'price': 40, 'is_active': 1}),
+    ], 'biz-1');
+    final items =
+        (await OfflineService.instance.getCachedItemsWithStatus('biz-1')).items;
+    expect(items.single.itemNo, '7');
+  });
 }

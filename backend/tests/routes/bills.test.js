@@ -1205,3 +1205,253 @@ describe('bill finalized date', () => {
     expect(sqlText).toMatch(/ORDER BY COALESCE\(b\.finalized_at, b\.created_at\) DESC/);
   });
 });
+
+// ------------------------------------------------------------------
+// Order-card price edit + line discount (applyLineOverrides)
+// ------------------------------------------------------------------
+describe('order-card line overrides', () => {
+  const ITEM2_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+  const dal = { ...sampleItem, id: ITEM2_ID, name: 'Dal', price: 30 };
+
+  // Routes every transaction query by its SQL so one mock serves POST,
+  // add-items and update-items. lines() = inputs bound to the bill_items
+  // INSERT, bill() = inputs bound to the bills INSERT.
+  function routeTx({ biz = {}, items = [sampleItem], oldLines = [] } = {}) {
+    const calls = [];
+    const flags = { inventory_enabled: false, round_off_enabled: false, gst_enabled: false, ...biz };
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      const r = {
+        inputs,
+        input: jest.fn((k, _t, v) => { inputs[k] = v; return r; }),
+        query: jest.fn((sqlText) => {
+          calls.push({ sqlText, inputs });
+          const ok = (rs = []) => Promise.resolve({ recordset: rs, rowsAffected: [rs.length || 1] });
+          if (/COUNT\(\*\) AS cnt/.test(sqlText)) return ok([{ cnt: 0 }]);
+          if (/INSERT INTO bills/.test(sqlText)) return ok([{ id: BILL_ID }]);
+          if (/FROM bills b/.test(sqlText)) return ok([{ id: BILL_ID, status: 'draft', ...flags }]);
+          if (/FROM businesses/.test(sqlText)) return ok([flags]);
+          if (/^\s*SELECT[\s\S]*FROM items\b/.test(sqlText)) return ok(items);
+          if (/^\s*SELECT[\s\S]*FROM bill_items/.test(sqlText)) return ok(oldLines);
+          return ok();
+        }),
+      };
+      return r;
+    });
+    // fetchBill and friends after commit.
+    mockRequest.query.mockImplementation(() =>
+      Promise.resolve({ recordset: [{ ...sampleBill }], rowsAffected: [1] }));
+    const of = (re) => calls.filter((c) => re.test(c.sqlText)).map((c) => c.inputs);
+    return {
+      lines: () => of(/INSERT INTO bill_items/).pop(),
+      bill: () => of(/INSERT INTO bills/).pop(),
+      sql: (re) => calls.map((c) => c.sqlText).find((s) => re.test(s)),
+    };
+  }
+
+  const post = (role, line, extra = {}) => request(app)
+    .post('/api/bills')
+    .set(authHeader({ role }))
+    .send({ items: [{ item_id: ITEM_ID, quantity: 2, ...line }], payment_mode: 'cash', ...extra });
+
+  describe('POST /api/bills', () => {
+    test('discount alone (no price edit) comes off the catalog net', async () => {
+      const tx = routeTx();
+      const res = await post('owner', { discount_amount: 10 });
+      expect(res.status).toBe(201);
+      expect(tx.lines()).toMatchObject({ unit_price0: 45, discount_amount0: 10, line_total0: 90 });
+    });
+
+    test('price edit alone stores the new net rate with no discount', async () => {
+      const tx = routeTx();
+      await post('cashier', { price_override: 60 });
+      expect(tx.lines()).toMatchObject({ unit_price0: 60, discount_amount0: 0, line_total0: 120 });
+    });
+
+    test('a discount bigger than the line is clamped to the line (never negative)', async () => {
+      const tx = routeTx();
+      await post('owner', { discount_amount: 500 });
+      expect(tx.lines()).toMatchObject({ unit_price0: 0, discount_amount0: 100, line_total0: 0 });
+      expect(tx.bill().subtotal).toBe(0);
+    });
+
+    test('a ₹0 price edit is a free line, not "no override"', async () => {
+      const tx = routeTx();
+      await post('owner', { price_override: 0 });
+      expect(tx.lines()).toMatchObject({ unit_price0: 0, line_total0: 0 });
+    });
+
+    test.each([
+      ['negative price', { price_override: -5 }],
+      ['text price', { price_override: 'abc' }],
+      ['negative discount', { discount_amount: -3 }],
+      ['text discount', { discount_amount: 'ten' }],
+      ['null fields', { price_override: null, discount_amount: null }],
+    ])('ignores a %s and bills at catalog', async (_name, line) => {
+      const tx = routeTx();
+      const res = await post('owner', line);
+      expect(res.status).toBe(201);
+      expect(tx.lines()).toMatchObject({ unit_price0: 50, discount_amount0: 0, line_total0: 100 });
+    });
+
+    test('discount is rounded to paise', async () => {
+      const tx = routeTx();
+      await post('owner', { discount_amount: 3.336 });
+      expect(tx.lines().discount_amount0).toBe(3.34);
+    });
+
+    test('GST is charged on the discounted net', async () => {
+      const tx = routeTx({ biz: { gst_enabled: true }, items: [{ ...sampleItem, tax_rate: 10 }] });
+      await post('owner', { price_override: 22, discount_amount: 8 });
+      // net 2 × 22 − 8 = 36; tax 10% of 36 = 3.6
+      expect(tx.lines().unit_price0).toBeCloseTo(18, 4);
+      expect(tx.lines().line_total0).toBe(39.6);
+      expect(tx.bill()).toMatchObject({ subtotal: 36, tax_amount: 3.6 });
+    });
+
+    test('kitchen role cannot reprice either', async () => {
+      const tx = routeTx();
+      await post('kitchen', { price_override: 1, discount_amount: 20 });
+      expect(tx.lines()).toMatchObject({ unit_price0: 50, discount_amount0: 0 });
+    });
+
+    test('a bill settled in one step records its creator as the biller', async () => {
+      const tx = routeTx();
+      await post('cashier', {});
+      const insertSql = tx.sql(/INSERT INTO bills/);
+      expect(insertSql).toMatch(/finalized_at, finalized_by_user_id\)/);
+      expect(insertSql).toMatch(/CASE WHEN @status = 'finalized' THEN @created_by_user_id END/);
+    });
+  });
+
+  describe('PUT /api/bills/:id/add-items', () => {
+    const add = (role, line) => request(app)
+      .put(`/api/bills/${BILL_ID}/add-items`)
+      .set(authHeader({ role }))
+      .send({ items: [{ item_id: ITEM_ID, quantity: 2, ...line }] });
+
+    test.each([
+      // role,    unit, disc, total
+      ['owner',   18,   8,    36],
+      ['cashier', 18,   8,    36],
+      ['server',  50,   0,    100],
+    ])('override as %s', async (role, unit, disc, total) => {
+      const tx = routeTx();
+      const res = await add(role, { price_override: 22, discount_amount: 8 });
+      expect(res.status).toBe(200);
+      expect(tx.lines().unit_price0).toBeCloseTo(unit, 4);
+      expect(tx.lines()).toMatchObject({ discount_amount0: disc, line_total0: total });
+      expect(tx.sql(/INSERT INTO bill_items/)).toMatch(/line_total, discount_amount\)/);
+    });
+  });
+
+  describe('PUT /api/bills/:id/update-items', () => {
+    // The draft as the cashier left it: 2 × Rice repriced to 22 less ₹8,
+    // stored as 18/unit + discount 8.
+    const priced = [{ item_id: ITEM_ID, variant_id: null, item_name: 'Rice', quantity: 2,
+      unit_price: 18, discount_amount: 8, kitchen_status: 'pending', kitchen_done_at: null }];
+    const update = (role, lines) => request(app)
+      .put(`/api/bills/${BILL_ID}/update-items`)
+      .set(authHeader({ role }))
+      .send({ items: lines });
+
+    test("a waiter changing qty keeps the cashier's price and ₹ discount", async () => {
+      const tx = routeTx({ oldLines: priced });
+      const res = await update('server', [{ item_id: ITEM_ID, quantity: 3 }]);
+      expect(res.status).toBe(200);
+      // 3 × 22 − 8 = 58
+      expect(tx.lines().unit_price0).toBeCloseTo(58 / 3, 4);
+      expect(tx.lines()).toMatchObject({ discount_amount0: 8, line_total0: 58 });
+    });
+
+    test("a waiter cannot replace the cashier's values with their own", async () => {
+      const tx = routeTx({ oldLines: priced });
+      await update('server', [{ item_id: ITEM_ID, quantity: 2, price_override: 1, discount_amount: 0 }]);
+      expect(tx.lines()).toMatchObject({ unit_price0: 18, discount_amount0: 8, line_total0: 36 });
+    });
+
+    test('a waiter adding a different dish gets catalog price for it', async () => {
+      const tx = routeTx({ oldLines: priced, items: [sampleItem, dal] });
+      await update('server', [
+        { item_id: ITEM_ID, quantity: 2 },
+        { item_id: ITEM2_ID, quantity: 1 },
+      ]);
+      expect(tx.lines()).toMatchObject({
+        unit_price0: 18, discount_amount0: 8,
+        unit_price1: 30, discount_amount1: 0, line_total1: 30,
+      });
+    });
+
+    test('a waiter on a never-repriced draft stays at catalog', async () => {
+      const tx = routeTx({ oldLines: [{ ...priced[0], unit_price: 50, discount_amount: 0 }] });
+      await update('server', [{ item_id: ITEM_ID, quantity: 4 }]);
+      expect(tx.lines()).toMatchObject({ unit_price0: 50, discount_amount0: 0, line_total0: 200 });
+    });
+
+    test('a cashier can change the override', async () => {
+      const tx = routeTx({ oldLines: priced });
+      await update('cashier', [{ item_id: ITEM_ID, quantity: 2, price_override: 40, discount_amount: 10 }]);
+      expect(tx.lines()).toMatchObject({ unit_price0: 35, discount_amount0: 10, line_total0: 70 });
+    });
+
+    test('a cashier sending no override clears it back to catalog', async () => {
+      const tx = routeTx({ oldLines: priced });
+      await update('owner', [{ item_id: ITEM_ID, quantity: 2 }]);
+      expect(tx.lines()).toMatchObject({ unit_price0: 50, discount_amount0: 0, line_total0: 100 });
+    });
+
+    test('old lines are read with discount_amount so it can carry over', async () => {
+      const tx = routeTx({ oldLines: priced });
+      await update('server', [{ item_id: ITEM_ID, quantity: 2 }]);
+      expect(tx.sql(/^\s*SELECT[\s\S]*FROM bill_items/)).toMatch(/discount_amount/);
+    });
+  });
+});
+
+// ------------------------------------------------------------------
+// "Billed by": finalized_by_user_id, read back as billed_by
+// ------------------------------------------------------------------
+describe('"Billed by"', () => {
+  test('GET /api/bills names the settler, else the creator', async () => {
+    mockRequest.recordset = [];
+    await request(app).get('/api/bills').set(authHeader());
+    const sqlText = mockRequest.query.mock.calls[0][0];
+    expect(sqlText).toMatch(/COALESCE\(fu\.name, cu\.name\) AS billed_by/);
+    expect(sqlText).toMatch(/LEFT JOIN users fu ON fu\.id = b\.finalized_by_user_id/);
+    expect(sqlText).toMatch(/LEFT JOIN users cu ON cu\.id = b\.created_by_user_id/);
+  });
+
+  test('GET /api/bills/:id returns billed_by and each line discount_amount', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ ...sampleBill, billed_by: 'Ramesh Patil' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ item_name: 'Rice', quantity: 2, unit_price: 45, line_total: 90, discount_amount: 10 }], rowsAffected: [1] })
+      .mockResolvedValue({ recordset: [], rowsAffected: [0] });
+    const res = await request(app).get(`/api/bills/${BILL_ID}`).set(authHeader());
+    expect(res.status).toBe(200);
+    expect(res.body.billed_by).toBe('Ramesh Patil');
+    expect(res.body.items[0].discount_amount).toBe(10);
+    expect(mockRequest.query.mock.calls[1][0]).toMatch(/discount_amount/);
+  });
+
+  test("a cashier settling a waiter's draft is recorded as the biller", async () => {
+    const CASHIER_ID = '99999999-9999-9999-9999-999999999999';
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: BILL_ID, table_id: null, bill_number: 'INV-0001' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app)
+      .put(`/api/bills/${BILL_ID}/finalize`)
+      .set(authHeader({ role: 'cashier', user_id: CASHIER_ID }));
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.finalized_by_user_id).toBe(CASHIER_ID);
+    expect(mockRequest.query.mock.calls[0][0]).toMatch(/finalized_by_user_id = @finalized_by_user_id/);
+  });
+
+  test('a waiter cannot settle, so never becomes the biller', async () => {
+    const res = await request(app)
+      .put(`/api/bills/${BILL_ID}/finalize`)
+      .set(authHeader({ role: 'server' }));
+    expect(res.status).toBe(403);
+    expect(mockRequest.inputs.finalized_by_user_id).toBeUndefined();
+  });
+});

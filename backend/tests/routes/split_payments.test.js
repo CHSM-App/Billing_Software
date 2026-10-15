@@ -150,6 +150,18 @@ describe('PUT /api/bills/:id/finalize — split', () => {
     expect(mockTransaction.begin).not.toHaveBeenCalled();
     expect(ran(/bill_payments|credit_payments/)).toBe(false);
   });
+
+  // "Billed by" on a split settle too, not just the single-mode path.
+  test('records the caller as the biller (finalized_by_user_id)', async () => {
+    queueSplitFinalize();
+    const res = await finalize({
+      payment_mode: 'split',
+      payments: [{ mode: 'cash', amount: 500 }, { mode: 'upi', amount: 200 }],
+    });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.finalized_by_user_id).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+    expect(ran(/finalized_by_user_id = @finalized_by_user_id/)).toBe(true);
+  });
 });
 
 describe('PUT /api/bills/:id/finalize — collecting old credit', () => {

@@ -214,3 +214,48 @@ describe('PUT /api/businesses/logo', () => {
     fs.unlinkSync(file);
   });
 });
+
+// ------------------------------------------------------------------
+// show_item_no — shop-wide "(101) Masala Dosa" on the billing page
+// ------------------------------------------------------------------
+describe('PUT /api/businesses/profile — show_item_no', () => {
+  test.each([
+    [true, 1],
+    [false, 0],
+    ['1', 1],
+  ])('show_item_no %p is stored as BIT %p and returned as a boolean', async (sent, bit) => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [oldRow({ show_item_no: !bit })], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [oldRow({ show_item_no: bit })], rowsAffected: [1] });
+
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader({ role: 'owner' }))
+      .send({ show_item_no: sent });
+
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.show_item_no).toBe(bit);
+    const updateSql = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /UPDATE businesses/.test(s));
+    expect(updateSql).toMatch(/show_item_no = @show_item_no/);
+    expect(res.body.show_item_no).toBe(!!bit);
+  });
+
+  test('only the owner can change it', async () => {
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader({ role: 'cashier' }))
+      .send({ show_item_no: true });
+    expect(res.status).toBe(403);
+  });
+
+  test('GET /profile returns show_item_no (false when the column is 0)', async () => {
+    mockRequest.recordset = [oldRow({ show_item_no: 0 })];
+    const res = await request(app)
+      .get('/api/businesses/profile')
+      .set(authHeader({ role: 'owner' }));
+    expect(res.status).toBe(200);
+    expect(res.body.show_item_no).toBe(false);
+    expect(mockRequest.query.mock.calls[0][0]).toMatch(/b\.show_item_no/);
+  });
+});
