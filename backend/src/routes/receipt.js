@@ -4,6 +4,8 @@ const logger = require('../logger');
 const { attachCharges } = require('../charges');
 const { stripBillPrefix } = require('../billNumber');
 const { attachCreditInfo, CREDIT_PART } = require('../creditPayments');
+const { renderInvoice } = require('../invoiceHtml');
+const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
 
 const router = express.Router();
 
@@ -282,8 +284,9 @@ router.get('/:token', async (req, res) => {
         SELECT bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount
         FROM bill_items bi
         JOIN bills b ON b.id = bi.bill_id
+        ${BILL_ITEMS_JOIN}
         WHERE b.receipt_token = @token
-        ORDER BY bi.item_name
+        ${BILL_ITEMS_ORDER}
       `);
 
     const items = itemsResult.recordset;
@@ -400,6 +403,16 @@ router.get('/:token', async (req, res) => {
     const payLabel = parts.length
       ? parts.map((p) => `${titleCase(settledAs(p.mode))} ₹${fmt(p.amount)}`).join(' · ')
       : titleCase(settledAs(bill.payment_mode));
+
+    // Shared from a device printing A4/A5: show the same invoice it prints.
+    const paper = ['a4', 'a5'].includes(req.query.p) ? req.query.p : null;
+    if (paper) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(renderInvoice({
+        paper, bill, items, parts, grandTotal, billedBy, settledAs, isUnpaidCredit,
+      }));
+    }
 
     const itemRows = items.map((i) => {
       const qty = Number(i.quantity) % 1 === 0 ? Number(i.quantity) : fmt(i.quantity);

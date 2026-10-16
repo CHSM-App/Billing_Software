@@ -361,18 +361,27 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
             actions: [
               _buildSearch(l10n, bar.maxWidth),
               if (isRestaurant && !_searchExpanded)
-                ReadyToServeToggle(
-                  count: readyCount,
-                  selected: _readyOnly,
-                  tooltip: l10n.kitchenReadyOnly,
-                  onTap: () {
-                    setState(() => _readyOnly = !_readyOnly);
-                    // The filter lives on Open Orders — bring it forward.
-                    final i = _tabs.indexOf(_OrdersTab.openOrders);
-                    if (_readyOnly && _tabController!.index != i) {
-                      _tabController!.animateTo(i);
-                    }
-                  },
+                // Back only once the search box has finished shrinking: shown
+                // the moment ✕ is tapped, it shared the row with a still-wide
+                // box and overflowed for the length of the animation.
+                AnimatedBuilder(
+                  animation: _searchAnimCtrl,
+                  builder: (context, child) => _searchAnimCtrl.isDismissed
+                      ? child!
+                      : const SizedBox.shrink(),
+                  child: ReadyToServeToggle(
+                    count: readyCount,
+                    selected: _readyOnly,
+                    tooltip: l10n.kitchenReadyOnly,
+                    onTap: () {
+                      setState(() => _readyOnly = !_readyOnly);
+                      // The filter lives on Open Orders — bring it forward.
+                      final i = _tabs.indexOf(_OrdersTab.openOrders);
+                      if (_readyOnly && _tabController!.index != i) {
+                        _tabController!.animateTo(i);
+                      }
+                    },
+                  ),
                 ),
               IconButton(
                 icon: const Icon(Icons.refresh_outlined),

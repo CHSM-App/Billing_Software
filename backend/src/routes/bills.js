@@ -10,6 +10,7 @@ const { generateReceiptToken, RECEIPT_BASE } = require('../receiptToken');
 const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
+const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
 
 // Shared by create and finalize so a mode accepted when a bill is parked is
 // still accepted when it is settled. 'split' = paid in several parts, listed
@@ -560,10 +561,12 @@ async function fetchBill(billId, businessId) {
   const itemsResult = await pool.request()
     .input('bill_id', sql.UniqueIdentifier, billId)
     .query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount,
-             kitchen_status, kitchen_done_at
-      FROM bill_items
-      WHERE bill_id = @bill_id
+      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount,
+             bi.kitchen_status, bi.kitchen_done_at
+      FROM bill_items bi
+      ${BILL_ITEMS_JOIN}
+      WHERE bi.bill_id = @bill_id
+      ${BILL_ITEMS_ORDER}
     `);
 
   bill.items = itemsResult.recordset;
@@ -1059,10 +1062,12 @@ router.get('/', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount,
-             kitchen_status, kitchen_done_at
-      FROM bill_items
-      WHERE bill_id IN (${billClause})
+      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount,
+             bi.kitchen_status, bi.kitchen_done_at
+      FROM bill_items bi
+      ${BILL_ITEMS_JOIN}
+      WHERE bi.bill_id IN (${billClause})
+      ${BILL_ITEMS_ORDER}
     `);
 
     const itemsByBill = {};
@@ -1121,10 +1126,12 @@ router.get('/drafts', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT id, bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount,
-             kitchen_status, kitchen_done_at
-      FROM bill_items
-      WHERE bill_id IN (${billClause})
+      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount,
+             bi.kitchen_status, bi.kitchen_done_at
+      FROM bill_items bi
+      ${BILL_ITEMS_JOIN}
+      WHERE bi.bill_id IN (${billClause})
+      ${BILL_ITEMS_ORDER}
     `);
 
     const itemsByBill = {};
@@ -1310,7 +1317,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 // Without a split, `mode` (or the draft's own mode) pays all of it. Returns
 // { row } like the single-mode UPDATE's OUTPUT, plus `creditPart` and
 // `collected`, or { status, error }.
-async function finalizeWithTenders(billId, businessId, { mode, split, collections }) {
+async function finalizeWithTenders(billId, businessId, userId, { mode, split, collections }) {
   const transaction = pool.transaction();
   await transaction.begin();
   const fail = async (status, error) => {
@@ -1372,7 +1379,7 @@ async function finalizeWithTenders(billId, businessId, { mode, split, collection
         billMode === 'credit' || creditPart ? 'unpaid' : 'paid')
       .input('credit_amount', sql.Decimal(10, 2), creditPart)
       .input('credit_collected', sql.Decimal(10, 2), collected > 0 ? collected : null)
-      .input('finalized_by_user_id', sql.UniqueIdentifier, req.user.user_id)
+      .input('finalized_by_user_id', sql.UniqueIdentifier, userId)
       .query(`
         UPDATE bills
         SET status = 'finalized', finalized_at = SYSUTCDATETIME(),
@@ -1415,7 +1422,7 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
     let finalizedRow;
     if (split || collections.list.length) {
       tendered = await finalizeWithTenders(req.params.id, req.user.business_id,
-        { mode: payment_mode, split, collections: collections.list });
+        req.user.user_id, { mode: payment_mode, split, collections: collections.list });
       if (tendered.error) return res.status(tendered.status).json({ error: tendered.error });
       finalizedRow = tendered.row;
     } else {
@@ -2340,7 +2347,10 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Invalid customer phone number' });
     }
 
-    const receiptUrl = `${RECEIPT_BASE}/receipt/${receipt_token}`;
+    // The sending device's paper size (kept on the device, not the business):
+    // A4/A5 links to the invoice layout that device prints.
+    const paper = ['a4', 'a5'].includes(req.body && req.body.paper) ? req.body.paper : null;
+    const receiptUrl = `${RECEIPT_BASE}/receipt/${receipt_token}${paper ? `?p=${paper}` : ''}`;
     const displayNumber = stripBillPrefix(bill_number);
     const message =
       `Your bill from ${shop_name} is ready!\n\n` +

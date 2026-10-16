@@ -6702,6 +6702,11 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
     final inCart = widget.qty > 0;
     final revealRight = _dragDx > 8; // show + icon on right bg
     final revealLeft = _dragDx < -8; // show − icon on left bg
+    // Orange at the low-stock alert, red at zero; nothing when stock isn't
+    // tracked.
+    final stockColor = ref.watch(inventoryEnabledProvider)
+        ? stockAlertColor(widget.item, widget.variant)
+        : null;
 
     return ClipRect(
       child: Stack(
@@ -6766,6 +6771,14 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                           ? const Color(0xFFFAFBFF) // faint tint: open group
                           : AppColors.surface,
                 ),
+                // Stock alert stripe on the row's left edge. Painted over the
+                // row, so it shifts nothing. A size row shows it on its own
+                // rail below instead.
+                foregroundDecoration: stockColor != null && !widget.nested
+                    ? BoxDecoration(
+                        border: Border(
+                            left: BorderSide(color: stockColor, width: 3)))
+                    : null,
                 // The accent rail marks SIZE rows only — the category bar has
                 // its own, and the parent dish is an ordinary item that happens
                 // to be open, so railing it too made all three levels look
@@ -6780,7 +6793,8 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                       ? BoxDecoration(
                           border: Border(
                               left: BorderSide(
-                                  color: widget.accent, width: 3)))
+                                  color: stockColor ?? widget.accent,
+                                  width: 3)))
                       : null,
                   padding: EdgeInsets.only(
                       left: widget.nested ? 8 : 10, right: 10),

@@ -531,11 +531,17 @@ Future<Map<String, dynamic>> getBillWhatsAppText(String billId) async {
 ///   - 'api'      → it already sent the template; returns { mode:'api', sent:true }.
 ///   - 'deeplink' → returns { mode:'deeplink', phone, message } to open WhatsApp.
 /// [phone] fills in a bill saved without one (and is stored on it); ignored
-/// when the bill already has a phone.
+/// when the bill already has a phone. An A4/A5 paper size is sent along so the
+/// receipt link opens the same invoice layout this device prints.
 Future<Map<String, dynamic>> whatsAppBill(String billId, {String? phone}) async {
+  final paper = await getPaperSize();
+  final body = {
+    if (phone != null) 'phone': phone,
+    if (!PaperSizes.isThermal(paper)) 'paper': paper,
+  };
   final data = _parse(await _authPost(
     Uri.parse('$baseUrl/bills/$billId/whatsapp'),
-    body: phone == null ? null : jsonEncode({'phone': phone}),
+    body: body.isEmpty ? null : jsonEncode(body),
   ));
   return Map<String, dynamic>.from(data as Map);
 }

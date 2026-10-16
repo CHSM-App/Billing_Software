@@ -219,7 +219,10 @@ class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
                   ),
                 ])
               : kitchenMasonry(
-                  itemCounts: [for (final t in shown) t.items.length],
+                  itemCounts: [
+                    for (final t in shown)
+                      t.items.length.clamp(0, _DraftTicket._maxRows)
+                  ],
                   cards: [
                     for (final t in shown)
                       _DraftTicket(
@@ -251,6 +254,8 @@ class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
 /// to open the bill too. Folds to just the header — folded by default on a
 /// phone, open on wider screens.
 class _DraftTicket extends StatefulWidget {
+  static const int _maxRows = 15; // dishes shown before the list scrolls
+
   final OpenOrderTicket ticket;
   final String role;
   final Set<String> busy;
@@ -495,21 +500,38 @@ class _DraftTicketState extends State<_DraftTicket> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (int i = 0; i < items.length; i++) ...[
-                        const Divider(height: 1),
-                        KitchenItemTile(
-                          key: ValueKey(items[i].id),
-                          item: {
-                            'id': items[i].id,
-                            'item_name': items[i].itemName,
-                            'quantity': items[i].quantity,
-                            'kitchen_status': _status(items[i]),
-                          },
-                          role: widget.role,
-                          busy: widget.busy,
-                          onToggle: widget.onToggle,
+                      // A long order stops growing at ~15 dishes and scrolls
+                      // inside the card; the Open bill button stays in view.
+                      // ponytail: ~35px per KitchenItemTile row, so wrapped
+                      // names show slightly fewer than 15.
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(
+                            maxHeight: _DraftTicket._maxRows * 35.0),
+                        child: Scrollbar(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                for (int i = 0; i < items.length; i++) ...[
+                                  const Divider(height: 1),
+                                  KitchenItemTile(
+                                    key: ValueKey(items[i].id),
+                                    item: {
+                                      'id': items[i].id,
+                                      'item_name': items[i].itemName,
+                                      'quantity': items[i].quantity,
+                                      'kitchen_status': _status(items[i]),
+                                    },
+                                    role: widget.role,
+                                    busy: widget.busy,
+                                    onToggle: widget.onToggle,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
-                      ],
+                      ),
                       const Divider(height: 1),
                       Padding(
                         padding: const EdgeInsets.all(AppSpacing.space8),

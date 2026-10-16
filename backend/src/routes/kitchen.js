@@ -3,6 +3,7 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
+const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
 
 const router = express.Router();
 
@@ -53,11 +54,12 @@ router.get('/orders', requireAuth, async (req, res) => {
     billIds.forEach((id, i) => itemsReq.input(`p${i}`, sql.UniqueIdentifier, id));
 
     const itemsResult = await itemsReq.query(`
-      SELECT id, bill_id, item_name, quantity, kitchen_status, kitchen_done_at,
-             source, diner_name, diner_phone
-      FROM bill_items
-      WHERE bill_id IN (${names.join(',')})
-      ORDER BY id ASC
+      SELECT bi.id, bi.bill_id, bi.item_name, bi.quantity, bi.kitchen_status, bi.kitchen_done_at,
+             bi.source, bi.diner_name, bi.diner_phone
+      FROM bill_items bi
+      ${BILL_ITEMS_JOIN}
+      WHERE bi.bill_id IN (${names.join(',')})
+      ${BILL_ITEMS_ORDER}
     `);
 
     const itemsByBill = {};

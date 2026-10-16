@@ -158,6 +158,9 @@ describe('GET /receipt/:token', () => {
     await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
     expect(mockRequest.query.mock.calls[0][0]).toMatch(/COALESCE\(fu\.name, cu\.name\) AS billed_by/);
     expect(mockRequest.query.mock.calls[1][0]).toMatch(/bi\.discount_amount/);
+    // Lines print grouped by menu category, not by name.
+    expect(mockRequest.query.mock.calls[1][0]).toMatch(/LEFT JOIN items it ON it\.id = bi\.item_id/);
+    expect(mockRequest.query.mock.calls[1][0]).toMatch(/ORDER BY[\s\S]*it\.major_category[\s\S]*it\.category[\s\S]*bi\.item_name/);
   });
 
   test('HTML includes item details', async () => {
@@ -284,4 +287,47 @@ describe('GET /receipt/:token', () => {
     expect(res.status).toBe(200);
     expect(res.text).toContain('1.50');
   });
+});
+
+// A link shared from a device printing A4/A5 (?p=a4|a5) opens the same
+// invoice layout the app prints, not the thermal-style card.
+describe('GET /receipt/:token?p=a4|a5', () => {
+  const gstBill = { ...sampleBillRow, subtotal: 347.46, tax_amount: 62.54, total: 410, gst_enabled: true, billed_by: 'Sagar D' };
+  const gstItems = [
+    { item_name: 'Bira 91 White (Pint 330 ml)', quantity: 1, unit_price: 161.02, line_total: 190, tax_rate: 18 },
+    { item_name: 'Bira 91 White (Can 500 ml)', quantity: 1, unit_price: 186.44, line_total: 220, tax_rate: 18 },
+  ];
+
+  test.each(['a4', 'a5'])('%s renders the tax invoice', async (p) => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [gstBill], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: gstItems, rowsAffected: [1] });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}?p=${p}`);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('Tax Invoice');
+    expect(res.text).toContain('Four Hundred Ten Rupees only');
+    expect(res.text).toContain('Rs.31.27'); // CGST / SGST halves
+    expect(res.text).toContain('Rs.410.00');
+    expect(res.text).toContain(`size:${p.toUpperCase()}`);
+    expect(res.text).not.toContain('top-bar');
+  });
+
+  test('an unknown p falls back to the card receipt', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleBillRow], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}?p=mm80`);
+    expect(res.text).toContain('top-bar');
+  });
+});
+
+describe('amountToWords', () => {
+  const { amountToWords } = require('../../src/invoiceHtml');
+  test.each([
+    [0, 'Zero Rupees only'],
+    [24072, 'Twenty Four Thousand Seventy Two Rupees only'],
+    [100000, 'One Lakh Rupees only'],
+    [1234.5, 'One Thousand Two Hundred Thirty Four Rupees and Fifty Paise only'],
+    [12345678, 'One Crore Twenty Three Lakh Forty Five Thousand Six Hundred Seventy Eight Rupees only'],
+  ])('%p → %s', (n, words) => expect(amountToWords(n)).toBe(words));
 });

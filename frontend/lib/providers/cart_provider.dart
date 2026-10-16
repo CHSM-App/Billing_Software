@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../models/models.dart';
 import '../models/cart_entry.dart';
 import 'session_provider.dart';
@@ -51,8 +52,34 @@ class CartNotifier extends Notifier<List<CartEntry>> {
           i == idx ? state[i].copyWith(quantity: state[i].quantity + 1) : state[i]
       ];
     } else {
-      state = [...state, CartEntry(item: item, variant: variant, quantity: 1)];
+      state = grouped(
+          [...state, CartEntry(item: item, variant: variant, quantity: 1)]);
     }
+  }
+
+  /// Lines grouped by menu category — major A–Z, then subcategory A–Z,
+  /// uncategorised last, then name — the same order the server returns bill
+  /// lines in (backend/src/billItemsOrder.js), so the cart, the Open Orders
+  /// card and every print agree. Ties (sizes of one dish) keep add order.
+  @visibleForTesting
+  static List<CartEntry> grouped(List<CartEntry> lines) {
+    // Case-insensitive A–Z, with an empty group after every named one.
+    int cmp(String? a, String? b) {
+      final x = a?.trim().toLowerCase() ?? '';
+      final y = b?.trim().toLowerCase() ?? '';
+      if (x.isEmpty != y.isEmpty) return x.isEmpty ? 1 : -1;
+      return x.compareTo(y);
+    }
+
+    final indexed = lines.indexed.toList()
+      ..sort((a, b) {
+        final p = a.$2.item, q = b.$2.item;
+        var c = cmp(p.majorCategory, q.majorCategory);
+        if (c == 0) c = cmp(p.category, q.category);
+        if (c == 0) c = cmp(p.name, q.name);
+        return c != 0 ? c : a.$1.compareTo(b.$1);
+      });
+    return [for (final (_, e) in indexed) e];
   }
 
   void changeQty(String key, double delta) {
@@ -121,7 +148,7 @@ class CartNotifier extends Notifier<List<CartEntry>> {
               quantity: existing.quantity + entry.quantity,
               discountAmt: existing.discountAmt + entry.discountAmt);
     }
-    state = merged.values.toList();
+    state = grouped(merged.values.toList());
   }
 
   Iterable<CartEntry> _entriesFromBill(Bill bill, List<Item> catalog) {

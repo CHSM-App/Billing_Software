@@ -14,6 +14,8 @@ Item makeItem({
   bool priceInclusiveTax = false,
   double? stockQuantity,
   List<ItemVariant> variants = const [],
+  String? category,
+  String? majorCategory,
 }) =>
     Item(
       id: id,
@@ -24,6 +26,8 @@ Item makeItem({
       priceInclusiveTax: priceInclusiveTax,
       stockQuantity: stockQuantity,
       variants: variants,
+      category: category,
+      majorCategory: majorCategory,
       isActive: true,
     );
 
@@ -89,6 +93,26 @@ void main() {
       notifier.addItem(makeItem(id: 'item-2', name: 'Dal'));
       final cart = container.read(cartProvider);
       expect(cart.length, 2);
+    });
+
+    test('groups lines by major, then category, uncategorised last', () {
+      final container = makeContainer();
+      final notifier = container.read(cartProvider.notifier);
+      final roti = makeItem(id: 'i5', name: 'Roti', category: 'Breads');
+      notifier.addItem(makeItem(id: 'i1', name: 'Tomato Soup', category: 'soups'));
+      notifier.addItem(makeItem(id: 'i2', name: 'Water'));
+      notifier.addItem(roti, variant: makeVariant(id: 'v2', itemId: 'i5', label: 'Butter'));
+      notifier.addItem(makeItem(id: 'i3', name: 'Naan', category: 'Breads'));
+      notifier.addItem(roti, variant: makeVariant(id: 'v1', itemId: 'i5', label: 'Plain'));
+      notifier.addItem(makeItem(id: 'i4', name: 'Noodles', category: 'Mains', majorCategory: 'Chinese'));
+      // Adding more of a line never moves it.
+      notifier.addItem(makeItem(id: 'i1', name: 'Tomato Soup', category: 'soups'));
+      expect(container.read(cartProvider).map((e) => e.key), [
+        'i4', // major "Chinese" before items with no major
+        'i3', 'i5:v2', 'i5:v1', // Breads: Naan, Roti; Roti sizes in add order
+        'i1', // soups (case-insensitive after Breads)
+        'i2', // uncategorised last
+      ]);
     });
   });
 
@@ -781,13 +805,13 @@ void main() {
     test('price + ₹ discount reprice one line and the cart totals', () {
       final c = withRiceAndDal();
       c.read(cartProvider.notifier).setLineOverride('item-1', price: 22, amt: 8);
-      final rice = c.read(cartProvider).first;
+      final rice = c.read(cartProvider).firstWhere((e) => e.key == 'item-1');
       expect(rice.priceOverride, 22);
       expect(rice.discountAmt, 8);
       expect(rice.discountPct, isNull);
       expect(rice.lineNet(false), 36);
       // Dal untouched.
-      expect(c.read(cartProvider).last.priceOverride, isNull);
+      expect(c.read(cartProvider).firstWhere((e) => e.key == 'item-2').priceOverride, isNull);
       expect(c.read(cartSubtotalProvider), 36 + 30);
       expect(c.read(cartTotalProvider), 66);
     });
@@ -797,7 +821,7 @@ void main() {
       final n = c.read(cartProvider.notifier);
       n.setLineOverride('item-1', amt: 8);
       n.setLineOverride('item-1', pct: 10, amt: 8);
-      final rice = c.read(cartProvider).first;
+      final rice = c.read(cartProvider).firstWhere((e) => e.key == 'item-1');
       expect(rice.discountPct, 10);
       expect(rice.discountAmt, 0);
       expect(rice.lineDiscount(false), 10); // 10% of 100
@@ -808,7 +832,7 @@ void main() {
       final n = c.read(cartProvider.notifier);
       n.setLineOverride('item-1', pct: 10);
       n.setLineOverride('item-1', amt: 5);
-      final rice = c.read(cartProvider).first;
+      final rice = c.read(cartProvider).firstWhere((e) => e.key == 'item-1');
       expect(rice.discountPct, isNull);
       expect(rice.lineDiscount(false), 5);
     });
@@ -818,7 +842,7 @@ void main() {
       final n = c.read(cartProvider.notifier);
       n.setLineOverride('item-1', price: 22, pct: 50);
       n.setLineOverride('item-1');
-      final rice = c.read(cartProvider).first;
+      final rice = c.read(cartProvider).firstWhere((e) => e.key == 'item-1');
       expect(rice.priceOverride, isNull);
       expect(rice.discountPct, isNull);
       expect(rice.discountAmt, 0);
@@ -845,7 +869,7 @@ void main() {
       final n = c.read(cartProvider.notifier);
       n.setLineOverride('item-1', price: 40, pct: 10);
       n.changeQty('item-1', 1);
-      final rice = c.read(cartProvider).first;
+      final rice = c.read(cartProvider).firstWhere((e) => e.key == 'item-1');
       expect(rice.quantity, 3);
       expect(rice.priceOverride, 40);
       expect(rice.lineDiscount(false), 12); // 10% of 120

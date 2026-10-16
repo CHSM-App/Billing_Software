@@ -207,10 +207,6 @@ class InvoicePdf {
                     fontStyle: pw.FontStyle.italic)),
           ),
           build: (context) => [
-            if (logo != null) ...[
-              pw.Center(child: pw.Image(pw.MemoryImage(logo), height: 60)),
-              pw.SizedBox(height: 6),
-            ],
             pw.Center(
               // "Tax Invoice" is a GST term: it means the document carries a
               // tax breakdown a buyer can claim input credit against. With GST
@@ -223,7 +219,7 @@ class InvoicePdf {
             pw.SizedBox(height: 8),
             _headerBox(businessName, address, phone, gstin, fssai,
                 bill.displayNumber, dateStr, shaped,
-                billedBy: bill.billedByFirst),
+                billedBy: bill.billedByFirst, logo: logo),
             _billToBox(bill, shaped),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money, shaped),
             pw.SizedBox(height: 10),
@@ -298,10 +294,6 @@ class InvoicePdf {
                 fontStyle: pw.FontStyle.italic)),
       ),
       build: (context) => [
-        if (logo != null) ...[
-          pw.Center(child: pw.Image(pw.MemoryImage(logo), height: 60)),
-          pw.SizedBox(height: 6),
-        ],
         pw.Center(
           child: pw.Text('Payment Receipt',
               style:
@@ -310,7 +302,7 @@ class InvoicePdf {
         pw.SizedBox(height: 8),
         _headerBox(businessName, address, phone, gstin, fssai,
             s.mode.toUpperCase(), dateFmt.format(s.createdAt.toLocal()), shaped,
-            numberLabel: 'Payment'),
+            numberLabel: 'Payment', logo: logo),
         if ((s.customerName ?? '').isNotEmpty || (s.customerPhone ?? '').isNotEmpty)
           pw.Container(
             width: double.infinity,
@@ -398,11 +390,11 @@ class InvoicePdf {
     return doc.save();
   }
 
-  // --- Header box: business (left) | Invoice No/Date (right) --------------
+  // --- Header box: [logo] business (left) | Invoice No/Date (right) -------
   static pw.Widget _headerBox(String name, String? address, String? phone,
       String? gstin, String? fssai, String billNumber, String dateStr,
       ShapedText shaped,
-      {String numberLabel = 'Invoice No.', String? billedBy}) {
+      {String numberLabel = 'Invoice No.', String? billedBy, Uint8List? logo}) {
     final left = <pw.Widget>[
       shaped.widget(name,
           fontSize: 15,
@@ -445,8 +437,22 @@ class InvoicePdf {
         pw.TableRow(children: [
           pw.Padding(
             padding: const pw.EdgeInsets.all(8),
-            child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start, children: left),
+            // The shop logo sits at the left of the business box, its name
+            // and details beside it.
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                if (logo != null) ...[
+                  pw.Image(pw.MemoryImage(logo), width: 60, height: 60),
+                  pw.SizedBox(width: 8),
+                ],
+                pw.Expanded(
+                  child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: left),
+                ),
+              ],
+            ),
           ),
           pw.Column(children: [
             pw.Container(

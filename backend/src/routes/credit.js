@@ -9,6 +9,7 @@ const { stripBillPrefix } = require('../billNumber');
 const { normalisePhone, sendReceiptLink } = require('../whatsapp');
 const { broadcast } = require('../realtime');
 const { attachCharges } = require('../charges');
+const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
 const { canonicalPhone, billPhoneMatch } = require('../customers');
 const {
   DUE, round2, parseCollections, checkCollections, recordCreditPayments, attachCreditInfo,
@@ -138,9 +139,11 @@ router.get('/customers/:phone/bills', requireAuth, async (req, res) => {
     const itemsReq = pool.request();
     ids.forEach((id, i) => itemsReq.input(`id${i}`, sql.UniqueIdentifier, id));
     const itemsResult = await itemsReq.query(`
-      SELECT bill_id, item_name, quantity, unit_price, tax_rate, line_total, discount_amount
-      FROM bill_items
-      WHERE bill_id IN (${params})
+      SELECT bi.bill_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.line_total, bi.discount_amount
+      FROM bill_items bi
+      ${BILL_ITEMS_JOIN}
+      WHERE bi.bill_id IN (${params})
+      ${BILL_ITEMS_ORDER}
     `);
     const byBill = {};
     for (const it of itemsResult.recordset) {
@@ -290,9 +293,11 @@ router.post('/settle', requireAuth, cashierOrOwner, async (req, res) => {
     const itemsReq = pool.request();
     ids.forEach((id, i) => itemsReq.input(`id${i}`, sql.UniqueIdentifier, id));
     const itemsResult = await itemsReq.query(`
-      SELECT bill_id, item_name, quantity, unit_price, tax_rate, line_total, discount_amount
-      FROM bill_items
-      WHERE bill_id IN (${params2})
+      SELECT bi.bill_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.line_total, bi.discount_amount
+      FROM bill_items bi
+      ${BILL_ITEMS_JOIN}
+      WHERE bi.bill_id IN (${params2})
+      ${BILL_ITEMS_ORDER}
     `);
     const byBill = {};
     for (const it of itemsResult.recordset) (byBill[it.bill_id] ||= []).push(it);

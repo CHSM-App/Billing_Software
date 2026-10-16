@@ -856,8 +856,17 @@ class _ItemSheetRow extends StatelessWidget {
         l10n.itemsStockLabel(formatQty(item.stockQuantity!)),
     ].join('  ·  ');
     final lowStock = inventoryEnabled && item.isLowStock;
+    // Orange at the low-stock alert, red at zero — same stripe as Billing.
+    final stockColor = inventoryEnabled ? stockAlertColor(item) : null;
 
-    return Material(
+    return DecoratedBox(
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        border: stockColor == null
+            ? null
+            : Border(left: BorderSide(color: stockColor, width: 3)),
+      ),
+      child: Material(
       color: AppColors.surface,
       child: InkWell(
         onTap: onTap,
@@ -975,6 +984,7 @@ class _ItemSheetRow extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -2730,6 +2740,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
   final _labelCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
+  final _lowStockCtrl = TextEditingController();
   final _barcodeCtrl = TextEditingController();
   bool _busy = false;
 
@@ -2744,6 +2755,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
     _labelCtrl.dispose();
     _priceCtrl.dispose();
     _stockCtrl.dispose();
+    _lowStockCtrl.dispose();
     _barcodeCtrl.dispose();
     super.dispose();
   }
@@ -2761,6 +2773,8 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
         if (barcode.isNotEmpty) 'barcode': barcode,
         if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
           'stock_quantity': double.tryParse(_stockCtrl.text.trim()),
+        if (widget.inventoryEnabled && _lowStockCtrl.text.trim().isNotEmpty)
+          'low_stock_threshold': double.tryParse(_lowStockCtrl.text.trim()),
         'sort_order': _variants.length,
       };
       final created = await createVariant(widget.item.id, data);
@@ -2769,6 +2783,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
         _labelCtrl.clear();
         _priceCtrl.clear();
         _stockCtrl.clear();
+        _lowStockCtrl.clear();
         _barcodeCtrl.clear();
       });
       widget.onChanged(List.unmodifiable(_variants));
@@ -3079,6 +3094,17 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                       const TextInputType.numberWithOptions(decimal: true),
                   // A size has no unit of its own — it is counted in the parent
                   // item's unit, which is what the stock rows below display.
+                  suffixIcon:
+                      UnitSuffix(itemUnitLabel(context, widget.item.unit)),
+                ),
+                const SizedBox(height: AppSpacing.space8),
+                // Same per-size alert as the create form's size rows — the
+                // item's own alert is cleared once it has sizes.
+                AppTextField(
+                  label: l10n.itemsFieldLowStock,
+                  controller: _lowStockCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   suffixIcon:
                       UnitSuffix(itemUnitLabel(context, widget.item.unit)),
                 ),

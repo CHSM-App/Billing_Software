@@ -12,6 +12,7 @@ const { requireAuth } = require('../auth');
 const { whatsappLimiter } = require('../middleware/rateLimiter');
 const logger = require('../logger');
 const { attachCharges } = require('../charges');
+const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
 const { syncCustomers, billPhoneMatch, canonicalPhone, customersAllowed } = require('../customers');
 const { sendCampaignMessage, normalisePhone } = require('../whatsapp');
 
@@ -253,7 +254,9 @@ router.get('/:id/bills', async (req, res) => {
 
         SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity,
                bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount
-        FROM @page p JOIN bill_items bi ON bi.bill_id = p.id;
+        FROM @page p JOIN bill_items bi ON bi.bill_id = p.id
+        ${BILL_ITEMS_JOIN}
+        ${BILL_ITEMS_ORDER};
       `);
 
     const [custSet, totalSet, bills, items] = result.recordsets;

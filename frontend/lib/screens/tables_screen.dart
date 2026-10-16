@@ -8,6 +8,7 @@ import '../services/table_qr_image.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
+import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/bottom_nav_bar.dart';
@@ -491,6 +492,20 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
         final canvasHeight =
             (maxBottom + viewportHeight).clamp(viewportHeight, double.infinity);
 
+        // Served / ordered dish counts per table, from its open order — the
+        // corner badge. The shell's realtime refresh keeps them live.
+        final served = <String, (double, double)>{
+          for (final b
+              in ref.watch(openDraftsProvider).valueOrNull ?? const <Bill>[])
+            if (b.tableId != null && b.items.isNotEmpty)
+              b.tableId!: (
+                b.items
+                    .where((i) => i.kitchenStatus == 'delivered')
+                    .fold(0.0, (s, i) => s + i.quantity),
+                b.items.fold(0.0, (s, i) => s + i.quantity),
+              ),
+        };
+
         return InteractiveViewer(
           constrained: false,
           minScale: 0.5,
@@ -500,6 +515,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
             width: canvasWidth,
             height: canvasHeight,
             child: Stack(
+              // The served badge pokes out past a table's corner; don't cut
+              // it off for a table placed against the canvas edge.
+              clipBehavior: Clip.none,
               children: tables.map((table) {
         // Keep positions non-negative; the canvas expands right/bottom to fit.
         final raw =
@@ -547,7 +565,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                     } catch (_) {}
                   }
                 : null,
-            child: _TableWidget(table: table, color: color),
+            child: _TableWidget(
+                table: table, color: color, served: served[table.id]),
           ),
         );
       }).toList(),
@@ -563,10 +582,30 @@ class _TableWidget extends StatelessWidget {
   final TableModel table;
   final Color color;
 
-  const _TableWidget({required this.table, required this.color});
+  /// (served, ordered) dishes on this table's open order; null = no order.
+  final (double, double)? served;
+
+  const _TableWidget({required this.table, required this.color, this.served});
 
   @override
   Widget build(BuildContext context) {
+    final box = _box(context);
+    if (served == null) return box;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        box,
+        Positioned(
+          top: -9,
+          right: -9,
+          child: _ServedBadge(
+              served: served!.$1, total: served!.$2, color: color),
+        ),
+      ],
+    );
+  }
+
+  Widget _box(BuildContext context) {
     final l10n = context.l10n;
     return Container(
       width: _kTableSize,
@@ -597,6 +636,73 @@ class _TableWidget extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             style: AppFont.style(fontSize: 10, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Corner pill on a table with an open order: dishes served / dishes ordered.
+/// It fills green from the left as dishes go out, and turns solid green with
+/// a tick once everything has been served.
+class _ServedBadge extends StatelessWidget {
+  final double served;
+  final double total;
+
+  /// The table's status colour, for the outline while dishes are still due.
+  final Color color;
+
+  const _ServedBadge(
+      {required this.served, required this.total, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final done = served >= total;
+    final p = total > 0 ? (served / total).clamp(0.0, 1.0) : 0.0;
+    return Container(
+      height: 20,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: done ? AppColors.success : null,
+        // Hard-stop gradient: the served share as a green fill.
+        gradient: done
+            ? null
+            : LinearGradient(
+                colors: const [
+                  AppColors.successLight,
+                  AppColors.successLight,
+                  AppColors.surface,
+                  AppColors.surface,
+                ],
+                stops: [0, p, p, 1],
+              ),
+        border: Border.all(
+            color: done ? AppColors.success : color, width: 1.5),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (done) ...[
+            const Icon(Icons.check, size: 12, color: Colors.white),
+            const SizedBox(width: 2),
+          ],
+          Text(
+            '${formatQty(served)}/${formatQty(total)}',
+            style: AppFont.style(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: done ? Colors.white : AppColors.textPrimary,
+              height: 1,
+            ),
           ),
         ],
       ),

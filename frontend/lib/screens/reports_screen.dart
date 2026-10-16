@@ -777,13 +777,19 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             : l10n.reportsParcel);
     return Row(
       children: [
-        SizedBox(
-          width: 52,
-          child: Text('#${b.billNumber.split('-').last}',
-              style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primary)),
+        // Keeps an offline bill's device code ("SN2A-0001"): the last segment
+        // alone made bills from different devices all read "#0001". Short
+        // numbers keep the old 52px column; longer ones widen it.
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 52),
+          child: Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Text('#${stripBillPrefix(b.billNumber)}',
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary)),
+          ),
         ),
         Expanded(
           child: Text(where,
