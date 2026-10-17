@@ -63,6 +63,37 @@ describe('PUT /api/kitchen/items/:id — who may move a dish where', () => {
   });
 });
 
+describe('PUT /api/kitchen/items/:id — retail tick', () => {
+  // First query is the business-type lookup; the rest fall back to defaults.
+  const retailPut = (role, status) => {
+    mockRequest.query.mockResolvedValueOnce({ recordset: [{ business_type: 'retail' }] });
+    return put(role, status);
+  };
+
+  test('staff tick an item straight from pending (no kitchen step)', async () => {
+    const res = await retailPut('cashier', 'delivered');
+    expect(res.status).toBe(200);
+    expect([mockRequest.inputs.from0, mockRequest.inputs.from1]).toEqual(['pending', 'delivered']);
+  });
+
+  test('and untick it back to pending', async () => {
+    const res = await retailPut('owner', 'pending');
+    expect(res.status).toBe(200);
+    expect([mockRequest.inputs.from0, mockRequest.inputs.from1]).toEqual(['pending', 'delivered']);
+  });
+
+  test('there is no "ready" step in retail', async () => {
+    expect((await retailPut('cashier', 'ready')).status).toBe(403);
+  });
+
+  test('a restaurant captain still cannot deliver from pending', async () => {
+    mockRequest.query.mockResolvedValueOnce({ recordset: [{ business_type: 'restaurant_with_tables' }] });
+    const res = await put('server', 'delivered');
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.from0).toBe('ready');
+  });
+});
+
 describe('GET /api/kitchen/orders', () => {
   const ordersWith = (statuses, query = '?statuses=delivered') => {
     mockRequest.query

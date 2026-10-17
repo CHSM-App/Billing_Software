@@ -1406,6 +1406,61 @@ describe('order-card line overrides', () => {
       expect(tx.sql(/^\s*SELECT[\s\S]*FROM bill_items/)).toMatch(/discount_amount/);
     });
   });
+
+  // Migration 059: the bill remembers which price list it was opened with.
+  describe('price_list_id', () => {
+    const LIST_ID = '12345678-1234-4234-8234-123456789abc';
+    const update = (role, body) => request(app)
+      .put(`/api/bills/${BILL_ID}/update-items`)
+      .set(authHeader({ role }))
+      .send({ items: [{ item_id: ITEM_ID, quantity: 2 }], ...body });
+
+    test('a cashier creating a draft stores the list', async () => {
+      const tx = routeTx();
+      const res = await post('cashier', {}, { status: 'draft', price_list_id: LIST_ID });
+      expect(res.status).toBe(201);
+      expect(tx.bill().price_list_id).toBe(LIST_ID);
+    });
+
+    test('no list sent stores NULL', async () => {
+      const tx = routeTx();
+      await post('owner', {});
+      expect(tx.bill().price_list_id).toBeNull();
+    });
+
+    test("a waiter's list is ignored", async () => {
+      const tx = routeTx();
+      await post('server', {}, { status: 'draft', price_list_id: LIST_ID });
+      expect(tx.bill().price_list_id).toBeNull();
+    });
+
+    test('a list from another business is a 400', async () => {
+      routeTx();
+      mockRequest.query.mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+      const res = await post('owner', {}, { price_list_id: LIST_ID });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/Price list not found/);
+    });
+
+    test('a malformed id is a 400', async () => {
+      routeTx();
+      const res = await post('owner', {}, { price_list_id: 'nope' });
+      expect(res.status).toBe(400);
+    });
+
+    test('update-items sets the list when a cashier sends it', async () => {
+      const tx = routeTx();
+      await update('cashier', { price_list_id: LIST_ID });
+      expect(tx.sql(/UPDATE b SET/)).toMatch(/price_list_id = @price_list_id/);
+    });
+
+    test('update-items leaves the list alone when the key is missing or a waiter sends it', async () => {
+      const tx = routeTx();
+      await update('cashier', {});
+      await update('server', { price_list_id: null });
+      expect(tx.sql(/price_list_id = @price_list_id/)).toBeUndefined();
+    });
+  });
 });
 
 // ------------------------------------------------------------------

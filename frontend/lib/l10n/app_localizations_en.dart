@@ -618,6 +618,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Items with an Item No show as (101) Item name on the billing page';
 
   @override
+  String get settingsToggles => 'Settings';
+
+  @override
+  String get settingsTogglesSubtitle =>
+      'GST, inventory, round-off and other options';
+
+  @override
   String get settingsManageStaff => 'Manage Staff';
 
   @override
@@ -1371,6 +1378,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingCustomerPhoneLabel => 'Customer phone';
 
   @override
+  String get billingCustomerBills => 'Customer\'s bills';
+
+  @override
   String get billingPhoneInvalid => 'Customer No. must be 10 digits.';
 
   @override
@@ -1834,6 +1844,38 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsUnitRoll => 'Roll';
+
+  @override
+  String get itemsUnitCase => 'Case';
+
+  @override
+  String get itemsUnitCrate => 'Crate';
+
+  @override
+  String get itemsUnitCarton => 'Carton';
+
+  @override
+  String get itemsFieldPack => 'Sold in packs';
+
+  @override
+  String get itemsPackNone => 'No pack';
+
+  @override
+  String itemsFieldPackSize(String pack) {
+    return '1 $pack =';
+  }
+
+  @override
+  String get itemsPackSizeInvalid => 'Must be more than 1';
+
+  @override
+  String get itemsPackPerSizeHint =>
+      'Packs are set per size: Manage sizes, then tap ✎ on a size.';
+
+  @override
+  String itemsSizeEditTitle(String label) {
+    return 'Edit — $label';
+  }
 
   @override
   String get itemsHasVariants => 'This item has variants';
@@ -3698,4 +3740,56 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get logoSave => 'Save logo';
+
+  @override
+  String get priceListPick => 'Price list';
+
+  @override
+  String get priceListDefault => 'Default';
+
+  @override
+  String get settingsPriceLists => 'Price lists';
+
+  @override
+  String get settingsPriceListsSubtitle => 'Party, wholesale and other rates';
+
+  @override
+  String get priceListsEmpty =>
+      'No price lists yet. Create one for party, wholesale or AC section rates.';
+
+  @override
+  String get priceListNew => 'New price list';
+
+  @override
+  String get priceListName => 'Name';
+
+  @override
+  String get priceListAdjust => 'Change every price by %';
+
+  @override
+  String get priceListAdjustHint =>
+      'e.g. 10 for 10% more, -5 for 5% less. Leave blank to keep default prices.';
+
+  @override
+  String get priceListItemsHint =>
+      'Fixed prices win over the %. Leave blank to use the % (or the default price).';
+
+  @override
+  String priceListDefaultPrice(String price) {
+    return 'Default ₹$price';
+  }
+
+  @override
+  String priceListDeleteConfirm(String name) {
+    return 'Delete \"$name\"? Bills already saved keep their prices.';
+  }
+
+  @override
+  String get priceListSaved => 'Price list saved';
+
+  @override
+  String get priceListNameRequired => 'Enter a name';
+
+  @override
+  String get priceListBadNumber => 'Enter a valid number';
 }

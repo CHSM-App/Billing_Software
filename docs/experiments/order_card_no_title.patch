@@ -1,0 +1,52 @@
+diff --git a/frontend/lib/screens/home_screen.dart b/frontend/lib/screens/home_screen.dart
+index 3452160b..251de1e0 100644
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -4221,38 +4221,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+                   AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
+               child: Row(
+                 children: [
+-                  Container(
+-                    width: 36,
+-                    height: 36,
+-                    decoration: BoxDecoration(
+-                      gradient: AppColors.primaryGradient,
+-                      borderRadius: BorderRadius.circular(AppRadius.small),
+-                    ),
+-                    child: const Icon(Icons.shopping_cart_outlined,
+-                        size: 18, color: Colors.white),
+-                  ),
+-                  const SizedBox(width: AppSpacing.space12),
+-                  // Title + count share ONE Expanded, which absorbs all the
+-                  // free width. A Spacer here instead would get nothing —
+-                  // Flexible and Spacer compete for the same slack, and the
+-                  // Flexible wins, which left the trailing icons stranded in
+-                  // the middle of the row instead of at its edge.
++                  // No "Order" title or cart icon — the item count leads the
++                  // row. It sits in an Expanded that absorbs the free width,
++                  // keeping the trailing icons at the row's edge. The 36px
++                  // strut keeps the header's height on an empty cart.
++                  const SizedBox(height: 36),
+                   Expanded(
+                     child: Row(
+                       mainAxisSize: MainAxisSize.min,
+                       children: [
+-                        Flexible(
+-                          child: Text(l10n.billingOrder,
+-                              maxLines: 1,
+-                              overflow: TextOverflow.ellipsis,
+-                              style: Theme.of(context).textTheme.titleLarge),
+-                        ),
+-                        // Item count beside the title — distinct LINES, not
+-                        // summed quantity, so a 1.5 kg line still reads as one
+-                        // item (matches the cart badge). Hidden on an empty
+-                        // cart: the placeholder below already says so.
++                        // Item count — distinct LINES, not summed quantity, so
++                        // a 1.5 kg line still reads as one item (matches the
++                        // cart badge). Hidden on an empty cart: the
++                        // placeholder below already says so.
+                         if (cart.isNotEmpty) ...[
+-                          const SizedBox(width: AppSpacing.space8),
+                           Container(
+                             padding: const EdgeInsets.symmetric(
+                                 horizontal: 8, vertical: 2),

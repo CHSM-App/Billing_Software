@@ -20,8 +20,30 @@ const router = express.Router();
 const VALID_UNITS = [
   'piece', 'kg', 'g', 'litre', 'ml', 'metre', 'dozen', 'plate',
   'packet', 'box', 'bottle', 'pair', 'set', 'bundle', 'bag', 'sqft', 'ton',
-  'quintal', 'roll',
+  'quintal', 'roll', 'case', 'crate', 'carton',
 ];
+
+// A pack ("1 box = 15 bottle") is an entry/display shortcut only: stock and bill
+// quantities always stay in the base unit, so billing never reads these. Sent
+// as a pair; both null/'' clears it.
+function validatePack(packUnit, packSize) {
+  if (packUnit === undefined && packSize === undefined) return null;
+  const hasUnit = packUnit != null && packUnit !== '';
+  const hasSize = packSize != null && packSize !== '';
+  if (hasUnit !== hasSize) return 'Pack unit and pack size must be set together';
+  if (!hasUnit) return null;
+  return validateEnum(packUnit, 'Pack unit', VALID_UNITS)
+    || validateNumber(packSize, 'Pack size')
+    || (parseFloat(packSize) > 1 ? null : 'Pack size must be more than 1');
+}
+
+// Binds pack_unit / pack_size on [request]; [off] forces both null.
+function inputPack(request, packUnit, packSize, off = false) {
+  const set = !off && packUnit != null && packUnit !== '';
+  return request
+    .input('pack_unit', sql.NVarChar(20), set ? String(packUnit) : null)
+    .input('pack_size', sql.Decimal(10, 2), set ? parseFloat(packSize) : null);
+}
 
 // Item photos are compressed on the device and uploaded as JPEG. They live on
 // disk under backend/uploads/items and are served by an explicit static mount
@@ -117,7 +139,7 @@ async function attachVariants(businessId, itemRows) {
   });
   const result = await request.query(`
     SELECT v.id, v.item_id, v.label, v.price, v.barcode,
-           v.stock_quantity, v.low_stock_threshold, v.sort_order, v.is_active
+           v.stock_quantity, v.low_stock_threshold, v.pack_unit, v.pack_size, v.sort_order, v.is_active
     FROM item_variants v
     JOIN items i ON i.id = v.item_id
     WHERE i.business_id = @business_id
@@ -236,7 +258,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at
+      SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, is_active, created_at
       FROM items
       WHERE ${where}
       ORDER BY name ASC
@@ -254,7 +276,7 @@ router.get('/', requireAuth, async (req, res) => {
           .input('barcode', sql.NVarChar(100), normalised);
         const variantMatch = await variantReq.query(`
           SELECT TOP 1 i.id, i.business_id, i.name, i.barcode, i.item_no, i.major_category, i.category, i.price,
-                 i.tax_rate, i.price_inclusive_tax, i.hsn_code, i.stock_quantity, i.low_stock_threshold, i.unit,
+                 i.tax_rate, i.price_inclusive_tax, i.hsn_code, i.stock_quantity, i.low_stock_threshold, i.unit, i.pack_unit, i.pack_size,
                  i.is_active, i.created_at, v.id AS matched_variant_id
           FROM item_variants v
           JOIN items i ON i.id = v.item_id
@@ -294,7 +316,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, is_active, created_at, image_url
+        SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, is_active, created_at, image_url
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -314,7 +336,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 router.post('/', requireAuth, ownerOnly, async (req, res) => {
   const {
     name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code,
-    stock_quantity, unit, low_stock_threshold, item_no,
+    stock_quantity, unit, low_stock_threshold, item_no, pack_unit, pack_size,
     // Set by the client when the item is being created with sizes. The variants
     // themselves are POSTed separately straight after, so at INSERT time this is
     // the only signal that the missing price is intentional.
@@ -342,7 +364,8 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
     || validateText(category, 'Category', 100)
     // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
     // recipe quantity is stored, so an unknown value would silently skip it.
-    || validateEnum(unit, 'Unit', VALID_UNITS);
+    || validateEnum(unit, 'Unit', VALID_UNITS)
+    || validatePack(pack_unit, pack_size);
   if (invalid) return res.status(400).json({ error: invalid });
 
   try {
@@ -356,7 +379,8 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
     const noConflict = await itemNoConflict(req.user.business_id, item_no);
     if (noConflict) return res.status(409).json(noConflict);
 
-    const result = await pool.request()
+    // A sized item's packs live on its sizes, like its price and stock.
+    const result = await inputPack(pool.request(), pack_unit, pack_size, sizedItem)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .input('name', sql.NVarChar(200), name)
       .input('item_no', sql.NVarChar(30), item_no ? String(item_no).trim() || null : null)
@@ -384,10 +408,10 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('low_stock_threshold', sql.Decimal(10, 2),
         low_stock_threshold != null ? parseFloat(low_stock_threshold) : 50)
       .query(`
-        INSERT INTO items (business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, low_stock_threshold)
+        INSERT INTO items (business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, pack_unit, pack_size, low_stock_threshold)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.item_no, INSERTED.major_category, INSERTED.category,
-               INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @item_no, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @low_stock_threshold)
+               INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.pack_unit, INSERTED.pack_size, INSERTED.is_active, INSERTED.created_at
+        VALUES (@business_id, @name, @barcode, @item_no, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @pack_unit, @pack_size, @low_stock_threshold)
       `);
 
     const created = result.recordset[0];
@@ -418,10 +442,10 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   const {
     name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit,
-    low_stock_threshold, item_no,
+    low_stock_threshold, item_no, pack_unit, pack_size,
   } = req.body;
 
-  if (!name && price === undefined && !major_category && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined && item_no === undefined) {
+  if (!name && price === undefined && !major_category && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined && item_no === undefined && pack_unit === undefined && pack_size === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   const invalid = (name !== undefined
@@ -438,7 +462,8 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     || validateText(category, 'Category', 100)
     // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
     // recipe quantity is stored, so an unknown value would silently skip it.
-    || validateEnum(unit, 'Unit', VALID_UNITS);
+    || validateEnum(unit, 'Unit', VALID_UNITS)
+    || validatePack(pack_unit, pack_size);
   if (invalid) return res.status(400).json({ error: invalid });
 
   try {
@@ -541,11 +566,15 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       request.input('low_stock_threshold', sql.Decimal(10, 2),
         low_stock_threshold != null ? parseFloat(low_stock_threshold) : null);
     }
+    if (pack_unit !== undefined) {
+      sets.push('pack_unit = @pack_unit', 'pack_size = @pack_size');
+      inputPack(request, pack_unit, pack_size);
+    }
     const result = await request.query(`
       UPDATE items
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.item_no, INSERTED.major_category, INSERTED.category,
-             INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.is_active, INSERTED.created_at
+             INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.pack_unit, INSERTED.pack_size, INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);
 
@@ -696,18 +725,22 @@ async function loadOwnedItem(itemId, businessId) {
 
 const VARIANT_OUTPUT =
   'INSERTED.id, INSERTED.item_id, INSERTED.label, INSERTED.price, INSERTED.barcode, ' +
-  'INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.sort_order, INSERTED.is_active';
+  'INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.pack_unit, INSERTED.pack_size, ' +
+  'INSERTED.sort_order, INSERTED.is_active';
 
 // POST /api/items/:id/variants
 router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
-  const { label, price, barcode, stock_quantity, low_stock_threshold, sort_order } = req.body;
+  const {
+    label, price, barcode, stock_quantity, low_stock_threshold, sort_order, pack_unit, pack_size,
+  } = req.body;
 
   const invalid = validateText(label, 'Size name', 50, { required: true })
     || validateNumber(price, 'Price')
     || validateNumber(stock_quantity, 'Stock')
     || validateNumber(low_stock_threshold, 'Low stock alert')
     || validateInteger(sort_order, 'sort_order')
-    || validateText(barcode, 'Barcode', 100);
+    || validateText(barcode, 'Barcode', 100)
+    || validatePack(pack_unit, pack_size);
   if (invalid) return res.status(400).json({ error: invalid });
 
   try {
@@ -716,7 +749,7 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
       return res.status(404).json({ error: 'Item not found' });
     }
 
-    const result = await pool.request()
+    const result = await inputPack(pool.request(), pack_unit, pack_size)
       .input('item_id', sql.UniqueIdentifier, req.params.id)
       .input('label', sql.NVarChar(50), String(label).trim())
       .input('price', sql.Decimal(10, 2), price != null ? parseFloat(price) : null)
@@ -725,16 +758,17 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
       .input('low_stock_threshold', sql.Decimal(10, 2), low_stock_threshold != null ? parseFloat(low_stock_threshold) : null)
       .input('sort_order', sql.Int, sort_order != null ? parseInt(sort_order, 10) : 0)
       .query(`
-        INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, sort_order)
+        INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, pack_unit, pack_size, sort_order)
         OUTPUT ${VARIANT_OUTPUT}
-        VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @sort_order)
+        VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @pack_unit, @pack_size, @sort_order)
       `);
 
     // Once an item has sizes, its own stock is meaningless — stock is tracked
     // per size. Null the parent's stock so it is never considered or alerted on.
+    // Same for its pack: packs live on each size.
     await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
-      .query('UPDATE items SET stock_quantity = NULL, low_stock_threshold = NULL WHERE id = @id');
+      .query('UPDATE items SET stock_quantity = NULL, low_stock_threshold = NULL, pack_unit = NULL, pack_size = NULL WHERE id = @id');
 
     return res.status(201).json(result.recordset[0]);
   } catch (err) {
@@ -750,10 +784,13 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
 
 // PUT /api/items/:id/variants/:variantId
 router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) => {
-  const { label, price, barcode, stock_quantity, low_stock_threshold, sort_order } = req.body;
+  const {
+    label, price, barcode, stock_quantity, low_stock_threshold, sort_order, pack_unit, pack_size,
+  } = req.body;
 
   if (label === undefined && price === undefined && barcode === undefined &&
-      stock_quantity === undefined && low_stock_threshold === undefined && sort_order === undefined) {
+      stock_quantity === undefined && low_stock_threshold === undefined && sort_order === undefined &&
+      pack_unit === undefined && pack_size === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   // The same rules as create — this route had none, so an edit could set a
@@ -765,7 +802,8 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
     || validateNumber(stock_quantity, 'Stock')
     || validateNumber(low_stock_threshold, 'Low stock alert')
     || validateInteger(sort_order, 'sort_order')
-    || validateText(barcode, 'Barcode', 100);
+    || validateText(barcode, 'Barcode', 100)
+    || validatePack(pack_unit, pack_size);
   if (invalid) return res.status(400).json({ error: invalid });
 
   try {
@@ -802,6 +840,10 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
     if (sort_order !== undefined) {
       sets.push('sort_order = @sort_order');
       request.input('sort_order', sql.Int, sort_order != null ? parseInt(sort_order, 10) : 0);
+    }
+    if (pack_unit !== undefined) {
+      sets.push('pack_unit = @pack_unit', 'pack_size = @pack_size');
+      inputPack(request, pack_unit, pack_size);
     }
 
     const result = await request.query(`

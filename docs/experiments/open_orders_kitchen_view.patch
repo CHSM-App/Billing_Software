@@ -1,1188 +1,362 @@
 diff --git a/frontend/lib/l10n/app_en.arb b/frontend/lib/l10n/app_en.arb
-index 32a83488..059ba5a3 100644
+index a7016205..6967f380 100644
 --- a/frontend/lib/l10n/app_en.arb
 +++ b/frontend/lib/l10n/app_en.arb
-@@ -72,6 +72,7 @@
-   "openOrdersEmpty": "No open orders. Saved drafts and table orders appear here.",
-   "openOrdersSearchHint": "Search table, name, phone, bill no.…",
-   "openOrdersNoMatches": "No open orders match your search.",
-+  "openOrdersOpenBill": "Open bill",
-   "customersTitle": "Customers",
-   "exportTitle": "Export",
-   "exportChooseFormat": "Export as",
+@@ -203,6 +203,8 @@
+   "settingsRoundOffSubtitle": "Round the final payable to the nearest rupee and show the adjustment on the bill",
+   "settingsShowItemNo": "Show item no on billing",
+   "settingsShowItemNoSubtitle": "Items with an Item No show as (101) Item name on the billing page",
++  "settingsToggles": "Settings",
++  "settingsTogglesSubtitle": "GST, inventory, round-off and other options",
+   "settingsManageStaff": "Manage Staff",
+   "settingsManageStaffSubtitle": "Add, edit or remove cashiers",
+   "settingsPrinterSetup": "Printer Setup",
 diff --git a/frontend/lib/l10n/app_localizations.dart b/frontend/lib/l10n/app_localizations.dart
-index 5b3b7557..42b62b0b 100644
+index 1acb266d..f3f82db0 100644
 --- a/frontend/lib/l10n/app_localizations.dart
 +++ b/frontend/lib/l10n/app_localizations.dart
-@@ -482,6 +482,12 @@ abstract class AppLocalizations {
-   /// **'No open orders match your search.'**
-   String get openOrdersNoMatches;
+@@ -1148,6 +1148,18 @@ abstract class AppLocalizations {
+   /// **'Items with an Item No show as (101) Item name on the billing page'**
+   String get settingsShowItemNoSubtitle;
  
-+  /// No description provided for @openOrdersOpenBill.
++  /// No description provided for @settingsToggles.
 +  ///
 +  /// In en, this message translates to:
-+  /// **'Open bill'**
-+  String get openOrdersOpenBill;
++  /// **'Settings'**
++  String get settingsToggles;
 +
-   /// No description provided for @customersTitle.
++  /// No description provided for @settingsTogglesSubtitle.
++  ///
++  /// In en, this message translates to:
++  /// **'GST, inventory, round-off and other options'**
++  String get settingsTogglesSubtitle;
++
+   /// No description provided for @settingsManageStaff.
    ///
    /// In en, this message translates to:
 diff --git a/frontend/lib/l10n/app_localizations_en.dart b/frontend/lib/l10n/app_localizations_en.dart
-index 6809b515..01b900be 100644
+index 9217b857..21d8fbd5 100644
 --- a/frontend/lib/l10n/app_localizations_en.dart
 +++ b/frontend/lib/l10n/app_localizations_en.dart
-@@ -219,6 +219,9 @@ class AppLocalizationsEn extends AppLocalizations {
-   @override
-   String get openOrdersNoMatches => 'No open orders match your search.';
+@@ -617,6 +617,13 @@ class AppLocalizationsEn extends AppLocalizations {
+   String get settingsShowItemNoSubtitle =>
+       'Items with an Item No show as (101) Item name on the billing page';
  
 +  @override
-+  String get openOrdersOpenBill => 'Open bill';
++  String get settingsToggles => 'Settings';
++
++  @override
++  String get settingsTogglesSubtitle =>
++      'GST, inventory, round-off and other options';
 +
    @override
-   String get customersTitle => 'Customers';
+   String get settingsManageStaff => 'Manage Staff';
  
 diff --git a/frontend/lib/l10n/app_localizations_mr.dart b/frontend/lib/l10n/app_localizations_mr.dart
-index 55856de0..ca3ac590 100644
+index 81aab228..2ef6e82c 100644
 --- a/frontend/lib/l10n/app_localizations_mr.dart
 +++ b/frontend/lib/l10n/app_localizations_mr.dart
-@@ -219,6 +219,9 @@ class AppLocalizationsMr extends AppLocalizations {
-   @override
-   String get openOrdersNoMatches => 'शोधाशी जुळणारी कोणतीही खुली ऑर्डर नाही.';
+@@ -619,6 +619,13 @@ class AppLocalizationsMr extends AppLocalizations {
+   String get settingsShowItemNoSubtitle =>
+       'आयटम क्र. असलेले आयटम बिलिंगवर (101) आयटमचे नाव असे दिसतील';
  
 +  @override
-+  String get openOrdersOpenBill => 'बिल उघडा';
++  String get settingsToggles => 'सेटिंग्ज';
++
++  @override
++  String get settingsTogglesSubtitle =>
++      'GST, इन्व्हेंटरी, राउंड-ऑफ व इतर पर्याय';
 +
    @override
-   String get customersTitle => 'ग्राहक';
+   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
  
 diff --git a/frontend/lib/l10n/app_mr.arb b/frontend/lib/l10n/app_mr.arb
-index 31cbc018..9caf00eb 100644
+index 5c2f3612..9e3b738e 100644
 --- a/frontend/lib/l10n/app_mr.arb
 +++ b/frontend/lib/l10n/app_mr.arb
-@@ -72,6 +72,7 @@
-   "openOrdersEmpty": "कोणत्याही खुल्या ऑर्डर नाहीत. जतन केलेले ड्राफ्ट आणि टेबल ऑर्डर येथे दिसतात.",
-   "openOrdersSearchHint": "टेबल, नाव, मोबाइल, बिल क्रमांक शोधा…",
-   "openOrdersNoMatches": "शोधाशी जुळणारी कोणतीही खुली ऑर्डर नाही.",
-+  "openOrdersOpenBill": "बिल उघडा",
-   "customersTitle": "ग्राहक",
-   "exportTitle": "निर्यात करा",
-   "exportChooseFormat": "या स्वरूपात निर्यात करा",
-diff --git a/frontend/lib/models/models.dart b/frontend/lib/models/models.dart
-index 72a75a93..fbe72a4a 100644
---- a/frontend/lib/models/models.dart
-+++ b/frontend/lib/models/models.dart
-@@ -307,6 +307,9 @@ class BillItem {
-   final double? taxRate;
-   final String? hsnCode;
-   final double lineTotal;
-+  /// 'pending' | 'ready' | 'delivered' — the dish's kitchen progress. Only the
-+  /// draft-bill responses carry it; null elsewhere (and on offline drafts).
-+  final String? kitchenStatus;
- 
-   BillItem({
-     required this.id,
-@@ -319,6 +322,7 @@ class BillItem {
-     this.taxRate,
-     this.hsnCode,
-     required this.lineTotal,
-+    this.kitchenStatus,
-   });
- 
-   factory BillItem.fromJson(Map<String, dynamic> j) => BillItem(
-@@ -335,6 +339,7 @@ class BillItem {
-         taxRate: j['tax_rate'] != null ? double.parse(j['tax_rate'].toString()) : null,
-         hsnCode: j['hsn_code'] as String?,
-         lineTotal: double.parse(j['line_total'].toString()),
-+        kitchenStatus: j['kitchen_status'] as String?,
-       );
- }
- 
-diff --git a/frontend/lib/providers/open_drafts_provider.dart b/frontend/lib/providers/open_drafts_provider.dart
-index f29bdac3..8a532ed5 100644
---- a/frontend/lib/providers/open_drafts_provider.dart
-+++ b/frontend/lib/providers/open_drafts_provider.dart
-@@ -158,3 +158,13 @@ final openDraftsProvider =
- /// Orders tab appears in the shell. Defaults to false until the list loads.
- final hasOpenDraftsProvider = Provider<bool>((ref) =>
-     (ref.watch(openDraftsProvider).valueOrNull ?? const []).isNotEmpty);
-+
-+/// Dishes the kitchen has marked ready that nobody has served yet, across all
-+/// open orders — the count on the Orders page's "Ready to serve" toggle.
-+final openOrdersReadyCountProvider = Provider<int>((ref) {
-+  var n = 0;
-+  for (final b in ref.watch(openDraftsProvider).valueOrNull ?? const <Bill>[]) {
-+    n += b.items.where((i) => i.kitchenStatus == 'ready').length;
-+  }
-+  return n;
-+});
+@@ -203,6 +203,8 @@
+   "settingsRoundOffSubtitle": "अंतिम देय रक्कम जवळच्या रुपयात करा आणि बिलावर फरक दाखवा",
+   "settingsShowItemNo": "बिलिंगवर आयटम क्र. दाखवा",
+   "settingsShowItemNoSubtitle": "आयटम क्र. असलेले आयटम बिलिंगवर (101) आयटमचे नाव असे दिसतील",
++  "settingsToggles": "सेटिंग्ज",
++  "settingsTogglesSubtitle": "GST, इन्व्हेंटरी, राउंड-ऑफ व इतर पर्याय",
+   "settingsManageStaff": "कर्मचारी व्यवस्थापन",
+   "settingsManageStaffSubtitle": "कॅशियर जोडा, बदला किंवा काढा",
+   "settingsPrinterSetup": "प्रिंटर सेटअप",
 diff --git a/frontend/lib/screens/kitchen_screen.dart b/frontend/lib/screens/kitchen_screen.dart
-index 7fcd95dd..2364d540 100644
+index 2364d540..e4fed848 100644
 --- a/frontend/lib/screens/kitchen_screen.dart
 +++ b/frontend/lib/screens/kitchen_screen.dart
-@@ -29,6 +29,25 @@ final kitchenReadyCountProvider = StateProvider<int>((_) => 0);
- class KitchenScreen extends ConsumerStatefulWidget {
-   const KitchenScreen({super.key});
- 
-+  /// The status a tap moves [item] to for this user, or null when they cannot
-+  /// touch it. Mirrors the server's rules in routes/kitchen.js: the chef ticks
-+  /// pending <-> ready; everyone else marks a ready dish delivered (or undoes).
-+  static String? nextStatus(String role, Map<String, dynamic> item) {
-+    final current = item['kitchen_status'] as String? ?? 'pending';
-+    if (role == 'kitchen') {
-+      return switch (current) {
-+        'pending' => 'ready',
-+        'ready' => 'pending',
-+        _ => null,
-+      };
-+    }
-+    return switch (current) {
-+      'ready' => 'delivered',
-+      'delivered' => 'ready',
-+      _ => null,
-+    };
-+  }
-+
-   @override
-   ConsumerState<KitchenScreen> createState() => _KitchenScreenState();
- }
-@@ -170,27 +189,8 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
-     ref.read(kitchenReadyCountProvider.notifier).state = n;
-   }
- 
--  /// The status a tap moves [item] to for this user, or null when they cannot
--  /// touch it. Mirrors the server's rules in routes/kitchen.js: the chef ticks
--  /// pending <-> ready; everyone else marks a ready dish delivered (or undoes).
--  static String? nextStatus(String role, Map<String, dynamic> item) {
--    final current = item['kitchen_status'] as String? ?? 'pending';
--    if (role == 'kitchen') {
--      return switch (current) {
--        'pending' => 'ready',
--        'ready' => 'pending',
--        _ => null,
--      };
--    }
--    return switch (current) {
--      'ready' => 'delivered',
--      'delivered' => 'ready',
--      _ => null,
--    };
--  }
--
-   Future<void> _toggle(Map<String, dynamic> item) async {
--    final next = nextStatus(ref.read(userRoleProvider), item);
-+    final next = KitchenScreen.nextStatus(ref.read(userRoleProvider), item);
-     if (next == null) return;
-     final id = item['id'] as String;
-     if (_busy.contains(id)) return;
-@@ -318,7 +318,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
-                   builder: (_) => const KitchenPrintSettingsScreen(),
-                 )),
-               ),
--            _ReadyToServeToggle(
-+            ReadyToServeToggle(
-               count: readyCount,
-               selected: _readyOnly,
-               tooltip: l10n.kitchenReadyOnly,
-@@ -422,81 +422,94 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen>
-     }
- 
-     final role = ref.read(userRoleProvider);
--    return LayoutBuilder(builder: (context, constraints) {
--      const spacing = AppSpacing.space8;
--      const padding = AppSpacing.space12;
--      // How many columns fit, aiming for ~240px per card so small devices show
--      // an extra column. Each card takes an equal share of the width and keeps
--      // its natural height (grows with its dish count), never a fixed grid box.
--      final cols =
--          ((constraints.maxWidth - padding * 2) / 240).floor().clamp(1, 5);
--      final cardWidth =
--          (constraints.maxWidth - padding * 2 - spacing * (cols - 1)) / cols;
--
--      // Masonry layout: place each order into the currently shortest column so
--      // cards pack tightly top-to-bottom with no gaps between them. Height is
--      // estimated from the header + one row per dish.
--      final columns = List.generate(cols, (_) => <Widget>[]);
--      final columnHeights = List.filled(cols, 0.0);
--      for (int i = 0; i < orders.length; i++) {
--        final order = orders[i];
--        int target = 0;
--        for (int c = 1; c < cols; c++) {
--          if (columnHeights[c] < columnHeights[target]) target = c;
--        }
--        final itemCount = (order['items'] as List).length;
--        // ~40px header + ~30px per dish row; exact value is irrelevant, it only
--        // needs to order columns by relative fullness.
--        columnHeights[target] += 40 + itemCount * 30 + spacing;
--        columns[target].add(Padding(
--          padding: EdgeInsets.only(bottom: spacing),
--          child: _OrderCard(
--            order: order,
-+    return kitchenMasonry(
-+      itemCounts: [for (final o in orders) (o['items'] as List).length],
-+      cards: [
-+        for (int i = 0; i < orders.length; i++)
-+          _OrderCard(
-+            order: orders[i],
-             // Queue position — orders are oldest-first, so #1 is prepared first.
-             sequence: i + 1,
--            label: _orderLabel(order),
-+            label: _orderLabel(orders[i]),
-             busy: _busy,
-             role: role,
-             onToggle: _toggle,
-             onMarkCompleted: _markOrderCompleted,
-           ),
--        ));
-+      ],
-+    );
-+  }
-+}
-+
-+/// Scrollable masonry of order cards — shared by the Kitchen page and the
-+/// Orders page's Open Orders. [itemCounts] (dish rows per card) is only used to
-+/// estimate card heights for packing.
-+Widget kitchenMasonry(
-+    {required List<Widget> cards, required List<int> itemCounts}) {
-+  return LayoutBuilder(builder: (context, constraints) {
-+    const spacing = AppSpacing.space8;
-+    const padding = AppSpacing.space12;
-+    // How many columns fit, aiming for ~240px per card so small devices show
-+    // an extra column. Each card takes an equal share of the width and keeps
-+    // its natural height (grows with its dish count), never a fixed grid box.
-+    final cols =
-+        ((constraints.maxWidth - padding * 2) / 240).floor().clamp(1, 5);
-+    final cardWidth =
-+        (constraints.maxWidth - padding * 2 - spacing * (cols - 1)) / cols;
-+
-+    // Masonry layout: place each order into the currently shortest column so
-+    // cards pack tightly top-to-bottom with no gaps between them. Height is
-+    // estimated from the header + one row per dish.
-+    final columns = List.generate(cols, (_) => <Widget>[]);
-+    final columnHeights = List.filled(cols, 0.0);
-+    for (int i = 0; i < cards.length; i++) {
-+      int target = 0;
-+      for (int c = 1; c < cols; c++) {
-+        if (columnHeights[c] < columnHeights[target]) target = c;
-       }
-+      // ~40px header + ~30px per dish row; exact value is irrelevant, it only
-+      // needs to order columns by relative fullness.
-+      columnHeights[target] += 40 + itemCounts[i] * 30 + spacing;
-+      columns[target].add(Padding(
-+        padding: const EdgeInsets.only(bottom: spacing),
-+        child: cards[i],
-+      ));
-+    }
- 
--      return SingleChildScrollView(
--        physics: const AlwaysScrollableScrollPhysics(),
--        // + the floating nav bar's inset, so the last cards scroll above it.
--        padding: const EdgeInsets.all(padding).copyWith(
--            bottom: padding + MediaQuery.paddingOf(context).bottom),
--        child: Row(
--          crossAxisAlignment: CrossAxisAlignment.start,
--          children: [
--            for (int c = 0; c < cols; c++) ...[
--              if (c > 0) const SizedBox(width: spacing),
--              SizedBox(
--                width: cardWidth,
--                child: Column(
--                  mainAxisSize: MainAxisSize.min,
--                  children: columns[c],
--                ),
-+    return SingleChildScrollView(
-+      physics: const AlwaysScrollableScrollPhysics(),
-+      // + the floating nav bar's inset, so the last cards scroll above it.
-+      padding: const EdgeInsets.all(padding).copyWith(
-+          bottom: padding + MediaQuery.paddingOf(context).bottom),
-+      child: Row(
-+        crossAxisAlignment: CrossAxisAlignment.start,
-+        children: [
-+          for (int c = 0; c < cols; c++) ...[
-+            if (c > 0) const SizedBox(width: spacing),
-+            SizedBox(
-+              width: cardWidth,
-+              child: Column(
-+                mainAxisSize: MainAxisSize.min,
-+                children: columns[c],
-               ),
--            ],
-+            ),
-           ],
--        ),
--      );
--    });
--  }
-+        ],
-+      ),
-+    );
-+  });
- }
- 
- /// Header pill that filters Pending down to dishes waiting to be served: a
- /// bell plus the live ready count. Outlined when off, solid green when on.
--class _ReadyToServeToggle extends StatelessWidget {
-+class ReadyToServeToggle extends StatelessWidget {
-   final int count;
-   final bool selected;
-   final String tooltip;
-   final VoidCallback onTap;
- 
--  const _ReadyToServeToggle({
-+  const ReadyToServeToggle({
-+    super.key,
-     required this.count,
-     required this.selected,
-     required this.tooltip,
-@@ -548,7 +561,7 @@ class _ReadyToServeToggle extends StatelessWidget {
- /// Order-age label for a kitchen card: "Just now" (<1 min), "N min ago"
- /// (<1 hr), and the local clock time (e.g. "02:45 PM") once an hour or more has
- /// passed. [createdAtIso] is the UTC ISO timestamp from the API.
--String _orderTimeLabel(BuildContext context, String? createdAtIso) {
-+String orderTimeLabel(BuildContext context, String? createdAtIso) {
-   if (createdAtIso == null) return '';
-   final created = DateTime.tryParse(createdAtIso);
-   if (created == null) return '';
-@@ -630,7 +643,7 @@ class _OrderCard extends StatelessWidget {
-                 ),
-                 Builder(builder: (context) {
-                   final timeLabel =
--                      _orderTimeLabel(context, order['created_at'] as String?);
-+                      orderTimeLabel(context, order['created_at'] as String?);
-                   if (timeLabel.isEmpty) return const SizedBox.shrink();
-                   return Padding(
-                     padding: const EdgeInsets.only(right: 6),
-@@ -709,7 +722,7 @@ class _OrderCard extends StatelessWidget {
-             children: [
-               for (int i = 0; i < items.length; i++) ...[
-                 if (i > 0) const Divider(height: 1),
--                _ItemTile(
-+                KitchenItemTile(
-                   item: items[i],
-                   role: role,
-                   busy: busy,
-@@ -756,13 +769,14 @@ class _OrderCard extends StatelessWidget {
- /// complete — visible to every role (chef, owner, waiter), not just a
- /// strikethrough. The chef taps to toggle pending/ready; floor staff tap a
- /// ready dish to mark it delivered (and again to undo).
--class _ItemTile extends StatefulWidget {
-+class KitchenItemTile extends StatefulWidget {
-   final Map<String, dynamic> item;
-   final String role;
+@@ -775,12 +775,17 @@ class KitchenItemTile extends StatefulWidget {
    final Set<String> busy;
    final Future<void> Function(Map<String, dynamic>) onToggle;
  
--  const _ItemTile({
-+  const KitchenItemTile({
-+    super.key,
++  /// Tint the whole row green (ready) / grey (delivered). Off on Open Orders,
++  /// where the tick alone marks the dish.
++  final bool tintRow;
++
+   const KitchenItemTile({
+     super.key,
      required this.item,
      required this.role,
      required this.busy,
-@@ -770,10 +784,10 @@ class _ItemTile extends StatefulWidget {
+     required this.onToggle,
++    this.tintRow = true,
    });
  
    @override
--  State<_ItemTile> createState() => _ItemTileState();
-+  State<KitchenItemTile> createState() => _KitchenItemTileState();
- }
- 
--class _ItemTileState extends State<_ItemTile>
-+class _KitchenItemTileState extends State<KitchenItemTile>
-     with SingleTickerProviderStateMixin {
-   late final AnimationController _controller;
-   late final Animation<double> _scale;
-@@ -798,7 +812,7 @@ class _ItemTileState extends State<_ItemTile>
-   }
- 
-   @override
--  void didUpdateWidget(_ItemTile oldWidget) {
-+  void didUpdateWidget(KitchenItemTile oldWidget) {
-     super.didUpdateWidget(oldWidget);
-     // React to readiness changing (e.g. a realtime refresh flips the status):
-     // animate the circle in when it becomes ready, out when it's un-ticked.
-@@ -832,7 +846,7 @@ class _ItemTileState extends State<_ItemTile>
-     // Compact custom row instead of ListTile, which forces a ~48px min height
-     // even when dense. This packs more dishes into each card.
-     final enabled =
--        _KitchenScreenState.nextStatus(widget.role, item) != null &&
-+        KitchenScreen.nextStatus(widget.role, item) != null &&
-             !widget.busy.contains(id);
-     return InkWell(
+@@ -852,11 +857,13 @@ class _KitchenItemTileState extends State<KitchenItemTile>
        onTap: enabled ? () => widget.onToggle(item) : null,
-diff --git a/frontend/lib/screens/main_shell.dart b/frontend/lib/screens/main_shell.dart
-index d56b127c..5b93ca52 100644
---- a/frontend/lib/screens/main_shell.dart
-+++ b/frontend/lib/screens/main_shell.dart
-@@ -135,6 +135,11 @@ class _MainShellState extends ConsumerState<MainShell>
-       case 'kitchen':
-         // The Kitchen screen listens to this ping and reloads its queue.
-         NotificationService.instance.pingKitchen();
-+        // Open Orders shows each dish's kitchen status too (the chef has no
-+        // Orders page, so skip the fetch there).
-+        if (ref.read(sessionProvider).valueOrNull?.userRole != 'kitchen') {
-+          ref.read(openDraftsProvider.notifier).refreshSilently();
-+        }
-         break;
-       case 'tables':
-         ref.read(tablesProvider.notifier).refreshSilently();
+       child: AnimatedContainer(
+         duration: const Duration(milliseconds: 300),
+-        color: delivered
+-            ? AppColors.background
+-            : ready
+-                ? AppColors.successLight
+-                : Colors.transparent,
++        color: !widget.tintRow
++            ? Colors.transparent
++            : delivered
++                ? AppColors.background
++                : ready
++                    ? AppColors.successLight
++                    : Colors.transparent,
+         padding: const EdgeInsets.symmetric(
+             horizontal: AppSpacing.space8, vertical: 6),
+         child: Row(
 diff --git a/frontend/lib/screens/open_drafts_screen.dart b/frontend/lib/screens/open_drafts_screen.dart
-index 01b40eeb..46019913 100644
+index c4602846..3997e00b 100644
 --- a/frontend/lib/screens/open_drafts_screen.dart
 +++ b/frontend/lib/screens/open_drafts_screen.dart
-@@ -1,6 +1,7 @@
- import 'package:flutter/material.dart';
-+import 'package:flutter/services.dart' show HapticFeedback;
- import 'package:flutter_riverpod/flutter_riverpod.dart';
--import 'package:intl/intl.dart';
-+import '../api.dart';
- import '../l10n/l10n_ext.dart';
- import '../models/models.dart';
- import '../providers.dart';
-@@ -10,11 +11,18 @@ import '../widgets/app_widgets.dart';
- import '../widgets/shell_app_bar.dart';
- import '../widgets/skeletons.dart';
- import 'home_screen.dart';
-+import 'kitchen_screen.dart';
-+
-+/// One card on the Open Orders board: the draft, its queue number, and the
-+/// dishes to list (all of them, or only the ready ones under the filter).
-+typedef OpenOrderTicket = ({Bill bill, int seq, List<BillItem> items});
- 
- /// The "Open Orders" queue: every draft bill — saved from the billing page or
--/// at a table. Tapping one opens it pre-loaded in the billing screen where a
--/// cashier/owner finalizes it (or a server edits and re-saves it).
--class OpenDraftsScreen extends ConsumerWidget {
-+/// at a table — laid out like the Kitchen page: oldest first, each card listing
-+/// its dishes with their kitchen status. A card's "Open bill" button (or a
-+/// swipe right) opens it in the billing screen where a cashier/owner finalizes
-+/// it (or a server edits and re-saves it); tapping a ready dish marks it served.
-+class OpenDraftsScreen extends ConsumerStatefulWidget {
-   /// When true, embedded inside the Orders tab's TabBarView — the parent
-   /// [OrdersScreen] supplies the shared app bar, so render only the list body.
-   final bool embedded;
-@@ -22,7 +30,15 @@ class OpenDraftsScreen extends ConsumerWidget {
-   /// Search text from the Orders page header; empty shows every order.
-   final String query;
- 
--  const OpenDraftsScreen({super.key, this.embedded = false, this.query = ''});
-+  /// "Ready to serve" filter from the Orders header: only dishes the kitchen
-+  /// has finished that nobody has served yet.
-+  final bool readyOnly;
-+
-+  const OpenDraftsScreen(
-+      {super.key,
-+      this.embedded = false,
-+      this.query = '',
-+      this.readyOnly = false});
- 
-   /// What the header search matches on: table, customer name, phone, bill no.
-   static String _haystack(Bill b) => [
-@@ -32,7 +48,42 @@ class OpenDraftsScreen extends ConsumerWidget {
-         b.billNumber,
-       ].whereType<String>().join(' ').toLowerCase();
- 
--  void _openDraft(BuildContext context, WidgetRef ref, Bill draft) {
-+  /// Oldest order first (#1 is the one waiting longest), then the search and
-+  /// the ready filter. Queue numbers come from the full list so a card keeps
-+  /// its number while filtered.
-+  @visibleForTesting
-+  static List<OpenOrderTicket> tickets(
-+      List<Bill> drafts, String query, bool readyOnly) {
-+    final sorted = [...drafts]
-+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-+    final q = query.trim().toLowerCase();
-+    return [
-+      for (var i = 0; i < sorted.length; i++)
-+        if (q.isEmpty || _haystack(sorted[i]).contains(q))
-+          (
-+            bill: sorted[i],
-+            seq: i + 1,
-+            items: readyOnly
-+                ? sorted[i]
-+                    .items
-+                    .where((it) => it.kitchenStatus == 'ready')
-+                    .toList()
-+                : sorted[i].items,
-+          ),
-+    ].where((t) => !readyOnly || t.items.isNotEmpty).toList();
-+  }
-+
-+  @override
-+  ConsumerState<OpenDraftsScreen> createState() => _OpenDraftsScreenState();
-+}
-+
-+class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
-+  // Dish ids mid-update (tile disabled) and their optimistic status until the
-+  // refreshed list lands.
-+  final Set<String> _busy = {};
-+  final Map<String, String> _override = {};
-+
-+  void _openDraft(Bill draft) {
-     // Start from a clean cart; HomeScreen loads the draft's items itself.
-     ref.read(cartProvider.notifier).clear();
-     Navigator.push(
-@@ -55,13 +106,41 @@ class OpenDraftsScreen extends ConsumerWidget {
+@@ -109,9 +109,15 @@ class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
      });
    }
  
-+  /// Serve a ready dish (or undo). Same rules and flow as the Kitchen page.
-+  Future<void> _toggle(Map<String, dynamic> item) async {
-+    final next = KitchenScreen.nextStatus(ref.read(userRoleProvider), item);
-+    final id = item['id'] as String;
-+    if (next == null || _busy.contains(id)) return;
-+    setState(() {
-+      _busy.add(id);
-+      _override[id] = next;
-+    });
-+    try {
-+      await markKitchenItem(id, next);
-+      await ref.read(openDraftsProvider.notifier).refreshSilently();
-+    } catch (e) {
-+      if (mounted) {
-+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-+            content: Text(sanitizeUiErrorMessage(e)),
-+            backgroundColor: AppColors.error));
-+      }
-+    } finally {
-+      if (mounted) {
-+        setState(() {
-+          _busy.remove(id);
-+          _override.remove(id);
-+        });
-+      }
-+    }
++  bool get _retail =>
++      ref.read(sessionProvider).valueOrNull?.businessType == 'retail';
++
+   /// Serve a ready dish (or undo). Same rules and flow as the Kitchen page.
++  /// Retail has no kitchen: a tap just ticks the item off, or unticks it.
+   Future<void> _toggle(Map<String, dynamic> item) async {
+-    final next = KitchenScreen.nextStatus(ref.read(userRoleProvider), item);
++    final next = _retail
++        ? (item['kitchen_status'] == 'delivered' ? 'pending' : 'delivered')
++        : KitchenScreen.nextStatus(ref.read(userRoleProvider), item);
+     final id = item['id'] as String;
+     if (next == null || _busy.contains(id)) return;
+     setState(() {
+@@ -232,6 +238,9 @@ class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
+                         busy: _busy,
+                         statusOverride: _override,
+                         forceExpanded: widget.readyOnly,
++                        retail: ref.watch(sessionProvider).valueOrNull
++                                ?.businessType ==
++                            'retail',
+                         open: phone ? _openBillId == t.bill.id : null,
+                         onOpenChanged: phone
+                             ? (open) => setState(
+@@ -254,7 +263,7 @@ class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
+ /// to open the bill too. Folds to just the header — folded by default on a
+ /// phone, open on wider screens.
+ class _DraftTicket extends StatefulWidget {
+-  static const int _maxRows = 15; // dishes shown before the list scrolls
++  static const int _maxRows = 10; // dishes shown before the list scrolls
+ 
+   final OpenOrderTicket ticket;
+   final String role;
+@@ -262,6 +271,9 @@ class _DraftTicket extends StatefulWidget {
+   final Map<String, String> statusOverride;
+   final bool forceExpanded;
+ 
++  /// Retail shop: items get a plain tick box instead of kitchen statuses.
++  final bool retail;
++
+   /// When the list decides which card is unfolded (phone: one at a time),
+   /// whether this one is, and how to ask for a change. Null = the card
+   /// folds on its own.
+@@ -277,6 +289,7 @@ class _DraftTicket extends StatefulWidget {
+     required this.busy,
+     required this.statusOverride,
+     required this.forceExpanded,
++    this.retail = false,
+     this.open,
+     this.onOpenChanged,
+     required this.onOpen,
+@@ -295,6 +308,20 @@ class _DraftTicketState extends State<_DraftTicket> {
+   String _status(BillItem it) =>
+       widget.statusOverride[it.id] ?? it.kitchenStatus ?? 'pending';
+ 
++  /// The dish list hit its top/bottom under a finger: keep the drag going on
++  /// the page instead of stopping dead. (A mouse wheel already passes to the
++  /// page by itself once the list can't move.)
++  /// ponytail: the page follows the finger but gets no fling on release.
++  bool _chainToPage(OverscrollNotification n) {
++    if (n.depth != 0 || n.dragDetails == null) return false;
++    // This card's context sits above the dish list, so this is the page.
++    final page = Scrollable.maybeOf(context)?.position;
++    if (page == null) return false;
++    page.jumpTo((page.pixels + n.overscroll)
++        .clamp(page.minScrollExtent, page.maxScrollExtent));
++    return false;
 +  }
 +
-   @override
--  Widget build(BuildContext context, WidgetRef ref) {
-+  Widget build(BuildContext context) {
-     final l10n = context.l10n;
--    final body = _buildBody(context, ref);
-+    final body = _buildBody(context);
- 
-     // Embedded in the Orders tab: parent supplies the app bar.
--    if (embedded) return body;
-+    if (widget.embedded) return body;
- 
-     return Scaffold(
-       body: Column(children: [
-@@ -82,7 +161,7 @@ class OpenDraftsScreen extends ConsumerWidget {
-     );
-   }
- 
--  Widget _buildBody(BuildContext context, WidgetRef ref) {
-+  Widget _buildBody(BuildContext context) {
-     final l10n = context.l10n;
-     final draftsAsync = ref.watch(openDraftsProvider);
- 
-@@ -113,10 +192,9 @@ class OpenDraftsScreen extends ConsumerWidget {
-             ),
-           );
-         }
--        final q = query.trim().toLowerCase();
--        final shown = q.isEmpty
--            ? drafts
--            : drafts.where((d) => _haystack(d).contains(q)).toList();
-+        final shown =
-+            OpenDraftsScreen.tickets(drafts, widget.query, widget.readyOnly);
-+        final role = ref.watch(userRoleProvider);
-         return RefreshIndicator(
-           onRefresh: () => ref.read(openDraftsProvider.notifier).reload(),
-           child: shown.isEmpty
-@@ -124,7 +202,9 @@ class OpenDraftsScreen extends ConsumerWidget {
-                   const SizedBox(height: 80),
-                   Center(
-                     child: Text(
--                      l10n.openOrdersNoMatches,
-+                      widget.readyOnly
-+                          ? l10n.kitchenNoReadyItems
-+                          : l10n.openOrdersNoMatches,
-                       style: Theme.of(context)
-                           .textTheme
-                           .bodyMedium
-@@ -132,16 +212,21 @@ class OpenDraftsScreen extends ConsumerWidget {
-                     ),
-                   ),
-                 ])
--              : ListView.separated(
--                  // + the floating nav bar's inset, so the last entry scrolls above it.
--                  padding: const EdgeInsets.all(AppSpacing.space12).copyWith(
--                      bottom: AppSpacing.space12 + MediaQuery.paddingOf(context).bottom),
--                  itemCount: shown.length,
--                  separatorBuilder: (_, __) =>
--                      const SizedBox(height: AppSpacing.space8),
--                  itemBuilder: (context, i) => _DraftCard(
--                      draft: shown[i],
--                      onTap: () => _openDraft(context, ref, shown[i])),
-+              : kitchenMasonry(
-+                  itemCounts: [for (final t in shown) t.items.length],
-+                  cards: [
-+                    for (final t in shown)
-+                      _DraftTicket(
-+                        key: ValueKey(t.bill.id),
-+                        ticket: t,
-+                        role: role,
-+                        busy: _busy,
-+                        statusOverride: _override,
-+                        forceExpanded: widget.readyOnly,
-+                        onOpen: () => _openDraft(t.bill),
-+                        onToggle: _toggle,
-+                      ),
-+                  ],
-                 ),
-         );
-       },
-@@ -149,16 +234,54 @@ class OpenDraftsScreen extends ConsumerWidget {
-   }
- }
- 
--class _DraftCard extends StatelessWidget {
--  final Bill draft;
--  final VoidCallback onTap;
-+/// An Open Orders card styled like the Kitchen page's: queue number, name,
-+/// age, total and ready count on top (tap = fold/unfold), the dishes
-+/// below (tap a ready one = served), then an "Open bill" button. Swipe right
-+/// to open the bill too. Folds to just the header — folded by default on a
-+/// phone, open on wider screens.
-+class _DraftTicket extends StatefulWidget {
-+  final OpenOrderTicket ticket;
-+  final String role;
-+  final Set<String> busy;
-+  final Map<String, String> statusOverride;
-+  final bool forceExpanded;
-+  final VoidCallback onOpen;
-+  final Future<void> Function(Map<String, dynamic>) onToggle;
-+
-+  const _DraftTicket({
-+    super.key,
-+    required this.ticket,
-+    required this.role,
-+    required this.busy,
-+    required this.statusOverride,
-+    required this.forceExpanded,
-+    required this.onOpen,
-+    required this.onToggle,
-+  });
-+
-+  @override
-+  State<_DraftTicket> createState() => _DraftTicketState();
-+}
-+
-+class _DraftTicketState extends State<_DraftTicket> {
-+  // Null until the user folds/unfolds it; until then it follows screen width.
-+  bool? _expanded;
- 
--  const _DraftCard({required this.draft, required this.onTap});
-+  String _status(BillItem it) =>
-+      widget.statusOverride[it.id] ?? it.kitchenStatus ?? 'pending';
- 
    @override
    Widget build(BuildContext context) {
      final l10n = context.l10n;
--    final itemCount = draft.items.fold<double>(0, (s, it) => s + it.quantity);
-+    final draft = widget.ticket.bill;
-+    final items = widget.ticket.items;
-+    final expanded = widget.forceExpanded ||
-+        (_expanded ?? MediaQuery.sizeOf(context).width >= 720);
-+    final readyCount = draft.items.where((it) => _status(it) == 'ready').length;
-+    final allReady = draft.items.isNotEmpty &&
-+        draft.items
-+            .every((it) => const ['ready', 'delivered'].contains(_status(it)));
-+
-     final hasName =
-         draft.customerName != null && draft.customerName!.trim().isNotEmpty;
-     final title = draft.tableNumber != null
-@@ -167,120 +290,317 @@ class _DraftCard extends StatelessWidget {
-         : hasName
-             ? draft.customerName!.trim()
-             : l10n.openOrdersBillNumber(draft.billNumber);
-+    final timeLabel =
-+        orderTimeLabel(context, draft.createdAt.toUtc().toIso8601String());
+@@ -320,7 +347,8 @@ class _DraftTicketState extends State<_DraftTicket> {
  
--    return Card(
--      margin: EdgeInsets.zero,
--      shape: RoundedRectangleBorder(
--        borderRadius: BorderRadius.circular(AppRadius.medium),
--        side: const BorderSide(color: AppColors.border),
--      ),
--      child: InkWell(
--        borderRadius: BorderRadius.circular(AppRadius.medium),
--        onTap: onTap,
--        child: Padding(
--          padding: const EdgeInsets.all(AppSpacing.space16),
--          child: Row(
--            children: [
--              Container(
--                width: 44,
--                height: 44,
--                decoration: BoxDecoration(
--                  color: AppColors.primary.withValues(alpha: 0.12),
--                  borderRadius: BorderRadius.circular(AppRadius.small),
--                ),
--                child: Icon(
--                    draft.tableId != null
--                        ? Icons.table_restaurant_outlined
--                        : Icons.receipt_long_outlined,
--                    color: AppColors.primary),
--              ),
--              const SizedBox(width: AppSpacing.space12),
--              Expanded(
--                child: Column(
--                  crossAxisAlignment: CrossAxisAlignment.start,
--                  children: [
--                    Row(
-+    final card = AppCard(
-+      padding: EdgeInsets.zero,
-+      color: allReady ? AppColors.successLight : AppColors.surface,
-+      child: Column(
-+        crossAxisAlignment: CrossAxisAlignment.stretch,
-+        children: [
-+          // Header: a tap anywhere folds/unfolds the dishes. Opening the bill
-+          // is the button under the dishes, or a swipe right on the card.
-+          // Under the ready filter cards stay open, so the tap does nothing.
-+          InkWell(
-+            onTap: widget.forceExpanded
-+                ? null
-+                : () => setState(() => _expanded = !expanded),
-+            child: Padding(
-+              padding: const EdgeInsets.fromLTRB(
-+                  AppSpacing.space8, 6, AppSpacing.space8, 6),
-+              child: Row(
-+                crossAxisAlignment: CrossAxisAlignment.start,
-+                children: [
-+                  Expanded(
-+                    child: Column(
-+                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                       children: [
--                        Expanded(
--                          child: Text(
--                            title,
--                            maxLines: 1,
--                            overflow: TextOverflow.ellipsis,
--                            style: Theme.of(context)
--                                .textTheme
--                                .titleMedium
--                                ?.copyWith(fontWeight: FontWeight.w600),
--                          ),
-+                        Row(
-+                          children: [
-+                            Container(
-+                              width: 22,
-+                              height: 22,
-+                              alignment: Alignment.center,
-+                              decoration: BoxDecoration(
-+                                color: allReady
-+                                    ? AppColors.success
-+                                    : AppColors.primary,
-+                                borderRadius:
-+                                    BorderRadius.circular(AppRadius.small),
-+                              ),
-+                              child: Text(
-+                                '${widget.ticket.seq}',
-+                                style: const TextStyle(
-+                                    color: Colors.white,
-+                                    fontSize: 12,
-+                                    fontWeight: FontWeight.w700),
-+                              ),
-+                            ),
-+                            const SizedBox(width: 6),
-+                            Expanded(
-+                              child: Text(
-+                                title,
-+                                maxLines: 1,
-+                                overflow: TextOverflow.ellipsis,
-+                                style: const TextStyle(
-+                                    fontSize: 14, fontWeight: FontWeight.w700),
-+                              ),
-+                            ),
-+                          ],
-                         ),
--                        const SizedBox(width: AppSpacing.space8),
--                        Text(
--                          '₹${(draft.total - draft.discountAmount).toStringAsFixed(2)}',
--                          style: Theme.of(context)
--                              .textTheme
--                              .titleMedium
--                              ?.copyWith(fontWeight: FontWeight.w700),
-+                        const SizedBox(height: 2),
-+                        Padding(
-+                          // Indented past the queue chip (22 + 6) so the total
-+                          // lines up under the title.
-+                          padding: const EdgeInsets.only(left: 28),
-+                          child: Row(
-+                            children: [
-+                              Text(
-+                                '₹${(draft.total - draft.discountAmount).toStringAsFixed(2)}',
-+                                style: const TextStyle(
-+                                    fontSize: 13, fontWeight: FontWeight.w700),
-+                              ),
-+                              const SizedBox(width: 6),
-+                              Expanded(
-+                                child: Text(
-+                                  l10n.openOrdersItemCount(draft.items
-+                                      .fold<double>(
-+                                          0, (s, it) => s + it.quantity)
-+                                      .toInt()),
-+                                  maxLines: 1,
-+                                  overflow: TextOverflow.ellipsis,
-+                                  style: const TextStyle(
-+                                      fontSize: 11,
-+                                      color: AppColors.textSecondary),
-+                                ),
-+                              ),
-+                            ],
+     final card = AppCard(
+       padding: EdgeInsets.zero,
+-      color: allReady ? AppColors.successLight : AppColors.surface,
++      // Never tinted green when everything is done — the ticks say it.
++      color: AppColors.surface,
+       child: Column(
+         crossAxisAlignment: CrossAxisAlignment.stretch,
+         children: [
+@@ -500,20 +528,39 @@ class _DraftTicketState extends State<_DraftTicket> {
+                 ? Column(
+                     crossAxisAlignment: CrossAxisAlignment.stretch,
+                     children: [
+-                      // A long order stops growing at ~15 dishes and scrolls
++                      // A long order stops growing at ~10 dishes and scrolls
+                       // inside the card; the Open bill button stays in view.
+                       // ponytail: ~35px per KitchenItemTile row, so wrapped
+-                      // names show slightly fewer than 15.
++                      // names show slightly fewer than 10.
+                       ConstrainedBox(
+                         constraints: const BoxConstraints(
+                             maxHeight: _DraftTicket._maxRows * 35.0),
+-                        child: Scrollbar(
++                        child: NotificationListener<OverscrollNotification>(
++                          onNotification: _chainToPage,
++                          child: Scrollbar(
+                           child: SingleChildScrollView(
++                            // Clamping, so a finger drag at either end reports
++                            // overscroll (handed to the page) instead of
++                            // bouncing.
++                            physics: const ClampingScrollPhysics(),
+                             child: Column(
+                               crossAxisAlignment: CrossAxisAlignment.stretch,
+                               children: [
+                                 for (int i = 0; i < items.length; i++) ...[
+                                   const Divider(height: 1),
++                                  if (widget.retail)
++                                    _TickTile(
++                                      key: ValueKey(items[i].id),
++                                      item: items[i],
++                                      ticked:
++                                          _status(items[i]) == 'delivered',
++                                      busy: widget.busy.contains(items[i].id),
++                                      onTap: () => widget.onToggle({
++                                        'id': items[i].id,
++                                        'kitchen_status': _status(items[i]),
++                                      }),
++                                    )
++                                  else
+                                   KitchenItemTile(
+                                     key: ValueKey(items[i].id),
+                                     item: {
+@@ -525,11 +572,13 @@ class _DraftTicketState extends State<_DraftTicket> {
+                                     role: widget.role,
+                                     busy: widget.busy,
+                                     onToggle: widget.onToggle,
++                                    tintRow: false,
+                                   ),
+                                 ],
+                               ],
+                             ),
+                           ),
 +                          ),
                          ),
-+                        // Money already taken online, and the reference to
-+                        // check it against. Shown here rather than only in the
-+                        // online queue because THIS is the screen someone opens
-+                        // to settle the bill or hand a delivery over — and a
-+                        // prepaid order that looks unpaid gets charged in full
-+                        // a second time.
-+                        if (draft.hasOnlinePrepayment) ...[
-+                          const SizedBox(height: 4),
-+                          Row(
-+                            children: [
-+                              const SizedBox(width: 28),
-+                              const Icon(Icons.verified_outlined,
-+                                  size: 13, color: AppColors.success),
-+                              const SizedBox(width: 4),
-+                              Flexible(
-+                                child: Text(
-+                                  'Paid online ₹${draft.onlinePaidAmount.toStringAsFixed(2)}'
-+                                  '${draft.onlinePaymentTxnId != null && draft.onlinePaymentTxnId!.isNotEmpty ? ' · ${draft.onlinePaymentTxnId}' : ''}',
-+                                  maxLines: 1,
-+                                  overflow: TextOverflow.ellipsis,
-+                                  style: const TextStyle(
-+                                    fontSize: 11.5,
-+                                    fontWeight: FontWeight.w600,
-+                                    color: AppColors.success,
-+                                  ),
-+                                ),
-+                              ),
-+                            ],
-+                          ),
-+                        ],
-                       ],
-                     ),
--                    const SizedBox(height: 2),
--                    Row(
-+                  ),
-+                  const SizedBox(width: AppSpacing.space8),
-+                  // Time + chevron on top, the ready badge right-aligned under
-+                  // them at the card's edge.
-+                  Padding(
-+                    padding: const EdgeInsets.only(top: 2),
-+                    child: Column(
-+                      crossAxisAlignment: CrossAxisAlignment.end,
-                       children: [
--                        Expanded(
--                          child: Text(
--                            l10n.openOrdersItemCount(itemCount.toInt()),
--                            maxLines: 1,
--                            overflow: TextOverflow.ellipsis,
--                            style: Theme.of(context)
--                                .textTheme
--                                .bodySmall
--                                ?.copyWith(color: AppColors.textSecondary),
--                          ),
--                        ),
--                        const SizedBox(width: AppSpacing.space8),
--                        Text(
--                          DateFormat('dd MMM yyyy, hh:mm a')
--                              .format(draft.createdAt.toLocal()),
--                          style: Theme.of(context)
--                              .textTheme
--                              .bodySmall
--                              ?.copyWith(color: AppColors.textSecondary),
-+                        Row(
-+                          crossAxisAlignment: CrossAxisAlignment.start,
-+                          children: [
-+                            if (timeLabel.isNotEmpty) ...[
-+                              const Padding(
-+                                padding: EdgeInsets.only(top: 4),
-+                                child: Icon(Icons.schedule,
-+                                    size: 11, color: AppColors.textSecondary),
-+                              ),
-+                              const SizedBox(width: 2),
-+                              Padding(
-+                                padding: const EdgeInsets.only(top: 2),
-+                                child: Text(
-+                                  timeLabel,
-+                                  style: const TextStyle(
-+                                      fontSize: 11,
-+                                      color: AppColors.textSecondary,
-+                                      fontWeight: FontWeight.w500),
-+                                ),
-+                              ),
-+                            ],
-+                            if (!widget.forceExpanded) ...[
-+                              const SizedBox(width: 4),
-+                              // Turns over in step with the dishes sliding.
-+                              AnimatedRotation(
-+                                turns: expanded ? 0.5 : 0,
-+                                duration: const Duration(milliseconds: 260),
-+                                curve: Curves.easeInOutCubic,
-+                                child: const Icon(Icons.expand_more, size: 20),
-+                              ),
-+                            ],
-+                          ],
-                         ),
-+                        if (readyCount > 0) ...[
-+                          const SizedBox(height: 2),
-+                          _ReadyBadge(count: readyCount),
-+                        ],
-                       ],
-                     ),
--                    // Money already taken online, and the reference to check it
--                    // against. Shown here rather than only in the online queue
--                    // because THIS is the screen someone opens to settle the
--                    // bill or hand a delivery over — and a prepaid order that
--                    // looks unpaid gets charged in full a second time.
--                    if (draft.hasOnlinePrepayment) ...[
--                      const SizedBox(height: 4),
--                      Row(
--                        children: [
--                          const Icon(Icons.verified_outlined,
--                              size: 13, color: AppColors.success),
--                          const SizedBox(width: 4),
--                          Flexible(
--                            child: Text(
--                              'Paid online ₹${draft.onlinePaidAmount.toStringAsFixed(2)}'
--                              '${draft.onlinePaymentTxnId != null && draft.onlinePaymentTxnId!.isNotEmpty ? ' · ${draft.onlinePaymentTxnId}' : ''}',
--                              maxLines: 1,
--                              overflow: TextOverflow.ellipsis,
--                              style: const TextStyle(
--                                fontSize: 11.5,
--                                fontWeight: FontWeight.w600,
--                                color: AppColors.success,
--                              ),
--                            ),
--                          ),
--                        ],
-+                  ),
-+                ],
-+              ),
-+            ),
-+          ),
-+          // Slides the dishes (and the Open bill button) open/closed instead
-+          // of snapping; clips while it animates.
-+          AnimatedSize(
-+            duration: const Duration(milliseconds: 260),
-+            curve: Curves.easeInOutCubic,
-+            alignment: Alignment.topCenter,
-+            child: expanded
-+                ? Column(
-+                    crossAxisAlignment: CrossAxisAlignment.stretch,
-+                    children: [
-+                      for (int i = 0; i < items.length; i++) ...[
-+                        const Divider(height: 1),
-+                        KitchenItemTile(
-+                          key: ValueKey(items[i].id),
-+                          item: {
-+                            'id': items[i].id,
-+                            'item_name': items[i].itemName,
-+                            'quantity': items[i].quantity,
-+                            'kitchen_status': _status(items[i]),
-+                          },
-+                          role: widget.role,
-+                          busy: widget.busy,
-+                          onToggle: widget.onToggle,
-+                        ),
-+                      ],
-+                      const Divider(height: 1),
-+                      Padding(
-+                        padding: const EdgeInsets.all(AppSpacing.space8),
-+                        child: OutlinedButton.icon(
-+                          onPressed: widget.onOpen,
-+                          icon:
-+                              const Icon(Icons.receipt_long_outlined, size: 18),
-+                          label: Text(l10n.openOrdersOpenBill),
-+                        ),
                        ),
-                     ],
--                  ],
--                ),
-+                  )
-+                : const SizedBox(width: double.infinity),
-+          ),
-+        ],
-+      ),
-+    );
+                       const Divider(height: 1),
+@@ -649,3 +698,70 @@ class _ReadyBadge extends StatelessWidget {
+     );
+   }
+ }
 +
-+    // Short swipe right (folded or open) = open the bill — same feel as the
-+    // billing page's swipe-to-add: the card travels at most [_maxDrag], fires
-+    // past [_threshold], and springs back.
-+    final armed = _dragDx > _threshold;
-+    return ClipRRect(
-+      borderRadius: BorderRadius.circular(AppRadius.medium),
-+      child: Stack(
-+        children: [
-+          // Revealed hint behind the card, growing with the drag.
-+          Positioned.fill(
-+            child: Align(
-+              alignment: Alignment.centerLeft,
-+              child: Container(
-+                width: _dragDx.clamp(0.0, _maxDrag),
-+                color: AppColors.primary.withValues(alpha: armed ? 0.22 : 0.10),
-+                alignment: Alignment.center,
-+                child: _dragDx > 8
-+                    ? Icon(Icons.receipt_long_outlined,
-+                        size: 20,
-+                        color: AppColors.primary.withValues(
-+                            alpha: ((_dragDx - 8) / (_threshold - 8))
-+                                .clamp(0.0, 1.0)))
-+                    : null,
-               ),
--            ],
-+            ),
-           ),
--        ),
-+          GestureDetector(
-+            onHorizontalDragStart: (_) => setState(() => _dragging = true),
-+            onHorizontalDragUpdate: (d) {
-+              final next = (_dragDx + d.delta.dx).clamp(0.0, _maxDrag);
-+              // A tick as it crosses the trigger point, so the hand knows
-+              // letting go now opens the bill.
-+              if ((next > _threshold) != (_dragDx > _threshold)) {
-+                HapticFeedback.selectionClick();
-+              }
-+              setState(() => _dragDx = next);
-+            },
-+            onHorizontalDragEnd: (_) => _endDrag(),
-+            onHorizontalDragCancel: _endDrag,
-+            child: AnimatedContainer(
-+              // Follows the finger 1:1; eases back on release.
-+              duration:
-+                  _dragging ? Duration.zero : const Duration(milliseconds: 200),
-+              curve: Curves.easeOut,
-+              transform: Matrix4.translationValues(_dragDx, 0, 0),
-+              child: card,
-+            ),
-+          ),
-+        ],
-+      ),
-+    );
-+  }
++/// A retail order line with a plain tick box — what the tick means is up to
++/// the shop (packed, handed over, checked…), so it carries no label.
++class _TickTile extends StatelessWidget {
++  final BillItem item;
++  final bool ticked;
++  final bool busy;
++  final VoidCallback onTap;
 +
-+  static const double _threshold = 56.0; // px to trigger, as swipe-to-add
-+  static const double _maxDrag = 72.0;
-+  double _dragDx = 0;
-+  bool _dragging = false;
-+
-+  void _endDrag() {
-+    final fire = _dragDx > _threshold;
-+    setState(() {
-+      _dragging = false;
-+      _dragDx = 0;
-+    });
-+    if (fire) {
-+      HapticFeedback.lightImpact();
-+      widget.onOpen();
-+    }
-+  }
-+}
-+
-+/// Green "🛎 N" pill — dishes on this order ready to be taken out.
-+class _ReadyBadge extends StatelessWidget {
-+  final int count;
-+  const _ReadyBadge({required this.count});
++  const _TickTile({
++    super.key,
++    required this.item,
++    required this.ticked,
++    required this.busy,
++    required this.onTap,
++  });
 +
 +  @override
 +  Widget build(BuildContext context) {
-+    return Container(
-+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-+      decoration: BoxDecoration(
-+        color: AppColors.success,
-+        borderRadius: BorderRadius.circular(AppRadius.small),
-+      ),
-+      child: Row(
-+        mainAxisSize: MainAxisSize.min,
-+        children: [
-+          const Icon(Icons.room_service, size: 12, color: Colors.white),
-+          const SizedBox(width: 3),
-+          Text(
-+            '$count',
-+            style: const TextStyle(
-+                color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
-+          ),
-+        ],
-       ),
-     );
-   }
-diff --git a/frontend/lib/screens/orders_screen.dart b/frontend/lib/screens/orders_screen.dart
-index 744ea872..6c94f03e 100644
---- a/frontend/lib/screens/orders_screen.dart
-+++ b/frontend/lib/screens/orders_screen.dart
-@@ -10,6 +10,7 @@ import '../widgets/shell_app_bar.dart';
- import 'tables_screen.dart';
- import 'open_drafts_screen.dart';
- import 'credit_screen.dart';
-+import 'kitchen_screen.dart';
- import 'online_orders_screen.dart';
- 
- /// The "Orders" bottom-nav tab: one screen hosting everything with work still
-@@ -53,6 +54,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
-   final _searchController = TextEditingController();
-   final _searchFocus = FocusNode();
- 
-+  // "Ready to serve" filter on Open Orders — same toggle as the Kitchen page.
-+  bool _readyOnly = false;
-+
-   @override
-   void initState() {
-     super.initState();
-@@ -265,7 +269,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
-         return TablesScreen(key: _tablesKey, embedded: true);
-       case _OrdersTab.openOrders:
-         return OpenDraftsScreen(
--            embedded: true, query: _searchController.text);
-+            embedded: true,
-+            query: _searchController.text,
-+            readyOnly: _readyOnly);
-       case _OrdersTab.credit:
-         return const CreditScreen(embedded: true);
-       case _OrdersTab.online:
-@@ -291,6 +297,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
- 
-     final storeEnabled =
-         ref.watch(sessionProvider).valueOrNull?.storeEnabled ?? false;
-+    final businessType = ref.watch(sessionProvider).valueOrNull?.businessType;
-+    final isRestaurant = businessType == 'restaurant_with_tables' ||
-+        businessType == 'restaurant_no_tables';
-+    final readyCount = ref.watch(openOrdersReadyCountProvider);
- 
-     _syncTabs([
-       // Always shown, even when empty, so staff always know where to look —
-@@ -350,6 +360,20 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
-             ),
-             actions: [
-               _buildSearch(l10n, bar.maxWidth),
-+              if (isRestaurant && !_searchExpanded)
-+                ReadyToServeToggle(
-+                  count: readyCount,
-+                  selected: _readyOnly,
-+                  tooltip: l10n.kitchenReadyOnly,
-+                  onTap: () {
-+                    setState(() => _readyOnly = !_readyOnly);
-+                    // The filter lives on Open Orders — bring it forward.
-+                    final i = _tabs.indexOf(_OrdersTab.openOrders);
-+                    if (_readyOnly && _tabController!.index != i) {
-+                      _tabController!.animateTo(i);
-+                    }
-+                  },
++    return InkWell(
++      onTap: busy ? null : onTap,
++      child: Padding(
++        padding: const EdgeInsets.symmetric(
++            horizontal: AppSpacing.space8, vertical: 6),
++        child: Row(
++          children: [
++            AnimatedSwitcher(
++              duration: const Duration(milliseconds: 200),
++              child: ticked
++                  ? Container(
++                      key: const ValueKey('on'),
++                      width: 20,
++                      height: 20,
++                      decoration: const BoxDecoration(
++                          color: AppColors.success, shape: BoxShape.circle),
++                      child: const Icon(Icons.check,
++                          size: 14, color: Colors.white),
++                    )
++                  : const Icon(Icons.radio_button_unchecked,
++                      key: ValueKey('off'),
++                      size: 20,
++                      color: AppColors.textSecondary),
++            ),
++            const SizedBox(width: 6),
++            Expanded(
++              child: Text(
++                item.itemName,
++                maxLines: 1,
++                overflow: TextOverflow.ellipsis,
++                style: TextStyle(
++                  fontSize: 13,
++                  color:
++                      ticked ? AppColors.textSecondary : AppColors.textPrimary,
 +                ),
-               IconButton(
-                 icon: const Icon(Icons.refresh_outlined),
-                 onPressed: _refresh,
++              ),
++            ),
++            const SizedBox(width: 6),
++            Text(
++              '× ${formatQty(item.quantity)}',
++              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
++            ),
++          ],
++        ),
++      ),
++    );
++  }
++}
 diff --git a/frontend/test/screens/open_drafts_screen_test.dart b/frontend/test/screens/open_drafts_screen_test.dart
 new file mode 100644
-index 00000000..53d1db1f
+index 00000000..62b3133e
 --- /dev/null
 +++ b/frontend/test/screens/open_drafts_screen_test.dart
-@@ -0,0 +1,54 @@
-+import 'package:flutter_test/flutter_test.dart';
+@@ -0,0 +1,126 @@
++import 'package:Vittam/l10n/app_localizations.dart';
 +import 'package:Vittam/models/models.dart';
++import 'package:Vittam/providers.dart';
++import 'package:Vittam/providers/open_drafts_provider.dart';
 +import 'package:Vittam/screens/open_drafts_screen.dart';
++import 'package:Vittam/theme/app_theme.dart';
++import 'package:flutter/material.dart';
++import 'package:flutter_localizations/flutter_localizations.dart';
++import 'package:flutter_riverpod/flutter_riverpod.dart';
++import 'package:flutter_test/flutter_test.dart';
 +
 +Bill _draft(String id, DateTime at, List<String?> statuses) => Bill(
 +      id: id,
@@ -1233,4 +407,69 @@ index 00000000..53d1db1f
 +  test('search still filters', () {
 +    expect(OpenDraftsScreen.tickets(drafts, 'guest mid', false).single.seq, 2);
 +  });
++
++  // Phone: unfolding one bill folds the one that was open. Wide screens keep
++  // every card open side by side, each folding on its own.
++  group('unfolding bills', () {
++    Future<void> pump(WidgetTester tester, double width) async {
++      tester.view.physicalSize = Size(width, 900);
++      tester.view.devicePixelRatio = 1;
++      addTearDown(tester.view.reset);
++      await tester.pumpWidget(ProviderScope(
++        overrides: [
++          openDraftsProvider.overrideWith(() => _FakeDrafts(drafts)),
++          userRoleProvider.overrideWithValue('owner'),
++        ],
++        child: MaterialApp(
++          theme: buildAppTheme('en'),
++          localizationsDelegates: const [
++            AppLocalizations.delegate,
++            GlobalMaterialLocalizations.delegate,
++            GlobalWidgetsLocalizations.delegate,
++            GlobalCupertinoLocalizations.delegate,
++          ],
++          supportedLocales: AppLocalizations.supportedLocales,
++          home: const OpenDraftsScreen(),
++        ),
++      ));
++      await tester.pumpAndSettle();
++    }
++
++    // 'old' has Dish 0 + Dish 1, 'mid' has only Dish 0: so Dish 1 on screen
++    // means 'old' is unfolded.
++    testWidgets('phone: only one bill open at a time', (tester) async {
++      await pump(tester, 390);
++      expect(find.text('Dish 0'), findsNothing); // all folded to start
++
++      await tester.tap(find.text('Guest old'));
++      await tester.pumpAndSettle();
++      expect(find.text('Dish 1'), findsOneWidget); // old open
++
++      await tester.tap(find.text('Guest mid'));
++      await tester.pumpAndSettle();
++      expect(find.text('Dish 1'), findsNothing); // old folded by itself
++      expect(find.text('Dish 0'), findsOneWidget); // only mid's dish
++
++      await tester.tap(find.text('Guest mid'));
++      await tester.pumpAndSettle();
++      expect(find.text('Dish 0'), findsNothing); // tapping it again folds it
++    });
++
++    testWidgets('wide: cards open together and fold independently',
++        (tester) async {
++      await pump(tester, 1600);
++      expect(find.text('Dish 1'), findsNWidgets(2)); // old and new both open
++      await tester.tap(find.text('Guest old'));
++      await tester.pumpAndSettle();
++      expect(find.text('Dish 1'), findsOneWidget); // only old folded
++    });
++  });
++}
++
++class _FakeDrafts extends OpenDraftsNotifier {
++  _FakeDrafts(this.drafts);
++  final List<Bill> drafts;
++
++  @override
++  Future<List<Bill>> build() async => drafts;
 +}

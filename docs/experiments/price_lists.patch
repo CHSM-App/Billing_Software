@@ -1,0 +1,2018 @@
+diff --git a/backend/src/routes/bills.js b/backend/src/routes/bills.js
+index 6a3b50ad..7e605e85 100644
+--- a/backend/src/routes/bills.js
++++ b/backend/src/routes/bills.js
+@@ -273,6 +273,30 @@ function resolveNetPriceAndRate(dbItem, variant, gstEnabled) {
+ // `carried` — a draft's existing values (update-items) — in place of the
+ // request's, so a waiter neither changes nor wipes the cashier's edits.
+ const canReprice = (user) => user.role === 'owner' || user.role === 'cashier';
++
++// The price list a bill was opened with (migration 059). Pricing never reads it
++// — list prices arrive as each line's price_override — it only lets a held bill
++// reopen on the same list. Same gate as price_override: a waiter's value is
++// ignored, so their edits never clear the cashier's list. Returns
++// { set: false } (leave the column alone), { set: true, id } or { error }.
++async function resolvePriceList(req) {
++  if (!Object.prototype.hasOwnProperty.call(req.body, 'price_list_id') ||
++      !canReprice(req.user)) {
++    return { set: false };
++  }
++  const id = req.body.price_list_id;
++  if (id === null || id === '') return { set: true, id: null };
++  if (typeof id !== 'string' ||
++      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
++    return { error: 'price_list_id must be a valid UUID' };
++  }
++  const found = await pool.request()
++    .input('id', sql.UniqueIdentifier, id)
++    .input('business_id', sql.UniqueIdentifier, req.user.business_id)
++    .query('SELECT id FROM price_lists WHERE id = @id AND business_id = @business_id');
++  if (found.recordset.length === 0) return { error: 'Price list not found' };
++  return { set: true, id };
++}
+ function applyLineOverrides(i, resolvedNet, qty, allowed, carried) {
+   const src = allowed ? i : (carried || {});
+   const p = parseFloat(src.price_override);
+@@ -529,7 +553,7 @@ async function fetchBill(billId, businessId) {
+     .query(`
+       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
+              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+-             b.total, b.round_off, b.payment_mode, b.status,
++             b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
+              b.payment_status, b.settled_at, b.settled_payment_mode, b.credit_amount,
+              b.credit_collected,
+              b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token,
+@@ -675,6 +699,9 @@ router.post('/', requireAuth, async (req, res) => {
+     }
+     // ─────────────────────────────────────────────────────────────────────────
+ 
++    const priceList = await resolvePriceList(req);
++    if (priceList.error) return res.status(400).json({ error: priceList.error });
++
+     const transaction = pool.transaction();
+     await transaction.begin();
+ 
+@@ -856,19 +883,20 @@ router.post('/', requireAuth, async (req, res) => {
+         .input('client_bill_id',  sql.NVarChar(36),     client_bill_id || null)
+         .input('receipt_token',   sql.NVarChar(16),     receiptToken)
+         .input('sale_time',       sql.DateTime2,        saleTime)
++        .input('price_list_id',   sql.UniqueIdentifier, priceList.set ? priceList.id : null)
+         // An offline sale was ordered and finalized in one moment, so its
+         // client time is both dates. A draft gets finalized_at on finalize.
+         .query(`
+           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
+                              subtotal, tax_amount, discount_amount, charges_amount, additional_charges,
+                              total, round_off, payment_mode, payment_status, credit_amount, status,
+-                             created_by_user_id, client_bill_id, receipt_token,
++                             created_by_user_id, client_bill_id, receipt_token, price_list_id,
+                              created_at, finalized_at, finalized_by_user_id)
+           OUTPUT INSERTED.id
+           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
+                   @subtotal, @tax_amount, @discount_amount, @charges_amount, @additional_charges,
+                   @total, @round_off, @payment_mode, @payment_status, @credit_amount, @status,
+-                  @created_by_user_id, @client_bill_id, @receipt_token,
++                  @created_by_user_id, @client_bill_id, @receipt_token, @price_list_id,
+                   COALESCE(@sale_time, SYSUTCDATETIME()),
+                   CASE WHEN @status = 'finalized' THEN COALESCE(@sale_time, SYSUTCDATETIME()) END,
+                   -- Settled in one step: the creator is also the biller.
+@@ -1102,7 +1130,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
+       .query(`
+         SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
+                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+-               b.total, b.round_off, b.payment_mode, b.status,
++               b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
+                b.created_by_user_id, b.created_at, b.receipt_token,
+                -- See the single-bill query above: an accepted online order
+                -- carries its advance and UPI reference here, which is what the
+@@ -1767,6 +1795,9 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
+   try {
+     await poolConnect;
+ 
++    const priceList = await resolvePriceList(req);
++    if (priceList.error) return res.status(400).json({ error: priceList.error });
++
+     const transaction = pool.transaction();
+     await transaction.begin();
+ 
+@@ -1989,6 +2020,10 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
+         extraSets.push('charges_amount = @charges_amount');
+         extraSets.push('additional_charges = @additional_charges');
+       }
++      if (priceList.set) {
++        totalsReq.input('price_list_id', sql.UniqueIdentifier, priceList.id);
++        extraSets.push('price_list_id = @price_list_id');
++      }
+       // `disc` for the tax scaling: the new clamped discount when setting it,
+       // otherwise the bill's current discount_amount. Both are clamped to net.
+       const discExpr = setDiscount
+diff --git a/backend/src/schema.sql b/backend/src/schema.sql
+index a148a9f2..073c3515 100644
+--- a/backend/src/schema.sql
++++ b/backend/src/schema.sql
+@@ -153,6 +153,37 @@ CREATE UNIQUE INDEX UQ_item_variants_item_barcode
+     ON item_variants (item_id, barcode)
+     WHERE barcode IS NOT NULL;
+ 
++-- Price lists (migration 059): an optional % rule plus fixed prices per item or
++-- size. Billing sends list prices as line price_overrides; see 059 for why
++-- item_id / variant_id carry no FK.
++CREATE TABLE price_lists (
++    id          UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
++    business_id UNIQUEIDENTIFIER NOT NULL,
++    name        NVARCHAR(60)     NOT NULL,
++    adjust_pct  DECIMAL(6,2)     NULL,
++    is_active   BIT              NOT NULL DEFAULT 1,
++    created_at  DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
++
++    CONSTRAINT FK_price_lists_business
++        FOREIGN KEY (business_id) REFERENCES businesses (id)
++);
++
++CREATE INDEX IX_price_lists_business_id ON price_lists (business_id);
++
++CREATE TABLE price_list_items (
++    id            UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
++    price_list_id UNIQUEIDENTIFIER NOT NULL,
++    item_id       UNIQUEIDENTIFIER NOT NULL,
++    variant_id    UNIQUEIDENTIFIER NULL,
++    price         DECIMAL(12,2)    NOT NULL,
++
++    CONSTRAINT FK_price_list_items_list
++        FOREIGN KEY (price_list_id) REFERENCES price_lists (id) ON DELETE CASCADE
++);
++
++CREATE UNIQUE INDEX UQ_price_list_items_line
++    ON price_list_items (price_list_id, item_id, variant_id);
++
+ CREATE TABLE tables (
+     id            UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+     business_id   UNIQUEIDENTIFIER NOT NULL,
+@@ -192,6 +223,7 @@ CREATE TABLE bills (
+     -- Who settled it ("Billed by" on receipts/History). Migration 057; NULL on
+     -- older bills, which fall back to created_by_user_id when read.
+     finalized_by_user_id UNIQUEIDENTIFIER NULL,
++    price_list_id       UNIQUEIDENTIFIER NULL,     -- list the bill was priced with (migration 059); no FK
+     client_bill_id      NVARCHAR(36)     NULL,     -- idempotency key from Flutter offline queue (UUID v4)
+     created_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
+ 
+diff --git a/backend/src/server.js b/backend/src/server.js
+index f573d74f..5968b5c8 100644
+--- a/backend/src/server.js
++++ b/backend/src/server.js
+@@ -247,6 +247,7 @@ app.use('/api', require('./routes/auth'));
+ app.use('/api/staff', require('./routes/staff'));
+ app.use('/api/businesses', require('./routes/businesses'));
+ app.use('/api/items', require('./routes/items'));
++app.use('/api/price-lists', require('./routes/price_lists'));
+ app.use('/api/raw-materials', require('./routes/raw_materials'));
+ app.use('/api/bills', require('./routes/bills'));
+ app.use('/api/credit', require('./routes/credit'));
+diff --git a/backend/tests/routes/bills.test.js b/backend/tests/routes/bills.test.js
+index f4da5343..7bb8e18f 100644
+--- a/backend/tests/routes/bills.test.js
++++ b/backend/tests/routes/bills.test.js
+@@ -1406,6 +1406,61 @@ describe('order-card line overrides', () => {
+       expect(tx.sql(/^\s*SELECT[\s\S]*FROM bill_items/)).toMatch(/discount_amount/);
+     });
+   });
++
++  // Migration 059: the bill remembers which price list it was opened with.
++  describe('price_list_id', () => {
++    const LIST_ID = '12345678-1234-4234-8234-123456789abc';
++    const update = (role, body) => request(app)
++      .put(`/api/bills/${BILL_ID}/update-items`)
++      .set(authHeader({ role }))
++      .send({ items: [{ item_id: ITEM_ID, quantity: 2 }], ...body });
++
++    test('a cashier creating a draft stores the list', async () => {
++      const tx = routeTx();
++      const res = await post('cashier', {}, { status: 'draft', price_list_id: LIST_ID });
++      expect(res.status).toBe(201);
++      expect(tx.bill().price_list_id).toBe(LIST_ID);
++    });
++
++    test('no list sent stores NULL', async () => {
++      const tx = routeTx();
++      await post('owner', {});
++      expect(tx.bill().price_list_id).toBeNull();
++    });
++
++    test("a waiter's list is ignored", async () => {
++      const tx = routeTx();
++      await post('server', {}, { status: 'draft', price_list_id: LIST_ID });
++      expect(tx.bill().price_list_id).toBeNull();
++    });
++
++    test('a list from another business is a 400', async () => {
++      routeTx();
++      mockRequest.query.mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
++      const res = await post('owner', {}, { price_list_id: LIST_ID });
++      expect(res.status).toBe(400);
++      expect(res.body.error).toMatch(/Price list not found/);
++    });
++
++    test('a malformed id is a 400', async () => {
++      routeTx();
++      const res = await post('owner', {}, { price_list_id: 'nope' });
++      expect(res.status).toBe(400);
++    });
++
++    test('update-items sets the list when a cashier sends it', async () => {
++      const tx = routeTx();
++      await update('cashier', { price_list_id: LIST_ID });
++      expect(tx.sql(/UPDATE b SET/)).toMatch(/price_list_id = @price_list_id/);
++    });
++
++    test('update-items leaves the list alone when the key is missing or a waiter sends it', async () => {
++      const tx = routeTx();
++      await update('cashier', {});
++      await update('server', { price_list_id: null });
++      expect(tx.sql(/price_list_id = @price_list_id/)).toBeUndefined();
++    });
++  });
+ });
+ 
+ // ------------------------------------------------------------------
+diff --git a/frontend/lib/api.dart b/frontend/lib/api.dart
+index a0161894..5edf7f63 100644
+--- a/frontend/lib/api.dart
++++ b/frontend/lib/api.dart
+@@ -729,6 +729,24 @@ Future<void> deleteTable(String id) async {
+   _parse(await _authDelete(Uri.parse('$baseUrl/tables/$id')));
+ }
+ 
++// Price lists: every role reads them (billing prices from them); only the
++// owner writes. Body: { name, adjust_pct, items: [{ item_id, variant_id, price }] }.
++Future<List<dynamic>> getPriceLists() async {
++  return _parse(await _authGet(Uri.parse('$baseUrl/price-lists')));
++}
++
++Future<Map<String, dynamic>> createPriceList(Map<String, dynamic> data) async {
++  return _parse(await _authPost(Uri.parse('$baseUrl/price-lists'), body: jsonEncode(data)));
++}
++
++Future<Map<String, dynamic>> updatePriceList(String id, Map<String, dynamic> data) async {
++  return _parse(await _authPut(Uri.parse('$baseUrl/price-lists/$id'), body: jsonEncode(data)));
++}
++
++Future<void> deletePriceList(String id) async {
++  _parse(await _authDelete(Uri.parse('$baseUrl/price-lists/$id')));
++}
++
+ /// Regenerate a table's QR token, invalidating the old sticker. Owner-only.
+ Future<Map<String, dynamic>> rotateTableQr(String id) async {
+   return _parse(
+@@ -1041,6 +1059,9 @@ Future<Map<String, dynamic>> updateBillItems(
+   /// Replaces the draft's additional charges when non-null (an empty list
+   /// clears them); null leaves whatever the draft already carries.
+   List<Map<String, dynamic>>? additionalCharges,
++  /// The bill's price list id, or null for default prices. Left out (the
++  /// default) the draft keeps whatever list it already has.
++  Object? priceListId = _keepPriceList,
+ }) async {
+   return _parse(await _authPut(
+     Uri.parse('$baseUrl/bills/$id/update-items'),
+@@ -1050,10 +1071,13 @@ Future<Map<String, dynamic>> updateBillItems(
+       if (customerPhone != null) 'customer_phone': customerPhone,
+       if (discountAmount != null) 'discount_amount': discountAmount,
+       if (additionalCharges != null) 'additional_charges': additionalCharges,
++      if (!identical(priceListId, _keepPriceList)) 'price_list_id': priceListId,
+     }),
+   ));
+ }
+ 
++const _keepPriceList = Object();
++
+ Future<void> voidBill(String id) async {
+   _parse(await _authDelete(Uri.parse('$baseUrl/bills/$id')));
+ }
+diff --git a/frontend/lib/l10n/app_en.arb b/frontend/lib/l10n/app_en.arb
+index ae8f709b..a5bba3bc 100644
+--- a/frontend/lib/l10n/app_en.arb
++++ b/frontend/lib/l10n/app_en.arb
+@@ -1265,5 +1265,22 @@
+   "logoShapeSquare": "Square",
+   "logoShapeWide": "Wide",
+   "logoReset": "Reset",
+-  "logoSave": "Save logo"
++  "logoSave": "Save logo",
++  "priceListPick": "Price list",
++  "priceListDefault": "Default",
++  "settingsPriceLists": "Price lists",
++  "settingsPriceListsSubtitle": "Party, wholesale and other rates",
++  "priceListsEmpty": "No price lists yet. Create one for party, wholesale or AC section rates.",
++  "priceListNew": "New price list",
++  "priceListName": "Name",
++  "priceListAdjust": "Change every price by %",
++  "priceListAdjustHint": "e.g. 10 for 10% more, -5 for 5% less. Leave blank to keep default prices.",
++  "priceListItemsHint": "Fixed prices win over the %. Leave blank to use the % (or the default price).",
++  "priceListDefaultPrice": "Default ₹{price}",
++  "@priceListDefaultPrice": { "placeholders": { "price": { "type": "String" } } },
++  "priceListDeleteConfirm": "Delete \"{name}\"? Bills already saved keep their prices.",
++  "@priceListDeleteConfirm": { "placeholders": { "name": { "type": "String" } } },
++  "priceListSaved": "Price list saved",
++  "priceListNameRequired": "Enter a name",
++  "priceListBadNumber": "Enter a valid number"
+ }
+diff --git a/frontend/lib/l10n/app_localizations.dart b/frontend/lib/l10n/app_localizations.dart
+index 19903936..5992bd5c 100644
+--- a/frontend/lib/l10n/app_localizations.dart
++++ b/frontend/lib/l10n/app_localizations.dart
+@@ -6585,6 +6585,96 @@ abstract class AppLocalizations {
+   /// In en, this message translates to:
+   /// **'Save logo'**
+   String get logoSave;
++
++  /// No description provided for @priceListPick.
++  ///
++  /// In en, this message translates to:
++  /// **'Price list'**
++  String get priceListPick;
++
++  /// No description provided for @priceListDefault.
++  ///
++  /// In en, this message translates to:
++  /// **'Default'**
++  String get priceListDefault;
++
++  /// No description provided for @settingsPriceLists.
++  ///
++  /// In en, this message translates to:
++  /// **'Price lists'**
++  String get settingsPriceLists;
++
++  /// No description provided for @settingsPriceListsSubtitle.
++  ///
++  /// In en, this message translates to:
++  /// **'Party, wholesale and other rates'**
++  String get settingsPriceListsSubtitle;
++
++  /// No description provided for @priceListsEmpty.
++  ///
++  /// In en, this message translates to:
++  /// **'No price lists yet. Create one for party, wholesale or AC section rates.'**
++  String get priceListsEmpty;
++
++  /// No description provided for @priceListNew.
++  ///
++  /// In en, this message translates to:
++  /// **'New price list'**
++  String get priceListNew;
++
++  /// No description provided for @priceListName.
++  ///
++  /// In en, this message translates to:
++  /// **'Name'**
++  String get priceListName;
++
++  /// No description provided for @priceListAdjust.
++  ///
++  /// In en, this message translates to:
++  /// **'Change every price by %'**
++  String get priceListAdjust;
++
++  /// No description provided for @priceListAdjustHint.
++  ///
++  /// In en, this message translates to:
++  /// **'e.g. 10 for 10% more, -5 for 5% less. Leave blank to keep default prices.'**
++  String get priceListAdjustHint;
++
++  /// No description provided for @priceListItemsHint.
++  ///
++  /// In en, this message translates to:
++  /// **'Fixed prices win over the %. Leave blank to use the % (or the default price).'**
++  String get priceListItemsHint;
++
++  /// No description provided for @priceListDefaultPrice.
++  ///
++  /// In en, this message translates to:
++  /// **'Default ₹{price}'**
++  String priceListDefaultPrice(String price);
++
++  /// No description provided for @priceListDeleteConfirm.
++  ///
++  /// In en, this message translates to:
++  /// **'Delete \"{name}\"? Bills already saved keep their prices.'**
++  String priceListDeleteConfirm(String name);
++
++  /// No description provided for @priceListSaved.
++  ///
++  /// In en, this message translates to:
++  /// **'Price list saved'**
++  String get priceListSaved;
++
++  /// No description provided for @priceListNameRequired.
++  ///
++  /// In en, this message translates to:
++  /// **'Enter a name'**
++  String get priceListNameRequired;
++
++  /// No description provided for @priceListBadNumber.
++  ///
++  /// In en, this message translates to:
++  /// **'Enter a valid number'**
++  String get priceListBadNumber;
+ }
+ 
+ class _AppLocalizationsDelegate
+diff --git a/frontend/lib/l10n/app_localizations_en.dart b/frontend/lib/l10n/app_localizations_en.dart
+index b546dd56..a8453a65 100644
+--- a/frontend/lib/l10n/app_localizations_en.dart
++++ b/frontend/lib/l10n/app_localizations_en.dart
+@@ -3740,4 +3740,56 @@ class AppLocalizationsEn extends AppLocalizations {
+ 
+   @override
+   String get logoSave => 'Save logo';
++
++  @override
++  String get priceListPick => 'Price list';
++
++  @override
++  String get priceListDefault => 'Default';
++
++  @override
++  String get settingsPriceLists => 'Price lists';
++
++  @override
++  String get settingsPriceListsSubtitle => 'Party, wholesale and other rates';
++
++  @override
++  String get priceListsEmpty =>
++      'No price lists yet. Create one for party, wholesale or AC section rates.';
++
++  @override
++  String get priceListNew => 'New price list';
++
++  @override
++  String get priceListName => 'Name';
++
++  @override
++  String get priceListAdjust => 'Change every price by %';
++
++  @override
++  String get priceListAdjustHint =>
++      'e.g. 10 for 10% more, -5 for 5% less. Leave blank to keep default prices.';
++
++  @override
++  String get priceListItemsHint =>
++      'Fixed prices win over the %. Leave blank to use the % (or the default price).';
++
++  @override
++  String priceListDefaultPrice(String price) {
++    return 'Default ₹$price';
++  }
++
++  @override
++  String priceListDeleteConfirm(String name) {
++    return 'Delete \"$name\"? Bills already saved keep their prices.';
++  }
++
++  @override
++  String get priceListSaved => 'Price list saved';
++
++  @override
++  String get priceListNameRequired => 'Enter a name';
++
++  @override
++  String get priceListBadNumber => 'Enter a valid number';
+ }
+diff --git a/frontend/lib/l10n/app_localizations_mr.dart b/frontend/lib/l10n/app_localizations_mr.dart
+index 01ac250d..a34a2e99 100644
+--- a/frontend/lib/l10n/app_localizations_mr.dart
++++ b/frontend/lib/l10n/app_localizations_mr.dart
+@@ -3752,4 +3752,56 @@ class AppLocalizationsMr extends AppLocalizations {
+ 
+   @override
+   String get logoSave => 'लोगो सेव्ह करा';
++
++  @override
++  String get priceListPick => 'दर यादी';
++
++  @override
++  String get priceListDefault => 'मूळ दर';
++
++  @override
++  String get settingsPriceLists => 'दर याद्या';
++
++  @override
++  String get settingsPriceListsSubtitle => 'पार्टी, घाऊक व इतर दर';
++
++  @override
++  String get priceListsEmpty =>
++      'अजून दर यादी नाही. पार्टी, घाऊक किंवा AC विभागासाठी एक तयार करा.';
++
++  @override
++  String get priceListNew => 'नवीन दर यादी';
++
++  @override
++  String get priceListName => 'नाव';
++
++  @override
++  String get priceListAdjust => 'सर्व दर % ने बदला';
++
++  @override
++  String get priceListAdjustHint =>
++      'उदा. 10 म्हणजे 10% जास्त, -5 म्हणजे 5% कमी. मूळ दर ठेवण्यासाठी रिकामे ठेवा.';
++
++  @override
++  String get priceListItemsHint =>
++      'ठराविक दर % पेक्षा प्राधान्याचा. % (किंवा मूळ दर) वापरण्यासाठी रिकामे ठेवा.';
++
++  @override
++  String priceListDefaultPrice(String price) {
++    return 'मूळ ₹$price';
++  }
++
++  @override
++  String priceListDeleteConfirm(String name) {
++    return '\"$name\" हटवायची? आधी जतन केलेल्या बिलांचे दर बदलणार नाहीत.';
++  }
++
++  @override
++  String get priceListSaved => 'दर यादी जतन झाली';
++
++  @override
++  String get priceListNameRequired => 'नाव टाका';
++
++  @override
++  String get priceListBadNumber => 'योग्य संख्या टाका';
+ }
+diff --git a/frontend/lib/l10n/app_mr.arb b/frontend/lib/l10n/app_mr.arb
+index 7b8d4c14..ecfc9a0a 100644
+--- a/frontend/lib/l10n/app_mr.arb
++++ b/frontend/lib/l10n/app_mr.arb
+@@ -1265,5 +1265,22 @@
+   "logoShapeSquare": "चौकोनी",
+   "logoShapeWide": "रुंद",
+   "logoReset": "रीसेट",
+-  "logoSave": "लोगो सेव्ह करा"
++  "logoSave": "लोगो सेव्ह करा",
++  "priceListPick": "दर यादी",
++  "priceListDefault": "मूळ दर",
++  "settingsPriceLists": "दर याद्या",
++  "settingsPriceListsSubtitle": "पार्टी, घाऊक व इतर दर",
++  "priceListsEmpty": "अजून दर यादी नाही. पार्टी, घाऊक किंवा AC विभागासाठी एक तयार करा.",
++  "priceListNew": "नवीन दर यादी",
++  "priceListName": "नाव",
++  "priceListAdjust": "सर्व दर % ने बदला",
++  "priceListAdjustHint": "उदा. 10 म्हणजे 10% जास्त, -5 म्हणजे 5% कमी. मूळ दर ठेवण्यासाठी रिकामे ठेवा.",
++  "priceListItemsHint": "ठराविक दर % पेक्षा प्राधान्याचा. % (किंवा मूळ दर) वापरण्यासाठी रिकामे ठेवा.",
++  "priceListDefaultPrice": "मूळ ₹{price}",
++  "@priceListDefaultPrice": { "placeholders": { "price": { "type": "String" } } },
++  "priceListDeleteConfirm": "\"{name}\" हटवायची? आधी जतन केलेल्या बिलांचे दर बदलणार नाहीत.",
++  "@priceListDeleteConfirm": { "placeholders": { "name": { "type": "String" } } },
++  "priceListSaved": "दर यादी जतन झाली",
++  "priceListNameRequired": "नाव टाका",
++  "priceListBadNumber": "योग्य संख्या टाका"
+ }
+diff --git a/frontend/lib/models/models.dart b/frontend/lib/models/models.dart
+index a3cc4429..64606d9d 100644
+--- a/frontend/lib/models/models.dart
++++ b/frontend/lib/models/models.dart
+@@ -513,6 +513,10 @@ class Bill {
+   /// queued offline bill, or a bill shape that doesn't carry it.
+   final String? billedBy;
+ 
++  /// The [PriceList] a held bill was priced with, so reopening it keeps the
++  /// list selected. Null for default prices and on older bills.
++  final String? priceListId;
++
+   /// When the bill was first written — for a held order, the ORDER time.
+   final DateTime createdAt;
+   /// When the sale was finalized. Null for a draft, and for an unsynced
+@@ -654,6 +658,7 @@ class Bill {
+     this.paymentStatus = 'paid',
+     required this.createdByUserId,
+     this.billedBy,
++    this.priceListId,
+     required this.createdAt,
+     this.finalizedAt,
+     required this.items,
+@@ -697,6 +702,7 @@ class Bill {
+         paymentStatus: j['payment_status'] ?? 'paid',
+         createdByUserId: j['created_by_user_id'] ?? '',
+         billedBy: j['billed_by'] as String?,
++        priceListId: j['price_list_id'] as String?,
+         createdAt: DateTime.parse(j['created_at']),
+         finalizedAt: j['finalized_at'] == null
+             ? null
+@@ -733,6 +739,56 @@ class Bill {
+       );
+ }
+ 
++/// A named set of prices — "Party", "Wholesale" — the cashier can bill with.
++///
++/// [adjustPct] is an optional % on every default price (+10 = 10% more);
++/// [prices] holds fixed prices keyed like [CartEntry.key] (`itemId`, or
++/// `itemId:variantId` for a size), in the same form as the catalog price
++/// (gross for an MRP item). Billing sends the result as the line's
++/// price_override, so nothing else about pricing changes.
++class PriceList {
++  final String id;
++  final String name;
++  final double? adjustPct;
++  final Map<String, double> prices;
++
++  const PriceList({
++    required this.id,
++    required this.name,
++    this.adjustPct,
++    this.prices = const {},
++  });
++
++  factory PriceList.fromJson(Map<String, dynamic> j) => PriceList(
++        id: j['id'],
++        name: j['name'],
++        adjustPct: j['adjust_pct'] == null
++            ? null
++            : double.tryParse(j['adjust_pct'].toString()),
++        prices: {
++          for (final e in (j['items'] as List? ?? const []).whereType<Map>())
++            e['variant_id'] == null
++                ? '${e['item_id']}'
++                : '${e['item_id']}:${e['variant_id']}':
++                double.parse(e['price'].toString()),
++        },
++      );
++
++  /// This list's price for an item or one of its sizes: the fixed price,
++  /// else the default price moved by [adjustPct] (to paise), else null —
++  /// meaning the default price stands. A size never borrows its item's
++  /// fixed price; sizes are priced on their own.
++  double? priceFor(Item item, [ItemVariant? variant]) {
++    final fixed =
++        prices[variant == null ? item.id : '${item.id}:${variant.id}'];
++    if (fixed != null) return fixed;
++    final base = variant != null ? (variant.price ?? item.price) : item.price;
++    final pct = adjustPct;
++    if (base == null || pct == null || pct == 0) return null;
++    return double.parse((base * (1 + pct / 100)).toStringAsFixed(2));
++  }
++}
++
+ /// An old credit bill paid off (in full or in part) along with a new bill.
+ class CollectedDue {
+   final String billId;
+diff --git a/frontend/lib/providers.dart b/frontend/lib/providers.dart
+index 723f6fef..e06c6ff8 100644
+--- a/frontend/lib/providers.dart
++++ b/frontend/lib/providers.dart
+@@ -12,3 +12,4 @@ export 'providers/printer_provider.dart';
+ export 'providers/credit_provider.dart';
+ export 'providers/online_orders_provider.dart';
+ export 'providers/major_category_order_provider.dart';
++export 'providers/price_lists_provider.dart';
+diff --git a/frontend/lib/providers/cart_provider.dart b/frontend/lib/providers/cart_provider.dart
+index 0c68a5b9..a3625ee1 100644
+--- a/frontend/lib/providers/cart_provider.dart
++++ b/frontend/lib/providers/cart_provider.dart
+@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
+ import 'package:flutter/foundation.dart' show visibleForTesting;
+ import '../models/models.dart';
+ import '../models/cart_entry.dart';
++import 'price_lists_provider.dart';
+ import 'session_provider.dart';
+ 
+ class CartNotifier extends Notifier<List<CartEntry>> {
+@@ -52,11 +53,31 @@ class CartNotifier extends Notifier<List<CartEntry>> {
+           i == idx ? state[i].copyWith(quantity: state[i].quantity + 1) : state[i]
+       ];
+     } else {
++      final line = CartEntry(item: item, variant: variant, quantity: 1);
+       state = grouped(
+-          [...state, CartEntry(item: item, variant: variant, quantity: 1)]);
++          [...state, _priced(line, ref.read(selectedPriceListProvider))]);
+     }
+   }
+ 
++  /// [e] at [list]'s price — an override only where the list differs from
++  /// the catalog — keeping its quantity and line discount.
++  static CartEntry _priced(CartEntry e, PriceList? list) {
++    final p = list?.priceFor(e.item, e.variant);
++    return e.copyWith(
++        clearOverrides: true,
++        priceOverride:
++            p == null || (p - e.catalogPrice).abs() < 0.005 ? null : p,
++        discountPct: e.discountPct,
++        discountAmt: e.discountAmt);
++  }
++
++  /// Bill with [list] (null = default prices). Re-prices EVERY line, so a
++  /// hand-typed price is replaced too — what's on screen is always the list.
++  void applyPriceList(PriceList? list) {
++    ref.read(selectedPriceListProvider.notifier).set(list);
++    state = [for (final e in state) _priced(e, list)];
++  }
++
+   /// Lines grouped by menu category — major A–Z, then subcategory A–Z,
+   /// uncategorised last, then name — the same order the server returns bill
+   /// lines in (backend/src/billItemsOrder.js), so the cart, the Open Orders
+@@ -125,7 +146,11 @@ class CartNotifier extends Notifier<List<CartEntry>> {
+     ];
+   }
+ 
+-  void clear() => state = [];
++  /// Empty the cart. The price list is per bill, so it goes back to default.
++  void clear() {
++    state = [];
++    ref.read(selectedPriceListProvider.notifier).set(null);
++  }
+ 
+   /// Rebuild the cart from a saved bill/draft.
+   ///
+@@ -148,7 +173,22 @@ class CartNotifier extends Notifier<List<CartEntry>> {
+               quantity: existing.quantity + entry.quantity,
+               discountAmt: existing.discountAmt + entry.discountAmt);
+     }
+-    state = grouped(merged.values.toList());
++    // Reopen on the bill's own list. Lines still at catalog price (a waiter
++    // added them) take the list price; repriced lines keep what they carry.
++    // ponytail: a list not loaded yet (or deleted since) reopens as Default;
++    // the lines keep their prices either way.
++    final list = bill.priceListId == null
++        ? null
++        : ref
++            .read(priceListsProvider)
++            .valueOrNull
++            ?.where((l) => l.id == bill.priceListId)
++            .firstOrNull;
++    ref.read(selectedPriceListProvider.notifier).set(list);
++    state = grouped([
++      for (final e in merged.values)
++        e.priceOverride == null ? _priced(e, list) : e,
++    ]);
+   }
+ 
+   Iterable<CartEntry> _entriesFromBill(Bill bill, List<Item> catalog) {
+diff --git a/frontend/lib/screens/home_screen.dart b/frontend/lib/screens/home_screen.dart
+index 4574e7a5..3452160b 100644
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -1671,6 +1671,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+     );
+   }
+ 
++  /// The price list this bill is priced with, saved on the draft so it
++  /// reopens on the same list. Null = default prices.
++  String? get _priceListId => ref.read(selectedPriceListProvider)?.id;
++
+   List<Map<String, dynamic>> get _cartPayload {
+     final cart = ref.read(cartProvider);
+     final gstEnabled = ref.read(gstEnabledProvider);
+@@ -1979,6 +1983,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+     // Additional charges likewise — always sent on an edit so that removing
+     // every charge clears them on the draft rather than leaving stale ones.
+     final additionalCharges = _chargesPayload();
++    final priceListId = _priceListId;
+     // Capture the notifiers NOW. After Navigator.pop this ConsumerState is
+     // disposed and its `ref` becomes defunct — using it for the background
+     // reconcile would silently no-op (this was why the table never updated).
+@@ -2033,6 +2038,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+             customerPhone: customerPhone,
+             discountAmount: discountAmount,
+             additionalCharges: additionalCharges,
++            priceListId: priceListId,
+           );
+         } else {
+           result = await createBill({
+@@ -2040,6 +2046,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+             'table_id': tableId,
+             'payment_mode': _draftMode,
+             'status': 'draft',
++            'price_list_id': priceListId,
+             if (customerName != null) 'customer_name': customerName,
+             if (customerPhone != null) 'customer_phone': customerPhone,
+             if (discountAmount > 0) 'discount_amount': discountAmount,
+@@ -2795,6 +2802,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+           discountAmount:
+               double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
+           additionalCharges: additionalCharges,
++          priceListId: _priceListId,
+         );
+         // The mode selected NOW, not the one the draft was parked with.
+         result = await finalizeBill(widget.activeBillId!,
+@@ -2811,6 +2819,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+             'customer_phone': _customerPhoneController.text.trim(),
+           'payment_mode': _draftMode,
+           'status': 'draft',
++          'price_list_id': _priceListId,
+           if (_discountAmtController.text.trim().isNotEmpty)
+             'discount_amount': double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
+           if (additionalCharges.isNotEmpty)
+@@ -4269,6 +4278,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
+                       ],
+                     ),
+                   ),
++                  // Price list picker — owner/cashier only, like a line price
++                  // edit (the server ignores a waiter's price_override).
++                  if (canFinalize) const _PriceListChip(),
+                   // Preview lives up here with the other order-level actions
+                   // because it is the one control that touches no money — it
+                   // must not sit in the footer row where everything settles.
+@@ -6559,6 +6571,62 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
+ /// is a dense row of title, count and controls. The tint is what makes them
+ /// look pressable, and it separates the two by consequence: blue looks at the
+ /// bill, red throws it away.
++/// "Default ▾" / "Party ▾" in the order-card header: picks the price list this
++/// bill is priced with. Hidden until the owner has made at least one list.
++class _PriceListChip extends ConsumerWidget {
++  const _PriceListChip();
++
++  @override
++  Widget build(BuildContext context, WidgetRef ref) {
++    final lists = ref.watch(priceListsProvider).valueOrNull ?? const [];
++    if (lists.isEmpty) return const SizedBox.shrink();
++    final l10n = context.l10n;
++    final selected = ref.watch(selectedPriceListProvider);
++    final color = selected == null ? AppColors.textSecondary : AppColors.primary;
++    return Padding(
++      padding: const EdgeInsets.only(right: 6),
++      child: PopupMenuButton<String>(
++        tooltip: l10n.priceListPick,
++        // '' = default prices; a PopupMenuItem can't carry a null value.
++        onSelected: (id) => ref.read(cartProvider.notifier).applyPriceList(
++            lists.where((l) => l.id == id).firstOrNull),
++        itemBuilder: (_) => [
++          CheckedPopupMenuItem(
++              value: '',
++              checked: selected == null,
++              child: Text(l10n.priceListDefault)),
++          for (final l in lists)
++            CheckedPopupMenuItem(
++                value: l.id,
++                checked: selected?.id == l.id,
++                child: Text(l.name)),
++        ],
++        child: Container(
++          height: 36,
++          constraints: const BoxConstraints(maxWidth: 130),
++          padding: const EdgeInsets.symmetric(horizontal: 8),
++          decoration: BoxDecoration(
++            color: color.withValues(alpha: 0.10),
++            borderRadius: BorderRadius.circular(AppRadius.small),
++          ),
++          child: Row(mainAxisSize: MainAxisSize.min, children: [
++            Icon(Icons.sell_outlined, size: 16, color: color),
++            const SizedBox(width: 4),
++            Flexible(
++              child: Text(selected?.name ?? l10n.priceListDefault,
++                  maxLines: 1,
++                  overflow: TextOverflow.ellipsis,
++                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
++                      color: color, fontWeight: FontWeight.w600)),
++            ),
++            Icon(Icons.arrow_drop_down, size: 18, color: color),
++          ]),
++        ),
++      ),
++    );
++  }
++}
++
+ class _HeaderIconAction extends StatelessWidget {
+   final IconData icon;
+   final Color color;
+@@ -6720,14 +6788,15 @@ class _ExcelItemRow extends ConsumerStatefulWidget {
+       variant != null ? variant!.label : item.billingName(showItemNo);
+   /// Null for a variant PARENT row: the item owns no price and its sizes differ,
+   /// so no single figure is correct — [rowPriceLabel] shows their range instead.
+-  double? get rowPrice => variant?.price ?? item.price;
++  double? rowPrice(PriceList? list) =>
++      list?.priceFor(item, variant) ?? variant?.price ?? item.price;
+ 
+   /// What the price column renders. A variant row and a plain item show their
+   /// own price. A variant PARENT shows nothing — it isn't billable itself and
+   /// each variant beneath it carries its own price.
+-  String get rowPriceLabel {
++  String rowPriceLabel(PriceList? list) {
+     if (treatAsVariantItem) return '';
+-    final p = rowPrice;
++    final p = rowPrice(list);
+     if (p == null) return '';
+     final suffix = item.isMeasured && !isVariantRow ? '/${item.unit}' : '';
+     return '₹${p.toStringAsFixed(2)}$suffix';
+@@ -6978,7 +7047,7 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
+                         fit: BoxFit.scaleDown,
+                         alignment: Alignment.centerRight,
+                         child: Text(
+-                          widget.rowPriceLabel,
++                          widget.rowPriceLabel(ref.watch(selectedPriceListProvider)),
+                           textAlign: TextAlign.right,
+                           maxLines: 1,
+                           style: TextStyle(
+diff --git a/frontend/lib/screens/settings_screen.dart b/frontend/lib/screens/settings_screen.dart
+index e3996f48..9d313cdb 100644
+--- a/frontend/lib/screens/settings_screen.dart
++++ b/frontend/lib/screens/settings_screen.dart
+@@ -27,6 +27,7 @@ import 'printer_test_screen.dart'
+ import 'printer_test_windows_screen.dart'
+     if (dart.library.html) 'printer_test_windows_screen_web.dart';
+ import 'staff_screen.dart';
++import 'price_lists_screen.dart';
+ import 'business_profile_screen.dart';
+ import 'marathi_print_test_screen.dart';
+ import 'raster_lab_screen.dart';
+@@ -417,6 +418,19 @@ class _SettingsContentState extends State<_SettingsContent>
+                               builder: (_) => const _TogglesScreen()),
+                         ),
+                       ),
++                      const SizedBox(height: AppSpacing.space8),
++                      _buildNavCard(
++                        context,
++                        icon: Icons.sell_outlined,
++                        iconColor: const Color(0xFF16A34A),
++                        title: l10n.settingsPriceLists,
++                        subtitle: l10n.settingsPriceListsSubtitle,
++                        onTap: () => Navigator.push(
++                          context,
++                          MaterialPageRoute(
++                              builder: (_) => const PriceListsScreen()),
++                        ),
++                      ),
+                       const SizedBox(height: AppSpacing.space24),
+ 
+                       _sectionLabel(context, l10n.settingsSectionTeam),
+diff --git a/frontend/lib/storage.dart b/frontend/lib/storage.dart
+index 5e75e9b7..124de88d 100644
+--- a/frontend/lib/storage.dart
++++ b/frontend/lib/storage.dart
+@@ -387,6 +387,20 @@ class AuthStorage {
+     return prefs.getString(_keyPaymentModeUse(businessId));
+   }
+ 
++  // Price lists (Party, Wholesale, ...) as the raw GET /price-lists JSON, so
++  // billing can still price from them offline. Per business, like the rest.
++  static String _keyPriceLists(String businessId) => 'price_lists_$businessId';
++
++  Future<void> savePriceLists(String businessId, String json) async {
++    final prefs = await SharedPreferences.getInstance();
++    await prefs.setString(_keyPriceLists(businessId), json);
++  }
++
++  Future<String?> getPriceLists(String businessId) async {
++    final prefs = await SharedPreferences.getInstance();
++    return prefs.getString(_keyPriceLists(businessId));
++  }
++
+   Future<void> saveChargeSuggestions(String businessId, String json) async {
+     final prefs = await SharedPreferences.getInstance();
+     await prefs.setString(_keyChargeSuggestions(businessId), json);
+@@ -620,6 +634,10 @@ Future<void>    saveMajorCategoryOrder(String businessId, String json) =>
+     AuthStorage.instance.saveMajorCategoryOrder(businessId, json);
+ Future<String?> getMajorCategoryOrder(String businessId) =>
+     AuthStorage.instance.getMajorCategoryOrder(businessId);
++Future<void>    saveCachedPriceLists(String businessId, String json) =>
++    AuthStorage.instance.savePriceLists(businessId, json);
++Future<String?> getCachedPriceLists(String businessId) =>
++    AuthStorage.instance.getPriceLists(businessId);
+ Future<void>    savePaymentModeUse(String businessId, String json) =>
+     AuthStorage.instance.savePaymentModeUse(businessId, json);
+ Future<String?> getPaymentModeUse(String businessId) =>
+diff --git a/backend/src/migrations/059_add_price_lists.sql b/backend/src/migrations/059_add_price_lists.sql
+new file mode 100644
+index 00000000..8ca3143d
+--- /dev/null
++++ b/backend/src/migrations/059_add_price_lists.sql
+@@ -0,0 +1,61 @@
++-- =============================================================================
++-- Migration 059: price lists — "Party", "Wholesale", "AC section"
++--
++-- A list is an optional % rule (adjust_pct, e.g. +10) plus optional fixed
++-- prices per item or per size (price_list_items). The cashier picks one on the
++-- order card and the app sends the list price as each line's price_override,
++-- so bill pricing itself is untouched: bill_items.unit_price stays the truth.
++--
++-- price_list_items.item_id / variant_id carry no FK on purpose: items and
++-- item_variants already cascade into each other, and SQL Server refuses a
++-- second cascade path. GET /api/price-lists joins them back to active rows.
++--
++-- bills.price_list_id only remembers which list a held bill was opened with.
++-- No FK, so the rollback is a plain DROP COLUMN.
++-- =============================================================================
++-- Use GO as the batch separator between statements (not semicolons).
++-- Do NOT use BEGIN TRANSACTION / COMMIT — the runner manages atomicity.
++-- =============================================================================
++
++IF OBJECT_ID('price_lists') IS NULL
++  CREATE TABLE price_lists (
++    id          UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
++    business_id UNIQUEIDENTIFIER NOT NULL,
++    name        NVARCHAR(60)     NOT NULL,
++    adjust_pct  DECIMAL(6,2)     NULL,
++    is_active   BIT              NOT NULL DEFAULT 1,
++    created_at  DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
++
++    CONSTRAINT FK_price_lists_business
++      FOREIGN KEY (business_id) REFERENCES businesses (id)
++  )
++GO
++
++IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_price_lists_business_id')
++  CREATE INDEX IX_price_lists_business_id ON price_lists (business_id)
++GO
++
++IF OBJECT_ID('price_list_items') IS NULL
++  CREATE TABLE price_list_items (
++    id            UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
++    price_list_id UNIQUEIDENTIFIER NOT NULL,
++    item_id       UNIQUEIDENTIFIER NOT NULL,
++    variant_id    UNIQUEIDENTIFIER NULL,
++    price         DECIMAL(12,2)    NOT NULL,
++
++    CONSTRAINT FK_price_list_items_list
++      FOREIGN KEY (price_list_id) REFERENCES price_lists (id) ON DELETE CASCADE
++  )
++GO
++
++IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ_price_list_items_line')
++  CREATE UNIQUE INDEX UQ_price_list_items_line
++    ON price_list_items (price_list_id, item_id, variant_id)
++GO
++
++IF NOT EXISTS (
++  SELECT 1 FROM sys.columns
++  WHERE object_id = OBJECT_ID('bills') AND name = 'price_list_id'
++)
++  ALTER TABLE bills ADD price_list_id UNIQUEIDENTIFIER NULL
++GO
+diff --git a/backend/src/migrations/059_add_price_lists_rollback.sql b/backend/src/migrations/059_add_price_lists_rollback.sql
+new file mode 100644
+index 00000000..8977ac1a
+--- /dev/null
++++ b/backend/src/migrations/059_add_price_lists_rollback.sql
+@@ -0,0 +1,16 @@
++-- Drops what migration 059 added. Price lists are lost; saved bills keep their
++-- amounts (list prices were stored as ordinary line prices).
++IF EXISTS (
++  SELECT 1 FROM sys.columns
++  WHERE object_id = OBJECT_ID('bills') AND name = 'price_list_id'
++)
++  ALTER TABLE bills DROP COLUMN price_list_id
++GO
++
++IF OBJECT_ID('price_list_items') IS NOT NULL
++  DROP TABLE price_list_items
++GO
++
++IF OBJECT_ID('price_lists') IS NOT NULL
++  DROP TABLE price_lists
++GO
+diff --git a/backend/src/routes/price_lists.js b/backend/src/routes/price_lists.js
+new file mode 100644
+index 00000000..7a5ea115
+--- /dev/null
++++ b/backend/src/routes/price_lists.js
+@@ -0,0 +1,278 @@
++// =============================================================================
++// Price lists — "Party", "Wholesale", "AC section".
++//
++// A list is an optional % rule (adjust_pct) plus fixed prices per item or size.
++// Billing applies it on the device and sends each list price as the line's
++// price_override (see routes/bills.js applyLineOverrides), so nothing here
++// prices a bill — this is only the owner's catalogue of lists.
++// =============================================================================
++const express = require('express');
++const { pool, poolConnect, sql } = require('../db');
++const { requireAuth } = require('../auth');
++const logger = require('../logger');
++const { validateNumber, validateText } = require('../validate');
++
++const router = express.Router();
++
++function ownerOnly(req, res, next) {
++  if (req.user.role !== 'owner') {
++    return res.status(403).json({ error: 'Only owners can perform this action' });
++  }
++  next();
++}
++
++const MIN_PCT = -90;
++const MAX_PCT = 500;
++// 4 parameters per row; SQL Server stops at 2100 per request.
++const INSERT_CHUNK = 400;
++
++/// Every active list of [businessId] with its fixed prices, in the shape the
++/// app caches: [{ id, name, adjust_pct, items: [{ item_id, variant_id, price }] }].
++/// Prices for items deleted since are dropped by the join.
++async function loadLists(businessId, onlyId = null) {
++  const lists = await pool.request()
++    .input('business_id', sql.UniqueIdentifier, businessId)
++    .input('id', sql.UniqueIdentifier, onlyId)
++    .query(`
++      SELECT id, name, adjust_pct
++      FROM price_lists
++      WHERE business_id = @business_id AND is_active = 1
++        AND (@id IS NULL OR id = @id)
++      ORDER BY name
++    `);
++  const entries = await pool.request()
++    .input('business_id', sql.UniqueIdentifier, businessId)
++    .input('id', sql.UniqueIdentifier, onlyId)
++    .query(`
++      SELECT pli.price_list_id, pli.item_id, pli.variant_id, pli.price
++      FROM price_list_items pli
++      JOIN price_lists pl ON pl.id = pli.price_list_id
++      JOIN items i ON i.id = pli.item_id
++                  AND i.business_id = pl.business_id AND i.is_active = 1
++      WHERE pl.business_id = @business_id AND pl.is_active = 1
++        AND (@id IS NULL OR pl.id = @id)
++    `);
++  const byList = {};
++  for (const e of entries.recordset) {
++    (byList[e.price_list_id] ||= []).push({
++      item_id: e.item_id,
++      variant_id: e.variant_id,
++      price: Number(e.price),
++    });
++  }
++  return lists.recordset.map((l) => ({
++    id: l.id,
++    name: l.name,
++    adjust_pct: l.adjust_pct == null ? null : Number(l.adjust_pct),
++    items: byList[l.id] || [],
++  }));
++}
++
++/// Checks a POST/PUT body. Returns { error } or the cleaned
++/// { name, adjustPct, items }.
++function cleanBody(body) {
++  const nameErr = validateText(body.name, 'Name', 60, { required: true });
++  if (nameErr) return { error: nameErr };
++
++  let adjustPct = null;
++  if (body.adjust_pct !== undefined && body.adjust_pct !== null && body.adjust_pct !== '') {
++    adjustPct = parseFloat(body.adjust_pct);
++    if (!Number.isFinite(adjustPct) || adjustPct < MIN_PCT || adjustPct > MAX_PCT) {
++      return { error: `Adjustment must be between ${MIN_PCT}% and ${MAX_PCT}%` };
++    }
++    if (adjustPct === 0) adjustPct = null;
++  }
++
++  const raw = body.items === undefined ? [] : body.items;
++  if (!Array.isArray(raw)) return { error: 'items must be an array' };
++  const items = [];
++  const seen = new Set();
++  for (const r of raw) {
++    if (!r || !r.item_id) return { error: 'each price needs an item_id' };
++    if (r.price === undefined || r.price === null || r.price === '') {
++      return { error: 'each price needs a price' };
++    }
++    const bad = validateNumber(r.price, 'Price');
++    if (bad) return { error: bad };
++    const key = `${r.item_id}|${r.variant_id || ''}`;
++    if (seen.has(key)) return { error: 'An item or size may appear only once in a price list' };
++    seen.add(key);
++    items.push({ item_id: r.item_id, variant_id: r.variant_id || null, price: parseFloat(r.price) });
++  }
++  return { name: String(body.name).trim(), adjustPct, items };
++}
++
++/// Every item and size named in [items] must belong to [businessId] — and a
++/// size to the item it is listed under. Returns an error string or null.
++async function checkOwnership(businessId, items) {
++  if (items.length === 0) return null;
++  const itemIds = [...new Set(items.map((i) => i.item_id))];
++  const iReq = pool.request().input('business_id', sql.UniqueIdentifier, businessId);
++  const iNames = itemIds.map((id, i) => { iReq.input(`it${i}`, sql.UniqueIdentifier, id); return `@it${i}`; });
++  const found = await iReq.query(`
++    SELECT id FROM items WHERE business_id = @business_id AND id IN (${iNames.join(',')})
++  `);
++  if (found.recordset.length !== itemIds.length) return 'One or more items were not found';
++
++  const variantIds = [...new Set(items.map((i) => i.variant_id).filter(Boolean))];
++  if (variantIds.length === 0) return null;
++  const vReq = pool.request().input('business_id', sql.UniqueIdentifier, businessId);
++  const vNames = variantIds.map((id, i) => { vReq.input(`vr${i}`, sql.UniqueIdentifier, id); return `@vr${i}`; });
++  const vFound = await vReq.query(`
++    SELECT v.id, v.item_id FROM item_variants v
++    JOIN items i ON i.id = v.item_id
++    WHERE i.business_id = @business_id AND v.id IN (${vNames.join(',')})
++  `);
++  const owner = {};
++  for (const v of vFound.recordset) owner[v.id] = v.item_id;
++  for (const i of items) {
++    if (i.variant_id && owner[i.variant_id] !== i.item_id) return 'One or more sizes were not found';
++  }
++  return null;
++}
++
++async function nameTaken(businessId, name, exceptId = null) {
++  const r = await pool.request()
++    .input('business_id', sql.UniqueIdentifier, businessId)
++    .input('name', sql.NVarChar(60), name)
++    .input('id', sql.UniqueIdentifier, exceptId)
++    .query(`
++      SELECT 1 AS x FROM price_lists
++      WHERE business_id = @business_id AND is_active = 1 AND name = @name
++        AND (@id IS NULL OR id <> @id)
++    `);
++  return r.recordset.length > 0;
++}
++
++/// Replace a list's fixed prices inside [transaction].
++async function replaceItems(transaction, listId, items) {
++  await transaction.request()
++    .input('id', sql.UniqueIdentifier, listId)
++    .query('DELETE FROM price_list_items WHERE price_list_id = @id');
++  for (let start = 0; start < items.length; start += INSERT_CHUNK) {
++    const req = transaction.request().input('id', sql.UniqueIdentifier, listId);
++    const rows = items.slice(start, start + INSERT_CHUNK).map((it, i) => {
++      req.input(`item${i}`, sql.UniqueIdentifier, it.item_id)
++        .input(`var${i}`, sql.UniqueIdentifier, it.variant_id)
++        .input(`price${i}`, sql.Decimal(12, 2), it.price);
++      return `(@id, @item${i}, @var${i}, @price${i})`;
++    });
++    await req.query(`
++      INSERT INTO price_list_items (price_list_id, item_id, variant_id, price)
++      VALUES ${rows.join(', ')}
++    `);
++  }
++}
++
++// GET /api/price-lists — every role: billing needs the lists to price lines.
++router.get('/', requireAuth, async (req, res) => {
++  try {
++    await poolConnect;
++    return res.json(await loadLists(req.user.business_id));
++  } catch (err) {
++    logger.error({ err }, 'Get price lists error');
++    return res.status(500).json({ error: 'Failed to fetch price lists' });
++  }
++});
++
++// POST /api/price-lists — { name, adjust_pct?, items?: [{ item_id, variant_id?, price }] }
++router.post('/', requireAuth, ownerOnly, async (req, res) => {
++  const body = cleanBody(req.body || {});
++  if (body.error) return res.status(400).json({ error: body.error });
++  const businessId = req.user.business_id;
++  try {
++    await poolConnect;
++    if (await nameTaken(businessId, body.name)) {
++      return res.status(409).json({ error: 'A price list with this name already exists' });
++    }
++    const ownErr = await checkOwnership(businessId, body.items);
++    if (ownErr) return res.status(400).json({ error: ownErr });
++
++    const transaction = pool.transaction();
++    await transaction.begin();
++    let id;
++    try {
++      const ins = await transaction.request()
++        .input('business_id', sql.UniqueIdentifier, businessId)
++        .input('name', sql.NVarChar(60), body.name)
++        .input('adjust_pct', sql.Decimal(6, 2), body.adjustPct)
++        .query(`
++          INSERT INTO price_lists (business_id, name, adjust_pct)
++          OUTPUT INSERTED.id
++          VALUES (@business_id, @name, @adjust_pct)
++        `);
++      id = ins.recordset[0].id;
++      await replaceItems(transaction, id, body.items);
++      await transaction.commit();
++    } catch (err) {
++      await transaction.rollback();
++      throw err;
++    }
++    const [list] = await loadLists(businessId, id);
++    return res.status(201).json(list);
++  } catch (err) {
++    logger.error({ err }, 'Create price list error');
++    return res.status(500).json({ error: 'Failed to create price list' });
++  }
++});
++
++// PUT /api/price-lists/:id — same body as POST; `items` replaces every price.
++router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
++  const body = cleanBody(req.body || {});
++  if (body.error) return res.status(400).json({ error: body.error });
++  const businessId = req.user.business_id;
++  try {
++    await poolConnect;
++    const found = await pool.request()
++      .input('id', sql.UniqueIdentifier, req.params.id)
++      .input('business_id', sql.UniqueIdentifier, businessId)
++      .query('SELECT id FROM price_lists WHERE id = @id AND business_id = @business_id AND is_active = 1');
++    if (found.recordset.length === 0) return res.status(404).json({ error: 'Price list not found' });
++    if (await nameTaken(businessId, body.name, req.params.id)) {
++      return res.status(409).json({ error: 'A price list with this name already exists' });
++    }
++    const ownErr = await checkOwnership(businessId, body.items);
++    if (ownErr) return res.status(400).json({ error: ownErr });
++
++    const transaction = pool.transaction();
++    await transaction.begin();
++    try {
++      await transaction.request()
++        .input('id', sql.UniqueIdentifier, req.params.id)
++        .input('name', sql.NVarChar(60), body.name)
++        .input('adjust_pct', sql.Decimal(6, 2), body.adjustPct)
++        .query('UPDATE price_lists SET name = @name, adjust_pct = @adjust_pct WHERE id = @id');
++      await replaceItems(transaction, req.params.id, body.items);
++      await transaction.commit();
++    } catch (err) {
++      await transaction.rollback();
++      throw err;
++    }
++    const [list] = await loadLists(businessId, req.params.id);
++    return res.json(list);
++  } catch (err) {
++    logger.error({ err }, 'Update price list error');
++    return res.status(500).json({ error: 'Failed to update price list' });
++  }
++});
++
++// DELETE /api/price-lists/:id — soft delete: held bills may still name it.
++router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
++  try {
++    await poolConnect;
++    const result = await pool.request()
++      .input('id', sql.UniqueIdentifier, req.params.id)
++      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
++      .query(`
++        UPDATE price_lists SET is_active = 0
++        WHERE id = @id AND business_id = @business_id AND is_active = 1
++      `);
++    if (!result.rowsAffected[0]) return res.status(404).json({ error: 'Price list not found' });
++    return res.json({ success: true });
++  } catch (err) {
++    logger.error({ err }, 'Delete price list error');
++    return res.status(500).json({ error: 'Failed to delete price list' });
++  }
++});
++
++module.exports = router;
+diff --git a/backend/tests/routes/price_lists.test.js b/backend/tests/routes/price_lists.test.js
+new file mode 100644
+index 00000000..d025306b
+--- /dev/null
++++ b/backend/tests/routes/price_lists.test.js
+@@ -0,0 +1,170 @@
++const request = require('supertest');
++
++const { makeDbMock } = require('../helpers/db');
++const { mockPool, mockRequest, mockTransaction } = makeDbMock();
++
++jest.mock('../../src/db', () => mockPool);
++
++const app = require('../../src/server');
++const { authHeader } = require('../helpers/auth');
++
++const LIST_ID = '11111111-1111-4111-8111-111111111111';
++const ITEM_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
++const VAR_ID  = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
++
++// Every pool query answers by its SQL, so the order of lookups doesn't matter.
++function routeDb({ taken = false, items = [{ id: ITEM_ID }], variants = [], list = true } = {}) {
++  const calls = [];
++  mockRequest.query.mockImplementation((sqlText) => {
++    calls.push(sqlText);
++    const ok = (rs = []) => Promise.resolve({ recordset: rs, rowsAffected: [rs.length] });
++    if (/AS x FROM price_lists/.test(sqlText)) return ok(taken ? [{ x: 1 }] : []);
++    if (/FROM item_variants/.test(sqlText)) return ok(variants);
++    if (/SELECT id FROM items/.test(sqlText)) return ok(items);
++    if (/SELECT id FROM price_lists/.test(sqlText)) return ok(list ? [{ id: LIST_ID }] : []);
++    if (/FROM price_list_items/.test(sqlText)) {
++      return ok([{ price_list_id: LIST_ID, item_id: ITEM_ID, variant_id: null, price: '120.00' }]);
++    }
++    if (/FROM price_lists/.test(sqlText)) return ok([{ id: LIST_ID, name: 'Party', adjust_pct: '10.00' }]);
++    if (/UPDATE price_lists SET is_active = 0/.test(sqlText)) {
++      return Promise.resolve({ recordset: [], rowsAffected: [list ? 1 : 0] });
++    }
++    return ok();
++  });
++  const txSql = [];
++  mockTransaction.request.mockImplementation(() => {
++    const r = {
++      inputs: {},
++      input(k, _t, v) { r.inputs[k] = v; return r; },
++      query: jest.fn((sqlText) => {
++        txSql.push({ sqlText, inputs: r.inputs });
++        return Promise.resolve({ recordset: [{ id: LIST_ID }], rowsAffected: [1] });
++      }),
++    };
++    return r;
++  });
++  return { calls, txSql };
++}
++
++beforeEach(() => {
++  mockRequest.reset();
++  jest.clearAllMocks();
++});
++
++describe('GET /api/price-lists', () => {
++  test('401 without a token', async () => {
++    expect((await request(app).get('/api/price-lists')).status).toBe(401);
++  });
++
++  test.each(['owner', 'cashier', 'server'])('%s gets the lists with their prices', async (role) => {
++    routeDb();
++    const res = await request(app).get('/api/price-lists').set(authHeader({ role }));
++    expect(res.status).toBe(200);
++    expect(res.body).toEqual([{
++      id: LIST_ID, name: 'Party', adjust_pct: 10,
++      items: [{ item_id: ITEM_ID, variant_id: null, price: 120 }],
++    }]);
++  });
++
++  test('prices for deleted items are dropped by the join', async () => {
++    const { calls } = routeDb();
++    await request(app).get('/api/price-lists').set(authHeader());
++    expect(calls.find((s) => /FROM price_list_items/.test(s))).toMatch(/i\.is_active = 1/);
++  });
++});
++
++describe('POST /api/price-lists', () => {
++  const post = (body, role = 'owner') =>
++    request(app).post('/api/price-lists').set(authHeader({ role })).send(body);
++
++  test('owner creates a list and its prices in one transaction', async () => {
++    const { txSql } = routeDb();
++    const res = await post({ name: ' Party ', adjust_pct: 10, items: [{ item_id: ITEM_ID, price: 120 }] });
++    expect(res.status).toBe(201);
++    expect(res.body.name).toBe('Party');
++    expect(txSql[0].inputs).toMatchObject({ name: 'Party', adjust_pct: 10 });
++    const insert = txSql.find((c) => /INSERT INTO price_list_items/.test(c.sqlText));
++    expect(insert.inputs).toMatchObject({ item0: ITEM_ID, var0: null, price0: 120 });
++    expect(mockTransaction.commit).toHaveBeenCalled();
++  });
++
++  test('a 0% rule is stored as no rule', async () => {
++    const { txSql } = routeDb();
++    await post({ name: 'Same', adjust_pct: 0 });
++    expect(txSql[0].inputs.adjust_pct).toBeNull();
++  });
++
++  test.each(['cashier', 'server'])('%s gets 403', async (role) => {
++    routeDb();
++    expect((await post({ name: 'X' }, role)).status).toBe(403);
++  });
++
++  test.each([
++    ['no name', { name: '  ' }],
++    ['a long name', { name: 'x'.repeat(61) }],
++    ['a % below -90', { name: 'X', adjust_pct: -95 }],
++    ['a % above 500', { name: 'X', adjust_pct: 501 }],
++    ['a text %', { name: 'X', adjust_pct: 'ten' }],
++    ['a negative price', { name: 'X', items: [{ item_id: ITEM_ID, price: -1 }] }],
++    ['a missing price', { name: 'X', items: [{ item_id: ITEM_ID }] }],
++    ['a duplicate item', { name: 'X', items: [{ item_id: ITEM_ID, price: 1 }, { item_id: ITEM_ID, price: 2 }] }],
++  ])('rejects %s with 400', async (_n, body) => {
++    routeDb();
++    expect((await post(body)).status).toBe(400);
++  });
++
++  test('a duplicate name is a 409', async () => {
++    routeDb({ taken: true });
++    expect((await post({ name: 'Party' })).status).toBe(409);
++  });
++
++  test("an item from another business is a 400", async () => {
++    routeDb({ items: [] });
++    const res = await post({ name: 'X', items: [{ item_id: ITEM_ID, price: 1 }] });
++    expect(res.status).toBe(400);
++    expect(mockTransaction.begin).not.toHaveBeenCalled();
++  });
++
++  test("a size listed under the wrong item is a 400", async () => {
++    routeDb({ variants: [{ id: VAR_ID, item_id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' }] });
++    const res = await post({ name: 'X', items: [{ item_id: ITEM_ID, variant_id: VAR_ID, price: 1 }] });
++    expect(res.status).toBe(400);
++  });
++});
++
++describe('PUT /api/price-lists/:id', () => {
++  const put = (body) =>
++    request(app).put(`/api/price-lists/${LIST_ID}`).set(authHeader()).send(body);
++
++  test('replaces the name, rule and every price', async () => {
++    const { txSql } = routeDb();
++    const res = await put({ name: 'Party', adjust_pct: 5, items: [] });
++    expect(res.status).toBe(200);
++    expect(txSql.map((c) => c.sqlText).join('\n')).toMatch(/DELETE FROM price_list_items/);
++  });
++
++  test('404 for a list of another business', async () => {
++    routeDb({ list: false });
++    expect((await put({ name: 'Party' })).status).toBe(404);
++  });
++});
++
++describe('DELETE /api/price-lists/:id', () => {
++  test('soft-deletes', async () => {
++    const { calls } = routeDb();
++    const res = await request(app).delete(`/api/price-lists/${LIST_ID}`).set(authHeader());
++    expect(res.status).toBe(200);
++    expect(calls[0]).toMatch(/SET is_active = 0/);
++  });
++
++  test('404 when not found', async () => {
++    routeDb({ list: false });
++    const res = await request(app).delete(`/api/price-lists/${LIST_ID}`).set(authHeader());
++    expect(res.status).toBe(404);
++  });
++
++  test('cashier gets 403', async () => {
++    const res = await request(app).delete(`/api/price-lists/${LIST_ID}`).set(authHeader({ role: 'cashier' }));
++    expect(res.status).toBe(403);
++  });
++});
+diff --git a/frontend/lib/providers/price_lists_provider.dart b/frontend/lib/providers/price_lists_provider.dart
+new file mode 100644
+index 00000000..d6866c9f
+--- /dev/null
++++ b/frontend/lib/providers/price_lists_provider.dart
+@@ -0,0 +1,61 @@
++import 'dart:convert';
++
++import 'package:flutter/foundation.dart' show debugPrint;
++import 'package:flutter_riverpod/flutter_riverpod.dart';
++
++import '../api.dart' as api;
++import '../models/models.dart';
++import '../storage.dart';
++
++/// The shop's price lists (Party, Wholesale, ...). Fetched from the server and
++/// cached per business, so billing can still price from them offline.
++class PriceListsNotifier extends AsyncNotifier<List<PriceList>> {
++  @override
++  Future<List<PriceList>> build() async {
++    final businessId = await getBusinessId() ?? '';
++    try {
++      final raw = await api.getPriceLists();
++      if (businessId.isNotEmpty) {
++        await saveCachedPriceLists(businessId, jsonEncode(raw));
++      }
++      return _parse(raw);
++    } catch (e) {
++      // Offline (or the server is older than price lists): use the cache.
++      debugPrint('Price lists: using cache ($e)');
++      final cached =
++          businessId.isEmpty ? null : await getCachedPriceLists(businessId);
++      if (cached == null) return const [];
++      try {
++        return _parse(jsonDecode(cached) as List);
++      } catch (_) {
++        return const [];
++      }
++    }
++  }
++
++  static List<PriceList> _parse(List raw) => [
++        for (final j in raw.whereType<Map>())
++          PriceList.fromJson(Map<String, dynamic>.from(j)),
++      ];
++
++  Future<void> reload() async {
++    state = await AsyncValue.guard(build);
++  }
++}
++
++final priceListsProvider =
++    AsyncNotifierProvider<PriceListsNotifier, List<PriceList>>(
++        PriceListsNotifier.new);
++
++/// The list the current bill is priced with; null = default prices. Set only
++/// through [CartNotifier.applyPriceList], which re-prices the cart to match.
++class SelectedPriceListNotifier extends Notifier<PriceList?> {
++  @override
++  PriceList? build() => null;
++
++  void set(PriceList? list) => state = list;
++}
++
++final selectedPriceListProvider =
++    NotifierProvider<SelectedPriceListNotifier, PriceList?>(
++        SelectedPriceListNotifier.new);
+diff --git a/frontend/lib/screens/price_lists_screen.dart b/frontend/lib/screens/price_lists_screen.dart
+new file mode 100644
+index 00000000..938ccdbf
+--- /dev/null
++++ b/frontend/lib/screens/price_lists_screen.dart
+@@ -0,0 +1,290 @@
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
++import 'package:flutter_riverpod/flutter_riverpod.dart';
++import '../api.dart';
++import '../l10n/l10n_ext.dart';
++import '../models/models.dart';
++import '../providers.dart';
++import '../theme/app_theme.dart';
++import '../widgets/app_widgets.dart';
++
++/// Owner screen: the shop's price lists (Party, Wholesale, ...). Billing picks
++/// one on the order card; see [PriceList].
++class PriceListsScreen extends ConsumerWidget {
++  const PriceListsScreen({super.key});
++
++  String _pct(double p) => '${p > 0 ? '+' : ''}${p.toStringAsFixed(p % 1 == 0 ? 0 : 2)}%';
++
++  @override
++  Widget build(BuildContext context, WidgetRef ref) {
++    final l10n = context.l10n;
++    final lists = ref.watch(priceListsProvider);
++    void open([PriceList? list]) => Navigator.push(context,
++        MaterialPageRoute(builder: (_) => _PriceListEditScreen(list: list)));
++    return Scaffold(
++      appBar: AppBar(title: Text(l10n.settingsPriceLists)),
++      body: lists.when(
++        loading: () => const Center(child: CircularProgressIndicator()),
++        error: (e, _) => Center(child: Text(l10n.errorSomethingWentWrong)),
++        data: (lists) => lists.isEmpty
++            ? EmptyState(
++                icon: Icons.sell_outlined,
++                message: l10n.priceListsEmpty,
++                actionLabel: l10n.priceListNew,
++                onAction: open,
++              )
++            : ListView(
++                padding: const EdgeInsets.only(bottom: 88),
++                children: [
++                  for (final l in lists)
++                    ListTile(
++                      leading: const Icon(Icons.sell_outlined, color: AppColors.primary),
++                      title: Text(l.name),
++                      subtitle: Text([
++                        if (l.adjustPct != null) _pct(l.adjustPct!),
++                        if (l.prices.isNotEmpty) '${l.prices.length} ₹',
++                      ].join('  ·  ')),
++                      trailing: const Icon(Icons.chevron_right),
++                      onTap: () => open(l),
++                    ),
++                ],
++              ),
++      ),
++      floatingActionButton: FloatingActionButton.extended(
++        heroTag: 'add_price_list',
++        onPressed: open,
++        icon: const Icon(Icons.add),
++        label: Text(l10n.priceListNew),
++        backgroundColor: AppColors.primary,
++        foregroundColor: Colors.white,
++      ),
++    );
++  }
++}
++
++/// One row of the editor: an item, or one size of a sized item.
++class _Row {
++  final Item item;
++  final ItemVariant? variant;
++  _Row(this.item, this.variant);
++  String get key => variant == null ? item.id : '${item.id}:${variant!.id}';
++  String get label => variant == null ? item.name : '${item.name} (${variant!.label})';
++  double? get basePrice => variant != null ? (variant!.price ?? item.price) : item.price;
++}
++
++class _PriceListEditScreen extends ConsumerStatefulWidget {
++  final PriceList? list;
++  const _PriceListEditScreen({this.list});
++
++  @override
++  ConsumerState<_PriceListEditScreen> createState() => _PriceListEditScreenState();
++}
++
++class _PriceListEditScreenState extends ConsumerState<_PriceListEditScreen> {
++  late final _name = TextEditingController(text: widget.list?.name ?? '');
++  late final _pct = TextEditingController(
++      text: widget.list?.adjustPct == null ? '' : _fmt(widget.list!.adjustPct!));
++  // Fixed prices by row key. Controllers are made lazily as rows scroll in.
++  late final Map<String, String> _prices = {
++    for (final e in (widget.list?.prices ?? const <String, double>{}).entries)
++      e.key: _fmt(e.value),
++  };
++  final _controllers = <String, TextEditingController>{};
++  String _search = '';
++  bool _saving = false;
++
++  static String _fmt(double v) => v.toStringAsFixed(v % 1 == 0 ? 0 : 2);
++
++  @override
++  void dispose() {
++    _name.dispose();
++    _pct.dispose();
++    for (final c in _controllers.values) {
++      c.dispose();
++    }
++    super.dispose();
++  }
++
++  TextEditingController _ctrl(String key) => _controllers.putIfAbsent(
++      key, () => TextEditingController(text: _prices[key] ?? ''));
++
++  void _snack(String msg, {bool isError = false}) =>
++      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
++        content: Text(msg),
++        backgroundColor: isError ? AppColors.error : null,
++      ));
++
++  Future<void> _save(List<_Row> rows) async {
++    final l10n = context.l10n;
++    final name = _name.text.trim();
++    if (name.isEmpty) return _snack(l10n.priceListNameRequired, isError: true);
++    final pctText = _pct.text.trim();
++    final pct = pctText.isEmpty ? null : double.tryParse(pctText);
++    if (pctText.isNotEmpty && pct == null) {
++      return _snack(l10n.priceListBadNumber, isError: true);
++    }
++    final byKey = {for (final r in rows) r.key: r};
++    final items = <Map<String, dynamic>>[];
++    for (final e in _prices.entries) {
++      final text = e.value.trim();
++      final row = byKey[e.key];
++      if (text.isEmpty || row == null) continue; // blank, or item since deleted
++      final p = double.tryParse(text);
++      if (p == null || p < 0) return _snack(l10n.priceListBadNumber, isError: true);
++      items.add({
++        'item_id': row.item.id,
++        if (row.variant != null) 'variant_id': row.variant!.id,
++        'price': p,
++      });
++    }
++    final body = {'name': name, 'adjust_pct': pct, 'items': items};
++    setState(() => _saving = true);
++    try {
++      if (widget.list == null) {
++        await createPriceList(body);
++      } else {
++        await updatePriceList(widget.list!.id, body);
++      }
++      await ref.read(priceListsProvider.notifier).reload();
++      if (!mounted) return;
++      _snack(l10n.priceListSaved);
++      Navigator.pop(context);
++    } on ApiException catch (e) {
++      if (mounted) _snack(sanitizeUiErrorMessage(e), isError: true);
++    } finally {
++      if (mounted) setState(() => _saving = false);
++    }
++  }
++
++  Future<void> _delete() async {
++    final l10n = context.l10n;
++    final ok = await showDialog<bool>(
++      context: context,
++      builder: (ctx) => AlertDialog(
++        content: Text(l10n.priceListDeleteConfirm(widget.list!.name)),
++        actions: [
++          TextButton(
++              onPressed: () => Navigator.pop(ctx, false),
++              child: Text(l10n.commonCancel)),
++          TextButton(
++              onPressed: () => Navigator.pop(ctx, true),
++              child: Text(l10n.commonDelete,
++                  style: const TextStyle(color: AppColors.error))),
++        ],
++      ),
++    );
++    if (ok != true || !mounted) return;
++    try {
++      await deletePriceList(widget.list!.id);
++      await ref.read(priceListsProvider.notifier).reload();
++      if (mounted) Navigator.pop(context);
++    } on ApiException catch (e) {
++      if (mounted) _snack(sanitizeUiErrorMessage(e), isError: true);
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final l10n = context.l10n;
++    final items = ref.watch(itemsProvider).valueOrNull ?? const <Item>[];
++    final rows = [
++      for (final i in items)
++        if (i.hasVariants) ...[for (final v in i.variants) _Row(i, v)] else _Row(i, null),
++    ];
++    final q = _search.trim().toLowerCase();
++    final shown = q.isEmpty ? rows : rows.where((r) => r.label.toLowerCase().contains(q)).toList();
++    final pct = double.tryParse(_pct.text.trim());
++    final numbers = [
++      FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
++    ];
++
++    return Scaffold(
++      appBar: AppBar(
++        title: Text(widget.list?.name ?? l10n.priceListNew),
++        actions: [
++          if (widget.list != null)
++            IconButton(
++              tooltip: l10n.commonDelete,
++              icon: const Icon(Icons.delete_outline, color: AppColors.error),
++              onPressed: _saving ? null : _delete,
++            ),
++          TextButton(
++            onPressed: _saving ? null : () => _save(rows),
++            child: Text(l10n.commonSave),
++          ),
++        ],
++      ),
++      body: ListView.builder(
++        itemCount: shown.length + 1,
++        itemBuilder: (context, i) {
++          if (i == 0) {
++            return Padding(
++              padding: const EdgeInsets.all(AppSpacing.space16),
++              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
++                TextField(
++                  controller: _name,
++                  maxLength: 60,
++                  decoration: InputDecoration(labelText: l10n.priceListName),
++                ),
++                TextField(
++                  controller: _pct,
++                  keyboardType: const TextInputType.numberWithOptions(
++                      decimal: true, signed: true),
++                  inputFormatters: [
++                    FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d{0,2}')),
++                  ],
++                  decoration: InputDecoration(
++                    labelText: l10n.priceListAdjust,
++                    helperText: l10n.priceListAdjustHint,
++                    helperMaxLines: 2,
++                    suffixText: '%',
++                  ),
++                  onChanged: (_) => setState(() {}),
++                ),
++                const SizedBox(height: AppSpacing.space16),
++                Text(l10n.priceListItemsHint,
++                    style: Theme.of(context).textTheme.bodySmall
++                        ?.copyWith(color: AppColors.textSecondary)),
++                const SizedBox(height: AppSpacing.space8),
++                TextField(
++                  decoration: InputDecoration(
++                    hintText: l10n.commonSearch,
++                    isDense: true,
++                    prefixIcon: const Icon(Icons.search_outlined, size: 18),
++                  ),
++                  onChanged: (v) => setState(() => _search = v),
++                ),
++              ]),
++            );
++          }
++          final r = shown[i - 1];
++          final base = r.basePrice;
++          // What a blank field bills at: the % rule on the default price.
++          final ruled = base == null || pct == null || pct == 0
++              ? base
++              : double.parse((base * (1 + pct / 100)).toStringAsFixed(2));
++          return ListTile(
++            title: Text(r.label, maxLines: 2, overflow: TextOverflow.ellipsis),
++            subtitle: Text(l10n.priceListDefaultPrice(
++                base == null ? '–' : base.toStringAsFixed(2))),
++            trailing: SizedBox(
++              width: 110,
++              child: TextField(
++                controller: _ctrl(r.key),
++                keyboardType: const TextInputType.numberWithOptions(decimal: true),
++                inputFormatters: numbers,
++                textAlign: TextAlign.right,
++                decoration: InputDecoration(
++                  isDense: true,
++                  prefixText: '₹ ',
++                  hintText: ruled?.toStringAsFixed(2),
++                ),
++                onChanged: (v) => _prices[r.key] = v,
++              ),
++            ),
++          );
++        },
++      ),
++    );
++  }
++}
+diff --git a/frontend/test/providers/price_lists_test.dart b/frontend/test/providers/price_lists_test.dart
+new file mode 100644
+index 00000000..0bae3d3c
+--- /dev/null
++++ b/frontend/test/providers/price_lists_test.dart
+@@ -0,0 +1,130 @@
++import 'package:Vittam/models/models.dart';
++import 'package:Vittam/providers/cart_provider.dart';
++import 'package:Vittam/providers/price_lists_provider.dart';
++import 'package:Vittam/providers/session_provider.dart';
++import 'package:flutter_riverpod/flutter_riverpod.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++Item item(String id, double? price, {List<ItemVariant> variants = const []}) =>
++    Item(id: id, businessId: 'b', name: id, price: price, variants: variants, isActive: true);
++
++final size = ItemVariant(id: 'L', itemId: 'tea', label: 'Large', price: 30);
++final tea = item('tea', null, variants: [size]);
++final rice = item('rice', 50);
++final dal = item('dal', 40);
++
++const party = PriceList(
++  id: 'party',
++  name: 'Party',
++  adjustPct: 10,
++  prices: {'rice': 70, 'tea:L': 35},
++);
++
++class _Lists extends PriceListsNotifier {
++  @override
++  Future<List<PriceList>> build() async => [party];
++}
++
++ProviderContainer container() => ProviderContainer(overrides: [
++      gstEnabledProvider.overrideWithValue(false),
++      inventoryEnabledProvider.overrideWithValue(false),
++      priceListsProvider.overrideWith(_Lists.new),
++    ]);
++
++void main() {
++  group('PriceList.priceFor', () {
++    test('a fixed price beats the % rule', () {
++      expect(party.priceFor(rice), 70);
++      expect(party.priceFor(tea, size), 35);
++    });
++
++    test('no fixed price: the % rule on the default, to paise', () {
++      expect(party.priceFor(dal), 44);
++      expect(const PriceList(id: 'x', name: 'x', adjustPct: 10)
++          .priceFor(item('i', 99)), 108.9);
++    });
++
++    test('a size is priced on its own, never from the item', () {
++      const l = PriceList(id: 'x', name: 'x', adjustPct: 10, prices: {'tea': 1});
++      expect(l.priceFor(tea, size), 33);
++    });
++
++    test('no rule and no fixed price: null (default stands)', () {
++      const plain = PriceList(id: 'x', name: 'x');
++      expect(plain.priceFor(dal), isNull);
++      expect(party.priceFor(item('free', null)), isNull);
++    });
++
++    test('fromJson keys sizes like CartEntry.key', () {
++      final l = PriceList.fromJson({
++        'id': 'p', 'name': 'P', 'adjust_pct': '5.00',
++        'items': [
++          {'item_id': 'rice', 'variant_id': null, 'price': '60.00'},
++          {'item_id': 'tea', 'variant_id': 'L', 'price': 32},
++        ],
++      });
++      expect(l.adjustPct, 5);
++      expect(l.prices, {'rice': 60, 'tea:L': 32});
++    });
++  });
++
++  group('CartNotifier with a price list', () {
++    test('applyPriceList re-prices every line, overwriting a hand edit', () {
++      final c = container();
++      final cart = c.read(cartProvider.notifier)
++        ..addItem(rice)
++        ..addItem(dal)
++        ..setLineOverride('dal', price: 5, amt: 2);
++      cart.applyPriceList(party);
++      final lines = {for (final e in c.read(cartProvider)) e.key: e};
++      expect(lines['rice']!.effectivePrice, 70);
++      expect(lines['dal']!.effectivePrice, 44);
++      expect(lines['dal']!.discountAmt, 2, reason: 'line discount is kept');
++      expect(c.read(selectedPriceListProvider), party);
++
++      cart.applyPriceList(null);
++      expect(c.read(cartProvider).every((e) => e.priceOverride == null), isTrue);
++    });
++
++    test('items added while a list is selected get its price', () {
++      final c = container();
++      c.read(cartProvider.notifier)
++        ..applyPriceList(party)
++        ..addItem(tea, variant: size);
++      expect(c.read(cartProvider).single.effectivePrice, 35);
++    });
++
++    test('clear() goes back to default prices', () {
++      final c = container();
++      c.read(cartProvider.notifier)
++        ..applyPriceList(party)
++        ..clear()
++        ..addItem(rice);
++      expect(c.read(selectedPriceListProvider), isNull);
++      expect(c.read(cartProvider).single.effectivePrice, 50);
++    });
++
++    test('loadFromBill reopens on the bill\'s list; catalog-priced lines take it', () async {
++      final c = container();
++      await c.read(priceListsProvider.future);
++      final bill = Bill(
++        id: 'b1', businessId: 'b', billNumber: 'INV-1', subtotal: 0, taxAmount: 0,
++        total: 0, paymentMode: 'cash', status: 'draft', createdByUserId: 'u',
++        createdAt: DateTime(2026), priceListId: 'party',
++        items: [
++          // Already at the list price (stored as an override).
++          BillItem(id: '1', billId: 'b1', itemId: 'rice', itemName: 'rice',
++              quantity: 1, unitPrice: 70, lineTotal: 70),
++          // A waiter added this at catalog price.
++          BillItem(id: '2', billId: 'b1', itemId: 'dal', itemName: 'dal',
++              quantity: 1, unitPrice: 40, lineTotal: 40),
++        ],
++      );
++      c.read(cartProvider.notifier).loadFromBill(bill, [rice, dal]);
++      final lines = {for (final e in c.read(cartProvider)) e.key: e};
++      expect(c.read(selectedPriceListProvider)?.id, 'party');
++      expect(lines['rice']!.effectivePrice, 70);
++      expect(lines['dal']!.effectivePrice, 44);
++    });
++  });
++}

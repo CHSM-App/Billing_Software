@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import '../models/models.dart';
 import '../models/cart_entry.dart';
+import 'price_lists_provider.dart';
 import 'session_provider.dart';
 
 class CartNotifier extends Notifier<List<CartEntry>> {
@@ -52,9 +53,29 @@ class CartNotifier extends Notifier<List<CartEntry>> {
           i == idx ? state[i].copyWith(quantity: state[i].quantity + 1) : state[i]
       ];
     } else {
+      final line = CartEntry(item: item, variant: variant, quantity: 1);
       state = grouped(
-          [...state, CartEntry(item: item, variant: variant, quantity: 1)]);
+          [...state, _priced(line, ref.read(selectedPriceListProvider))]);
     }
+  }
+
+  /// [e] at [list]'s price — an override only where the list differs from
+  /// the catalog — keeping its quantity and line discount.
+  static CartEntry _priced(CartEntry e, PriceList? list) {
+    final p = list?.priceFor(e.item, e.variant);
+    return e.copyWith(
+        clearOverrides: true,
+        priceOverride:
+            p == null || (p - e.catalogPrice).abs() < 0.005 ? null : p,
+        discountPct: e.discountPct,
+        discountAmt: e.discountAmt);
+  }
+
+  /// Bill with [list] (null = default prices). Re-prices EVERY line, so a
+  /// hand-typed price is replaced too — what's on screen is always the list.
+  void applyPriceList(PriceList? list) {
+    ref.read(selectedPriceListProvider.notifier).set(list);
+    state = [for (final e in state) _priced(e, list)];
   }
 
   /// Lines grouped by menu category — major A–Z, then subcategory A–Z,
@@ -125,7 +146,11 @@ class CartNotifier extends Notifier<List<CartEntry>> {
     ];
   }
 
-  void clear() => state = [];
+  /// Empty the cart. The price list is per bill, so it goes back to default.
+  void clear() {
+    state = [];
+    ref.read(selectedPriceListProvider.notifier).set(null);
+  }
 
   /// Rebuild the cart from a saved bill/draft.
   ///
@@ -148,7 +173,22 @@ class CartNotifier extends Notifier<List<CartEntry>> {
               quantity: existing.quantity + entry.quantity,
               discountAmt: existing.discountAmt + entry.discountAmt);
     }
-    state = grouped(merged.values.toList());
+    // Reopen on the bill's own list. Lines still at catalog price (a waiter
+    // added them) take the list price; repriced lines keep what they carry.
+    // ponytail: a list not loaded yet (or deleted since) reopens as Default;
+    // the lines keep their prices either way.
+    final list = bill.priceListId == null
+        ? null
+        : ref
+            .read(priceListsProvider)
+            .valueOrNull
+            ?.where((l) => l.id == bill.priceListId)
+            .firstOrNull;
+    ref.read(selectedPriceListProvider.notifier).set(list);
+    state = grouped([
+      for (final e in merged.values)
+        e.priceOverride == null ? _priced(e, list) : e,
+    ]);
   }
 
   Iterable<CartEntry> _entriesFromBill(Bill bill, List<Item> catalog) {

@@ -827,3 +827,71 @@ describe('duplicate item names', () => {
     expect(res.status).toBe(201);
   });
 });
+
+// ------------------------------------------------------------------
+// Packs — "1 box = 15 bottle"; entry/display only, never billed from
+// ------------------------------------------------------------------
+describe('item packs', () => {
+  const owner = () => authHeader({ role: 'owner' });
+
+  test('POST saves a pack on a plain item', async () => {
+    nameIsFree();
+    mockRequest.recordset = [{ ...sampleItem, pack_unit: 'box', pack_size: 15 }];
+    const res = await request(app).post('/api/items').set(owner())
+      .send({ name: 'Water', price: 20, unit: 'bottle', pack_unit: 'box', pack_size: 15 });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.pack_unit).toBe('box');
+    expect(mockRequest.inputs.pack_size).toBe(15);
+    const insertSql = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /INSERT INTO items/.test(s));
+    expect(insertSql).toMatch(/@pack_unit, @pack_size/);
+  });
+
+  test('POST stores no item-level pack on a sized item', async () => {
+    nameIsFree();
+    mockRequest.recordset = [sampleItem];
+    const res = await request(app).post('/api/items').set(owner())
+      .send({ name: 'Water', has_variants: true, pack_unit: 'box', pack_size: 15 });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.pack_unit).toBeNull();
+    expect(mockRequest.inputs.pack_size).toBeNull();
+  });
+
+  test.each([
+    [{ pack_unit: 'box', pack_size: 1 }, /more than 1/],
+    [{ pack_unit: 'box' }, /together/],
+    [{ pack_size: 15 }, /together/],
+    [{ pack_unit: 'sack', pack_size: 15 }, /Pack unit/],
+  ])('POST rejects pack %p', async (pack, msg) => {
+    const res = await request(app).post('/api/items').set(owner())
+      .send({ name: 'Water', price: 20, ...pack });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(msg);
+  });
+
+  test('PUT with null pack clears it', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID, variant_count: 0 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
+    const res = await request(app).put(`/api/items/${ITEM_ID}`).set(owner())
+      .send({ pack_unit: null, pack_size: null });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.pack_unit).toBeNull();
+    const updateSql = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /UPDATE items/.test(s));
+    expect(updateSql).toMatch(/pack_unit = @pack_unit, pack_size = @pack_size/);
+  });
+
+  test('a variant carries its own pack', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] }) // owned
+      .mockResolvedValueOnce({ recordset: [{ id: 'v1', pack_unit: 'crate', pack_size: 24 }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
+    const res = await request(app).post(`/api/items/${ITEM_ID}/variants`).set(owner())
+      .send({ label: '500ml', price: 10, pack_unit: 'crate', pack_size: 24 });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.pack_unit).toBe('crate');
+    expect(mockRequest.inputs.pack_size).toBe(24);
+    const sqls = mockRequest.query.mock.calls.map((c) => c[0]);
+    expect(sqls.some((s) => /pack_unit = NULL, pack_size = NULL/.test(s))).toBe(true);
+  });
+});

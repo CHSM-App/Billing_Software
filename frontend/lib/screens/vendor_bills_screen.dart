@@ -7,12 +7,14 @@ import 'package:intl/intl.dart';
 
 import '../api.dart' as api;
 import '../l10n/l10n_ext.dart';
+import '../models/models.dart' show formatQty;
 import '../providers.dart';
 import '../services/purchase_list_pdf_import.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/stock_target_picker.dart';
+import 'items_screen.dart' show itemUnitLabel;
 import 'purchase_list_screen.dart';
 
 final _money = NumberFormat('#,##0.00');
@@ -305,6 +307,12 @@ class _LineDraft {
   String? rawMaterialId;
   String? unit;
 
+  /// The linked target's pack, and whether [qty] is typed in packs. The server
+  /// only ever sees base units — see [quantity].
+  String? packUnit;
+  double? packSize;
+  bool inPacks = false;
+
   /// Focus node for the item-name field; the autocomplete needs to own it.
   final FocusNode nameFocus = FocusNode();
 
@@ -361,6 +369,9 @@ class _LineDraft {
     variantId = t.variantId;
     rawMaterialId = t.rawMaterialId;
     unit = t.unit;
+    packUnit = t.packUnit;
+    packSize = t.packSize;
+    inPacks = false;
     _linkedName = t.name;
     name.text = t.name;
     if (hsn.text.trim().isEmpty && t.hsnCode != null) hsn.text = t.hsnCode!;
@@ -378,10 +389,17 @@ class _LineDraft {
     variantId = null;
     rawMaterialId = null;
     unit = null;
+    packUnit = null;
+    packSize = null;
+    inPacks = false;
     _linkedName = null;
   }
 
-  double get quantity => double.tryParse(qty.text.trim()) ?? 0;
+  /// In base units: "2" typed in boxes of 15 is 30.
+  double get quantity {
+    final typed = double.tryParse(qty.text.trim()) ?? 0;
+    return inPacks && packSize != null ? typed * packSize! : typed;
+  }
 
   /// The user types the line's total amount, not a per-unit price — a vendor
   /// bill quotes "10 kg — Rs. 500", and dividing that by hand is a step the
@@ -1019,6 +1037,22 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
               controller: l.qty,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
+              // Tap to switch between the base unit and the pack.
+              suffixIcon: l.packUnit != null && l.packSize != null
+                  ? InkWell(
+                      onTap: () => setState(() => l.inPacks = !l.inPacks),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          UnitSuffix(itemUnitLabel(context,
+                              l.inPacks ? l.packUnit! : (l.unit ?? 'piece'))),
+                          const Icon(Icons.swap_vert,
+                              size: 16, color: AppColors.textSecondary),
+                          const SizedBox(width: 6),
+                        ],
+                      ),
+                    )
+                  : null,
               validator: (v) {
                 final q = double.tryParse((v ?? '').trim());
                 return (q == null || q <= 0)
@@ -1085,7 +1119,9 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                 child: Text(
                   l.unit == null || l.unit!.isEmpty
                       ? context.l10n.purchaseUpdatesStock
-                      : context.l10n.purchaseUpdatesStockUnit(l.unit!),
+                      : context.l10n.purchaseUpdatesStockUnit(l.inPacks
+                          ? '${formatQty(l.quantity)} ${l.unit}'
+                          : l.unit!),
                   style:
                       const TextStyle(fontSize: 11, color: AppColors.primary),
                 ),

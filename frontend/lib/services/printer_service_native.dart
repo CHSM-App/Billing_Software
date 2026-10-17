@@ -615,8 +615,8 @@ class PrinterService {
     }
     lines.add(
         '${labels?.date ?? 'Date:'} ${_formatDate(bill.billDate.toLocal())}');
-    if (bill.billedByFirst != null) {
-      lines.add('${labels?.billedBy ?? 'Cashier:'} ${bill.billedByFirst}');
+    if (bill.billedByName != null) {
+      lines.add('${labels?.billedBy ?? 'Cashier:'} ${bill.billedByName}');
     }
     if (bill.customerName != null && bill.customerName!.isNotEmpty) {
       lines.add('${labels?.customer ?? 'Cust:'} ${bill.customerName}');
@@ -794,9 +794,9 @@ class PrinterService {
           widthFraction: 1.0),
     ], size: sizeBody));
     // Who settled it — tells staff apart now that prices can be edited.
-    if (bill.billedByFirst != null) {
+    if (bill.billedByName != null) {
       rows.add(ReceiptRow.cols([
-        ReceiptCell('${labels?.billedBy ?? 'Cashier:'} ${bill.billedByFirst}',
+        ReceiptCell('${labels?.billedBy ?? 'Cashier:'} ${bill.billedByName}',
             widthFraction: 1.0),
       ], size: sizeBody));
     }

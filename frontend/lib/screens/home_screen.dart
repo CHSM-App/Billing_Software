@@ -28,6 +28,8 @@ import '../services/notification_service.dart';
 import '../storage.dart';
 import '../main.dart' show rootMessengerKey;
 import 'bill_preview_screen.dart';
+import 'customers_screen.dart' show CustomerBillsScreen;
+import 'items_screen.dart' show itemUnitLabel;
 import 'login_screen.dart';
 import 'printer_setup_screen.dart';
 import '../widgets/category_sheet.dart'
@@ -238,6 +240,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // suggestion fills both.
   List<Map<String, dynamic>> _customerSuggestions = const [];
   Timer? _customerSearchDebounce;
+
+  // The typed customer, when they are already in the Customers list — shows
+  // the handshake that opens their bills. [_knownCustomerKey] is the
+  // name|phone that result belongs to, so a re-run only fires on a change.
+  Customer? _knownCustomer;
+  String? _knownCustomerKey;
+  Timer? _knownCustomerDebounce;
   // Which field the open list belongs to ('name' | 'phone' | null = closed).
   String? _suggestFor;
   // Set while a suggestion is being applied, so the controller listeners that
@@ -286,6 +295,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _customerPhoneFocus.addListener(_closeSuggestionsOnBlur);
     // Look up any previous credit for the entered phone (10-digit trigger).
     _customerPhoneController.addListener(_onPhoneChangedForCredit);
+    _customerNameController.addListener(_onCustomerChangedForKnown);
+    _customerPhoneController.addListener(_onCustomerChangedForKnown);
     // Auto-scroll focused field above the keyboard
     _customerNameFocus.addListener(() {
       if (_customerNameFocus.hasFocus) _ensureVisible(_customerNameKey);
@@ -357,6 +368,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _majorStripCtrl.dispose();
     _activeMajor.dispose();
     _customerSearchDebounce?.cancel();
+    _knownCustomerDebounce?.cancel();
     _customerNameController.dispose();
     _customerPhoneController.dispose();
     _discountPctController.dispose();
@@ -1659,6 +1671,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// The price list this bill is priced with, saved on the draft so it
+  /// reopens on the same list. Null = default prices.
+  String? get _priceListId => ref.read(selectedPriceListProvider)?.id;
+
   List<Map<String, dynamic>> get _cartPayload {
     final cart = ref.read(cartProvider);
     final gstEnabled = ref.read(gstEnabledProvider);
@@ -1967,6 +1983,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // Additional charges likewise — always sent on an edit so that removing
     // every charge clears them on the draft rather than leaving stale ones.
     final additionalCharges = _chargesPayload();
+    final priceListId = _priceListId;
     // Capture the notifiers NOW. After Navigator.pop this ConsumerState is
     // disposed and its `ref` becomes defunct — using it for the background
     // reconcile would silently no-op (this was why the table never updated).
@@ -2021,6 +2038,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             customerPhone: customerPhone,
             discountAmount: discountAmount,
             additionalCharges: additionalCharges,
+            priceListId: priceListId,
           );
         } else {
           result = await createBill({
@@ -2028,6 +2046,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'table_id': tableId,
             'payment_mode': _draftMode,
             'status': 'draft',
+            'price_list_id': priceListId,
             if (customerName != null) 'customer_name': customerName,
             if (customerPhone != null) 'customer_phone': customerPhone,
             if (discountAmount > 0) 'discount_amount': discountAmount,
@@ -2528,6 +2547,65 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Find the typed customer in the Customers list: by phone once it is
+  /// complete, else by an exact name match that only one customer has. Owner
+  /// only, and only while the Customers feature is on — that is who can open
+  /// their bills.
+  void _onCustomerChangedForKnown() {
+    final name = _customerNameController.text.trim();
+    final phone = _customerPhoneController.text.trim();
+    final key = '${name.toLowerCase()}|$phone';
+    if (key == _knownCustomerKey) return;
+    _knownCustomerKey = key;
+    _knownCustomerDebounce?.cancel();
+    if (_knownCustomer != null) {
+      setState(() => _knownCustomer = null);
+      _sheetSetState?.call(() {});
+    }
+    final session = ref.read(sessionProvider).valueOrNull;
+    final completePhone = RegExp(r'^\d{10}$').hasMatch(phone);
+    if (session == null ||
+        session.userRole != 'owner' ||
+        !session.customersEnabled ||
+        name.isEmpty ||
+        (!completePhone && phone.isNotEmpty)) {
+      return;
+    }
+    _knownCustomerDebounce = Timer(const Duration(milliseconds: 400),
+        () => _lookupKnownCustomer(key, name, completePhone ? phone : null));
+  }
+
+  Future<void> _lookupKnownCustomer(
+      String key, String name, String? phone) async {
+    try {
+      final res = await getCustomers({'q': phone ?? name, 'limit': '20'});
+      final rows = [
+        for (final j in res['items'] as List)
+          Customer.fromJson(Map<String, dynamic>.from(j as Map))
+      ];
+      final match = phone != null
+          ? rows.where((c) => c.phone.endsWith(phone))
+          : rows.where(
+              (c) => (c.name ?? '').trim().toLowerCase() == name.toLowerCase());
+      // Typed on while this was in flight, or no single clear match.
+      if (!mounted || key != _knownCustomerKey || match.length != 1) return;
+      setState(() => _knownCustomer = match.first);
+      _sheetSetState?.call(() {});
+    } catch (_) {
+      // Only an extra shortcut — a failed lookup just shows no handshake.
+    }
+  }
+
+  void _openKnownCustomer() {
+    final customer = _knownCustomer;
+    if (customer == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => CustomerBillsScreen(customer: customer)),
+    );
+  }
+
   void _onPhoneChangedForCredit() {
     final phone = _customerPhoneController.text.trim();
     _prevCreditDebounce?.cancel();
@@ -2724,6 +2802,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           discountAmount:
               double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
           additionalCharges: additionalCharges,
+          priceListId: _priceListId,
         );
         // The mode selected NOW, not the one the draft was parked with.
         result = await finalizeBill(widget.activeBillId!,
@@ -2740,6 +2819,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'customer_phone': _customerPhoneController.text.trim(),
           'payment_mode': _draftMode,
           'status': 'draft',
+          'price_list_id': _priceListId,
           if (_discountAmtController.text.trim().isNotEmpty)
             'discount_amount': double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
           if (additionalCharges.isNotEmpty)
@@ -4141,38 +4221,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
               child: Row(
                 children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      gradient: AppColors.primaryGradient,
-                      borderRadius: BorderRadius.circular(AppRadius.small),
-                    ),
-                    child: const Icon(Icons.shopping_cart_outlined,
-                        size: 18, color: Colors.white),
-                  ),
-                  const SizedBox(width: AppSpacing.space12),
-                  // Title + count share ONE Expanded, which absorbs all the
-                  // free width. A Spacer here instead would get nothing —
-                  // Flexible and Spacer compete for the same slack, and the
-                  // Flexible wins, which left the trailing icons stranded in
-                  // the middle of the row instead of at its edge.
+                  // No "Order" title or cart icon — the item count leads the
+                  // row. It sits in an Expanded that absorbs the free width,
+                  // keeping the trailing icons at the row's edge. The 36px
+                  // strut keeps the header's height on an empty cart.
+                  const SizedBox(height: 36),
                   Expanded(
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Flexible(
-                          child: Text(l10n.billingOrder,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleLarge),
-                        ),
-                        // Item count beside the title — distinct LINES, not
-                        // summed quantity, so a 1.5 kg line still reads as one
-                        // item (matches the cart badge). Hidden on an empty
-                        // cart: the placeholder below already says so.
+                        // Item count — distinct LINES, not summed quantity, so
+                        // a 1.5 kg line still reads as one item (matches the
+                        // cart badge). Hidden on an empty cart: the
+                        // placeholder below already says so.
                         if (cart.isNotEmpty) ...[
-                          const SizedBox(width: AppSpacing.space8),
                           Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 2),
@@ -4198,6 +4260,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       ],
                     ),
                   ),
+                  // Price list picker — owner/cashier only, like a line price
+                  // edit (the server ignores a waiter's price_override).
+                  if (canFinalize) const _PriceListChip(),
                   // Preview lives up here with the other order-level actions
                   // because it is the one control that touches no money — it
                   // must not sit in the footer row where everything settles.
@@ -4229,16 +4294,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
 
           ],
-          items: cart.isEmpty
-              ? _emptyCartPlaceholder(l10n)
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: cart.map((e) => _buildCartRow(e)).toList(),
-                ),
-          // Footer (payment, customer, discount, totals, actions).
-          footer: [
-            const Divider(height: 1),
-
+          // Customer first: who the bill is for, then what they ordered,
+          // then the money. The handshake on the name opens their bills.
+          top: [
             // Inline credit validation message — shown inside the card (no
             // snackbar, no closing) when a credit bill lacks name/phone.
             if (canFinalize && _creditError != null)
@@ -4327,6 +4385,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   controller: _customerNameController,
                                   focusNode: _customerNameFocus,
                                   capitalizeWords: true,
+                                  // Already a customer: open their bills.
+                                  suffixIcon: _knownCustomer == null
+                                      ? null
+                                      : IconButton(
+                                          tooltip: l10n.billingCustomerBills,
+                                          icon: const Icon(
+                                              Icons.handshake_outlined,
+                                              size: 20,
+                                              color: AppColors.primary),
+                                          onPressed: _openKnownCustomer,
+                                        ),
                                   prefixIcon: const Icon(Icons.person_outline,
                                       size: 16,
                                       color: AppColors.textSecondary),
@@ -4357,9 +4426,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
 
-            // Previous credit due for this phone — shown below the customer
-            // fields, one line per unpaid bill: tick it to collect it with
-            // this bill, in full or the part typed in.
+            const Divider(height: 1),
+          ],
+          items: cart.isEmpty
+              ? _emptyCartPlaceholder(l10n)
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: cart.map((e) => _buildCartRow(e)).toList(),
+                ),
+          // Footer (previous dues, discount, charges, totals, actions).
+          footer: [
+            const Divider(height: 1),
+
+            // Previous credit due for this phone — shown below the items, one
+            // line per unpaid bill: tick it to collect it with this bill, in
+            // full or the part typed in.
             if (canFinalize && _prevDueLines.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
@@ -5018,9 +5099,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     required bool inSheet,
     required bool empty,
     required List<Widget> header,
+    required List<Widget> top,
     required Widget items,
     required List<Widget> footer,
   }) {
+    final topColumn = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: top,
+    );
     final footerColumn = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5030,7 +5117,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [...header, items, footerColumn],
+        children: [...header, topColumn, items, footerColumn],
       );
     }
     return Column(
@@ -5051,12 +5138,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // Empty cart: a leading blank makes spaceBetween
-                          // centre the placeholder in the space above the
-                          // footer, so the footer sits where it will be once
-                          // the first item goes in.
-                          if (empty) const SizedBox.shrink(),
-                          items,
+                          // Empty cart: the customer section leads, so
+                          // spaceBetween centres the placeholder in the space
+                          // above the footer, which sits where it will be once
+                          // the first item goes in. Otherwise customer + items
+                          // stay together at the top.
+                          if (empty) ...[topColumn, items] else Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [topColumn, items],
+                          ),
                           footerColumn,
                         ],
                       ),
@@ -5155,6 +5245,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           color: AppColors.primary,
           fontWeight: FontWeight.w600,
         );
+    final packLabel = cartPackLabel(context, entry);
+    final packUnit = entry.packUnit;
+    final packSize = entry.packSize;
     final row = Padding(
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.space16, vertical: 6.0),
@@ -5187,6 +5280,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       ],
                       // Net (pre-tax) line amount — tax is shown in the totals below.
                       Text('₹${lineNet.toStringAsFixed(2)}', style: amountStyle),
+                      // 17 bottles with a box of 15 → "1 Box + 2 Bottle".
+                      if (packLabel != null)
+                        Flexible(
+                          child: Text('  ·  $packLabel',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: AppColors.textSecondary)),
+                        ),
                       if (canEdit)
                         AnimatedRotation(
                           turns: expanded ? 0.5 : 0,
@@ -5201,6 +5305,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
           ),
+          // "+Box": a whole pack in one tap.
+          if (packUnit != null && packSize != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: InkWell(
+                onTap: () => _cartChange(
+                    entry.key,
+                    () => ref
+                        .read(cartProvider.notifier)
+                        .changeQty(entry.key, packSize)),
+                borderRadius: BorderRadius.circular(AppRadius.small),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(AppRadius.small),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Text('+${itemUnitLabel(context, packUnit)}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
+                          )),
+                ),
+              ),
+            ),
           Container(
             decoration: BoxDecoration(
               color: AppColors.surfaceVariant,
@@ -5287,6 +5417,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+}
+
+/// "1 Box + 2 Bottle" for a cart line holding at least one full pack, else
+/// null. Display only — the line still bills its quantity in base units.
+String? cartPackLabel(BuildContext context, CartEntry e) {
+  final p = e.packs;
+  final unit = e.packUnit;
+  if (p == null || unit == null) return null;
+  final packs = '${p.packs} ${itemUnitLabel(context, unit)}';
+  return p.loose > 0
+      ? '$packs + ${formatQty(p.loose)} ${itemUnitLabel(context, e.item.unit)}'
+      : packs;
 }
 
 // ---------------------------------------------------------------------------
@@ -6411,6 +6553,62 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
 /// is a dense row of title, count and controls. The tint is what makes them
 /// look pressable, and it separates the two by consequence: blue looks at the
 /// bill, red throws it away.
+/// "Default ▾" / "Party ▾" in the order-card header: picks the price list this
+/// bill is priced with. Hidden until the owner has made at least one list.
+class _PriceListChip extends ConsumerWidget {
+  const _PriceListChip();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lists = ref.watch(priceListsProvider).valueOrNull ?? const [];
+    if (lists.isEmpty) return const SizedBox.shrink();
+    final l10n = context.l10n;
+    final selected = ref.watch(selectedPriceListProvider);
+    final color = selected == null ? AppColors.textSecondary : AppColors.primary;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: PopupMenuButton<String>(
+        tooltip: l10n.priceListPick,
+        // '' = default prices; a PopupMenuItem can't carry a null value.
+        onSelected: (id) => ref.read(cartProvider.notifier).applyPriceList(
+            lists.where((l) => l.id == id).firstOrNull),
+        itemBuilder: (_) => [
+          CheckedPopupMenuItem(
+              value: '',
+              checked: selected == null,
+              child: Text(l10n.priceListDefault)),
+          for (final l in lists)
+            CheckedPopupMenuItem(
+                value: l.id,
+                checked: selected?.id == l.id,
+                child: Text(l.name)),
+        ],
+        child: Container(
+          height: 36,
+          constraints: const BoxConstraints(maxWidth: 130),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(AppRadius.small),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.sell_outlined, size: 16, color: color),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(selected?.name ?? l10n.priceListDefault,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: color, fontWeight: FontWeight.w600)),
+            ),
+            Icon(Icons.arrow_drop_down, size: 18, color: color),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
 class _HeaderIconAction extends StatelessWidget {
   final IconData icon;
   final Color color;
@@ -6572,14 +6770,15 @@ class _ExcelItemRow extends ConsumerStatefulWidget {
       variant != null ? variant!.label : item.billingName(showItemNo);
   /// Null for a variant PARENT row: the item owns no price and its sizes differ,
   /// so no single figure is correct — [rowPriceLabel] shows their range instead.
-  double? get rowPrice => variant?.price ?? item.price;
+  double? rowPrice(PriceList? list) =>
+      list?.priceFor(item, variant) ?? variant?.price ?? item.price;
 
   /// What the price column renders. A variant row and a plain item show their
   /// own price. A variant PARENT shows nothing — it isn't billable itself and
   /// each variant beneath it carries its own price.
-  String get rowPriceLabel {
+  String rowPriceLabel(PriceList? list) {
     if (treatAsVariantItem) return '';
-    final p = rowPrice;
+    final p = rowPrice(list);
     if (p == null) return '';
     final suffix = item.isMeasured && !isVariantRow ? '/${item.unit}' : '';
     return '₹${p.toStringAsFixed(2)}$suffix';
@@ -6703,8 +6902,9 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
     final revealRight = _dragDx > 8; // show + icon on right bg
     final revealLeft = _dragDx < -8; // show − icon on left bg
     // Orange at the low-stock alert, red at zero; nothing when stock isn't
-    // tracked.
-    final stockColor = ref.watch(inventoryEnabledProvider)
+    // tracked. A variant parent leaves it to its variant rows.
+    final stockColor = ref.watch(inventoryEnabledProvider) &&
+            (widget.variant != null || !widget.item.hasVariants)
         ? stockAlertColor(widget.item, widget.variant)
         : null;
 
@@ -6830,7 +7030,7 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerRight,
                         child: Text(
-                          widget.rowPriceLabel,
+                          widget.rowPriceLabel(ref.watch(selectedPriceListProvider)),
                           textAlign: TextAlign.right,
                           maxLines: 1,
                           style: TextStyle(

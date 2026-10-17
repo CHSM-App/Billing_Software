@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
+import '../models/cart_entry.dart';
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
@@ -109,9 +110,15 @@ class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
     });
   }
 
+  bool get _retail =>
+      ref.read(sessionProvider).valueOrNull?.businessType == 'retail';
+
   /// Serve a ready dish (or undo). Same rules and flow as the Kitchen page.
+  /// Retail has no kitchen: a tap just ticks the item off, or unticks it.
   Future<void> _toggle(Map<String, dynamic> item) async {
-    final next = KitchenScreen.nextStatus(ref.read(userRoleProvider), item);
+    final next = _retail
+        ? (item['kitchen_status'] == 'delivered' ? 'pending' : 'delivered')
+        : KitchenScreen.nextStatus(ref.read(userRoleProvider), item);
     final id = item['id'] as String;
     if (next == null || _busy.contains(id)) return;
     setState(() {
@@ -232,6 +239,10 @@ class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
                         busy: _busy,
                         statusOverride: _override,
                         forceExpanded: widget.readyOnly,
+                        catalog: ref.watch(itemsProvider).valueOrNull ?? const [],
+                        retail: ref.watch(sessionProvider).valueOrNull
+                                ?.businessType ==
+                            'retail',
                         open: phone ? _openBillId == t.bill.id : null,
                         onOpenChanged: phone
                             ? (open) => setState(
@@ -254,13 +265,19 @@ class _OpenDraftsScreenState extends ConsumerState<OpenDraftsScreen> {
 /// to open the bill too. Folds to just the header — folded by default on a
 /// phone, open on wider screens.
 class _DraftTicket extends StatefulWidget {
-  static const int _maxRows = 15; // dishes shown before the list scrolls
+  static const int _maxRows = 10; // dishes shown before the list scrolls
 
   final OpenOrderTicket ticket;
   final String role;
   final Set<String> busy;
   final Map<String, String> statusOverride;
   final bool forceExpanded;
+
+  /// The item catalog, to show a line's packs ("1 Box + 2 Bottle").
+  final List<Item> catalog;
+
+  /// Retail shop: items get a plain tick box instead of kitchen statuses.
+  final bool retail;
 
   /// When the list decides which card is unfolded (phone: one at a time),
   /// whether this one is, and how to ask for a change. Null = the card
@@ -277,6 +294,8 @@ class _DraftTicket extends StatefulWidget {
     required this.busy,
     required this.statusOverride,
     required this.forceExpanded,
+    this.catalog = const [],
+    this.retail = false,
     this.open,
     this.onOpenChanged,
     required this.onOpen,
@@ -294,6 +313,32 @@ class _DraftTicketState extends State<_DraftTicket> {
 
   String _status(BillItem it) =>
       widget.statusOverride[it.id] ?? it.kitchenStatus ?? 'pending';
+
+  /// "1 Box + 2 Bottle" for a line holding at least one full pack, else null.
+  /// Read from the live catalog — bill lines carry no pack of their own.
+  String? _packLabel(BillItem it) {
+    final item = widget.catalog.where((i) => i.id == it.itemId).firstOrNull;
+    if (item == null) return null;
+    final variant = it.variantId == null
+        ? null
+        : item.variants.where((v) => v.id == it.variantId).firstOrNull;
+    return cartPackLabel(
+        context, CartEntry(item: item, variant: variant, quantity: it.quantity));
+  }
+
+  /// The dish list hit its top/bottom under a finger: keep the drag going on
+  /// the page instead of stopping dead. (A mouse wheel already passes to the
+  /// page by itself once the list can't move.)
+  /// ponytail: the page follows the finger but gets no fling on release.
+  bool _chainToPage(OverscrollNotification n) {
+    if (n.depth != 0 || n.dragDetails == null) return false;
+    // This card's context sits above the dish list, so this is the page.
+    final page = Scrollable.maybeOf(context)?.position;
+    if (page == null) return false;
+    page.jumpTo((page.pixels + n.overscroll)
+        .clamp(page.minScrollExtent, page.maxScrollExtent));
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -320,7 +365,8 @@ class _DraftTicketState extends State<_DraftTicket> {
 
     final card = AppCard(
       padding: EdgeInsets.zero,
-      color: allReady ? AppColors.successLight : AppColors.surface,
+      // Never tinted green when everything is done — the ticks say it.
+      color: AppColors.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -500,35 +546,60 @@ class _DraftTicketState extends State<_DraftTicket> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // A long order stops growing at ~15 dishes and scrolls
+                      // A long order stops growing at ~10 dishes and scrolls
                       // inside the card; the Open bill button stays in view.
                       // ponytail: ~35px per KitchenItemTile row, so wrapped
-                      // names show slightly fewer than 15.
+                      // names show slightly fewer than 10.
                       ConstrainedBox(
                         constraints: const BoxConstraints(
                             maxHeight: _DraftTicket._maxRows * 35.0),
-                        child: Scrollbar(
+                        child: NotificationListener<OverscrollNotification>(
+                          onNotification: _chainToPage,
+                          child: Scrollbar(
                           child: SingleChildScrollView(
+                            // Clamping, so a finger drag at either end reports
+                            // overscroll (handed to the page) instead of
+                            // bouncing.
+                            physics: const ClampingScrollPhysics(),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 for (int i = 0; i < items.length; i++) ...[
                                   const Divider(height: 1),
+                                  if (widget.retail)
+                                    _TickTile(
+                                      key: ValueKey(items[i].id),
+                                      item: items[i],
+                                      packLabel: _packLabel(items[i]),
+                                      ticked:
+                                          _status(items[i]) == 'delivered',
+                                      busy: widget.busy.contains(items[i].id),
+                                      onTap: () => widget.onToggle({
+                                        'id': items[i].id,
+                                        'kitchen_status': _status(items[i]),
+                                      }),
+                                    )
+                                  else
                                   KitchenItemTile(
                                     key: ValueKey(items[i].id),
                                     item: {
                                       'id': items[i].id,
-                                      'item_name': items[i].itemName,
+                                      'item_name': [
+                                        items[i].itemName,
+                                        _packLabel(items[i]),
+                                      ].nonNulls.join('  ·  '),
                                       'quantity': items[i].quantity,
                                       'kitchen_status': _status(items[i]),
                                     },
                                     role: widget.role,
                                     busy: widget.busy,
                                     onToggle: widget.onToggle,
+                                    tintRow: false,
                                   ),
                                 ],
                               ],
                             ),
+                          ),
                           ),
                         ),
                       ),
@@ -645,6 +716,83 @@ class _ReadyBadge extends StatelessWidget {
                 color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A retail order line with a plain tick box — what the tick means is up to
+/// the shop (packed, handed over, checked…), so it carries no label.
+class _TickTile extends StatelessWidget {
+  final BillItem item;
+  final String? packLabel;
+  final bool ticked;
+  final bool busy;
+  final VoidCallback onTap;
+
+  const _TickTile({
+    super.key,
+    required this.item,
+    this.packLabel,
+    required this.ticked,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: busy ? null : onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.space8, vertical: 6),
+        child: Row(
+          children: [
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: ticked
+                  ? Container(
+                      key: const ValueKey('on'),
+                      width: 20,
+                      height: 20,
+                      decoration: const BoxDecoration(
+                          color: AppColors.success, shape: BoxShape.circle),
+                      child: const Icon(Icons.check,
+                          size: 14, color: Colors.white),
+                    )
+                  : const Icon(Icons.radio_button_unchecked,
+                      key: ValueKey('off'),
+                      size: 20,
+                      color: AppColors.textSecondary),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                item.itemName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  color:
+                      ticked ? AppColors.textSecondary : AppColors.textPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            if (packLabel != null) ...[
+              Text(
+                packLabel!,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textSecondary),
+              ),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              '× ${formatQty(item.quantity)}',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -20,6 +20,11 @@ class StockTarget {
   final String? hsnCode;
   final double? taxRate;
 
+  /// The item's or size's pack ("1 box = 15"), so a purchase can be typed in
+  /// boxes. Null for raw materials and unpacked items.
+  final String? packUnit;
+  final double? packSize;
+
   const StockTarget({
     required this.name,
     required this.unit,
@@ -30,6 +35,8 @@ class StockTarget {
     this.rawMaterialId,
     this.hsnCode,
     this.taxRate,
+    this.packUnit,
+    this.packSize,
   }) : assert(
           (itemId != null ? 1 : 0) +
                   (variantId != null ? 1 : 0) +
@@ -86,6 +93,8 @@ List<StockTarget> buildStockTargets({
             variantId: v.id,
             hsnCode: it.hsnCode,
             taxRate: it.taxRate,
+            packUnit: v.packUnit,
+            packSize: v.packSize,
           ));
         }
       } else if (!exclude.contains(it.name)) {
@@ -97,6 +106,8 @@ List<StockTarget> buildStockTargets({
           itemId: it.id,
           hsnCode: it.hsnCode,
           taxRate: it.taxRate,
+          packUnit: it.packUnit,
+          packSize: it.packSize,
         ));
       }
     }

@@ -620,6 +620,13 @@ class AppLocalizationsMr extends AppLocalizations {
       'आयटम क्र. असलेले आयटम बिलिंगवर (101) आयटमचे नाव असे दिसतील';
 
   @override
+  String get settingsToggles => 'सेटिंग्ज';
+
+  @override
+  String get settingsTogglesSubtitle =>
+      'GST, इन्व्हेंटरी, राउंड-ऑफ व इतर पर्याय';
+
+  @override
   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
 
   @override
@@ -1375,6 +1382,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingCustomerPhoneLabel => 'ग्राहकाचा मोबाइल';
 
   @override
+  String get billingCustomerBills => 'ग्राहकाची बिले';
+
+  @override
   String get billingPhoneInvalid => 'ग्राहक क्रमांक १० अंकी असणे आवश्यक आहे.';
 
   @override
@@ -1841,6 +1851,38 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsUnitRoll => 'रोल';
+
+  @override
+  String get itemsUnitCase => 'केस';
+
+  @override
+  String get itemsUnitCrate => 'क्रेट';
+
+  @override
+  String get itemsUnitCarton => 'कार्टन';
+
+  @override
+  String get itemsFieldPack => 'पॅकमध्ये विक्री';
+
+  @override
+  String get itemsPackNone => 'पॅक नाही';
+
+  @override
+  String itemsFieldPackSize(String pack) {
+    return '1 $pack =';
+  }
+
+  @override
+  String get itemsPackSizeInvalid => '1 पेक्षा जास्त असावे';
+
+  @override
+  String get itemsPackPerSizeHint =>
+      'पॅक प्रत्येक आकारासाठी सेट होतो: आकार व्यवस्थापित करा, मग आकारावर ✎ दाबा.';
+
+  @override
+  String itemsSizeEditTitle(String label) {
+    return 'संपादन — $label';
+  }
 
   @override
   String get itemsHasVariants => 'या वस्तूचे प्रकार आहेत';
@@ -3710,4 +3752,56 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get logoSave => 'लोगो सेव्ह करा';
+
+  @override
+  String get priceListPick => 'दर यादी';
+
+  @override
+  String get priceListDefault => 'मूळ दर';
+
+  @override
+  String get settingsPriceLists => 'दर याद्या';
+
+  @override
+  String get settingsPriceListsSubtitle => 'पार्टी, घाऊक व इतर दर';
+
+  @override
+  String get priceListsEmpty =>
+      'अजून दर यादी नाही. पार्टी, घाऊक किंवा AC विभागासाठी एक तयार करा.';
+
+  @override
+  String get priceListNew => 'नवीन दर यादी';
+
+  @override
+  String get priceListName => 'नाव';
+
+  @override
+  String get priceListAdjust => 'सर्व दर % ने बदला';
+
+  @override
+  String get priceListAdjustHint =>
+      'उदा. 10 म्हणजे 10% जास्त, -5 म्हणजे 5% कमी. मूळ दर ठेवण्यासाठी रिकामे ठेवा.';
+
+  @override
+  String get priceListItemsHint =>
+      'ठराविक दर % पेक्षा प्राधान्याचा. % (किंवा मूळ दर) वापरण्यासाठी रिकामे ठेवा.';
+
+  @override
+  String priceListDefaultPrice(String price) {
+    return 'मूळ ₹$price';
+  }
+
+  @override
+  String priceListDeleteConfirm(String name) {
+    return '\"$name\" हटवायची? आधी जतन केलेल्या बिलांचे दर बदलणार नाहीत.';
+  }
+
+  @override
+  String get priceListSaved => 'दर यादी जतन झाली';
+
+  @override
+  String get priceListNameRequired => 'नाव टाका';
+
+  @override
+  String get priceListBadNumber => 'योग्य संख्या टाका';
 }

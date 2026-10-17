@@ -173,7 +173,7 @@ void main() {
     expect(items.firstWhere((i) => i.id == 'b').itemNo, isNull);
   });
 
-  test('a v14 device upgrades to v15 and gains cached_items.item_no', () async {
+  test('a v14 device upgrades and gains cached_items.item_no and packs', () async {
     final path =
         '${await databaseFactory.getDatabasesPath()}/billing_offline.db';
     await databaseFactory.deleteDatabase(path);
@@ -199,16 +199,19 @@ void main() {
     // Same single instance the service holds — inspect it, don't close it.
     final db = await databaseFactory.openDatabase(path);
     final cols = await db.rawQuery('PRAGMA table_info(cached_items)');
-    expect(cols.map((c) => c['name']), contains('item_no'));
-    expect(await db.getVersion(), 15);
+    expect(cols.map((c) => c['name']), containsAll(['item_no', 'pack_unit', 'pack_size']));
+    expect(await db.getVersion(), 16);
 
     // And the cache works end to end on the upgraded table.
     await OfflineService.instance.replaceItemCache([
       Item.fromJson({'id': 'a', 'business_id': 'biz-1', 'name': 'Idli',
-          'item_no': '7', 'price': 40, 'is_active': 1}),
+          'item_no': '7', 'price': 40, 'is_active': 1,
+          'pack_unit': 'box', 'pack_size': 15}),
     ], 'biz-1');
     final items =
         (await OfflineService.instance.getCachedItemsWithStatus('biz-1')).items;
     expect(items.single.itemNo, '7');
+    expect(items.single.packUnit, 'box');
+    expect(items.single.packSize, 15);
   });
 }

@@ -108,6 +108,10 @@ CREATE TABLE items (
     item_no         NVARCHAR(30)     NULL,
     stock_quantity  DECIMAL(10,2)    NULL,
     unit            NVARCHAR(20)     NOT NULL DEFAULT 'piece',
+    -- "1 box = 15 bottle" (migration 058). Entry/display only — stock and bill
+    -- quantities stay in `unit`. NULL on a sized item; packs live on its sizes.
+    pack_unit       NVARCHAR(20)     NULL,
+    pack_size       DECIMAL(10,2)    NULL,
     is_active       BIT              NOT NULL DEFAULT 1,
     created_at      DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
 
@@ -132,6 +136,8 @@ CREATE TABLE item_variants (
     barcode             NVARCHAR(100)    NULL,
     stock_quantity      DECIMAL(10,2)    NULL,
     low_stock_threshold DECIMAL(10,2)    NULL,
+    pack_unit           NVARCHAR(20)     NULL,   -- this size's pack (migration 058)
+    pack_size           DECIMAL(10,2)    NULL,
     sort_order          INT              NOT NULL DEFAULT 0,
     is_active           BIT              NOT NULL DEFAULT 1,
     created_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
@@ -146,6 +152,37 @@ CREATE INDEX IX_item_variants_item_id ON item_variants (item_id);
 CREATE UNIQUE INDEX UQ_item_variants_item_barcode
     ON item_variants (item_id, barcode)
     WHERE barcode IS NOT NULL;
+
+-- Price lists (migration 059): an optional % rule plus fixed prices per item or
+-- size. Billing sends list prices as line price_overrides; see 059 for why
+-- item_id / variant_id carry no FK.
+CREATE TABLE price_lists (
+    id          UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    business_id UNIQUEIDENTIFIER NOT NULL,
+    name        NVARCHAR(60)     NOT NULL,
+    adjust_pct  DECIMAL(6,2)     NULL,
+    is_active   BIT              NOT NULL DEFAULT 1,
+    created_at  DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
+
+    CONSTRAINT FK_price_lists_business
+        FOREIGN KEY (business_id) REFERENCES businesses (id)
+);
+
+CREATE INDEX IX_price_lists_business_id ON price_lists (business_id);
+
+CREATE TABLE price_list_items (
+    id            UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    price_list_id UNIQUEIDENTIFIER NOT NULL,
+    item_id       UNIQUEIDENTIFIER NOT NULL,
+    variant_id    UNIQUEIDENTIFIER NULL,
+    price         DECIMAL(12,2)    NOT NULL,
+
+    CONSTRAINT FK_price_list_items_list
+        FOREIGN KEY (price_list_id) REFERENCES price_lists (id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX UQ_price_list_items_line
+    ON price_list_items (price_list_id, item_id, variant_id);
 
 CREATE TABLE tables (
     id            UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
@@ -186,6 +223,7 @@ CREATE TABLE bills (
     -- Who settled it ("Billed by" on receipts/History). Migration 057; NULL on
     -- older bills, which fall back to created_by_user_id when read.
     finalized_by_user_id UNIQUEIDENTIFIER NULL,
+    price_list_id       UNIQUEIDENTIFIER NULL,     -- list the bill was priced with (migration 059); no FK
     client_bill_id      NVARCHAR(36)     NULL,     -- idempotency key from Flutter offline queue (UUID v4)
     created_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
 

@@ -967,6 +967,9 @@ class _RadioGroupScope<T> extends InheritedWidget {
 /// out of stock, orange at or below its low-stock alert, null otherwise (and
 /// whenever stock isn't tracked). A sized item takes its worst size — orange
 /// if any size is low or out, red only when every size is out.
+const stockOutColor = Color(0xFFDC2626);
+const stockLowColor = Color(0xFFEAB308);
+
 Color? stockAlertColor(Item item, [ItemVariant? variant]) {
   final levels = variant != null
       ? [(variant.stockQuantity, variant.isLowStock)]
@@ -974,7 +977,9 @@ Color? stockAlertColor(Item item, [ItemVariant? variant]) {
           ? [for (final v in item.variants) (v.stockQuantity, v.isLowStock)]
           : [(item.stockQuantity, item.isLowStock)];
   bool out((double?, bool) l) => l.$1 != null && l.$1! <= 0;
-  if (levels.every(out)) return AppColors.error;
-  if (levels.any((l) => out(l) || l.$2)) return AppColors.warning;
+  // Yellow vs deep red rather than the theme's amber/red, which read alike
+  // as a thin strip.
+  if (levels.every(out)) return stockOutColor;
+  if (levels.any((l) => out(l) || l.$2)) return stockLowColor;
   return null;
 }

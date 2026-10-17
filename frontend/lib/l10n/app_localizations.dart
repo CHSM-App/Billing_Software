@@ -1148,6 +1148,18 @@ abstract class AppLocalizations {
   /// **'Items with an Item No show as (101) Item name on the billing page'**
   String get settingsShowItemNoSubtitle;
 
+  /// No description provided for @settingsToggles.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get settingsToggles;
+
+  /// No description provided for @settingsTogglesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'GST, inventory, round-off and other options'**
+  String get settingsTogglesSubtitle;
+
   /// No description provided for @settingsManageStaff.
   ///
   /// In en, this message translates to:
@@ -2510,6 +2522,12 @@ abstract class AppLocalizations {
   /// **'Customer phone'**
   String get billingCustomerPhoneLabel;
 
+  /// No description provided for @billingCustomerBills.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer\'s bills'**
+  String get billingCustomerBills;
+
   /// No description provided for @billingPhoneInvalid.
   ///
   /// In en, this message translates to:
@@ -3315,6 +3333,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Roll'**
   String get itemsUnitRoll;
+
+  /// No description provided for @itemsUnitCase.
+  ///
+  /// In en, this message translates to:
+  /// **'Case'**
+  String get itemsUnitCase;
+
+  /// No description provided for @itemsUnitCrate.
+  ///
+  /// In en, this message translates to:
+  /// **'Crate'**
+  String get itemsUnitCrate;
+
+  /// No description provided for @itemsUnitCarton.
+  ///
+  /// In en, this message translates to:
+  /// **'Carton'**
+  String get itemsUnitCarton;
+
+  /// No description provided for @itemsFieldPack.
+  ///
+  /// In en, this message translates to:
+  /// **'Sold in packs'**
+  String get itemsFieldPack;
+
+  /// No description provided for @itemsPackNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No pack'**
+  String get itemsPackNone;
+
+  /// No description provided for @itemsFieldPackSize.
+  ///
+  /// In en, this message translates to:
+  /// **'1 {pack} ='**
+  String itemsFieldPackSize(String pack);
+
+  /// No description provided for @itemsPackSizeInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Must be more than 1'**
+  String get itemsPackSizeInvalid;
+
+  /// No description provided for @itemsPackPerSizeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Packs are set per size: Manage sizes, then tap ✎ on a size.'**
+  String get itemsPackPerSizeHint;
+
+  /// No description provided for @itemsSizeEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit — {label}'**
+  String itemsSizeEditTitle(String label);
 
   /// No description provided for @itemsHasVariants.
   ///
@@ -6513,6 +6585,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Save logo'**
   String get logoSave;
+
+  /// No description provided for @priceListPick.
+  ///
+  /// In en, this message translates to:
+  /// **'Price list'**
+  String get priceListPick;
+
+  /// No description provided for @priceListDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get priceListDefault;
+
+  /// No description provided for @settingsPriceLists.
+  ///
+  /// In en, this message translates to:
+  /// **'Price lists'**
+  String get settingsPriceLists;
+
+  /// No description provided for @settingsPriceListsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Party, wholesale and other rates'**
+  String get settingsPriceListsSubtitle;
+
+  /// No description provided for @priceListsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No price lists yet. Create one for party, wholesale or AC section rates.'**
+  String get priceListsEmpty;
+
+  /// No description provided for @priceListNew.
+  ///
+  /// In en, this message translates to:
+  /// **'New price list'**
+  String get priceListNew;
+
+  /// No description provided for @priceListName.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get priceListName;
+
+  /// No description provided for @priceListAdjust.
+  ///
+  /// In en, this message translates to:
+  /// **'Change every price by %'**
+  String get priceListAdjust;
+
+  /// No description provided for @priceListAdjustHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. 10 for 10% more, -5 for 5% less. Leave blank to keep default prices.'**
+  String get priceListAdjustHint;
+
+  /// No description provided for @priceListItemsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Fixed prices win over the %. Leave blank to use the % (or the default price).'**
+  String get priceListItemsHint;
+
+  /// No description provided for @priceListDefaultPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Default ₹{price}'**
+  String priceListDefaultPrice(String price);
+
+  /// No description provided for @priceListDeleteConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete \"{name}\"? Bills already saved keep their prices.'**
+  String priceListDeleteConfirm(String name);
+
+  /// No description provided for @priceListSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Price list saved'**
+  String get priceListSaved;
+
+  /// No description provided for @priceListNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a name'**
+  String get priceListNameRequired;
+
+  /// No description provided for @priceListBadNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid number'**
+  String get priceListBadNumber;
 }
 
 class _AppLocalizationsDelegate

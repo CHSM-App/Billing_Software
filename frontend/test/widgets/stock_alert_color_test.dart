@@ -20,11 +20,11 @@ ItemVariant _size(String id, double? stock, {double? alert = 5}) => ItemVariant(
 void main() {
   test('plain item: none above the alert, orange at it, red at zero', () {
     expect(stockAlertColor(_item(stock: 20, alert: 5)), isNull);
-    expect(stockAlertColor(_item(stock: 5, alert: 5)), AppColors.warning);
-    expect(stockAlertColor(_item(stock: 0, alert: 5)), AppColors.error);
-    expect(stockAlertColor(_item(stock: -2, alert: 5)), AppColors.error);
+    expect(stockAlertColor(_item(stock: 5, alert: 5)), stockLowColor);
+    expect(stockAlertColor(_item(stock: 0, alert: 5)), stockOutColor);
+    expect(stockAlertColor(_item(stock: -2, alert: 5)), stockOutColor);
     // Zero is red even without an alert level set.
-    expect(stockAlertColor(_item(stock: 0)), AppColors.error);
+    expect(stockAlertColor(_item(stock: 0)), stockOutColor);
   });
 
   test('untracked stock never gets a stripe', () {
@@ -33,13 +33,13 @@ void main() {
 
   test('sized item: orange if any size is low or out, red only when all are out', () {
     final mixed = _item(variants: [_size('S', 20), _size('M', 0)]);
-    expect(stockAlertColor(mixed), AppColors.warning);
+    expect(stockAlertColor(mixed), stockLowColor);
     expect(stockAlertColor(_item(variants: [_size('S', 20), _size('M', 30)])),
         isNull);
     expect(stockAlertColor(_item(variants: [_size('S', 0), _size('M', 0)])),
-        AppColors.error);
+        stockOutColor);
     // A size row reports its own stock.
-    expect(stockAlertColor(mixed, mixed.variants[1]), AppColors.error);
+    expect(stockAlertColor(mixed, mixed.variants[1]), stockOutColor);
     expect(stockAlertColor(mixed, mixed.variants[0]), isNull);
   });
 }

@@ -61,8 +61,86 @@ String itemUnitLabel(BuildContext context, String unit) {
       return l10n.itemsUnitQuintal;
     case 'roll':
       return l10n.itemsUnitRoll;
+    case 'case':
+      return l10n.itemsUnitCase;
+    case 'crate':
+      return l10n.itemsUnitCrate;
+    case 'carton':
+      return l10n.itemsUnitCarton;
     default:
       return l10n.itemsUnitPiece;
+  }
+}
+
+/// Units a pack can be. A subset of the item units — a pack is something you
+/// count, never a weight.
+const _packUnits = [
+  'box', 'case', 'crate', 'carton', 'packet', 'dozen', 'bag',
+  'bundle', 'set', 'roll',
+];
+
+/// Wire fields for a pack row. Always sends both, so choosing "No pack" clears.
+Map<String, dynamic> _packPayload(String? unit, TextEditingController size) => {
+      'pack_unit': unit,
+      'pack_size': unit == null ? null : double.tryParse(size.text.trim()),
+    };
+
+/// "Sold in packs: [Box ▾]   1 Box = [15] bottle" — the optional pack of an
+/// item or one size. Entry/display only: billing shows 17 as "1 box + 2" and can
+/// add a whole box in one tap; stock and bills stay in [baseUnit].
+class _PackRow extends StatelessWidget {
+  final String? unit;
+  final TextEditingController size;
+  final String baseUnit;
+  final ValueChanged<String?>? onUnitChanged;
+
+  const _PackRow({
+    required this.unit,
+    required this.size,
+    required this.baseUnit,
+    required this.onUnitChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: DropdownButtonFormField<String?>(
+            value: _packUnits.contains(unit) ? unit : null,
+            isExpanded: true,
+            decoration: InputDecoration(labelText: l10n.itemsFieldPack),
+            items: [
+              DropdownMenuItem(value: null, child: Text(l10n.itemsPackNone)),
+              for (final u in _packUnits)
+                DropdownMenuItem(
+                  value: u,
+                  child: Text(itemUnitLabel(context, u),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: onUnitChanged,
+          ),
+        ),
+        if (unit != null) ...[
+          const SizedBox(width: AppSpacing.space8),
+          Expanded(
+            child: AppTextField(
+              label: l10n.itemsFieldPackSize(itemUnitLabel(context, unit!)),
+              controller: size,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              suffixIcon: UnitSuffix(itemUnitLabel(context, baseUnit)),
+              validator: (v) => (double.tryParse(v?.trim() ?? '') ?? 0) > 1
+                  ? null
+                  : l10n.itemsPackSizeInvalid,
+            ),
+          ),
+        ],
+      ],
+    );
   }
 }
 
@@ -1260,6 +1338,8 @@ class _VariantDraft {
   final barcode = TextEditingController();
   final stock = TextEditingController();
   final lowStock = TextEditingController();
+  final packSize = TextEditingController();
+  String? packUnit;
 
   /// A row the user added and then left completely untouched. Dropped silently
   /// on save — a trailing blank row is a change of mind, not an error.
@@ -1268,7 +1348,8 @@ class _VariantDraft {
       price.text.trim().isEmpty &&
       barcode.text.trim().isEmpty &&
       stock.text.trim().isEmpty &&
-      lowStock.text.trim().isEmpty;
+      lowStock.text.trim().isEmpty &&
+      packUnit == null;
 
   void dispose() {
     label.dispose();
@@ -1276,6 +1357,7 @@ class _VariantDraft {
     barcode.dispose();
     stock.dispose();
     lowStock.dispose();
+    packSize.dispose();
   }
 }
 
@@ -1333,8 +1415,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _barcodeCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
   final _lowStockCtrl = TextEditingController();
+  final _packSizeCtrl = TextEditingController();
   final _picker = ImagePicker();
   String _unit = 'piece';
+  String? _packUnit;
   bool _saving = false;
 
   /// The item's photo (customer-facing on the QR menu / online store).
@@ -1404,6 +1488,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     'ton',
     'quintal',
     'roll',
+    'case',
+    'crate',
+    'carton',
   ];
 
   @override
@@ -1425,6 +1512,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _stockCtrl.text = item.stockQuantity?.toString() ?? '';
       _lowStockCtrl.text = item.lowStockThreshold?.toString() ?? '';
       _unit = _units.contains(item.unit) ? item.unit : 'piece';
+      _packUnit = item.packUnit;
+      _packSizeCtrl.text =
+          item.packSize != null ? formatQty(item.packSize!) : '';
       // The items list never carries image_url, so look this one up.
       getItemImageUrl(item.id).then((url) {
         if (mounted) setState(() => _photoUrl = url);
@@ -1682,6 +1772,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _barcodeCtrl.dispose();
     _stockCtrl.dispose();
     _lowStockCtrl.dispose();
+    _packSizeCtrl.dispose();
     for (final d in _variantDrafts) {
       d.dispose();
     }
@@ -1851,6 +1942,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
           'stock_quantity': double.parse(d.stock.text.trim()),
         if (widget.inventoryEnabled && d.lowStock.text.trim().isNotEmpty)
           'low_stock_threshold': double.parse(d.lowStock.text.trim()),
+        if (d.packUnit != null) ..._packPayload(d.packUnit, d.packSize),
         'sort_order': sortOrder,
       };
 
@@ -1896,8 +1988,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       // only accepts a null price when has_variants says so.
       if (_hasVariants) 'has_variants': true,
       'price': sizedItem ? null : double.parse(_priceCtrl.text.trim()),
-      if (_taxCtrl.text.trim().isNotEmpty)
-        'tax_rate': double.parse(_taxCtrl.text.trim()),
+      // Sent as null when blank so clearing the rate is persisted. Only when GST
+      // is on — otherwise the field is hidden and we'd wipe a rate never shown.
+      if (widget.gstEnabled)
+        'tax_rate': _taxCtrl.text.trim().isNotEmpty ? double.parse(_taxCtrl.text.trim()) : null,
       // Always sent (not conditional on the tax field) so clearing the rate or
       // switching the toggle off is persisted rather than leaving a stale 1
       // behind on the server.
@@ -1909,6 +2003,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       // server nulls it anyway when has_variants is set.)
       if (!sizedItem) 'barcode': effectiveBarcode,
       'unit': _unit,
+      // A sized item's packs live on its sizes; the server nulls this on create.
+      if (!sizedItem) ..._packPayload(_packUnit, _packSizeCtrl),
       if (widget.inventoryEnabled && sizedItem)
         'stock_quantity': null
       else if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
@@ -2193,6 +2289,13 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
               ],
             ),
           ],
+          const SizedBox(height: AppSpacing.space8),
+          _PackRow(
+            unit: d.packUnit,
+            size: d.packSize,
+            baseUnit: _unit,
+            onUnitChanged: _saving ? null : (v) => setState(() => d.packUnit = v),
+          ),
         ],
       ),
     );
@@ -2330,6 +2433,35 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   ],
                   onChanged: (v) => setState(() => _unit = v ?? 'piece'),
                 ),
+                if (!_sizedItem) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  _PackRow(
+                    unit: _packUnit,
+                    size: _packSizeCtrl,
+                    baseUnit: _unit,
+                    onUnitChanged: (v) => setState(() => _packUnit = v),
+                  ),
+                ] else if (widget.item?.hasVariants ?? false) ...[
+                  // A sized item's packs live on its sizes — point there, or
+                  // the option just looks missing.
+                  const SizedBox(height: AppSpacing.space8),
+                  Row(
+                    children: [
+                      const Icon(Icons.info_outline,
+                          size: 14, color: AppColors.textSecondary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          l10n.itemsPackPerSizeHint,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 // Tax rate + HSN/SAC only appear when GST is enabled for the
                 // business. When off, the item form has no tax fields at all —
                 // exactly as before GST support existed.
@@ -2742,6 +2874,8 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
   final _stockCtrl = TextEditingController();
   final _lowStockCtrl = TextEditingController();
   final _barcodeCtrl = TextEditingController();
+  final _packSizeCtrl = TextEditingController();
+  String? _packUnit;
   bool _busy = false;
 
   @override
@@ -2757,6 +2891,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
     _stockCtrl.dispose();
     _lowStockCtrl.dispose();
     _barcodeCtrl.dispose();
+    _packSizeCtrl.dispose();
     super.dispose();
   }
 
@@ -2775,6 +2910,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
           'stock_quantity': double.tryParse(_stockCtrl.text.trim()),
         if (widget.inventoryEnabled && _lowStockCtrl.text.trim().isNotEmpty)
           'low_stock_threshold': double.tryParse(_lowStockCtrl.text.trim()),
+        if (_packUnit != null) ..._packPayload(_packUnit, _packSizeCtrl),
         'sort_order': _variants.length,
       };
       final created = await createVariant(widget.item.id, data);
@@ -2785,6 +2921,8 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
         _stockCtrl.clear();
         _lowStockCtrl.clear();
         _barcodeCtrl.clear();
+        _packSizeCtrl.clear();
+        _packUnit = null;
       });
       widget.onChanged(List.unmodifiable(_variants));
     } on ApiException catch (e) {
@@ -2911,42 +3049,29 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
     );
   }
 
-  /// Edit (or clear) the barcode value of an existing size. Persists the change
+  /// Edit (or clear) an existing size's barcode and pack. Persists the change
   /// and patches the local list so scans/prints use the new value immediately.
   Future<void> _editVariantBarcode(ItemVariant v) async {
-    final l10n = context.l10n;
-    final ctrl = TextEditingController(text: v.barcode ?? '');
-    final saved = await showDialog<bool>(
+    final result = await showDialog<({String barcode, Map<String, dynamic> pack})>(
       context: context,
-      builder: (dctx) => AlertDialog(
-        title: Text(l10n.itemsSizeBarcodeEditTitle(v.label)),
-        content: AppTextField(
-          label: l10n.itemsSizeBarcodeOptional,
-          controller: ctrl,
-          keyboardType: TextInputType.text,
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dctx, false),
-              child: Text(l10n.commonCancel)),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(dctx, true),
-              child: Text(l10n.commonSave)),
-        ],
-      ),
+      builder: (_) => _SizeEditDialog(variant: v, baseUnit: widget.item.unit),
     );
-    ctrl.dispose();
-    if (saved != true) return;
+    if (result == null) return;
+    final newBarcode = result.barcode;
+    final pack = result.pack;
 
-    final newBarcode = ctrl.text.trim();
     // No change → skip the round-trip.
-    if (newBarcode == (v.barcode ?? '')) return;
+    final packChanged =
+        pack['pack_unit'] != v.packUnit || pack['pack_size'] != v.packSize;
+    if (newBarcode == (v.barcode ?? '') && !packChanged) return;
 
     setState(() => _busy = true);
     try {
       // Empty string clears the barcode (backend maps '' → null).
-      final result = await updateVariant(
-          widget.item.id, v.id, {'barcode': newBarcode.isEmpty ? null : newBarcode});
+      final result = await updateVariant(widget.item.id, v.id, {
+        'barcode': newBarcode.isEmpty ? null : newBarcode,
+        if (packChanged) ...pack,
+      });
       final updated = ItemVariant.fromJson(result);
       if (!mounted) return;
       setState(() {
@@ -3014,6 +3139,10 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                     price == null ? '—' : '₹${price.toStringAsFixed(2)}',
                     if (widget.inventoryEnabled && v.stockQuantity != null)
                       l10n.itemsStockLabel(formatQty(v.stockQuantity!)),
+                    if (v.packUnit != null && v.packSize != null)
+                      '1 ${itemUnitLabel(context, v.packUnit!)} = '
+                          '${formatQty(v.packSize!)} '
+                          '${itemUnitLabel(context, widget.item.unit)}',
                   ].join('  ·  ');
                   return ListTile(
                     dense: true,
@@ -3028,7 +3157,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          tooltip: l10n.itemsSizeBarcodeEditTitle(v.label),
+                          tooltip: l10n.itemsSizeEditTitle(v.label),
                           visualDensity: VisualDensity.compact,
                           constraints: const BoxConstraints(),
                           padding: const EdgeInsets.all(6),
@@ -3117,6 +3246,13 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                 controller: _barcodeCtrl,
                 keyboardType: TextInputType.text,
               ),
+              const SizedBox(height: AppSpacing.space8),
+              _PackRow(
+                unit: _packUnit,
+                size: _packSizeCtrl,
+                baseUnit: widget.item.unit,
+                onUnitChanged: _busy ? null : (u) => setState(() => _packUnit = u),
+              ),
             ],
           ),
         ),
@@ -3136,6 +3272,76 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
               : const Icon(Icons.add, size: 18),
           label: Text(l10n.itemsAddSize),
         ),
+      ],
+    );
+  }
+}
+
+/// Barcode + pack editor for one existing size. A widget of its own so its
+/// controllers are disposed only once the route is gone — disposing them right
+/// after showDialog returned pulled them out from under the closing animation
+/// ("_dependents.isEmpty" / "wrong build scope").
+class _SizeEditDialog extends StatefulWidget {
+  final ItemVariant variant;
+  final String baseUnit;
+  const _SizeEditDialog({required this.variant, required this.baseUnit});
+
+  @override
+  State<_SizeEditDialog> createState() => _SizeEditDialogState();
+}
+
+class _SizeEditDialogState extends State<_SizeEditDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final _barcode = TextEditingController(text: widget.variant.barcode ?? '');
+  late final _packSize = TextEditingController(
+      text: widget.variant.packSize != null ? formatQty(widget.variant.packSize!) : '');
+  late String? _packUnit = widget.variant.packUnit;
+
+  @override
+  void dispose() {
+    _barcode.dispose();
+    _packSize.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      title: Text(l10n.itemsSizeEditTitle(widget.variant.label)),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppTextField(
+              label: l10n.itemsSizeBarcodeOptional,
+              controller: _barcode,
+              keyboardType: TextInputType.text,
+            ),
+            const SizedBox(height: AppSpacing.space12),
+            _PackRow(
+              unit: _packUnit,
+              size: _packSize,
+              baseUnit: widget.baseUnit,
+              onUnitChanged: (u) => setState(() => _packUnit = u),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.commonCancel)),
+        ElevatedButton(
+            onPressed: () {
+              if (!_formKey.currentState!.validate()) return;
+              Navigator.pop(context, (
+                barcode: _barcode.text.trim(),
+                pack: _packPayload(_packUnit, _packSize),
+              ));
+            },
+            child: Text(l10n.commonSave)),
       ],
     );
   }

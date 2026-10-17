@@ -94,7 +94,8 @@ class OfflineService {
       // a device that ran it never opens its DB at a lower version.
       // 14: offline_bills.payments — the parts of a split bill.
       // 15: cached_items.item_no.
-      version: 15,
+      // 16: pack_unit / pack_size on cached_items and cached_variants.
+      version: 16,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
       // Self-heal: _createSchema is all IF NOT EXISTS, so this is a no-op on a
@@ -208,6 +209,9 @@ class OfflineService {
         -- 'piece', 'kg', 'litre', ... Drives decimal-quantity entry; without it
         -- a weighed item billed offline could only be sold in whole units.
         unit           TEXT    NOT NULL DEFAULT 'piece',
+        -- "1 box = 15 bottle"; display only, mirrors items.pack_unit/pack_size.
+        pack_unit      TEXT,
+        pack_size      REAL,
         is_active      INTEGER NOT NULL DEFAULT 1,
         cached_at      INTEGER NOT NULL
       )
@@ -234,6 +238,8 @@ class OfflineService {
         barcode             TEXT,
         stock_quantity      REAL,
         low_stock_threshold REAL,
+        pack_unit           TEXT,
+        pack_size           REAL,
         sort_order          INTEGER NOT NULL DEFAULT 0,
         is_active           INTEGER NOT NULL DEFAULT 1
       )
@@ -353,6 +359,17 @@ class OfflineService {
         await db.execute('ALTER TABLE cached_items ADD COLUMN item_no TEXT');
       }
     }
+    if (oldVersion < 16) {
+      // v15 → v16: pack units on both caches. Additive; the next sync fills
+      // them in. Guarded per table: a rebuilt table already has them.
+      for (final table in ['cached_items', 'cached_variants']) {
+        final cols = await db.rawQuery('PRAGMA table_info($table)');
+        if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'pack_unit')) {
+          await db.execute('ALTER TABLE $table ADD COLUMN pack_unit TEXT');
+          await db.execute('ALTER TABLE $table ADD COLUMN pack_size REAL');
+        }
+      }
+    }
   }
 
   /// Cache of bills and drafts fetched FROM the server.
@@ -412,6 +429,8 @@ class OfflineService {
           'price_inclusive_tax': item.priceInclusiveTax ? 1 : 0,
           'stock_quantity': item.stockQuantity,
           'unit': item.unit,
+          'pack_unit': item.packUnit,
+          'pack_size': item.packSize,
           'is_active': item.isActive ? 1 : 0,
           'cached_at': now,
         });
@@ -425,6 +444,8 @@ class OfflineService {
             'barcode': v.barcode,
             'stock_quantity': v.stockQuantity,
             'low_stock_threshold': v.lowStockThreshold,
+            'pack_unit': v.packUnit,
+            'pack_size': v.packSize,
             'sort_order': v.sortOrder,
             'is_active': v.isActive ? 1 : 0,
           });
@@ -711,6 +732,8 @@ class OfflineService {
           ? (row['stock_quantity'] as num).toDouble()
           : null,
       unit: (row['unit'] as String?) ?? 'piece',
+      packUnit: row['pack_unit'] as String?,
+      packSize: (row['pack_size'] as num?)?.toDouble(),
       isActive: (row['is_active'] as int) == 1,
     );
   }
@@ -728,6 +751,8 @@ class OfflineService {
       lowStockThreshold: row['low_stock_threshold'] != null
           ? (row['low_stock_threshold'] as num).toDouble()
           : null,
+      packUnit: row['pack_unit'] as String?,
+      packSize: (row['pack_size'] as num?)?.toDouble(),
       sortOrder: (row['sort_order'] as int?) ?? 0,
       isActive: (row['is_active'] as int) == 1,
     );

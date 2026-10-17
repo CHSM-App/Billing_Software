@@ -387,6 +387,20 @@ class AuthStorage {
     return prefs.getString(_keyPaymentModeUse(businessId));
   }
 
+  // Price lists (Party, Wholesale, ...) as the raw GET /price-lists JSON, so
+  // billing can still price from them offline. Per business, like the rest.
+  static String _keyPriceLists(String businessId) => 'price_lists_$businessId';
+
+  Future<void> savePriceLists(String businessId, String json) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyPriceLists(businessId), json);
+  }
+
+  Future<String?> getPriceLists(String businessId) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyPriceLists(businessId));
+  }
+
   Future<void> saveChargeSuggestions(String businessId, String json) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyChargeSuggestions(businessId), json);
@@ -620,6 +634,10 @@ Future<void>    saveMajorCategoryOrder(String businessId, String json) =>
     AuthStorage.instance.saveMajorCategoryOrder(businessId, json);
 Future<String?> getMajorCategoryOrder(String businessId) =>
     AuthStorage.instance.getMajorCategoryOrder(businessId);
+Future<void>    saveCachedPriceLists(String businessId, String json) =>
+    AuthStorage.instance.savePriceLists(businessId, json);
+Future<String?> getCachedPriceLists(String businessId) =>
+    AuthStorage.instance.getPriceLists(businessId);
 Future<void>    savePaymentModeUse(String businessId, String json) =>
     AuthStorage.instance.savePaymentModeUse(businessId, json);
 Future<String?> getPaymentModeUse(String businessId) =>

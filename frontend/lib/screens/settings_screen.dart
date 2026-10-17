@@ -27,6 +27,7 @@ import 'printer_test_screen.dart'
 import 'printer_test_windows_screen.dart'
     if (dart.library.html) 'printer_test_windows_screen_web.dart';
 import 'staff_screen.dart';
+import 'price_lists_screen.dart';
 import 'business_profile_screen.dart';
 import 'marathi_print_test_screen.dart';
 import 'raster_lab_screen.dart';
@@ -402,52 +403,33 @@ class _SettingsContentState extends State<_SettingsContent>
                           ),
                         ),
                       ],
-                      // Customer QR self-ordering — restaurants only.
-                      if (session.businessType == 'restaurant_with_tables') ...[
-                        const SizedBox(height: AppSpacing.space8),
-                        _BusinessFlagToggle(
-                          field: 'self_order_enabled',
-                          icon: Icons.qr_code_2,
-                          title: l10n.settingsSelfOrder,
-                          subtitle: l10n.settingsSelfOrderSubtitle,
+                      // Every on/off business option lives on its own
+                      // Settings screen, so Profile stays a list of places.
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.tune_outlined,
+                        iconColor: const Color(0xFF475569),
+                        title: l10n.settingsToggles,
+                        subtitle: l10n.settingsTogglesSubtitle,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const _TogglesScreen()),
                         ),
-                      ],
-                      // Inventory tracking — any business type. (Barcode
-                      // scanning is always on now, so it has no toggle.)
-                      const SizedBox(height: AppSpacing.space8),
-                      _BusinessFlagToggle(
-                        field: 'inventory_enabled',
-                        icon: Icons.inventory_2_outlined,
-                        title: l10n.settingsInventory,
-                        subtitle: l10n.settingsInventorySubtitle,
                       ),
-                      // GST tax invoices — off by default. When on, items gain a
-                      // tax rate + HSN/SAC field and receipts show CGST/SGST.
                       const SizedBox(height: AppSpacing.space8),
-                      _BusinessFlagToggle(
-                        field: 'gst_enabled',
-                        icon: Icons.receipt_long_outlined,
-                        title: l10n.settingsGst,
-                        subtitle: l10n.settingsGstSubtitle,
-                      ),
-                      // Invoice round-off — off by default. When on, the final
-                      // payable is rounded to the nearest rupee and the
-                      // adjustment shows as a separate "Round Off" line.
-                      const SizedBox(height: AppSpacing.space8),
-                      _BusinessFlagToggle(
-                        field: 'round_off_enabled',
-                        icon: Icons.calculate_outlined,
-                        title: l10n.settingsRoundOff,
-                        subtitle: l10n.settingsRoundOffSubtitle,
-                      ),
-                      // Item No on billing — off by default. When on, items
-                      // with a number show as "(101) Masala Dosa" on billing.
-                      const SizedBox(height: AppSpacing.space8),
-                      _BusinessFlagToggle(
-                        field: 'show_item_no',
-                        icon: Icons.tag,
-                        title: l10n.settingsShowItemNo,
-                        subtitle: l10n.settingsShowItemNoSubtitle,
+                      _buildNavCard(
+                        context,
+                        icon: Icons.sell_outlined,
+                        iconColor: const Color(0xFF16A34A),
+                        title: l10n.settingsPriceLists,
+                        subtitle: l10n.settingsPriceListsSubtitle,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const PriceListsScreen()),
+                        ),
                       ),
                       const SizedBox(height: AppSpacing.space24),
 
@@ -1182,3 +1164,74 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
   }
 }
 
+/// Owner's on/off business options, opened from Profile → Settings.
+class _TogglesScreen extends ConsumerWidget {
+  const _TogglesScreen();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final businessType = ref.watch(sessionProvider).valueOrNull?.businessType;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Column(children: [
+        ShellAppBar(title: Text(l10n.settingsToggles)),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(AppSpacing.space16).copyWith(
+                bottom:
+                    AppSpacing.space16 + MediaQuery.paddingOf(context).bottom),
+            children: [
+              // Customer QR self-ordering — restaurants only.
+              if (businessType == 'restaurant_with_tables') ...[
+                _BusinessFlagToggle(
+                  field: 'self_order_enabled',
+                  icon: Icons.qr_code_2,
+                  title: l10n.settingsSelfOrder,
+                  subtitle: l10n.settingsSelfOrderSubtitle,
+                ),
+              ],
+              // Inventory tracking — any business type. (Barcode
+              // scanning is always on now, so it has no toggle.)
+              const SizedBox(height: AppSpacing.space8),
+              _BusinessFlagToggle(
+                field: 'inventory_enabled',
+                icon: Icons.inventory_2_outlined,
+                title: l10n.settingsInventory,
+                subtitle: l10n.settingsInventorySubtitle,
+              ),
+              // GST tax invoices — off by default. When on, items gain a
+              // tax rate + HSN/SAC field and receipts show CGST/SGST.
+              const SizedBox(height: AppSpacing.space8),
+              _BusinessFlagToggle(
+                field: 'gst_enabled',
+                icon: Icons.receipt_long_outlined,
+                title: l10n.settingsGst,
+                subtitle: l10n.settingsGstSubtitle,
+              ),
+              // Invoice round-off — off by default. When on, the final
+              // payable is rounded to the nearest rupee and the
+              // adjustment shows as a separate "Round Off" line.
+              const SizedBox(height: AppSpacing.space8),
+              _BusinessFlagToggle(
+                field: 'round_off_enabled',
+                icon: Icons.calculate_outlined,
+                title: l10n.settingsRoundOff,
+                subtitle: l10n.settingsRoundOffSubtitle,
+              ),
+              // Item No on billing — off by default. When on, items
+              // with a number show as "(101) Masala Dosa" on billing.
+              const SizedBox(height: AppSpacing.space8),
+              _BusinessFlagToggle(
+                field: 'show_item_no',
+                icon: Icons.tag,
+                title: l10n.settingsShowItemNo,
+                subtitle: l10n.settingsShowItemNoSubtitle,
+              ),
+            ],
+          ),
+        ),
+      ]),
+    );
+  }
+}

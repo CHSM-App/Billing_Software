@@ -326,8 +326,8 @@ router.get('/:token', async (req, res) => {
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit', hour12: true,
     });
-    // First name only — enough to tell staff apart without printing surnames.
-    const billedBy = String(bill.billed_by || '').trim().split(/\s+/)[0];
+    // Full name, whitespace collapsed ("Ramesh  Patil " → "Ramesh Patil").
+    const billedBy = String(bill.billed_by || '').trim().replace(/\s+/g, ' ');
 
     const addrParts = [bill.address, bill.city, bill.state, bill.pincode].filter(Boolean);
     const addressLine = addrParts.length ? esc(addrParts.join(', ')) : '';

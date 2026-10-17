@@ -729,6 +729,24 @@ Future<void> deleteTable(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/tables/$id')));
 }
 
+// Price lists: every role reads them (billing prices from them); only the
+// owner writes. Body: { name, adjust_pct, items: [{ item_id, variant_id, price }] }.
+Future<List<dynamic>> getPriceLists() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/price-lists')));
+}
+
+Future<Map<String, dynamic>> createPriceList(Map<String, dynamic> data) async {
+  return _parse(await _authPost(Uri.parse('$baseUrl/price-lists'), body: jsonEncode(data)));
+}
+
+Future<Map<String, dynamic>> updatePriceList(String id, Map<String, dynamic> data) async {
+  return _parse(await _authPut(Uri.parse('$baseUrl/price-lists/$id'), body: jsonEncode(data)));
+}
+
+Future<void> deletePriceList(String id) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/price-lists/$id')));
+}
+
 /// Regenerate a table's QR token, invalidating the old sticker. Owner-only.
 Future<Map<String, dynamic>> rotateTableQr(String id) async {
   return _parse(
@@ -1041,6 +1059,9 @@ Future<Map<String, dynamic>> updateBillItems(
   /// Replaces the draft's additional charges when non-null (an empty list
   /// clears them); null leaves whatever the draft already carries.
   List<Map<String, dynamic>>? additionalCharges,
+  /// The bill's price list id, or null for default prices. Left out (the
+  /// default) the draft keeps whatever list it already has.
+  Object? priceListId = _keepPriceList,
 }) async {
   return _parse(await _authPut(
     Uri.parse('$baseUrl/bills/$id/update-items'),
@@ -1050,9 +1071,12 @@ Future<Map<String, dynamic>> updateBillItems(
       if (customerPhone != null) 'customer_phone': customerPhone,
       if (discountAmount != null) 'discount_amount': discountAmount,
       if (additionalCharges != null) 'additional_charges': additionalCharges,
+      if (!identical(priceListId, _keepPriceList)) 'price_list_id': priceListId,
     }),
   ));
 }
+
+const _keepPriceList = Object();
 
 Future<void> voidBill(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/bills/$id')));

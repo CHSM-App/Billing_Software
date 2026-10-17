@@ -17,9 +17,12 @@ const router = express.Router();
 //     delivered dish "ready", which would undo the delivery;
 //   * everyone else (owner, cashier, captain) marks a READY dish delivered once
 //     it reaches the table, or undoes that back to ready.
+//   * a retail shop has no kitchen: staff simply tick an item off its order
+//     (stored as delivered) straight from pending, and untick it again.
 const ROLE_RULES = {
   kitchen: { pending: ['pending', 'ready', 'delivered'], ready: ['pending', 'ready'] },
   other: { delivered: ['ready', 'delivered'], ready: ['ready', 'delivered'] },
+  retail: { delivered: ['pending', 'delivered'], pending: ['pending', 'delivered'] },
 };
 
 const VALID_KITCHEN_STATUSES = ['pending', 'ready', 'delivered'];
@@ -106,18 +109,28 @@ router.put('/items/:id', requireAuth, async (req, res) => {
   if (!VALID_KITCHEN_STATUSES.includes(kitchen_status)) {
     return res.status(400).json({ error: `kitchen_status must be one of: ${VALID_KITCHEN_STATUSES.join(', ')}` });
   }
-  const rules = req.user.role === 'kitchen' ? ROLE_RULES.kitchen : ROLE_RULES.other;
-  const fromStatuses = rules[kitchen_status];
-  if (!fromStatuses) {
-    return res.status(403).json({
-      error: req.user.role === 'kitchen'
-        ? 'The kitchen cannot mark items delivered'
-        : 'Only the kitchen can mark items ready or pending',
-    });
-  }
-
   try {
     await poolConnect;
+
+    // The access token carries no business type, so look it up — only for
+    // floor staff, whose rules differ between a restaurant and a retail shop.
+    let rules = ROLE_RULES.kitchen;
+    if (req.user.role !== 'kitchen') {
+      const biz = await pool.request()
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .query('SELECT business_type FROM businesses WHERE id = @business_id');
+      rules = biz.recordset[0]?.business_type === 'retail'
+        ? ROLE_RULES.retail
+        : ROLE_RULES.other;
+    }
+    const fromStatuses = rules[kitchen_status];
+    if (!fromStatuses) {
+      return res.status(403).json({
+        error: req.user.role === 'kitchen'
+          ? 'The kitchen cannot mark items delivered'
+          : 'Only the kitchen can mark items ready or pending',
+      });
+    }
 
     const request = pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)

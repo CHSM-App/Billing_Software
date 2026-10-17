@@ -273,6 +273,30 @@ function resolveNetPriceAndRate(dbItem, variant, gstEnabled) {
 // `carried` — a draft's existing values (update-items) — in place of the
 // request's, so a waiter neither changes nor wipes the cashier's edits.
 const canReprice = (user) => user.role === 'owner' || user.role === 'cashier';
+
+// The price list a bill was opened with (migration 059). Pricing never reads it
+// — list prices arrive as each line's price_override — it only lets a held bill
+// reopen on the same list. Same gate as price_override: a waiter's value is
+// ignored, so their edits never clear the cashier's list. Returns
+// { set: false } (leave the column alone), { set: true, id } or { error }.
+async function resolvePriceList(req) {
+  if (!Object.prototype.hasOwnProperty.call(req.body, 'price_list_id') ||
+      !canReprice(req.user)) {
+    return { set: false };
+  }
+  const id = req.body.price_list_id;
+  if (id === null || id === '') return { set: true, id: null };
+  if (typeof id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return { error: 'price_list_id must be a valid UUID' };
+  }
+  const found = await pool.request()
+    .input('id', sql.UniqueIdentifier, id)
+    .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+    .query('SELECT id FROM price_lists WHERE id = @id AND business_id = @business_id');
+  if (found.recordset.length === 0) return { error: 'Price list not found' };
+  return { set: true, id };
+}
 function applyLineOverrides(i, resolvedNet, qty, allowed, carried) {
   const src = allowed ? i : (carried || {});
   const p = parseFloat(src.price_override);
@@ -529,7 +553,7 @@ async function fetchBill(billId, businessId) {
     .query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
-             b.total, b.round_off, b.payment_mode, b.status,
+             b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
              b.payment_status, b.settled_at, b.settled_payment_mode, b.credit_amount,
              b.credit_collected,
              b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token,
@@ -674,6 +698,9 @@ router.post('/', requireAuth, async (req, res) => {
       }
     }
     // ─────────────────────────────────────────────────────────────────────────
+
+    const priceList = await resolvePriceList(req);
+    if (priceList.error) return res.status(400).json({ error: priceList.error });
 
     const transaction = pool.transaction();
     await transaction.begin();
@@ -856,19 +883,20 @@ router.post('/', requireAuth, async (req, res) => {
         .input('client_bill_id',  sql.NVarChar(36),     client_bill_id || null)
         .input('receipt_token',   sql.NVarChar(16),     receiptToken)
         .input('sale_time',       sql.DateTime2,        saleTime)
+        .input('price_list_id',   sql.UniqueIdentifier, priceList.set ? priceList.id : null)
         // An offline sale was ordered and finalized in one moment, so its
         // client time is both dates. A draft gets finalized_at on finalize.
         .query(`
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
                              subtotal, tax_amount, discount_amount, charges_amount, additional_charges,
                              total, round_off, payment_mode, payment_status, credit_amount, status,
-                             created_by_user_id, client_bill_id, receipt_token,
+                             created_by_user_id, client_bill_id, receipt_token, price_list_id,
                              created_at, finalized_at, finalized_by_user_id)
           OUTPUT INSERTED.id
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
                   @subtotal, @tax_amount, @discount_amount, @charges_amount, @additional_charges,
                   @total, @round_off, @payment_mode, @payment_status, @credit_amount, @status,
-                  @created_by_user_id, @client_bill_id, @receipt_token,
+                  @created_by_user_id, @client_bill_id, @receipt_token, @price_list_id,
                   COALESCE(@sale_time, SYSUTCDATETIME()),
                   CASE WHEN @status = 'finalized' THEN COALESCE(@sale_time, SYSUTCDATETIME()) END,
                   -- Settled in one step: the creator is also the biller.
@@ -1102,7 +1130,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
       .query(`
         SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
-               b.total, b.round_off, b.payment_mode, b.status,
+               b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
                b.created_by_user_id, b.created_at, b.receipt_token,
                -- See the single-bill query above: an accepted online order
                -- carries its advance and UPI reference here, which is what the
@@ -1767,6 +1795,9 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
   try {
     await poolConnect;
 
+    const priceList = await resolvePriceList(req);
+    if (priceList.error) return res.status(400).json({ error: priceList.error });
+
     const transaction = pool.transaction();
     await transaction.begin();
 
@@ -1988,6 +2019,10 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           serializeCharges(parsedCharges.charges));
         extraSets.push('charges_amount = @charges_amount');
         extraSets.push('additional_charges = @additional_charges');
+      }
+      if (priceList.set) {
+        totalsReq.input('price_list_id', sql.UniqueIdentifier, priceList.id);
+        extraSets.push('price_list_id = @price_list_id');
       }
       // `disc` for the tax scaling: the new clamped discount when setting it,
       // otherwise the bill's current discount_amount. Both are clamped to net.

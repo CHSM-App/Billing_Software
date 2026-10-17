@@ -286,13 +286,13 @@ void main() {
       'items': [],
     };
 
-    test('billed_by: full name kept, first name for receipts', () {
+    test('billed_by: raw name kept, tidied full name for receipts', () {
       final b = Bill.fromJson({...billJson, 'billed_by': '  Ramesh  Patil '});
       expect(b.billedBy, '  Ramesh  Patil ');
-      expect(b.billedByFirst, 'Ramesh');
+      expect(b.billedByName, 'Ramesh Patil');
       // Unknown (offline / older shapes) or blank: nothing to print.
-      expect(Bill.fromJson(billJson).billedByFirst, isNull);
-      expect(Bill.fromJson({...billJson, 'billed_by': '  '}).billedByFirst,
+      expect(Bill.fromJson(billJson).billedByName, isNull);
+      expect(Bill.fromJson({...billJson, 'billed_by': '  '}).billedByName,
           isNull);
     });
 
@@ -942,6 +942,52 @@ void main() {
       expect(o.items, isEmpty);
       expect(o.subtotal, 0);
       expect(o.paymentStatus, 'unpaid');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // Packs — "1 box = 15 bottle", display only
+  // ─────────────────────────────────────────────────────────────
+  group('packBreakdown', () {
+    test('under one pack is null', () {
+      expect(packBreakdown(14, 15), isNull);
+      expect(packBreakdown(15, null), isNull);
+      expect(packBreakdown(15, 1), isNull);
+    });
+    test('whole and partial packs', () {
+      expect(packBreakdown(15, 15), (packs: 1, loose: 0.0));
+      expect(packBreakdown(17, 15), (packs: 1, loose: 2.0));
+      expect(packBreakdown(30, 15), (packs: 2, loose: 0.0));
+      expect(packBreakdown(2.5, 0.5 * 2.5), (packs: 2, loose: 0.0));
+    });
+  });
+
+  group('CartEntry pack', () {
+    final item = Item.fromJson({
+      'id': 'i1', 'business_id': 'b', 'name': 'Water', 'price': 20,
+      'unit': 'bottle', 'pack_unit': 'box', 'pack_size': '15.00',
+      'is_active': true,
+      'variants': [
+        {'id': 'v1', 'item_id': 'i1', 'label': '500ml', 'price': 10,
+         'pack_unit': 'crate', 'pack_size': 24, 'is_active': true},
+        {'id': 'v2', 'item_id': 'i1', 'label': '2L', 'price': 40,
+         'is_active': true},
+      ],
+    });
+
+    test('plain line uses the item pack; price is untouched', () {
+      final e = CartEntry(item: item, quantity: 17);
+      expect(e.packUnit, 'box');
+      expect(e.packs, (packs: 1, loose: 2.0));
+      expect(e.lineNet(false), 340);
+    });
+
+    test('a size uses its own pack, never the item''s', () {
+      expect(CartEntry(item: item, variant: item.variants[0], quantity: 48).packs,
+          (packs: 2, loose: 0.0));
+      final noPack = CartEntry(item: item, variant: item.variants[1], quantity: 30);
+      expect(noPack.packUnit, isNull);
+      expect(noPack.packs, isNull);
     });
   });
 }

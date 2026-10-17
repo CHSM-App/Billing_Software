@@ -88,6 +88,14 @@ class CartEntry {
   double lineTax(bool gstEnabled) =>
       lineNet(gstEnabled) * _taxFraction(gstEnabled);
 
+  /// The line's pack ("1 box = 15"): the size's own when a size is picked —
+  /// never the item's, which a sized item doesn't carry — else the item's.
+  String? get packUnit => variant != null ? variant!.packUnit : item.packUnit;
+  double? get packSize => variant != null ? variant!.packSize : item.packSize;
+
+  /// 17 bottles → (packs: 1, loose: 2). Null under one full pack. Display only.
+  ({int packs, double loose})? get packs => packBreakdown(quantity, packSize);
+
   /// Display name including the size, e.g. "T-Shirt (XL)".
   String get displayName =>
       variant == null ? item.name : '${item.name} (${variant!.label})';

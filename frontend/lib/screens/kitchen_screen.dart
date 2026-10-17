@@ -775,12 +775,17 @@ class KitchenItemTile extends StatefulWidget {
   final Set<String> busy;
   final Future<void> Function(Map<String, dynamic>) onToggle;
 
+  /// Tint the whole row green (ready) / grey (delivered). Off on Open Orders,
+  /// where the tick alone marks the dish.
+  final bool tintRow;
+
   const KitchenItemTile({
     super.key,
     required this.item,
     required this.role,
     required this.busy,
     required this.onToggle,
+    this.tintRow = true,
   });
 
   @override
@@ -852,11 +857,13 @@ class _KitchenItemTileState extends State<KitchenItemTile>
       onTap: enabled ? () => widget.onToggle(item) : null,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
-        color: delivered
-            ? AppColors.background
-            : ready
-                ? AppColors.successLight
-                : Colors.transparent,
+        color: !widget.tintRow
+            ? Colors.transparent
+            : delivered
+                ? AppColors.background
+                : ready
+                    ? AppColors.successLight
+                    : Colors.transparent,
         padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.space8, vertical: 6),
         child: Row(

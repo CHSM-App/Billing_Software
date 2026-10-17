@@ -11,6 +11,18 @@ String formatQty(double qty) {
       .replaceAll(RegExp(r'\.$'), '');
 }
 
+/// [qty] base units as whole packs plus the loose rest: 17 bottles with a box of
+/// 15 is (packs: 1, loose: 2). Null when there is no pack or not one full pack.
+/// Display only: stock and bills always count base units.
+({int packs, double loose})? packBreakdown(double qty, double? packSize) {
+  if (packSize == null || packSize <= 1) return null;
+  // The epsilon keeps 15.0 / 15 from flooring to 0 on a float that is 14.999…
+  final packs = (qty / packSize + 1e-9).floor();
+  if (packs < 1) return null;
+  final loose = double.parse((qty - packs * packSize).toStringAsFixed(3));
+  return (packs: packs, loose: loose < 0 ? 0 : loose);
+}
+
 /// Strips the leading letter prefix (the business's bill prefix, 'INV' by
 /// default) and its dash from a bill number: 'INV-0007' → '0007',
 /// 'INV-a7f4-0001' → 'a7f4-0001'. Numbers without such a prefix are returned
@@ -71,6 +83,10 @@ class ItemVariant {
   final String? barcode;
   final double? stockQuantity;
   final double? lowStockThreshold;
+
+  /// This size's pack ("1 box = 24"), or null. See [packBreakdown].
+  final String? packUnit;
+  final double? packSize;
   final int sortOrder;
   final bool isActive;
 
@@ -82,6 +98,8 @@ class ItemVariant {
     this.barcode,
     this.stockQuantity,
     this.lowStockThreshold,
+    this.packUnit,
+    this.packSize,
     this.sortOrder = 0,
     this.isActive = true,
   });
@@ -96,6 +114,10 @@ class ItemVariant {
             ? double.parse(j['stock_quantity'].toString())
             : null,
         lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
+        packUnit: j['pack_unit'] as String?,
+        packSize: j['pack_size'] != null
+            ? double.parse(j['pack_size'].toString())
+            : null,
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         isActive: j['is_active'] == true || j['is_active'] == 1,
       );
@@ -146,6 +168,11 @@ class Item {
   final double? stockQuantity;
   final double? lowStockThreshold;
   final String unit;
+
+  /// Pack of a plain item ("1 box = 15" [unit]), or null. A sized item keeps
+  /// its packs on its variants. See [packBreakdown].
+  final String? packUnit;
+  final double? packSize;
   final List<ItemVariant> variants;
   final bool isActive;
 
@@ -169,6 +196,8 @@ class Item {
     this.stockQuantity,
     this.lowStockThreshold,
     this.unit = 'piece',
+    this.packUnit,
+    this.packSize,
     this.variants = const [],
     required this.isActive,
     this.imageUrl,
@@ -191,6 +220,10 @@ class Item {
         stockQuantity: j['stock_quantity'] != null ? double.parse(j['stock_quantity'].toString()) : null,
         lowStockThreshold: (j['low_stock_threshold'] as num?)?.toDouble(),
         unit: (j['unit'] as String?) ?? 'piece',
+        packUnit: j['pack_unit'] as String?,
+        packSize: j['pack_size'] != null
+            ? double.parse(j['pack_size'].toString())
+            : null,
         variants: (j['variants'] as List? ?? [])
             .map((v) => ItemVariant.fromJson(v))
             .toList(),
@@ -228,6 +261,8 @@ class Item {
         stockQuantity: stockQuantity,
         lowStockThreshold: lowStockThreshold,
         unit: unit,
+        packUnit: packUnit,
+        packSize: packSize,
         variants: newVariants,
         isActive: isActive,
         imageUrl: imageUrl,
@@ -478,6 +513,10 @@ class Bill {
   /// queued offline bill, or a bill shape that doesn't carry it.
   final String? billedBy;
 
+  /// The [PriceList] a held bill was priced with, so reopening it keeps the
+  /// list selected. Null for default prices and on older bills.
+  final String? priceListId;
+
   /// When the bill was first written — for a held order, the ORDER time.
   final DateTime createdAt;
   /// When the sale was finalized. Null for a draft, and for an unsynced
@@ -542,11 +581,11 @@ class Bill {
   /// The final amount the customer pays: total, less discount, plus round-off.
   double get grandTotal => total - discountAmount + roundOff;
 
-  /// First name of [billedBy] — "Ramesh" from "Ramesh Patil" — for receipts
-  /// and History; enough to tell staff apart. Null when unknown or blank.
-  String? get billedByFirst {
-    final n = billedBy?.trim() ?? '';
-    return n.isEmpty ? null : n.split(RegExp(r'\s+')).first;
+  /// Full name of [billedBy], whitespace collapsed — "Ramesh Patil" from
+  /// "  Ramesh  Patil " — for receipts and History. Null when unknown or blank.
+  String? get billedByName {
+    final n = billedBy?.trim().replaceAll(RegExp(r'\s+'), ' ') ?? '';
+    return n.isEmpty ? null : n;
   }
 
   /// What an unpaid bill still owes: its credit part (else the whole bill),
@@ -619,6 +658,7 @@ class Bill {
     this.paymentStatus = 'paid',
     required this.createdByUserId,
     this.billedBy,
+    this.priceListId,
     required this.createdAt,
     this.finalizedAt,
     required this.items,
@@ -662,6 +702,7 @@ class Bill {
         paymentStatus: j['payment_status'] ?? 'paid',
         createdByUserId: j['created_by_user_id'] ?? '',
         billedBy: j['billed_by'] as String?,
+        priceListId: j['price_list_id'] as String?,
         createdAt: DateTime.parse(j['created_at']),
         finalizedAt: j['finalized_at'] == null
             ? null
@@ -696,6 +737,56 @@ class Bill {
             ),
         ],
       );
+}
+
+/// A named set of prices — "Party", "Wholesale" — the cashier can bill with.
+///
+/// [adjustPct] is an optional % on every default price (+10 = 10% more);
+/// [prices] holds fixed prices keyed like [CartEntry.key] (`itemId`, or
+/// `itemId:variantId` for a size), in the same form as the catalog price
+/// (gross for an MRP item). Billing sends the result as the line's
+/// price_override, so nothing else about pricing changes.
+class PriceList {
+  final String id;
+  final String name;
+  final double? adjustPct;
+  final Map<String, double> prices;
+
+  const PriceList({
+    required this.id,
+    required this.name,
+    this.adjustPct,
+    this.prices = const {},
+  });
+
+  factory PriceList.fromJson(Map<String, dynamic> j) => PriceList(
+        id: j['id'],
+        name: j['name'],
+        adjustPct: j['adjust_pct'] == null
+            ? null
+            : double.tryParse(j['adjust_pct'].toString()),
+        prices: {
+          for (final e in (j['items'] as List? ?? const []).whereType<Map>())
+            e['variant_id'] == null
+                ? '${e['item_id']}'
+                : '${e['item_id']}:${e['variant_id']}':
+                double.parse(e['price'].toString()),
+        },
+      );
+
+  /// This list's price for an item or one of its sizes: the fixed price,
+  /// else the default price moved by [adjustPct] (to paise), else null —
+  /// meaning the default price stands. A size never borrows its item's
+  /// fixed price; sizes are priced on their own.
+  double? priceFor(Item item, [ItemVariant? variant]) {
+    final fixed =
+        prices[variant == null ? item.id : '${item.id}:${variant.id}'];
+    if (fixed != null) return fixed;
+    final base = variant != null ? (variant.price ?? item.price) : item.price;
+    final pct = adjustPct;
+    if (base == null || pct == null || pct == 0) return null;
+    return double.parse((base * (1 + pct / 100)).toStringAsFixed(2));
+  }
 }
 
 /// An old credit bill paid off (in full or in part) along with a new bill.

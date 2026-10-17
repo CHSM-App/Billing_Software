@@ -362,12 +362,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 ),
                 // Customer and biller share one line — the card's height is
                 // fixed, so "Billed by" must not add a row of its own.
-                if (bill.customerName != null || bill.billedByFirst != null)
+                if (bill.customerName != null || bill.billedByName != null)
                   Text(
                       [
                         if (bill.customerName != null) bill.customerName!,
-                        if (bill.billedByFirst != null)
-                          l10n.historyBilledBy(bill.billedByFirst!),
+                        if (bill.billedByName != null)
+                          l10n.historyBilledBy(bill.billedByName!),
                       ].join('  ·  '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -543,9 +543,9 @@ class BillDetailDialog extends StatelessWidget {
                       .bodySmall
                       ?.copyWith(color: AppColors.textSecondary),
                 ),
-              if (bill.billedByFirst != null)
+              if (bill.billedByName != null)
                 Text(
-                  l10n.historyBilledBy(bill.billedByFirst!),
+                  l10n.historyBilledBy(bill.billedByName!),
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall

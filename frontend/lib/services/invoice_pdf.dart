@@ -143,7 +143,7 @@ class InvoicePdf {
     await shaped.add('For: $businessName', bold: true, maxWidth: 200);
     for (final b in bills) {
       await shaped.add(b.customerName, fontSize: 11, bold: true, maxWidth: 260);
-      await shaped.add(b.billedByFirst, fontSize: 11, bold: true, maxWidth: 200);
+      await shaped.add(b.billedByName, fontSize: 11, bold: true, maxWidth: 200);
       for (final i in b.items) {
         await shaped.add(i.receiptName, maxWidth: 220);
       }
@@ -219,7 +219,7 @@ class InvoicePdf {
             pw.SizedBox(height: 8),
             _headerBox(businessName, address, phone, gstin, fssai,
                 bill.displayNumber, dateStr, shaped,
-                billedBy: bill.billedByFirst, logo: logo),
+                billedBy: bill.billedByName, logo: logo),
             _billToBox(bill, shaped),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money, shaped),
             pw.SizedBox(height: 10),
