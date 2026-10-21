@@ -9,6 +9,7 @@ import '../storage.dart';
 import 'printer_service.dart';
 import 'receipt_labels.dart';
 import 'invoice_pdf.dart';
+import 'bill_settings.dart';
 
 /// A rendered preview of a bill, in whichever form matches the chosen paper
 /// size: a thermal receipt bitmap ([isPdf] == false) or an A5/A4 PDF invoice
@@ -47,6 +48,21 @@ class ReceiptOutput {
   /// True when the currently-selected paper size is a PDF page size (A5/A4),
   /// i.e. NOT a thermal roll. Callsites use this to decide whether an active
   /// thermal printer is required before emitting.
+  /// Billing Setup applied to the shop header: hidden lines are simply not
+  /// passed on. The GSTIN is left to the renderers ([BillSettings.showGstin]),
+  /// because on thermal it also decides the CGST/SGST split.
+  static Future<(BillSettings, String?, String?, String?, String?)> _setup(
+      String? address, String? phone, String? fssai, String? footerNote) async {
+    final s = await BillSettings.load();
+    return (
+      s,
+      s.showAddress ? address : null,
+      s.showPhone ? s.shopPhones(phone) : null,
+      s.showFssai ? fssai : null,
+      footerNote ?? s.footerNote,
+    );
+  }
+
   static Future<bool> isPdfSelected() async {
     final size = await getPaperSize();
     return !PaperSizes.isThermal(size);
@@ -73,18 +89,21 @@ class ReceiptOutput {
     bills = bills.where((b) => b.status != 'draft').toList();
     if (bills.isEmpty) return;
     final size = await getPaperSize();
+    final (settings, address, phone, fssai, note) =
+        await _setup(businessAddress, businessPhone, businessFssai, footerNote);
 
     if (PaperSizes.isThermal(size)) {
       await PrinterService.instance.printBills(
         bills,
         businessName: businessName,
-        businessAddress: businessAddress,
-        businessPhone: businessPhone,
+        businessAddress: address,
+        businessPhone: phone,
         businessGstin: businessGstin,
-        businessFssai: businessFssai,
+        businessFssai: fssai,
         gstEnabled: gstEnabled,
         labels: labels,
         logo: await _logoImage(),
+        settings: settings,
         paperDots: PaperSizes.thermalDots(size),
       );
       return;
@@ -96,14 +115,15 @@ class ReceiptOutput {
       bills: bills,
       pageFormat: pageFormat,
       businessName: businessName,
-      address: businessAddress,
-      phone: businessPhone,
-      gstin: businessGstin,
-      fssai: businessFssai,
+      address: address,
+      phone: phone,
+      gstin: settings.showGstin ? businessGstin : null,
+      fssai: fssai,
       defaultSacCode: defaultSacCode,
       gstEnabled: gstEnabled,
-      footerNote: footerNote,
+      footerNote: note,
       logo: await _logoBytes(),
+      settings: settings,
     );
 
     await Printing.layoutPdf(
@@ -176,18 +196,21 @@ class ReceiptOutput {
     required ReceiptLabels labels,
   }) async {
     final size = await getPaperSize();
+    final (settings, address, phone, fssai, note) =
+        await _setup(businessAddress, businessPhone, businessFssai, footerNote);
 
     if (PaperSizes.isThermal(size)) {
       final png = await PrinterService.instance.buildReceiptPreviewPng(
         bill,
         businessName: businessName,
-        businessAddress: businessAddress,
-        businessPhone: businessPhone,
+        businessAddress: address,
+        businessPhone: phone,
         businessGstin: businessGstin,
-        businessFssai: businessFssai,
+        businessFssai: fssai,
         gstEnabled: gstEnabled,
         labels: labels,
         logo: await _logoImage(),
+        settings: settings,
         paperDots: PaperSizes.thermalDots(size),
       );
       return ReceiptPreview(bytes: png, isPdf: false);
@@ -198,14 +221,15 @@ class ReceiptOutput {
       bills: [bill],
       pageFormat: pageFormat,
       businessName: businessName,
-      address: businessAddress,
-      phone: businessPhone,
-      gstin: businessGstin,
-      fssai: businessFssai,
+      address: address,
+      phone: phone,
+      gstin: settings.showGstin ? businessGstin : null,
+      fssai: fssai,
       defaultSacCode: defaultSacCode,
       gstEnabled: gstEnabled,
-      footerNote: footerNote,
+      footerNote: note,
       logo: await _logoBytes(),
+      settings: settings,
     );
     return ReceiptPreview(bytes: bytes, isPdf: true);
   }

@@ -24,6 +24,11 @@ class ReceiptLabels {
   final String cgst;
   final String sgst;
   final String gstin;
+  // Billing Setup sections: customer address, terms note, bank details.
+  final String address;
+  final String terms;
+  final String bankDetails;
+  final String note;
   // FSSAI is a proper acronym — identical across all supported languages, so it
   // isn't routed through the ARB files. Defaults to 'FSSAI:'.
   final String fssai;
@@ -76,6 +81,10 @@ class ReceiptLabels {
     required this.cgst,
     required this.sgst,
     required this.gstin,
+    this.address = 'Address:',
+    this.terms = 'Terms & Conditions',
+    this.bankDetails = 'Bank Details',
+    this.note = 'Note',
     this.fssai = 'FSSAI:',
     required this.discount,
     this.roundOff = 'Round Off:',
@@ -119,6 +128,10 @@ class ReceiptLabels {
         cgst: l10n.receiptCgst,
         sgst: l10n.receiptSgst,
         gstin: l10n.receiptGstin,
+        address: l10n.receiptAddress,
+        terms: l10n.receiptTerms,
+        bankDetails: l10n.receiptBankDetails,
+        note: l10n.receiptNote,
         discount: l10n.receiptDiscount,
         roundOff: l10n.receiptRoundOff,
         total: l10n.receiptTotal,

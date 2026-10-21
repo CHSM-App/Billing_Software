@@ -1859,7 +1859,7 @@ abstract class AppLocalizations {
   /// No description provided for @registerSuccessBody.
   ///
   /// In en, this message translates to:
-  /// **'Registration successful. Your 4-day free trial has started.\n\nLog in now to start billing.'**
+  /// **'Registration successful. Your 30-day free trial has started.\n\nLog in now to start billing.'**
   String get registerSuccessBody;
 
   /// No description provided for @registerBackToLogin.
@@ -1963,6 +1963,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'GSTIN:'**
   String get receiptGstin;
+
+  /// No description provided for @receiptAddress.
+  ///
+  /// In en, this message translates to:
+  /// **'Address:'**
+  String get receiptAddress;
+
+  /// No description provided for @receiptTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms & Conditions'**
+  String get receiptTerms;
+
+  /// No description provided for @receiptBankDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Bank Details'**
+  String get receiptBankDetails;
+
+  /// No description provided for @receiptNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Note'**
+  String get receiptNote;
 
   /// No description provided for @receiptDiscount.
   ///
@@ -2527,6 +2551,240 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Customer\'s bills'**
   String get billingCustomerBills;
+
+  /// No description provided for @billingCustomerMoreDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'More details (address, GSTIN)'**
+  String get billingCustomerMoreDetails;
+
+  /// No description provided for @billingCustomerAddressLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer address'**
+  String get billingCustomerAddressLabel;
+
+  /// No description provided for @billingCustomerGstinLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer GSTIN'**
+  String get billingCustomerGstinLabel;
+
+  /// No description provided for @billingCustomerGstinInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Check the GSTIN (e.g. 27ABCDE1234F1Z5)'**
+  String get billingCustomerGstinInvalid;
+
+  /// No description provided for @billSetupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Billing Setup'**
+  String get billSetupTitle;
+
+  /// No description provided for @billSetupSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose what prints on your bills'**
+  String get billSetupSubtitle;
+
+  /// No description provided for @billSetupIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Ticked items print on every bill: thermal, A4/A5 and the bill link sent to customers.'**
+  String get billSetupIntro;
+
+  /// No description provided for @billSetupLogo.
+  ///
+  /// In en, this message translates to:
+  /// **'Shop logo'**
+  String get billSetupLogo;
+
+  /// No description provided for @billSetupLogoMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload a logo from Settings first'**
+  String get billSetupLogoMissing;
+
+  /// No description provided for @billSetupAddress.
+  ///
+  /// In en, this message translates to:
+  /// **'Shop address'**
+  String get billSetupAddress;
+
+  /// No description provided for @billSetupPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Shop phone'**
+  String get billSetupPhone;
+
+  /// No description provided for @billSetupAltPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Alternate mobile number (optional)'**
+  String get billSetupAltPhone;
+
+  /// No description provided for @billSetupAltPhoneInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid phone number'**
+  String get billSetupAltPhoneInvalid;
+
+  /// No description provided for @billSetupGstin.
+  ///
+  /// In en, this message translates to:
+  /// **'Shop GSTIN'**
+  String get billSetupGstin;
+
+  /// No description provided for @billSetupFssai.
+  ///
+  /// In en, this message translates to:
+  /// **'FSSAI number'**
+  String get billSetupFssai;
+
+  /// No description provided for @billSetupCashier.
+  ///
+  /// In en, this message translates to:
+  /// **'Cashier name'**
+  String get billSetupCashier;
+
+  /// No description provided for @billSetupCustomer.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer details'**
+  String get billSetupCustomer;
+
+  /// No description provided for @billSetupCustomerSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Name, phone, address and GSTIN'**
+  String get billSetupCustomerSubtitle;
+
+  /// No description provided for @billSetupTaxSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'GST / HSN summary'**
+  String get billSetupTaxSummary;
+
+  /// No description provided for @billSetupTaxSummarySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'HSN column and tax table on A4/A5 bills and the bill link'**
+  String get billSetupTaxSummarySubtitle;
+
+  /// No description provided for @billSetupNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Note on bill'**
+  String get billSetupNote;
+
+  /// No description provided for @billSetupNoteSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'A message printed on every bill'**
+  String get billSetupNoteSubtitle;
+
+  /// No description provided for @billSetupNoteText.
+  ///
+  /// In en, this message translates to:
+  /// **'Note text'**
+  String get billSetupNoteText;
+
+  /// No description provided for @billSetupNoteHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Free home delivery above Rs.500'**
+  String get billSetupNoteHint;
+
+  /// No description provided for @billSetupTerms.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms and conditions'**
+  String get billSetupTerms;
+
+  /// No description provided for @billSetupTermsText.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms text'**
+  String get billSetupTermsText;
+
+  /// No description provided for @billSetupTermsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. Goods once sold will not be taken back'**
+  String get billSetupTermsHint;
+
+  /// No description provided for @billSetupBank.
+  ///
+  /// In en, this message translates to:
+  /// **'Bank details'**
+  String get billSetupBank;
+
+  /// No description provided for @billSetupBankAccountName.
+  ///
+  /// In en, this message translates to:
+  /// **'Account name'**
+  String get billSetupBankAccountName;
+
+  /// No description provided for @billSetupBankAccountNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Account number'**
+  String get billSetupBankAccountNo;
+
+  /// No description provided for @billSetupBankName.
+  ///
+  /// In en, this message translates to:
+  /// **'Bank name'**
+  String get billSetupBankName;
+
+  /// No description provided for @billSetupBankBranch.
+  ///
+  /// In en, this message translates to:
+  /// **'Branch'**
+  String get billSetupBankBranch;
+
+  /// No description provided for @billSetupBankIfsc.
+  ///
+  /// In en, this message translates to:
+  /// **'IFSC code'**
+  String get billSetupBankIfsc;
+
+  /// No description provided for @billSetupBankNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Note (optional)'**
+  String get billSetupBankNote;
+
+  /// No description provided for @billSetupIfscInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid IFSC (e.g. SBIN0001234)'**
+  String get billSetupIfscInvalid;
+
+  /// No description provided for @billSetupAccountNoInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Account number must be 6–20 digits'**
+  String get billSetupAccountNoInvalid;
+
+  /// No description provided for @billSetupBankIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid account number and IFSC, or untick Bank details'**
+  String get billSetupBankIncomplete;
+
+  /// No description provided for @billSetupSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Billing setup saved'**
+  String get billSetupSaved;
+
+  /// No description provided for @billSetupUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'Billing Setup needs a server update. Please contact support.'**
+  String get billSetupUnsupported;
 
   /// No description provided for @billingPhoneInvalid.
   ///

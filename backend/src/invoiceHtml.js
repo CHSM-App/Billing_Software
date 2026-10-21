@@ -5,6 +5,45 @@
 // Keep the two in step: same sections, same order, same "Rs." money.
 
 const { stripBillPrefix } = require('./billNumber');
+const billSettings = require('./billSettings');
+
+// WhatsApp (and Instagram/Facebook) open links in an in-app browser where
+// window.print() silently does nothing. User agents don't reliably say so,
+// so detect the outcome instead: no 'beforeprint' within a second means print
+// was ignored — show a box to reopen the page in the phone's browser or copy the link.
+// Lives inside .actions so it's hidden on paper with the button.
+const DOWNLOAD_ONCLICK = 'vtDownload()';
+// href is filled in by the DOWNLOAD_FALLBACK script: <this page>/pdf (receipt.js pdfRoute).
+const PDF_LINK = '<a id="vt-pdf" href="#" download>Download PDF</a>';
+const DOWNLOAD_FALLBACK = `
+<div id="vt-open" style="display:none;margin:14px auto 0;max-width:420px;padding:14px;border:1px solid #ddd;border-radius:8px;background:#fffbe6;font:14px/1.45 Helvetica,Arial,sans-serif;color:#333;text-align:center">
+  <div style="margin-bottom:10px">This browser can't print. Use <b>Download PDF</b>, or open this page in your browser (in WhatsApp: tap <b>&#8942;</b> at the top right, then <b>Open in browser</b>).</div>
+  <a id="vt-browser" href="#" style="display:none;margin:4px;padding:10px 16px;border-radius:6px;background:#1a1a2e;color:#fff;text-decoration:none;font-weight:600">Open in browser</a>
+  <button type="button" onclick="vtCopy(this)" style="margin:4px;padding:10px 16px;border-radius:6px;border:1px solid #1a1a2e;background:#fff;color:#1a1a2e;font:600 14px Helvetica,Arial,sans-serif;cursor:pointer">Copy link</button>
+</div>
+<script data-download>
+var vtPrinted = false;
+document.getElementById('vt-pdf').href = location.pathname.replace(/[/]$/, '') + '/pdf' + location.search;
+addEventListener('beforeprint', function () { vtPrinted = true; });
+// Android: an intent with no package opens the user's default browser (or asks
+// which one) — Chrome, Firefox, Edge, Samsung Internet alike. iOS has no way to
+// leave an in-app view for Safari from a link, so there the button stays hidden.
+if (/Android/.test(navigator.userAgent)) {
+  var vtBrowser = document.getElementById('vt-browser');
+  vtBrowser.href = 'intent://' + location.href.replace(/^https?:[/][/]/, '') + '#Intent;scheme=https;action=android.intent.action.VIEW;end';
+  vtBrowser.style.display = 'inline-block';
+}
+function vtDownload() {
+  vtPrinted = false;
+  try { window.print(); } catch (e) {}
+  setTimeout(function () { if (!vtPrinted) document.getElementById('vt-open').style.display = 'block'; }, 1000);
+}
+function vtCopy(btn) {
+  var done = function () { btn.textContent = 'Link copied - paste it in your browser'; };
+  if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(done, function () { prompt('Copy this link:', location.href); });
+  else prompt('Copy this link:', location.href);
+}
+</script>`;
 
 const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
   'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
@@ -86,7 +125,7 @@ const CSS = `
   .foot b{display:block}
   .brand{margin-top:auto;padding-top:12pt;text-align:right;font-size:7pt;font-style:italic;color:#757575}
   .actions{text-align:center;padding:16px}
-  .actions button{background:#1a1a2e;color:#fff;border:none;border-radius:6px;padding:12px 22px;font:600 14px Helvetica,Arial,sans-serif;cursor:pointer}
+  .actions a,.actions button{display:inline-block;margin:4px;text-decoration:none;background:#1a1a2e;color:#fff;border:none;border-radius:6px;padding:12px 22px;font:600 14px Helvetica,Arial,sans-serif;cursor:pointer}
   @media print{body{background:#fff}.actions{display:none}}
 `;
 
@@ -97,6 +136,13 @@ const CSS = `
 function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settledAs, isUnpaidCredit }) {
   const page = PAGES[paper];
   const showGst = !!bill.gst_enabled && Number(bill.tax_amount) > 0;
+  // Billing Setup (businesses.bill_settings). NULL = defaults = the page as before.
+  const cfg = billSettings.parse(bill.bill_settings);
+  const showHsn = showGst && cfg.show_tax_summary;
+  const bank = billSettings.bankLines(cfg);
+  const note = billSettings.noteText(cfg);
+  const cust = cfg.show_customer;
+  const phones = billSettings.shopPhones(bill.shop_phone, cfg);
   const date = new Date(bill.finalized_at || bill.created_at)
     .toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' })
     .replace(/\//g, '-');
@@ -110,7 +156,7 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
   const net = (i) => Number(i.quantity) * Number(i.unit_price);
   const lineTax = (i) => (Number(i.line_total) - net(i)) * discountRatio;
   const codeOf = (i) => i.hsn_code || bill.default_sac_code || '';
-  const anyHsn = showGst && items.some((i) => codeOf(i));
+  const anyHsn = showHsn && items.some((i) => codeOf(i));
   const rate = (i) => (Number(i.quantity) > 0
     ? Number(i.unit_price) + Number(i.discount_amount || 0) / Number(i.quantity)
     : Number(i.unit_price));
@@ -168,23 +214,25 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
       ${bill.logo_url && bill.print_logo ? `<img src="${esc(bill.logo_url)}" class="logo" alt=""/>` : ''}
       <div>
       <div class="name">${esc(bill.shop_name)}</div>
-      ${bill.address ? `<div>${esc(bill.address).replace(/\r?\n/g, '<br/>')}</div>` : ''}
-      ${bill.shop_phone ? `<div>Ph: ${esc(String(bill.shop_phone).trim())}</div>` : ''}
-      ${bill.gst_enabled && bill.gst_number ? `<div>GSTIN: ${esc(bill.gst_number)}</div>` : ''}
-      ${bill.fssai_number ? `<div>FSSAI: ${esc(bill.fssai_number)}</div>` : ''}
+      ${cfg.show_address && bill.address ? `<div>${esc(bill.address).replace(/\r?\n/g, '<br/>')}</div>` : ''}
+      ${cfg.show_phone && phones ? `<div>Ph: ${esc(phones)}</div>` : ''}
+      ${cfg.show_gstin && bill.gst_enabled && bill.gst_number ? `<div>GSTIN: ${esc(bill.gst_number)}</div>` : ''}
+      ${cfg.show_fssai && bill.fssai_number ? `<div>FSSAI: ${esc(bill.fssai_number)}</div>` : ''}
       </div>
     </div></td>
     <td style="padding:0">
       <div class="kv"><div class="k">Invoice No.</div><div class="v">${number}</div></div>
       <div class="kv"><div class="k">Date</div><div class="v">${date}</div></div>
-      ${billedBy ? `<div class="kv"><div class="k">Cashier</div><div class="v">${esc(billedBy)}</div></div>` : ''}
+      ${cfg.show_cashier && billedBy ? `<div class="kv"><div class="k">Cashier</div><div class="v">${esc(billedBy)}</div></div>` : ''}
     </td>
   </tr></table>
 
-  ${bill.customer_name || bill.customer_phone || bill.table_number ? `<div class="to">
+  ${(cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin)) || bill.table_number ? `<div class="to">
     <div class="k">Bill To</div>
-    ${bill.customer_name ? `<div class="v">${esc(bill.customer_name)}</div>` : ''}
-    ${bill.customer_phone ? `<div>Contact No.: ${esc(bill.customer_phone)}</div>` : ''}
+    ${cust && bill.customer_name ? `<div class="v">${esc(bill.customer_name)}</div>` : ''}
+    ${cust && bill.customer_address ? `<div>Address: ${esc(bill.customer_address).replace(/\r?\n/g, '<br/>')}</div>` : ''}
+    ${cust && bill.customer_phone ? `<div>Contact No.: ${esc(bill.customer_phone)}</div>` : ''}
+    ${cust && bill.customer_gstin ? `<div>GSTIN: ${esc(bill.customer_gstin)}</div>` : ''}
     ${bill.table_number ? `<div>Table: ${esc(String(bill.table_number))}</div>` : ''}
   </div>` : '<div style="height:8pt"></div>'}
 
@@ -225,7 +273,7 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
     </div>
   </div>
 
-  ${showGst ? `<table class="grid hsn" style="margin-top:10pt">
+  ${showHsn ? `<table class="grid hsn" style="margin-top:10pt">
     <thead><tr><th>HSN/SAC</th><th class="r">Taxable amount</th><th class="r">CGST Rate</th>
       <th class="r">CGST Amt</th><th class="r">SGST Rate</th><th class="r">SGST Amt</th><th class="r">Total Tax</th></tr></thead>
     <tbody>${hsnRows}
@@ -236,15 +284,15 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
   </table>` : ''}
 
   <div class="foot">
-    <div><b>Terms and conditions</b>${esc(bill.bill_footer_note && bill.bill_footer_note.trim() ? bill.bill_footer_note : 'Thanks for doing business with us!')}</div>
+    <div>${note ? `<b>Note</b>${esc(note)}` : ''}${cfg.show_terms ? `<b${note ? ' style="margin-top:6pt"' : ''}>Terms and conditions</b>${esc(bill.bill_footer_note && bill.bill_footer_note.trim() ? bill.bill_footer_note : 'Thanks for doing business with us!')}` : ''}${bank.length ? `<b style="margin-top:6pt">Bank Details</b>${bank.map(esc).join('<br/>')}` : ''}</div>
     <b>For: ${esc(bill.shop_name)}</b>
   </div>
 
   <div class="brand">Powered by Vengurlatech</div>
 </div>
-<div class="actions"><button type="button" onclick="window.print()">Download Invoice</button></div>
+<div class="actions">${PDF_LINK}<button type="button" onclick="${DOWNLOAD_ONCLICK}">Print</button>${DOWNLOAD_FALLBACK}</div>
 </body>
 </html>`;
 }
 
-module.exports = { renderInvoice, amountToWords };
+module.exports = { renderInvoice, amountToWords, DOWNLOAD_ONCLICK, DOWNLOAD_FALLBACK, PDF_LINK };

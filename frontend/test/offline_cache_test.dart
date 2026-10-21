@@ -200,7 +200,7 @@ void main() {
     final db = await databaseFactory.openDatabase(path);
     final cols = await db.rawQuery('PRAGMA table_info(cached_items)');
     expect(cols.map((c) => c['name']), containsAll(['item_no', 'pack_unit', 'pack_size']));
-    expect(await db.getVersion(), 16);
+    expect(await db.getVersion(), 17);
 
     // And the cache works end to end on the upgraded table.
     await OfflineService.instance.replaceItemCache([
@@ -213,5 +213,55 @@ void main() {
     expect(items.single.itemNo, '7');
     expect(items.single.packUnit, 'box');
     expect(items.single.packSize, 15);
+  });
+
+  // v17: customer address / GSTIN. A bill queued by the previous app version
+  // must survive the upgrade and still read (and sync) as before.
+  test('a v16 device keeps its queued bill and gains customer address/GSTIN', () async {
+    final path =
+        '${await databaseFactory.getDatabasesPath()}/billing_offline.db';
+    await databaseFactory.deleteDatabase(path);
+    final old = await databaseFactory.openDatabase(path,
+        options: OpenDatabaseOptions(
+          version: 16,
+          onCreate: (db, _) async {
+            await db.execute('''
+              CREATE TABLE offline_bills (
+                local_id TEXT NOT NULL PRIMARY KEY,
+                client_bill_id TEXT NOT NULL UNIQUE,
+                business_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                table_id TEXT, bill_number TEXT,
+                customer_name TEXT, customer_phone TEXT,
+                subtotal REAL NOT NULL, tax_amount REAL NOT NULL,
+                discount_amount REAL NOT NULL DEFAULT 0,
+                charges_amount REAL NOT NULL DEFAULT 0,
+                additional_charges TEXT, total REAL NOT NULL,
+                round_off REAL NOT NULL DEFAULT 0,
+                payment_mode TEXT NOT NULL, payments TEXT,
+                items_json TEXT NOT NULL, created_at INTEGER NOT NULL,
+                sync_status TEXT NOT NULL DEFAULT 'pending',
+                sync_error TEXT, retry_count INTEGER NOT NULL DEFAULT 0)
+            ''');
+            await db.insert('offline_bills', {
+              'local_id': 'LOCAL-1', 'client_bill_id': 'c-1',
+              'business_id': 'biz-1', 'user_id': 'u-1',
+              'customer_name': 'Asha', 'customer_phone': '9876543210',
+              'subtotal': 100, 'tax_amount': 0, 'total': 100,
+              'payment_mode': 'cash', 'items_json': '[]', 'created_at': 1,
+            });
+          },
+        ));
+    await old.close();
+
+    await OfflineService.instance.init();
+
+    final db = await databaseFactory.openDatabase(path);
+    expect(await db.getVersion(), 17);
+    final cols = (await db.rawQuery('PRAGMA table_info(offline_bills)'))
+        .map((c) => c['name']);
+    expect(cols, containsAll(['customer_address', 'customer_gstin']));
+    final pending = await OfflineService.instance.getPendingBills();
+    expect(pending.single['customer_name'], 'Asha');
+    expect(pending.single['customer_address'], isNull);
   });
 }

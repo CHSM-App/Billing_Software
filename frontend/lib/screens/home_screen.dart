@@ -9,6 +9,7 @@ import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../models/cart_entry.dart';
 import '../utils/money.dart';
+import '../utils/text_formatters.dart' show UpperCaseTextFormatter;
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
@@ -136,6 +137,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // CartEntry.key); tapping another row moves it there.
   String? _expandedCartKey;
   bool _showCustomerFields = true;
+  // Address + GSTIN under the phone field. Folded by default, even when the
+  // customer section is open; opens on tap or when a draft / picked customer
+  // already has them.
+  bool _showMoreCustomerFields = false;
   // How the bill is paid: rows of [mode][amount] at the bottom of the cart.
   // One row is an ordinary single-mode bill; "+" adds a row and splits it.
   // The last row always takes whatever the others leave of the payable (see
@@ -209,6 +214,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final _sheetAtBottom = ValueNotifier<bool>(true);
   final _customerNameController = TextEditingController();
   final _customerPhoneController = TextEditingController();
+  final _customerAddressController = TextEditingController();
+  final _customerGstinController = TextEditingController();
   final _discountPctController = TextEditingController();
   final _discountAmtController = TextEditingController();
   bool _updatingDiscount = false;
@@ -371,6 +378,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _knownCustomerDebounce?.cancel();
     _customerNameController.dispose();
     _customerPhoneController.dispose();
+    _customerAddressController.dispose();
+    _customerGstinController.dispose();
     _discountPctController.dispose();
     _discountAmtController.dispose();
     _customerNameFocus.dispose();
@@ -475,6 +484,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             _customerPhoneController.text =
                 _localPhoneDigits(bill.customerPhone!);
             _showCustomerFields = true;
+          }
+          _customerAddressController.text = bill.customerAddress ?? '';
+          _customerGstinController.text = bill.customerGstin ?? '';
+          if (_customerAddress != null || _customerGstin != null) {
+            _showCustomerFields = true;
+            _showMoreCustomerFields = true;
           }
           // Restore the saved discount. Setting the amount fires the listener,
           // which derives the matching percentage from the (now loaded) total.
@@ -1861,6 +1876,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'table_number': widget.tableNumber,
         'customer_name': customerName,
         'customer_phone': customerPhone,
+        'customer_address': _customerAddress,
+        'customer_gstin': _customerGstin,
         'subtotal': subtotal,
         'tax_amount': taxAmount,
         'discount_amount': discountAmt,
@@ -1928,6 +1945,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         ref.read(cartProvider.notifier).clear();
         _customerNameController.clear();
         _customerPhoneController.clear();
+        _clearCustomerExtras();
         _discountPctController.clear();
         _discountAmtController.clear();
         _clearCharges();
@@ -1976,6 +1994,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // save and pre-fill when the order is reopened.
     final customerName = _customerNameController.text.trim().nullIfEmpty;
     final customerPhone = _customerPhoneController.text.trim().nullIfEmpty;
+    final customerAddress = _customerAddress;
+    final customerGstin = _customerGstin;
     // Persist the discount too, so reopening the draft keeps it (was previously
     // dropped — the draft saved with no discount).
     final discountAmount =
@@ -2016,6 +2036,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // cleared these; this one did not.
       _customerNameController.clear();
       _customerPhoneController.clear();
+      _clearCustomerExtras();
       _discountPctController.clear();
       _discountAmtController.clear();
       _clearCharges();
@@ -2036,6 +2057,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             payload,
             customerName: customerName,
             customerPhone: customerPhone,
+            customerAddress: customerAddress,
+            customerGstin: customerGstin,
             discountAmount: discountAmount,
             additionalCharges: additionalCharges,
             priceListId: priceListId,
@@ -2049,6 +2072,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'price_list_id': priceListId,
             if (customerName != null) 'customer_name': customerName,
             if (customerPhone != null) 'customer_phone': customerPhone,
+            if (customerAddress != null) 'customer_address': customerAddress,
+            if (customerGstin != null) 'customer_gstin': customerGstin,
             if (discountAmount > 0) 'discount_amount': discountAmount,
             if (additionalCharges.isNotEmpty)
               'additional_charges': additionalCharges,
@@ -2418,6 +2443,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  String? get _customerAddress =>
+      _customerAddressController.text.trim().nullIfEmpty;
+  String? get _customerGstin => _customerGstinController.text.trim().nullIfEmpty;
+
+  /// Address + GSTIN go with the customer: cleared and folded with them.
+  void _clearCustomerExtras() {
+    _customerAddressController.clear();
+    _customerGstinController.clear();
+    _showMoreCustomerFields = false;
+  }
+
   /// Fill BOTH fields from a picked suggestion, whichever field was typed in.
   ///
   /// Picking "Ramesh" from the name list must bring his number along, and
@@ -2453,6 +2489,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         selection: TextSelection.collapsed(offset: localPhone.length),
       );
     }
+    // Saved address / GSTIN (older backends don't send them). Only fills,
+    // never blanks what the cashier already typed.
+    final address = (c['customer_address'] ?? '').toString().trim();
+    final gstin = (c['customer_gstin'] ?? '').toString().trim();
+    if (address.isNotEmpty) _customerAddressController.text = address;
+    if (gstin.isNotEmpty) _customerGstinController.text = gstin;
+    if (address.isNotEmpty || gstin.isNotEmpty) _showMoreCustomerFields = true;
     _applyingSuggestion = false;
 
     _customerSuggestions = const [];
@@ -2475,6 +2518,79 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _suggestFor = null;
     });
     _sheetSetState?.call(() {});
+  }
+
+  static final _gstinRe =
+      RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$');
+
+  /// "More details" under the phone field: the customer's address and GSTIN,
+  /// folded until tapped. [setLocal] repaints the host (panel or sheet).
+  Widget _moreCustomerFields(
+      AppLocalizations l10n, void Function(VoidCallback) setLocal) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InkWell(
+          onTap: () => setLocal(
+              () => _showMoreCustomerFields = !_showMoreCustomerFields),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.space8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    l10n.billingCustomerMoreDetails,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.primary, fontWeight: FontWeight.w500),
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: _showMoreCustomerFields ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: const Icon(Icons.keyboard_arrow_down_outlined,
+                      size: 18, color: AppColors.primary),
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+          child: !_showMoreCustomerFields
+              ? const SizedBox(width: double.infinity)
+              : Column(
+                  children: [
+                    AppTextField(
+                      label: l10n.billingCustomerAddressLabel,
+                      controller: _customerAddressController,
+                      capitalizeWords: true,
+                      maxLength: 500,
+                      prefixIcon: const Icon(Icons.location_on_outlined,
+                          size: 16, color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: AppSpacing.space8),
+                    // Shows the format error but never blocks the sale.
+                    ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: _customerGstinController,
+                      builder: (_, v, __) => AppTextField(
+                        label: l10n.billingCustomerGstinLabel,
+                        controller: _customerGstinController,
+                        maxLength: 15,
+                        inputFormatters: const [UpperCaseTextFormatter()],
+                        errorText: v.text.trim().isEmpty ||
+                                _gstinRe.hasMatch(v.text.trim())
+                            ? null
+                            : l10n.billingCustomerGstinInvalid,
+                        prefixIcon: const Icon(Icons.receipt_long_outlined,
+                            size: 16, color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ],
+    );
   }
 
   /// Dropdown of matching past customers, shown under whichever field is being
@@ -2799,6 +2915,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           _cartPayload,
           customerName: _customerNameController.text.trim().nullIfEmpty,
           customerPhone: _customerPhoneController.text.trim().nullIfEmpty,
+          customerAddress: _customerAddress,
+          customerGstin: _customerGstin,
           discountAmount:
               double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
           additionalCharges: additionalCharges,
@@ -2817,6 +2935,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'customer_name': _customerNameController.text.trim(),
           if (_customerPhoneController.text.trim().isNotEmpty)
             'customer_phone': _customerPhoneController.text.trim(),
+          if (_customerAddress != null) 'customer_address': _customerAddress,
+          if (_customerGstin != null) 'customer_gstin': _customerGstin,
           'payment_mode': _draftMode,
           'status': 'draft',
           'price_list_id': _priceListId,
@@ -2854,6 +2974,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _customerNameController.clear();
       _customerPhoneController.clear();
+      _clearCustomerExtras();
       _discountPctController.clear();
       _discountAmtController.clear();
       _clearCharges();
@@ -3059,6 +3180,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'bill_number': offlineBillNumber,
         'customer_name': _customerNameController.text.trim().nullIfEmpty,
         'customer_phone': _customerPhoneController.text.trim().nullIfEmpty,
+        'customer_address': _customerAddress,
+        'customer_gstin': _customerGstin,
         'subtotal': subtotal,
         'tax_amount': taxAmount,
         'discount_amount': discountAmt,
@@ -3084,6 +3207,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         tableNumber: widget.tableNumber,
         customerName: _customerNameController.text.trim().nullIfEmpty,
         customerPhone: _customerPhoneController.text.trim().nullIfEmpty,
+        customerAddress: _customerAddress,
+        customerGstin: _customerGstin,
         subtotal: subtotal,
         taxAmount: taxAmount,
         discountAmount: discountAmt,
@@ -3118,6 +3243,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ref.read(cartProvider.notifier).clear();
       _customerNameController.clear();
       _customerPhoneController.clear();
+      _clearCustomerExtras();
       _discountPctController.clear();
       _discountAmtController.clear();
       _clearCharges();
@@ -3193,6 +3319,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       tableNumber: widget.tableNumber,
       customerName: _customerNameController.text.trim().nullIfEmpty,
       customerPhone: _customerPhoneController.text.trim().nullIfEmpty,
+      customerAddress: _customerAddress,
+      customerGstin: _customerGstin,
       subtotal: subtotal,
       taxAmount: taxAmount,
       discountAmount: discountAmt,
@@ -4417,6 +4545,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       color: AppColors.textSecondary),
                                 ),
                                 _customerSuggestionList('phone'),
+                                _moreCustomerFields(l10n, setLocal),
                               ],
                             ),
                           )

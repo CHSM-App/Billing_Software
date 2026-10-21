@@ -235,8 +235,10 @@ describe('GET /api/bills/customers/search (billing autocomplete)', () => {
     });
     const res = await request(app).get('/api/bills/customers/search?q=as').set(authHeader({ role: 'cashier' }));
     expect(res.status).toBe(200);
+    // customer_address / customer_gstin added in migration 061 — older apps
+    // read the original four by name and ignore the rest.
     expect(Object.keys(res.body[0]).sort())
-      .toEqual(['customer_name', 'customer_phone', 'last_bill_at', 'visits']);
+      .toEqual(['customer_address', 'customer_gstin', 'customer_name', 'customer_phone', 'last_bill_at', 'visits']);
   });
 
   test('a full 91-prefixed number finds the 10-digit customer', async () => {

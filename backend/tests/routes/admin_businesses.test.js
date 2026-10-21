@@ -67,3 +67,21 @@ describe('GET /admin/api/businesses — deletion request', () => {
       .toMatch(/LEFT JOIN account_deletion_requests adr\s+ON adr\.business_id = b\.id AND adr\.status = 'pending'/);
   });
 });
+
+describe('GET /admin/api/businesses — users with app version', () => {
+  test('each business lists its own users, version null when never reported', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [row(), row({ id: 'b2', name: 'Other' })] })
+      .mockResolvedValueOnce({ recordset: [
+        { business_id: 'b1', name: 'Owner', phone: '9000000001', role: 'owner', is_active: 1, app_version: '1.1.15+28' },
+        { business_id: 'b1', name: 'Cash', phone: '9000000002', role: 'cashier', is_active: 0, app_version: null },
+      ] });
+    const res = await request(app).get('/admin/api/businesses').set(adminAuth());
+    expect(res.status).toBe(200);
+    expect(res.body.businesses[0].users).toEqual([
+      { name: 'Owner', phone: '9000000001', role: 'owner', is_active: true, app_version: '1.1.15+28' },
+      { name: 'Cash', phone: '9000000002', role: 'cashier', is_active: false, app_version: null },
+    ]);
+    expect(res.body.businesses[1].users).toEqual([]);
+  });
+});

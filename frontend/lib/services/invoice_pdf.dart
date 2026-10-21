@@ -8,6 +8,7 @@ import 'package:pdf/widgets.dart' as pw;
 import '../models/models.dart';
 import '../utils/amount_words.dart';
 import 'devanagari_raster.dart';
+import 'bill_settings.dart';
 
 /// Devanagari text pre-shaped into images, so a synchronous widget build can
 /// place it. Keyed by size + weight + string, because the image is rendered at
@@ -129,6 +130,7 @@ class InvoicePdf {
     required bool gstEnabled,
     String? footerNote,
     Uint8List? logo,
+    BillSettings settings = const BillSettings(),
   }) async {
     final devanagari = await _loadDevanagari();
 
@@ -141,8 +143,17 @@ class InvoicePdf {
     await shaped.add(address?.replaceAll('\r\n', '\n'), maxWidth: 260);
     await shaped.add(footerNote, maxWidth: 300);
     await shaped.add('For: $businessName', bold: true, maxWidth: 200);
+    await shaped.add(settings.noteText, maxWidth: 300);
+    for (final l in settings.bankLines) {
+      await shaped.add(l, maxWidth: 300);
+    }
     for (final b in bills) {
       await shaped.add(b.customerName, fontSize: 11, bold: true, maxWidth: 260);
+      await shaped.add(
+          b.customerAddress == null
+              ? null
+              : 'Address: ${b.customerAddress!.replaceAll('\r\n', '\n')}',
+          maxWidth: 260);
       await shaped.add(b.billedByName, fontSize: 11, bold: true, maxWidth: 200);
       for (final i in b.items) {
         await shaped.add(i.receiptName, maxWidth: 220);
@@ -184,9 +195,12 @@ class InvoicePdf {
           : 1.0;
       double lineTaxOf(BillItem i) =>
           (i.lineTotal - (i.quantity * i.unitPrice)) * discountRatio;
-      String codeOf(BillItem i) => (i.hsnCode?.isNotEmpty ?? false)
-          ? i.hsnCode!
-          : (defaultSacCode ?? '');
+      // Billing Setup can hide the HSN column + table: no codes, no column.
+      String codeOf(BillItem i) => !settings.showTaxSummary
+          ? ''
+          : (i.hsnCode?.isNotEmpty ?? false)
+              ? i.hsnCode!
+              : (defaultSacCode ?? '');
 
       doc.addPage(
         pw.MultiPage(
@@ -219,17 +233,21 @@ class InvoicePdf {
             pw.SizedBox(height: 8),
             _headerBox(businessName, address, phone, gstin, fssai,
                 bill.displayNumber, dateStr, shaped,
-                billedBy: bill.billedByName, logo: logo),
-            _billToBox(bill, shaped),
+                billedBy: settings.showCashier ? bill.billedByName : null,
+                logo: logo),
+            _billToBox(bill, shaped, showCustomer: settings.showCustomer),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money, shaped),
             pw.SizedBox(height: 10),
             _summary(bill, grandTotal, showGst, money),
-            if (showGst) ...[
+            if (showGst && settings.showTaxSummary) ...[
               pw.SizedBox(height: 10),
               _hsnTable(bill, codeOf, lineTaxOf, money),
             ],
             pw.SizedBox(height: 24),
-            _footer(businessName, footerNote, shaped),
+            _footer(businessName, footerNote, shaped,
+                showTerms: settings.showTerms,
+                bank: settings.bankLines,
+                shopNote: settings.noteText),
           ],
         ),
       );
@@ -504,10 +522,13 @@ class InvoicePdf {
       );
 
   // --- Bill To --------------------------------------------------------------
-  static pw.Widget _billToBox(Bill bill, ShapedText shaped) {
-    if ((bill.customerName == null || bill.customerName!.isEmpty) &&
-        (bill.customerPhone == null || bill.customerPhone!.isEmpty) &&
-        (bill.tableNumber == null || bill.tableNumber!.isEmpty)) {
+  static pw.Widget _billToBox(Bill bill, ShapedText shaped,
+      {bool showCustomer = true}) {
+    bool has(String? v) => v != null && v.isNotEmpty;
+    final cust = showCustomer &&
+        (has(bill.customerName) || has(bill.customerPhone) ||
+            has(bill.customerAddress) || has(bill.customerGstin));
+    if (!cust && !has(bill.tableNumber)) {
       return pw.SizedBox(height: 8);
     }
     return pw.Container(
@@ -523,14 +544,21 @@ class InvoicePdf {
         children: [
           pw.Text('Bill To', style: const pw.TextStyle(fontSize: 9)),
           pw.SizedBox(height: 2),
-          if (bill.customerName != null && bill.customerName!.isNotEmpty)
+          if (cust && has(bill.customerName))
             shaped.widget(bill.customerName!,
                 fontSize: 11,
                 bold: true,
                 style: pw.TextStyle(
                     fontSize: 11, fontWeight: pw.FontWeight.bold)),
-          if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty)
+          if (cust && has(bill.customerAddress))
+            shaped.widget(
+                'Address: ${bill.customerAddress!.replaceAll('\r\n', '\n')}',
+                style: const pw.TextStyle(fontSize: 9)),
+          if (cust && has(bill.customerPhone))
             pw.Text('Contact No.: ${bill.customerPhone}',
+                style: const pw.TextStyle(fontSize: 9)),
+          if (cust && has(bill.customerGstin))
+            pw.Text('GSTIN: ${bill.customerGstin}',
                 style: const pw.TextStyle(fontSize: 9)),
           if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty)
             pw.Text('Table: ${bill.tableNumber}',
@@ -848,7 +876,11 @@ class InvoicePdf {
 
   // --- Footer ---------------------------------------------------------------
   static pw.Widget _footer(
-      String businessName, String? note, ShapedText shaped) {
+      String businessName, String? note, ShapedText shaped,
+      {bool showTerms = true,
+      List<String> bank = const [],
+      String shopNote = ''}) {
+    final bold = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.end,
       children: [
@@ -856,14 +888,25 @@ class InvoicePdf {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text('Terms and conditions',
-                  style: pw.TextStyle(
-                      fontSize: 9, fontWeight: pw.FontWeight.bold)),
-              shaped.widget(
-                  (note != null && note.trim().isNotEmpty)
-                      ? note
-                      : 'Thanks for doing business with us!',
-                  style: const pw.TextStyle(fontSize: 9)),
+              if (shopNote.isNotEmpty) ...[
+                pw.Text('Note', style: bold),
+                shaped.widget(shopNote, style: const pw.TextStyle(fontSize: 9)),
+                if (showTerms) pw.SizedBox(height: 6),
+              ],
+              if (showTerms) ...[
+                pw.Text('Terms and conditions', style: bold),
+                shaped.widget(
+                    (note != null && note.trim().isNotEmpty)
+                        ? note
+                        : 'Thanks for doing business with us!',
+                    style: const pw.TextStyle(fontSize: 9)),
+              ],
+              if (bank.isNotEmpty) ...[
+                if (showTerms) pw.SizedBox(height: 6),
+                pw.Text('Bank Details', style: bold),
+                for (final l in bank)
+                  shaped.widget(l, style: const pw.TextStyle(fontSize: 9)),
+              ],
             ],
           ),
         ),

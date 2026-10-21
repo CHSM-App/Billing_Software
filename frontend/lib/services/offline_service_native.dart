@@ -95,7 +95,8 @@ class OfflineService {
       // 14: offline_bills.payments — the parts of a split bill.
       // 15: cached_items.item_no.
       // 16: pack_unit / pack_size on cached_items and cached_variants.
-      version: 16,
+      // 17: customer_address / customer_gstin on offline_bills and offline_drafts.
+      version: 17,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
       // Self-heal: _createSchema is all IF NOT EXISTS, so this is a no-op on a
@@ -121,6 +122,8 @@ class OfflineService {
         bill_number     TEXT,
         customer_name   TEXT,
         customer_phone  TEXT,
+        customer_address TEXT,
+        customer_gstin  TEXT,
         subtotal        REAL    NOT NULL,
         tax_amount      REAL    NOT NULL,
         discount_amount REAL    NOT NULL DEFAULT 0,
@@ -160,6 +163,8 @@ class OfflineService {
         table_number    TEXT,
         customer_name   TEXT,
         customer_phone  TEXT,
+        customer_address TEXT,
+        customer_gstin  TEXT,
         subtotal        REAL    NOT NULL,
         tax_amount      REAL    NOT NULL,
         discount_amount REAL    NOT NULL DEFAULT 0,
@@ -357,6 +362,18 @@ class OfflineService {
       final cols = await db.rawQuery('PRAGMA table_info(cached_items)');
       if (!cols.any((c) => c['name'] == 'item_no')) {
         await db.execute('ALTER TABLE cached_items ADD COLUMN item_no TEXT');
+      }
+    }
+    if (oldVersion < 17) {
+      // v16 → v17: customer address / GSTIN (migration 061). Additive; old
+      // queued rows keep NULL and sync exactly as before. Guarded: a table
+      // created fresh this run already has them.
+      for (final table in ['offline_bills', 'offline_drafts']) {
+        final cols = await db.rawQuery('PRAGMA table_info($table)');
+        if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'customer_address')) {
+          await db.execute('ALTER TABLE $table ADD COLUMN customer_address TEXT');
+          await db.execute('ALTER TABLE $table ADD COLUMN customer_gstin TEXT');
+        }
       }
     }
     if (oldVersion < 16) {
@@ -797,6 +814,8 @@ class OfflineService {
       'bill_number':     data['bill_number'],
       'customer_name':   data['customer_name'],
       'customer_phone':  data['customer_phone'],
+      'customer_address': data['customer_address'],
+      'customer_gstin':  data['customer_gstin'],
       'subtotal':        data['subtotal'],
       'tax_amount':      data['tax_amount'],
       'discount_amount': data['discount_amount'] ?? 0,
@@ -991,6 +1010,8 @@ class OfflineService {
       billNumber: (row['bill_number'] as String?) ?? localId,
       customerName: row['customer_name'] as String?,
       customerPhone: row['customer_phone'] as String?,
+      customerAddress: row['customer_address'] as String?,
+      customerGstin: row['customer_gstin'] as String?,
       subtotal: (row['subtotal'] as num).toDouble(),
       taxAmount: (row['tax_amount'] as num).toDouble(),
       discountAmount: (row['discount_amount'] as num?)?.toDouble() ?? 0,
@@ -1034,6 +1055,8 @@ class OfflineService {
       'table_number':    data['table_number'],
       'customer_name':   data['customer_name'],
       'customer_phone':  data['customer_phone'],
+      'customer_address': data['customer_address'],
+      'customer_gstin':  data['customer_gstin'],
       'subtotal':        data['subtotal'],
       'tax_amount':      data['tax_amount'],
       'discount_amount': data['discount_amount'] ?? 0,

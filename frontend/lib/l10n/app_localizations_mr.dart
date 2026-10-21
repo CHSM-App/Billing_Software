@@ -1002,7 +1002,7 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get registerSuccessBody =>
-      'नोंदणी यशस्वी झाली. तुमची ४ दिवसांची मोफत चाचणी सुरू झाली आहे.\n\nबिलिंग सुरू करण्यासाठी आता लॉगिन करा.';
+      'नोंदणी यशस्वी झाली. तुमची ३० दिवसांची मोफत चाचणी सुरू झाली आहे.\n\nबिलिंग सुरू करण्यासाठी आता लॉगिन करा.';
 
   @override
   String get registerBackToLogin => 'लॉगिनवर परत जा';
@@ -1054,6 +1054,18 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get receiptGstin => 'GSTIN:';
+
+  @override
+  String get receiptAddress => 'पत्ता:';
+
+  @override
+  String get receiptTerms => 'अटी व शर्ती';
+
+  @override
+  String get receiptBankDetails => 'बँक तपशील';
+
+  @override
+  String get receiptNote => 'टीप';
 
   @override
   String get receiptDiscount => 'सूट:';
@@ -1383,6 +1395,128 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingCustomerBills => 'ग्राहकाची बिले';
+
+  @override
+  String get billingCustomerMoreDetails => 'अधिक तपशील (पत्ता, GSTIN)';
+
+  @override
+  String get billingCustomerAddressLabel => 'ग्राहकाचा पत्ता';
+
+  @override
+  String get billingCustomerGstinLabel => 'ग्राहकाचा GSTIN';
+
+  @override
+  String get billingCustomerGstinInvalid =>
+      'GSTIN तपासा (उदा. 27ABCDE1234F1Z5)';
+
+  @override
+  String get billSetupTitle => 'बिल सेटअप';
+
+  @override
+  String get billSetupSubtitle => 'बिलावर काय छापायचे ते निवडा';
+
+  @override
+  String get billSetupIntro =>
+      'टिक केलेले भाग प्रत्येक बिलावर छापले जातील: थर्मल, A4/A5 आणि ग्राहकाला पाठवलेली बिल लिंक.';
+
+  @override
+  String get billSetupLogo => 'दुकानाचा लोगो';
+
+  @override
+  String get billSetupLogoMissing => 'आधी सेटिंग्जमधून लोगो अपलोड करा';
+
+  @override
+  String get billSetupAddress => 'दुकानाचा पत्ता';
+
+  @override
+  String get billSetupPhone => 'दुकानाचा फोन';
+
+  @override
+  String get billSetupAltPhone => 'पर्यायी मोबाइल नंबर (ऐच्छिक)';
+
+  @override
+  String get billSetupAltPhoneInvalid => 'योग्य फोन नंबर टाका';
+
+  @override
+  String get billSetupGstin => 'दुकानाचा GSTIN';
+
+  @override
+  String get billSetupFssai => 'FSSAI क्रमांक';
+
+  @override
+  String get billSetupCashier => 'कॅशियरचे नाव';
+
+  @override
+  String get billSetupCustomer => 'ग्राहकाचा तपशील';
+
+  @override
+  String get billSetupCustomerSubtitle => 'नाव, फोन, पत्ता आणि GSTIN';
+
+  @override
+  String get billSetupTaxSummary => 'GST / HSN सारांश';
+
+  @override
+  String get billSetupTaxSummarySubtitle =>
+      'A4/A5 बिल व बिल लिंकवरील HSN कॉलम आणि कर तक्ता';
+
+  @override
+  String get billSetupNote => 'बिलावरील टीप';
+
+  @override
+  String get billSetupNoteSubtitle => 'प्रत्येक बिलावर छापला जाणारा संदेश';
+
+  @override
+  String get billSetupNoteText => 'टीपेचा मजकूर';
+
+  @override
+  String get billSetupNoteHint => 'उदा. ₹500 वरील खरेदीवर मोफत होम डिलिव्हरी';
+
+  @override
+  String get billSetupTerms => 'अटी व शर्ती';
+
+  @override
+  String get billSetupTermsText => 'अटींचा मजकूर';
+
+  @override
+  String get billSetupTermsHint => 'उदा. विकलेला माल परत घेतला जाणार नाही';
+
+  @override
+  String get billSetupBank => 'बँक तपशील';
+
+  @override
+  String get billSetupBankAccountName => 'खातेदाराचे नाव';
+
+  @override
+  String get billSetupBankAccountNo => 'खाते क्रमांक';
+
+  @override
+  String get billSetupBankName => 'बँकेचे नाव';
+
+  @override
+  String get billSetupBankBranch => 'शाखा';
+
+  @override
+  String get billSetupBankIfsc => 'IFSC कोड';
+
+  @override
+  String get billSetupBankNote => 'टीप (ऐच्छिक)';
+
+  @override
+  String get billSetupIfscInvalid => 'चुकीचा IFSC (उदा. SBIN0001234)';
+
+  @override
+  String get billSetupAccountNoInvalid => 'खाते क्रमांक 6–20 अंकी असावा';
+
+  @override
+  String get billSetupBankIncomplete =>
+      'योग्य खाते क्रमांक व IFSC भरा, किंवा बँक तपशील अनटिक करा';
+
+  @override
+  String get billSetupSaved => 'बिल सेटअप जतन केला';
+
+  @override
+  String get billSetupUnsupported =>
+      'बिल सेटअपसाठी सर्व्हर अपडेट आवश्यक आहे. कृपया सपोर्टशी संपर्क साधा.';
 
   @override
   String get billingPhoneInvalid => 'ग्राहक क्रमांक १० अंकी असणे आवश्यक आहे.';

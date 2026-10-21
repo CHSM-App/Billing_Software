@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import '../api.dart';
 import '../storage.dart';
 import '../utils/platform_utils.dart' show isDesktopDevice;
+import 'bill_settings.dart';
 
 // ---------------------------------------------------------------------------
 // LicenseStatus — result of a license check
@@ -179,6 +180,8 @@ class LicenseService {
         await syncBusinessLogo(
             data['logo_url'] as String?, data['print_logo'] as bool);
       }
+      // Billing Setup, same reason. No key (older backend) = left alone.
+      await BillSettings.sync(data);
 
       final result = _evaluate(
         status:          data['status'] as String,

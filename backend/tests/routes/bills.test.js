@@ -1461,6 +1461,37 @@ describe('order-card line overrides', () => {
       expect(tx.sql(/price_list_id = @price_list_id/)).toBeUndefined();
     });
   });
+
+  // Migration 061: customer address / GSTIN snapshot on the bill.
+  describe('customer_address / customer_gstin', () => {
+    const update = (body) => request(app)
+      .put(`/api/bills/${BILL_ID}/update-items`)
+      .set(authHeader({ role: 'cashier' }))
+      .send({ items: [{ item_id: ITEM_ID, quantity: 2 }], ...body });
+
+    test('POST stores them trimmed, GSTIN upper-cased', async () => {
+      const tx = routeTx();
+      const res = await post('cashier', {}, { customer_address: ' Plot 5 ', customer_gstin: '27abcde1234f1z5' });
+      expect(res.status).toBe(201);
+      expect(tx.bill().customer_address).toBe('Plot 5');
+      expect(tx.bill().customer_gstin).toBe('27ABCDE1234F1Z5');
+    });
+
+    test('an older app that never sends them stores NULL', async () => {
+      const tx = routeTx();
+      await post('cashier', {});
+      expect(tx.bill().customer_address).toBeNull();
+      expect(tx.bill().customer_gstin).toBeNull();
+    });
+
+    test('update-items sets them only when the key is sent', async () => {
+      const tx = routeTx();
+      await update({});
+      expect(tx.sql(/customer_address = @customer_address|customer_gstin = @customer_gstin/)).toBeUndefined();
+      await update({ customer_address: 'Plot 5', customer_gstin: '27ABCDE1234F1Z5' });
+      expect(tx.sql(/customer_address = @customer_address/)).toMatch(/customer_gstin = @customer_gstin/);
+    });
+  });
 });
 
 // ------------------------------------------------------------------

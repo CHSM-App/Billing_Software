@@ -124,6 +124,7 @@ class PrinterService {
       bool gstEnabled = true,
       dynamic labels,
       ui.Image? logo,
+      dynamic settings,
       int paperDots = 576}) async {
     throw PrinterException('Receipt preview is not supported in the browser.');
   }
@@ -137,6 +138,7 @@ class PrinterService {
       bool gstEnabled = true,
       dynamic labels,
       ui.Image? logo,
+      dynamic settings,
       int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }
@@ -150,6 +152,7 @@ class PrinterService {
       bool gstEnabled = true,
       dynamic labels,
       ui.Image? logo,
+      dynamic settings,
       int paperDots = 576}) async {
     throw PrinterException('Printing is not supported in the browser.');
   }

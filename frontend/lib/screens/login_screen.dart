@@ -13,6 +13,7 @@ import 'main_shell.dart';
 import 'license_screen.dart';
 import '../services/license_service.dart';
 import '../services/notification_service.dart';
+import '../services/bill_settings.dart';
 
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
@@ -272,6 +273,8 @@ class _LoginScreenState extends ConsumerState<_LoginView>
       // Cache the shop logo too, so it prints on receipts offline.
       await syncBusinessLogo(
           business['logo_url'] as String?, business['print_logo'] == true);
+      // And what the owner chose to print (Billing Setup).
+      await BillSettings.sync(business);
       NotificationService.instance.init();
       await ref.read(sessionProvider.notifier).refresh();
       ref.invalidate(itemsProvider);

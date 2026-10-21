@@ -123,6 +123,8 @@ class OpenDraftsNotifier extends AsyncNotifier<List<Bill>> {
       tableId: row['table_id'] as String?,
       customerName: row['customer_name'] as String?,
       customerPhone: row['customer_phone'] as String?,
+      customerAddress: row['customer_address'] as String?,
+      customerGstin: row['customer_gstin'] as String?,
       subtotal: (row['subtotal'] as num).toDouble(),
       taxAmount: (row['tax_amount'] as num).toDouble(),
       discountAmount: (row['discount_amount'] as num?)?.toDouble() ?? 0.0,

@@ -3,11 +3,12 @@ import 'dart:convert';
 import 'dart:developer' as dev;
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'https://sophisticated-cdna-laboratory-myspace.trycloudflare.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
 
@@ -1055,6 +1056,8 @@ Future<Map<String, dynamic>> updateBillItems(
   List<Map<String, dynamic>> items, {
   String? customerName,
   String? customerPhone,
+  String? customerAddress,
+  String? customerGstin,
   double? discountAmount,
   /// Replaces the draft's additional charges when non-null (an empty list
   /// clears them); null leaves whatever the draft already carries.
@@ -1069,6 +1072,8 @@ Future<Map<String, dynamic>> updateBillItems(
       'items': items,
       if (customerName != null) 'customer_name': customerName,
       if (customerPhone != null) 'customer_phone': customerPhone,
+      if (customerAddress != null) 'customer_address': customerAddress,
+      if (customerGstin != null) 'customer_gstin': customerGstin,
       if (discountAmount != null) 'discount_amount': discountAmount,
       if (additionalCharges != null) 'additional_charges': additionalCharges,
       if (!identical(priceListId, _keepPriceList)) 'price_list_id': priceListId,
@@ -1087,7 +1092,14 @@ Future<void> voidBill(String id) async {
 // ---------------------------------------------------------------------------
 
 Future<Map<String, dynamic>> getLicense() async {
-  final body = _parse(await _authGet(Uri.parse('$baseUrl/license')));
+  // ?v= tells the server which build this user runs (admin dashboard). A
+  // failed lookup just leaves it off — never block the license check on it.
+  String v = '';
+  try {
+    final info = await PackageInfo.fromPlatform();
+    v = '?v=${Uri.encodeQueryComponent('${info.version}+${info.buildNumber}')}';
+  } catch (_) {}
+  final body = _parse(await _authGet(Uri.parse('$baseUrl/license$v')));
   return _asJsonMap(body, statusCode: 200);
 }
 

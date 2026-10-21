@@ -188,6 +188,8 @@ class SyncService {
       if (row['table_id']       != null) 'table_id':       row['table_id'],
       if (row['customer_name']  != null) 'customer_name':  row['customer_name'],
       if (row['customer_phone'] != null) 'customer_phone': row['customer_phone'],
+      if (row['customer_address'] != null) 'customer_address': row['customer_address'],
+      if (row['customer_gstin'] != null) 'customer_gstin': row['customer_gstin'],
       // Preserve the discount and the invoice round-off exactly as printed on
       // the customer's receipt; the server stores round_off verbatim (like
       // bill_number) rather than recomputing it.
@@ -256,6 +258,8 @@ class SyncService {
       if (row['table_id']       != null) 'table_id':       row['table_id'],
       if (row['customer_name']  != null) 'customer_name':  row['customer_name'],
       if (row['customer_phone'] != null) 'customer_phone': row['customer_phone'],
+      if (row['customer_address'] != null) 'customer_address': row['customer_address'],
+      if (row['customer_gstin'] != null) 'customer_gstin': row['customer_gstin'],
       if (discount > 0)                  'discount_amount': discount,
       ..._chargesPayload(row),
       'payment_mode': row['payment_mode'],

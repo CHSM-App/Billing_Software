@@ -28,6 +28,7 @@ import 'printer_test_windows_screen.dart'
     if (dart.library.html) 'printer_test_windows_screen_web.dart';
 import 'staff_screen.dart';
 import 'price_lists_screen.dart';
+import 'billing_setup_screen.dart';
 import 'business_profile_screen.dart';
 import 'marathi_print_test_screen.dart';
 import 'raster_lab_screen.dart';
@@ -416,6 +417,21 @@ class _SettingsContentState extends State<_SettingsContent>
                           context,
                           MaterialPageRoute(
                               builder: (_) => const _TogglesScreen()),
+                        ),
+                      ),
+                      // What prints on a bill: header lines, cashier,
+                      // customer, terms, bank details.
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.receipt_outlined,
+                        iconColor: const Color(0xFF0EA5E9),
+                        title: l10n.billSetupTitle,
+                        subtitle: l10n.billSetupSubtitle,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const BillingSetupScreen()),
                         ),
                       ),
                       const SizedBox(height: AppSpacing.space8),

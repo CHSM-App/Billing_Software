@@ -133,6 +133,14 @@ const { upsertCustomer, syncCustomers, canonicalPhone, billPhoneMatch } = requir
 
 const router = express.Router();
 
+// Customer address / GSTIN (migration 061): trimmed, capped, blank = NULL.
+// No format check on the GSTIN — the app validates it, and a queued offline
+// bill must never fail to sync over a typo.
+function customerText(v, max, upper = false) {
+  const t = typeof v === 'string' ? v.trim() : '';
+  return t ? (upper ? t.toUpperCase() : t).slice(0, max) : null;
+}
+
 // Re-derive a bill's round_off from its (already persisted) total & discount so
 // the final payable stays reconciled after a totals-changing edit. When rounding
 // is disabled for the business it is forced to 0. ROUND(x, 0) in SQL Server is
@@ -552,6 +560,7 @@ async function fetchBill(billId, businessId) {
     .input('business_id', sql.UniqueIdentifier, businessId)
     .query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
+             b.customer_address, b.customer_gstin,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
              b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
              b.payment_status, b.settled_at, b.settled_payment_mode, b.credit_amount,
@@ -602,7 +611,7 @@ async function fetchBill(billId, businessId) {
 
 // POST /api/bills
 router.post('/', requireAuth, async (req, res) => {
-  const { items, table_id, customer_name, customer_phone, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at } = req.body;
+  const { items, table_id, customer_name, customer_phone, customer_address, customer_gstin, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
@@ -868,6 +877,8 @@ router.post('/', requireAuth, async (req, res) => {
         .input('table_id',        sql.UniqueIdentifier, table_id || null)
         .input('customer_name',   sql.NVarChar(200),    customer_name || null)
         .input('customer_phone',  sql.NVarChar(20),     customer_phone || null)
+        .input('customer_address', sql.NVarChar(500),   customerText(customer_address, 500))
+        .input('customer_gstin',  sql.NVarChar(15),     customerText(customer_gstin, 15, true))
         .input('subtotal',        sql.Decimal(10, 2),   subtotal)
         .input('tax_amount',      sql.Decimal(10, 2),   taxAmount)
         .input('discount_amount', sql.Decimal(10, 2),   discountAmount)
@@ -888,12 +899,14 @@ router.post('/', requireAuth, async (req, res) => {
         // client time is both dates. A draft gets finalized_at on finalize.
         .query(`
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
+                             customer_address, customer_gstin,
                              subtotal, tax_amount, discount_amount, charges_amount, additional_charges,
                              total, round_off, payment_mode, payment_status, credit_amount, status,
                              created_by_user_id, client_bill_id, receipt_token, price_list_id,
                              created_at, finalized_at, finalized_by_user_id)
           OUTPUT INSERTED.id
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
+                  @customer_address, @customer_gstin,
                   @subtotal, @tax_amount, @discount_amount, @charges_amount, @additional_charges,
                   @total, @round_off, @payment_mode, @payment_status, @credit_amount, @status,
                   @created_by_user_id, @client_bill_id, @receipt_token, @price_list_id,
@@ -978,7 +991,7 @@ router.post('/', requireAuth, async (req, res) => {
 
       // The bill is saved — keep the customers table in step. Not awaited and
       // never throws (customers.js), so it cannot affect this sale.
-      upsertCustomer(req.user.business_id, customer_phone, customer_name);
+      upsertCustomer(req.user.business_id, customer_phone, customer_name, customer_address, customer_gstin);
 
       // Collect stock targets that just crossed below their threshold (stock was
       // above before, at/below after). Bundle into one notification. For variant
@@ -1074,6 +1087,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const billsResult = await request.query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
+             b.customer_address, b.customer_gstin,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
              b.total, b.round_off, b.payment_mode, b.status,
              b.payment_status, b.credit_amount, b.credit_collected,
@@ -1129,6 +1143,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
+               b.customer_address, b.customer_gstin,
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
                b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
                b.created_by_user_id, b.created_at, b.receipt_token,
@@ -1284,6 +1299,8 @@ router.get('/customers/search', requireAuth, async (req, res) => {
         SELECT TOP (${limit})
           c.name             AS customer_name,
           c.phone            AS customer_phone,
+          c.address          AS customer_address,
+          c.gstin            AS customer_gstin,
           v.visits,
           v.last_bill_at
         FROM customers c
@@ -1307,6 +1324,8 @@ router.get('/customers/search', requireAuth, async (req, res) => {
         seen.set(key, {
           customer_name: r.customer_name || '',
           customer_phone: phone,
+          customer_address: r.customer_address || '',
+          customer_gstin: r.customer_gstin || '',
           visits: Number(r.visits),
           last_bill_at: r.last_bill_at,
         });
@@ -1771,7 +1790,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
 // PUT /api/bills/:id/update-items — replace all items on a draft bill
 router.put('/:id/update-items', requireAuth, async (req, res) => {
-  const { items, customer_name, customer_phone, discount_amount, additional_charges } = req.body;
+  const { items, customer_name, customer_phone, customer_address, customer_gstin, discount_amount, additional_charges } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required' });
@@ -1780,6 +1799,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
   // them (e.g. the kitchen) never wipe existing details.
   const setCustomerName = Object.prototype.hasOwnProperty.call(req.body, 'customer_name');
   const setCustomerPhone = Object.prototype.hasOwnProperty.call(req.body, 'customer_phone');
+  const setCustomerAddress = Object.prototype.hasOwnProperty.call(req.body, 'customer_address');
+  const setCustomerGstin = Object.prototype.hasOwnProperty.call(req.body, 'customer_gstin');
   const setDiscount = Object.prototype.hasOwnProperty.call(req.body, 'discount_amount');
   // additional_charges: sending the key replaces the whole list (an empty array
   // clears it); omitting it keeps whatever the draft already carries.
@@ -2005,6 +2026,14 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         totalsReq.input('customer_phone', sql.NVarChar(20), customer_phone || null);
         extraSets.push('customer_phone = @customer_phone');
       }
+      if (setCustomerAddress) {
+        totalsReq.input('customer_address', sql.NVarChar(500), customerText(customer_address, 500));
+        extraSets.push('customer_address = @customer_address');
+      }
+      if (setCustomerGstin) {
+        totalsReq.input('customer_gstin', sql.NVarChar(15), customerText(customer_gstin, 15, true));
+        extraSets.push('customer_gstin = @customer_gstin');
+      }
       if (setDiscount) {
         const discountAmount = Math.max(parseFloat(discount_amount) || 0, 0);
         totalsReq.input('discount_amount', sql.Decimal(10, 2), discountAmount);
@@ -2085,8 +2114,9 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
 
     // After commit, not awaited — see customers.js. Uses the stored bill so a
     // name-only edit still knows the phone.
-    if (setCustomerName || setCustomerPhone) {
-      upsertCustomer(req.user.business_id, bill.customer_phone, bill.customer_name);
+    if (setCustomerName || setCustomerPhone || setCustomerAddress || setCustomerGstin) {
+      upsertCustomer(req.user.business_id, bill.customer_phone, bill.customer_name,
+        bill.customer_address, bill.customer_gstin);
     }
 
     audit.logBillItemsUpdated(

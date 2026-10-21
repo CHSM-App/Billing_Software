@@ -205,6 +205,9 @@
     <div class="kv"><span class="k">Bills</span><span id="dBills">—</span></div>
     <div class="kv"><span class="k">Items</span><span id="dItems">—</span></div>
 
+    <div class="section-label">Users &amp; App Version</div>
+    <div id="dUsers"></div>
+
     <div class="section-label">Subscription</div>
     <div class="toggle-row">
       <span>Trial subscription</span>
@@ -529,6 +532,17 @@
       + (b.last_active_at ? ' <span class="muted">'+esc(new Date(b.last_active_at).toLocaleString('en-IN'))+'</span>' : '');
     $('dBills').textContent = b.bill_count!=null ? b.bill_count : 0;
     $('dItems').textContent = b.item_count!=null ? b.item_count : 0;
+    // Owner first (server orders it). No version = that user hasn't opened a
+    // build that reports one yet.
+    var users = b.users || [];
+    $('dUsers').innerHTML = users.length ? users.map(function(u){
+      return '<div class="kv"><span>'+esc(u.name)
+        + ' <span class="chip '+(u.role==='owner'?'blue':'gray')+'">'+esc(u.role)+'</span>'
+        + (u.is_active ? '' : ' <span class="chip red">disabled</span>')
+        + '<div class="biz-sub">'+esc(u.phone)+'</div></span>'
+        + (u.app_version ? '<span>v'+esc(u.app_version)+'</span>' : '<span class="muted">unknown</span>')
+        + '</div>';
+    }).join('') : '<div class="muted">No users.</div>';
 
     $('fTrial').checked = !!sub.is_trial;
     $('fStatus').value  = sub.status || 'active';

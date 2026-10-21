@@ -78,6 +78,12 @@ describe('POST /api/register', () => {
     const res = await request(app).post('/api/register').send(validBody);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+    // New businesses start on the paid WhatsApp API with a 30-day trial.
+    const insertBiz = mockRequest.query.mock.calls.find(c => /INSERT INTO businesses/.test(c[0]))[0];
+    expect(insertBiz).toMatch(/whatsapp_mode[\s\S]*'api'/);
+    const days = (new Date(res.body.trial_expires_at) - Date.now()) / 86400000;
+    expect(days).toBeGreaterThan(29.9);
+    expect(days).toBeLessThanOrEqual(30);
   });
 
   test('accepts optional GSTIN/PAN/FSSAI and enables GST when a GSTIN is given', async () => {
@@ -226,6 +232,22 @@ describe('POST /api/login', () => {
       .send({ phone: OWNER_PHONE, pin: VALID_PIN });
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/pending verification/i);
+  });
+
+  test('returns 403 account_disabled for a disabled staff account', async () => {
+    const userRow = await makeUserRow();
+    userRow.role = 'cashier';
+    userRow.is_active = false;
+    mockRequest.query.mockResolvedValueOnce({ recordset: [userRow], rowsAffected: [1] });
+
+    const res = await request(app)
+      .post('/api/login')
+      .send({ phone: OWNER_PHONE, pin: VALID_PIN });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('account_disabled');
+    // The mock hands back whatever row it is given, so also pin the real SQL:
+    // the check is dead unless the lookup actually selects the column.
+    expect(mockRequest.query.mock.calls[0][0]).toMatch(/u\.is_active/);
   });
 
   test('returns 423 for locked account', async () => {

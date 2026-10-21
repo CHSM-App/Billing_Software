@@ -27,6 +27,8 @@ CREATE TABLE businesses (
     logo_url         NVARCHAR(1000)   NULL,
     bill_prefix      NVARCHAR(10)     NULL DEFAULT 'INV',
     bill_footer_note NVARCHAR(500)    NULL,
+    -- What prints on a bill, JSON (migration 061). Shape: src/billSettings.js.
+    bill_settings    NVARCHAR(2000)   NULL,
     -- Online store (added via migration 037) — a public, shop-level ordering
     -- link. See online_orders at the bottom of this file.
     store_enabled          BIT           NOT NULL DEFAULT 0,
@@ -210,6 +212,8 @@ CREATE TABLE bills (
     table_id            UNIQUEIDENTIFIER NULL,
     customer_name       NVARCHAR(200)    NULL,
     customer_phone      NVARCHAR(20)     NULL,
+    customer_address    NVARCHAR(500)    NULL,   -- migration 061
+    customer_gstin      NVARCHAR(15)     NULL,   -- migration 061
     subtotal            DECIMAL(10,2)    NOT NULL,
     tax_amount          DECIMAL(10,2)    NOT NULL DEFAULT 0,
     -- Additional charges (delivery, packaging, ...) — migration 035. Folded

@@ -5,6 +5,7 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const audit = require('../audit');
 const logger = require('../logger');
+const billSettings = require('../billSettings');
 const {
   uniqueStoreToken, validateSlug, isSlugAvailable, looksAutoDerived,
 } = require('../storeToken');
@@ -19,7 +20,7 @@ const PROFILE_COLUMNS = `
   self_order_enabled,
   gst_number, pan_number, fssai_number, email, website,
   city, state, pincode, logo_url, print_logo,
-  bill_prefix, bill_footer_note,
+  bill_prefix, bill_footer_note, bill_settings,
   gst_enabled, default_sac_code, round_off_enabled, show_item_no,
   store_enabled, store_token, store_delivery_enabled,
   store_delivery_charge, store_payment_qr_url, store_upi_id,
@@ -65,8 +66,8 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
           b.inventory_enabled, b.has_barcode_scanner,
           b.self_order_enabled,
           b.gst_number, b.pan_number, b.fssai_number, b.email, b.website,
-          b.city, b.state, b.pincode, b.logo_url,
-          b.bill_prefix, b.bill_footer_note,
+          b.city, b.state, b.pincode, b.logo_url, b.print_logo,
+          b.bill_prefix, b.bill_footer_note, b.bill_settings,
           b.gst_enabled, b.default_sac_code,
           b.round_off_enabled, b.show_item_no,
           b.store_enabled, b.store_token,
@@ -146,6 +147,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     print_logo,
     bill_prefix,
     bill_footer_note,
+    bill_settings,
     self_order_enabled,
     inventory_enabled,
     has_barcode_scanner,
@@ -209,6 +211,13 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       bill_footer_note.length > 500) {
     return res.status(400).json({ error: 'Bill footer note must be 500 characters or less' });
   }
+  // Print settings arrive as an object and are stored as JSON text.
+  let billSettingsText;
+  if (bill_settings !== undefined) {
+    const r = billSettings.normalize(bill_settings);
+    if (r.error) return res.status(400).json({ error: r.error });
+    billSettingsText = r.value;
+  }
   // Online store money knobs. Clamping is NOT enough here — a bad advance % or a
   // negative delivery charge would be quoted to real customers on a public page.
   if (store_advance_percent !== undefined && store_advance_percent !== null) {
@@ -253,6 +262,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     print_logo,
     bill_prefix,
     bill_footer_note,
+    bill_settings: billSettingsText,
     self_order_enabled,
     inventory_enabled,
     has_barcode_scanner,
@@ -287,7 +297,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
         SELECT
           name, address, phone, email, website,
           city, state, pincode, gst_number, pan_number, fssai_number,
-          logo_url, print_logo, bill_prefix, bill_footer_note,
+          logo_url, print_logo, bill_prefix, bill_footer_note, bill_settings,
           gst_enabled, default_sac_code, round_off_enabled, show_item_no,
           store_enabled, store_delivery_enabled,
           store_delivery_charge, store_advance_percent, store_payment_required,
@@ -424,7 +434,9 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     const oldSnapshot = {};
     const newSnapshot = {};
     for (const [key] of fields) {
-      oldSnapshot[key] = old[key] ?? null;
+      oldSnapshot[key] = key === 'bill_settings'
+        ? billSettings.parse(old[key])
+        : (old[key] ?? null);
       newSnapshot[key] = (newBusiness[key] ?? null);
     }
 
@@ -571,6 +583,7 @@ function _formatBusiness(row) {
     print_logo:          !!row.print_logo,
     bill_prefix:         row.bill_prefix ?? 'INV',
     bill_footer_note:    row.bill_footer_note ?? null,
+    bill_settings:       billSettings.parse(row.bill_settings),
     gst_enabled:         !!row.gst_enabled,
     default_sac_code:    row.default_sac_code ?? null,
     round_off_enabled:   !!row.round_off_enabled,
@@ -608,6 +621,7 @@ function _sqlTypeFor(key) {
     print_logo:       sql.Bit,
     bill_prefix:      sql.NVarChar(10),
     bill_footer_note: sql.NVarChar(500),
+    bill_settings:    sql.NVarChar(2000),
     self_order_enabled: sql.Bit,
     inventory_enabled: sql.Bit,
     has_barcode_scanner: sql.Bit,

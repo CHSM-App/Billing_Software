@@ -244,6 +244,8 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
         tableId: b.tableId,
         customerName: b.customerName,
         customerPhone: b.customerPhone,
+        customerAddress: b.customerAddress,
+        customerGstin: b.customerGstin,
         subtotal: b.subtotal,
         taxAmount: b.taxAmount,
         discountAmount: b.discountAmount,

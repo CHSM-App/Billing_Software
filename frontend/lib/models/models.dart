@@ -487,6 +487,10 @@ class Bill {
   final String? tableNumber;
   final String? customerName;
   final String? customerPhone;
+  /// Optional B2B details (migration 061), printed under Bill To. Null on
+  /// older bills and from older backends.
+  final String? customerAddress;
+  final String? customerGstin;
   final double subtotal;
   final double taxAmount;
   final double discountAmount;
@@ -646,6 +650,8 @@ class Bill {
     this.tableNumber,
     this.customerName,
     this.customerPhone,
+    this.customerAddress,
+    this.customerGstin,
     required this.subtotal,
     required this.taxAmount,
     this.discountAmount = 0.0,
@@ -684,6 +690,8 @@ class Bill {
         tableNumber: j['table_number'],
         customerName: j['customer_name'],
         customerPhone: j['customer_phone'],
+        customerAddress: j['customer_address'] as String?,
+        customerGstin: j['customer_gstin'] as String?,
         subtotal: double.parse(j['subtotal'].toString()),
         taxAmount: double.parse(j['tax_amount'].toString()),
         discountAmount: j['discount_amount'] != null

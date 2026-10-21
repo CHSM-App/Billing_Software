@@ -999,7 +999,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get registerSuccessBody =>
-      'Registration successful. Your 4-day free trial has started.\n\nLog in now to start billing.';
+      'Registration successful. Your 30-day free trial has started.\n\nLog in now to start billing.';
 
   @override
   String get registerBackToLogin => 'Back to Login';
@@ -1051,6 +1051,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get receiptGstin => 'GSTIN:';
+
+  @override
+  String get receiptAddress => 'Address:';
+
+  @override
+  String get receiptTerms => 'Terms & Conditions';
+
+  @override
+  String get receiptBankDetails => 'Bank Details';
+
+  @override
+  String get receiptNote => 'Note';
 
   @override
   String get receiptDiscount => 'Discount:';
@@ -1379,6 +1391,129 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingCustomerBills => 'Customer\'s bills';
+
+  @override
+  String get billingCustomerMoreDetails => 'More details (address, GSTIN)';
+
+  @override
+  String get billingCustomerAddressLabel => 'Customer address';
+
+  @override
+  String get billingCustomerGstinLabel => 'Customer GSTIN';
+
+  @override
+  String get billingCustomerGstinInvalid =>
+      'Check the GSTIN (e.g. 27ABCDE1234F1Z5)';
+
+  @override
+  String get billSetupTitle => 'Billing Setup';
+
+  @override
+  String get billSetupSubtitle => 'Choose what prints on your bills';
+
+  @override
+  String get billSetupIntro =>
+      'Ticked items print on every bill: thermal, A4/A5 and the bill link sent to customers.';
+
+  @override
+  String get billSetupLogo => 'Shop logo';
+
+  @override
+  String get billSetupLogoMissing => 'Upload a logo from Settings first';
+
+  @override
+  String get billSetupAddress => 'Shop address';
+
+  @override
+  String get billSetupPhone => 'Shop phone';
+
+  @override
+  String get billSetupAltPhone => 'Alternate mobile number (optional)';
+
+  @override
+  String get billSetupAltPhoneInvalid => 'Enter a valid phone number';
+
+  @override
+  String get billSetupGstin => 'Shop GSTIN';
+
+  @override
+  String get billSetupFssai => 'FSSAI number';
+
+  @override
+  String get billSetupCashier => 'Cashier name';
+
+  @override
+  String get billSetupCustomer => 'Customer details';
+
+  @override
+  String get billSetupCustomerSubtitle => 'Name, phone, address and GSTIN';
+
+  @override
+  String get billSetupTaxSummary => 'GST / HSN summary';
+
+  @override
+  String get billSetupTaxSummarySubtitle =>
+      'HSN column and tax table on A4/A5 bills and the bill link';
+
+  @override
+  String get billSetupNote => 'Note on bill';
+
+  @override
+  String get billSetupNoteSubtitle => 'A message printed on every bill';
+
+  @override
+  String get billSetupNoteText => 'Note text';
+
+  @override
+  String get billSetupNoteHint => 'e.g. Free home delivery above Rs.500';
+
+  @override
+  String get billSetupTerms => 'Terms and conditions';
+
+  @override
+  String get billSetupTermsText => 'Terms text';
+
+  @override
+  String get billSetupTermsHint =>
+      'e.g. Goods once sold will not be taken back';
+
+  @override
+  String get billSetupBank => 'Bank details';
+
+  @override
+  String get billSetupBankAccountName => 'Account name';
+
+  @override
+  String get billSetupBankAccountNo => 'Account number';
+
+  @override
+  String get billSetupBankName => 'Bank name';
+
+  @override
+  String get billSetupBankBranch => 'Branch';
+
+  @override
+  String get billSetupBankIfsc => 'IFSC code';
+
+  @override
+  String get billSetupBankNote => 'Note (optional)';
+
+  @override
+  String get billSetupIfscInvalid => 'Invalid IFSC (e.g. SBIN0001234)';
+
+  @override
+  String get billSetupAccountNoInvalid => 'Account number must be 6–20 digits';
+
+  @override
+  String get billSetupBankIncomplete =>
+      'Enter a valid account number and IFSC, or untick Bank details';
+
+  @override
+  String get billSetupSaved => 'Billing setup saved';
+
+  @override
+  String get billSetupUnsupported =>
+      'Billing Setup needs a server update. Please contact support.';
 
   @override
   String get billingPhoneInvalid => 'Customer No. must be 10 digits.';

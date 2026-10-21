@@ -25,6 +25,7 @@ import 'package:flutter_thermal_printer/printer_manager.dart' as ftp
     show PrinterManager;
 
 import 'receipt_labels.dart';
+import 'bill_settings.dart';
 import 'kitchen_ticket.dart';
 import 'raster_lab.dart';
 import 'barcode_image.dart';
@@ -738,7 +739,8 @@ class PrinterService {
       String? businessFssai,
       bool gstEnabled = true,
       ReceiptLabels? labels,
-      ui.Image? logo}) {
+      ui.Image? logo,
+      BillSettings settings = const BillSettings()}) {
     // Same content-fitted columns as the ASCII path, so both renderings of a
     // given bill divide the paper identically.
     final p = _fitProfile(basep, bill, gstEnabled, labels);
@@ -769,7 +771,9 @@ class PrinterService {
         businessName: businessName,
         businessAddress: businessAddress,
         businessPhone: businessPhone,
-        businessGstin: gst ? businessGstin : null,
+        // Billing Setup hides only the header line; [gst] still drives the
+        // CGST/SGST split below.
+        businessGstin: gst && settings.showGstin ? businessGstin : null,
         businessFssai: fssai ? businessFssai : null,
         cols: p.cols,
         sizeTitle: sizeTitle,
@@ -794,23 +798,27 @@ class PrinterService {
           widthFraction: 1.0),
     ], size: sizeBody));
     // Who settled it — tells staff apart now that prices can be edited.
-    if (bill.billedByName != null) {
+    if (settings.showCashier && bill.billedByName != null) {
       rows.add(ReceiptRow.cols([
         ReceiptCell('${labels?.billedBy ?? 'Cashier:'} ${bill.billedByName}',
             widthFraction: 1.0),
       ], size: sizeBody));
     }
-    if (bill.customerName != null && bill.customerName!.isNotEmpty) {
-      rows.add(ReceiptRow.cols([
-        ReceiptCell('${labels?.customer ?? 'Cust:'} ${bill.customerName}',
-            widthFraction: 1.0),
-      ], size: sizeBody));
-    }
-    if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty) {
-      rows.add(ReceiptRow.cols([
-        ReceiptCell('${labels?.customerPhone ?? 'Ph:'} ${bill.customerPhone}',
-            widthFraction: 1.0),
-      ], size: sizeBody));
+    if (settings.showCustomer) {
+      ReceiptRow line(String t) => ReceiptRow.cols(
+          [ReceiptCell(t, widthFraction: 1.0)], size: sizeBody);
+      if (bill.customerName != null && bill.customerName!.isNotEmpty) {
+        rows.add(line('${labels?.customer ?? 'Cust:'} ${bill.customerName}'));
+      }
+      if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty) {
+        rows.add(line('${labels?.customerPhone ?? 'Ph:'} ${bill.customerPhone}'));
+      }
+      if (bill.customerAddress != null && bill.customerAddress!.isNotEmpty) {
+        rows.add(line('${labels?.address ?? 'Address:'} ${bill.customerAddress}'));
+      }
+      if (bill.customerGstin != null && bill.customerGstin!.isNotEmpty) {
+        rows.add(line('${labels?.gstin ?? 'GSTIN:'} ${bill.customerGstin}'));
+      }
     }
     rows.add(ReceiptRow.rule());
 
@@ -927,6 +935,37 @@ class PrinterService {
       rows.add(total(label, value, bold: bold));
     }
     rows.add(ReceiptRow.rule());
+    // Billing Setup: the owner's terms note and bank details, when set.
+    final shopNote = settings.noteText;
+    if (shopNote.isNotEmpty) {
+      rows.add(ReceiptRow.center(labels?.note ?? 'Note',
+          size: sizeTotal, bold: true));
+      for (final l in _wrapLines(shopNote, p.cols)) {
+        rows.add(ReceiptRow.center(l, size: sizeTotal));
+      }
+    }
+    final note = settings.footerNote?.trim() ?? '';
+    if (settings.showTerms && note.isNotEmpty) {
+      rows.add(ReceiptRow.center(labels?.terms ?? 'Terms & Conditions',
+          size: sizeTotal, bold: true));
+      for (final l in _wrapLines(note, p.cols)) {
+        rows.add(ReceiptRow.center(l, size: sizeTotal));
+      }
+    }
+    final bank = settings.bankLines;
+    if (bank.isNotEmpty) {
+      rows.add(ReceiptRow.cols([
+        ReceiptCell(labels?.bankDetails ?? 'Bank Details', widthFraction: 1.0),
+      ], size: sizeTotal, bold: true));
+      for (final l in bank) {
+        rows.add(ReceiptRow.cols([ReceiptCell(l, widthFraction: 1.0)], size: sizeTotal));
+      }
+    }
+    if (shopNote.isNotEmpty ||
+        (settings.showTerms && note.isNotEmpty) ||
+        bank.isNotEmpty) {
+      rows.add(ReceiptRow.rule());
+    }
     rows.add(ReceiptRow.center(
         labels?.thankYou ?? 'Thank you, visit again!', size: sizeBody));
     // Small italic brand line under the thank-you note.
@@ -1157,6 +1196,7 @@ class PrinterService {
       bool gstEnabled = true,
       ReceiptLabels? labels,
       ui.Image? logo,
+      BillSettings settings = const BillSettings(),
       int paperDots = 576}) async {
     final profile = _profileForDots(paperDots);
     final rows = _buildReceiptRows(bill, profile,
@@ -1167,7 +1207,8 @@ class PrinterService {
         businessFssai: businessFssai,
         gstEnabled: gstEnabled,
         labels: labels,
-        logo: logo);
+        logo: logo,
+        settings: settings);
     return RasterLab.receiptPreviewPng(rows, width: paperDots);
   }
 
@@ -1226,6 +1267,7 @@ class PrinterService {
       bool gstEnabled = true,
       ReceiptLabels? labels,
       ui.Image? logo,
+      BillSettings settings = const BillSettings(),
       int paperDots = 576}) async {
     final printer = await getActivePrinter();
     if (printer == null) throw PrinterException('No printer configured');
@@ -1262,7 +1304,8 @@ class PrinterService {
         businessFssai: businessFssai,
         gstEnabled: gstEnabled,
         labels: labels,
-        logo: logo);
+        logo: logo,
+        settings: settings);
     final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
     await _printBytes(printer, raster, chunkSize: 0);
 
@@ -1308,6 +1351,7 @@ class PrinterService {
       bool gstEnabled = true,
       ReceiptLabels? labels,
       ui.Image? logo,
+      BillSettings settings = const BillSettings(),
       int paperDots = 576}) async {
     for (var i = 0; i < bills.length; i++) {
       await printBill(bills[i],
@@ -1319,6 +1363,7 @@ class PrinterService {
           gstEnabled: gstEnabled,
           labels: labels,
           logo: logo,
+          settings: settings,
           paperDots: paperDots);
       // Let the printer finish and the SPP link settle before the next job.
       if (i < bills.length - 1) {

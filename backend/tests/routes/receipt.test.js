@@ -330,3 +330,68 @@ describe('amountToWords', () => {
     [12345678, 'One Crore Twenty Three Lakh Forty Five Thousand Six Hundred Seventy Eight Rupees only'],
   ])('%p → %s', (n, words) => expect(amountToWords(n)).toBe(words));
 });
+
+describe('GET /receipt/:token/pdf', () => {
+  // The token ends up in a spawned browser's URL — anything off-alphabet must
+  // be refused before a process starts.
+  it('rejects a malformed token without launching a browser', async () => {
+    const res = await request(app).get('/receipt/' + encodeURIComponent('a&b c<x>') + '/pdf');
+    expect(res.status).toBe(404);
+    const res2 = await request(app).get('/receipt/s/' + 'x'.repeat(17) + '/pdf');
+    expect(res2.status).toBe(404);
+  });
+});
+
+// Billing Setup (businesses.bill_settings, migration 061).
+describe('GET /receipt/:token honours Billing Setup', () => {
+  const custom = JSON.stringify({
+    show_cashier: false, show_gstin: false, show_address: false, show_terms: false,
+    show_bank: true, alt_phone: '02366-262626',
+    show_note: true, note: 'Free home delivery',
+    bank: { account_name: 'My Shop', account_no: '1234567890', bank_name: 'SBI', branch: 'Vengurla', ifsc: 'SBIN0001234' },
+  });
+  const row = {
+    ...sampleBillRow, billed_by: 'Ramesh', gst_enabled: true,
+    customer_address: 'Plot 5, Sawantwadi', customer_gstin: '27ABCDE1234F1Z5',
+  };
+
+  test.each([null, 'a4'])('NULL settings (p=%s): bill as before, no bank block', async (p) => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ ...sampleBillRow, billed_by: 'Ramesh', gst_enabled: true }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}${p ? `?p=${p}` : ''}`);
+    expect(res.text).toContain('Cashier');
+    expect(res.text).toContain('GSTIN123');
+    expect(res.text).toContain('123 Main St');
+    expect(res.text).toContain('Thank you!');
+    expect(res.text).not.toContain('A/c No');
+  });
+
+  test.each([null, 'a4'])('saved settings (p=%s) hide/show the chosen parts', async (p) => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ ...row, bill_settings: custom }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}${p ? `?p=${p}` : ''}`);
+    expect(res.text).not.toContain('Cashier');
+    expect(res.text).not.toContain('GSTIN123');
+    expect(res.text).not.toContain('123 Main St');
+    expect(res.text).not.toContain('Thank you!');
+    expect(res.text).toContain('A/c No: 1234567890');
+    expect(res.text).toContain('Bank Details');
+    expect(res.text).toContain('Free home delivery');
+    expect(res.text).toContain('Address: Plot 5, Sawantwadi');
+    expect(res.text).toContain('9876500000, 02366-262626');
+    expect(res.text).toContain('IFSC: SBIN0001234');
+    expect(res.text).toContain('Plot 5, Sawantwadi');
+    expect(res.text).toContain('27ABCDE1234F1Z5');
+  });
+
+  test('show_customer off hides the whole customer block', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ ...row, bill_settings: '{"show_customer":false}' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: sampleItems, rowsAffected: [1] });
+    const res = await request(app).get(`/receipt/${RECEIPT_TOKEN}`);
+    expect(res.text).not.toContain('Alice');
+    expect(res.text).not.toContain('27ABCDE1234F1Z5');
+  });
+});

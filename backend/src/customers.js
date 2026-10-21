@@ -45,27 +45,39 @@ function billPhoneMatch(phoneExpr, billAlias = 'b') {
 }
 
 /**
- * Insert the customer, or refresh their name from the bill just saved. Fire
- * and forget: always resolves, never rejects.
+ * Insert the customer, or refresh their name / address / GSTIN from the bill
+ * just saved. A blank value never clears a stored one (older apps never send
+ * address or GSTIN). Fire and forget: always resolves, never rejects.
  */
-function upsertCustomer(businessId, phone, name) {
+function upsertCustomer(businessId, phone, name, address, gstin) {
   const p = canonicalPhone(phone);
   if (!businessId || !p) return Promise.resolve();
   const n = clean(name) || null;
+  const a = clean(address) || null;
+  const g = clean(gstin) || null;
   return (async () => {
     await poolConnect;
     await pool.request()
       .input('business_id', sql.UniqueIdentifier, businessId)
       .input('phone', sql.NVarChar(20), p.slice(0, 20))
       .input('name', sql.NVarChar(200), n ? n.slice(0, 200) : null)
+      .input('address', sql.NVarChar(500), a ? a.slice(0, 500) : null)
+      .input('gstin', sql.NVarChar(15), g ? g.slice(0, 15).toUpperCase() : null)
       .query(`
         MERGE customers WITH (HOLDLOCK) AS c
-        USING (SELECT @phone AS phone, @name AS name) AS s
+        USING (SELECT @phone AS phone, @name AS name, @address AS address, @gstin AS gstin) AS s
           ON c.business_id = @business_id AND c.phone = s.phone
         WHEN NOT MATCHED THEN
-          INSERT (business_id, phone, name) VALUES (@business_id, s.phone, s.name)
-        WHEN MATCHED AND s.name IS NOT NULL AND (c.name IS NULL OR c.name <> s.name) THEN
-          UPDATE SET name = s.name, updated_at = GETUTCDATE();
+          INSERT (business_id, phone, name, address, gstin)
+          VALUES (@business_id, s.phone, s.name, s.address, s.gstin)
+        WHEN MATCHED AND (
+              (s.name IS NOT NULL AND (c.name IS NULL OR c.name <> s.name))
+           OR (s.address IS NOT NULL AND (c.address IS NULL OR c.address <> s.address))
+           OR (s.gstin IS NOT NULL AND (c.gstin IS NULL OR c.gstin <> s.gstin))) THEN
+          UPDATE SET name = COALESCE(s.name, c.name),
+                     address = COALESCE(s.address, c.address),
+                     gstin = COALESCE(s.gstin, c.gstin),
+                     updated_at = GETUTCDATE();
       `);
   })().catch((err) => {
     logger.warn({ err, businessId }, 'customer upsert failed (bill unaffected)');

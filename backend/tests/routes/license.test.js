@@ -61,3 +61,24 @@ describe('GET /api/license — effective store_enabled', () => {
     expect(res.body.allow_online_store).toBe(true);
   });
 });
+
+describe('GET /api/license — app version (?v=)', () => {
+  const versionWrites = () => mockRequest.query.mock.calls
+    .filter(c => /UPDATE users SET app_version/.test(c[0]));
+  const get = (q) => request(app).get('/api/license' + q).set(authHeader({ role: 'owner' }));
+
+  it('stores the build the app reports against the user', async () => {
+    mockRequest.recordset = [row()];
+    const res = await get('?v=1.1.15%2B28');
+    expect(res.status).toBe(200);
+    expect(versionWrites()).toHaveLength(1);
+    expect(mockRequest.inputs.app_version).toBe('1.1.15+28');
+  });
+
+  it('writes nothing for an older build that sends no version, or for junk', async () => {
+    mockRequest.recordset = [row()];
+    await get('');
+    await get("?v=1.0';DROP");
+    expect(versionWrites()).toHaveLength(0);
+  });
+});

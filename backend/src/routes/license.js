@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
+const billSettings = require('../billSettings');
 
 const router = Router();
 
@@ -23,6 +24,18 @@ router.get('/', requireAuth, async (req, res) => {
       .query(`UPDATE businesses SET last_active_at = GETUTCDATE() WHERE id = @business_id`)
       .catch(() => {});
 
+    // App build this user is running ("1.1.15+28"), sent as ?v= by the app.
+    // Per user — an owner and a cashier can be on different builds. Older
+    // builds don't send it; anything not shaped like a version is ignored.
+    const appVersion = req.query.v;
+    if (typeof appVersion === 'string' && /^[0-9A-Za-z.+-]{1,30}$/.test(appVersion)) {
+      pool.request()
+        .input('user_id', sql.UniqueIdentifier, req.user.user_id)
+        .input('app_version', sql.NVarChar(30), appVersion)
+        .query(`UPDATE users SET app_version = @app_version WHERE id = @user_id`)
+        .catch(() => {});
+    }
+
     const request = pool.request();
     request.input('business_id', sql.UniqueIdentifier, req.user.business_id);
     request.input('user_id', sql.UniqueIdentifier, req.user.user_id);
@@ -42,6 +55,8 @@ router.get('/', requireAuth, async (req, res) => {
         b.store_enabled,
         b.logo_url,
         b.print_logo,
+        b.bill_footer_note,
+        b.bill_settings,
         -- The caller's role AS IT IS NOW, not as their 8-hour access token
         -- claims. This endpoint is hit on every app open/resume, so it is where
         -- a device finds out its role was changed underneath it.
@@ -106,6 +121,9 @@ router.get('/', requireAuth, async (req, res) => {
       // this is how an owner's logo change reaches their devices.
       logo_url: sub.logo_url ?? null,
       print_logo: !!sub.print_logo,
+      // Billing Setup — reaches staff devices the same way.
+      bill_footer_note: sub.bill_footer_note ?? null,
+      bill_settings: billSettings.parse(sub.bill_settings),
       // Null when the user row is gone (deleted staff) — the client treats
       // any mismatch with its cached role, including null, as "log out".
       current_role: sub.current_role ?? null,

@@ -259,3 +259,44 @@ describe('PUT /api/businesses/profile — show_item_no', () => {
     expect(mockRequest.query.mock.calls[0][0]).toMatch(/b\.show_item_no/);
   });
 });
+
+// Billing Setup (migration 061): an object in, JSON text in the column,
+// the parsed object (with defaults) back out.
+describe('PUT /api/businesses/profile — bill_settings', () => {
+  test('stores validated JSON and returns the parsed settings', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [oldRow()], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [oldRow({ bill_settings: '{"show_cashier":false}' })], rowsAffected: [1] });
+
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader({ role: 'owner' }))
+      .send({ bill_settings: { show_cashier: false, bank: { ifsc: 'sbin0001234' } } });
+
+    expect(res.status).toBe(200);
+    const stored = JSON.parse(mockRequest.inputs.bill_settings);
+    expect(stored.show_cashier).toBe(false);
+    expect(stored.bank.ifsc).toBe('SBIN0001234');
+    expect(res.body.bill_settings.show_cashier).toBe(false);
+    expect(res.body.bill_settings.show_bank).toBe(false);
+  });
+
+  test('rejects a bad IFSC', async () => {
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader({ role: 'owner' }))
+      .send({ bill_settings: { show_bank: true, bank: { ifsc: 'BAD' } } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/IFSC/);
+  });
+
+  test('GET /profile returns defaults when the column is NULL', async () => {
+    mockRequest.recordset = [oldRow()];
+    const res = await request(app)
+      .get('/api/businesses/profile')
+      .set(authHeader({ role: 'owner' }));
+    expect(res.body.bill_settings.show_cashier).toBe(true);
+    expect(res.body.bill_settings.show_bank).toBe(false);
+  });
+});

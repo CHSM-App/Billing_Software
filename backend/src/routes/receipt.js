@@ -3,11 +3,54 @@ const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
 const { attachCharges } = require('../charges');
 const { stripBillPrefix } = require('../billNumber');
+const billSettings = require('../billSettings');
 const { attachCreditInfo, CREDIT_PART } = require('../creditPayments');
-const { renderInvoice } = require('../invoiceHtml');
+const { renderInvoice, DOWNLOAD_ONCLICK, DOWNLOAD_FALLBACK, PDF_LINK } = require('../invoiceHtml');
 const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
+const { publicPageLimiter } = require('../middleware/rateLimiter');
+const { execFile } = require('child_process');
+const fsp = require('fs/promises');
+const os = require('os');
+const path = require('path');
 
 const router = express.Router();
+
+// "Download PDF": a headless browser prints our own receipt page to a file, so
+// the PDF is the page exactly. Served as a real file download because the
+// in-app browsers WhatsApp opens links in ignore window.print().
+// ponytail: one browser process per download (~1-2s); keep a warm puppeteer instance if PDF traffic grows.
+const PDF_BROWSER = process.env.PDF_BROWSER_PATH
+  || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+
+function pdfRoute(prefix) {
+  return async (req, res) => {
+    const token = String(req.params.token || '').replace(/\s+/g, '');
+    if (!/^[\w-]{1,16}$/.test(token)) return res.status(404).send('<h2>Receipt not found</h2>');
+    const paper = ['a4', 'a5'].includes(req.query.p) ? `?p=${req.query.p}` : '';
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'receipt-'));
+    const out = path.join(dir, 'receipt.pdf');
+    try {
+      // Exit code is unreliable across Chrome/Edge versions — the file is the result.
+      await new Promise((resolve) => execFile(PDF_BROWSER, [
+        '--headless=new', '--disable-gpu', '--no-pdf-header-footer', '--print-to-pdf-no-header',
+        `--user-data-dir=${path.join(dir, 'profile')}`, `--print-to-pdf=${out}`,
+        `http://127.0.0.1:${process.env.PORT || 3000}/receipt/${prefix}${token}${paper}`,
+      ], { timeout: 30000 }, resolve));
+      const pdf = await fsp.readFile(out);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="receipt-${token}.pdf"`);
+      return res.send(pdf);
+    } catch (err) {
+      logger.error({ err }, 'receipt pdf error');
+      return res.status(500).send('<h2>Could not create the PDF. Please try again.</h2>');
+    } finally {
+      fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+}
+
+router.get('/s/:token/pdf', publicPageLimiter, pdfRoute('s/'));
+router.get('/:token/pdf', publicPageLimiter, pdfRoute(''));
 
 // Shared by the bill receipt and the credit Payment Receipt pages.
 const PAGE_CSS = `
@@ -84,7 +127,7 @@ const PAGE_CSS = `
 
   /* ── download button ── */
   .actions{max-width:500px;margin:16px auto 0;text-align:center}
-  .btn-download{display:inline-flex;align-items:center;gap:8px;background:#1a1a2e;color:#fff;border:none;border-radius:6px;padding:12px 22px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15);transition:opacity .15s}
+  .btn-download{display:inline-flex;margin:4px;text-decoration:none;align-items:center;gap:8px;background:#1a1a2e;color:#fff;border:none;border-radius:6px;padding:12px 22px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15);transition:opacity .15s}
   .btn-download:hover{opacity:.9}
   .btn-download svg{width:16px;height:16px}
 
@@ -225,7 +268,9 @@ router.get('/s/:token', async (req, res) => {
 </div>
 
 <div class="actions">
-  <button type="button" class="btn-download" onclick="window.print()">Download Receipt</button>
+  ${PDF_LINK.replace('<a ', '<a class="btn-download" ')}
+  <button type="button" class="btn-download" onclick="${DOWNLOAD_ONCLICK}">Print</button>
+  ${DOWNLOAD_FALLBACK}
 </div>
 </body>
 </html>`;
@@ -254,6 +299,7 @@ router.get('/:token', async (req, res) => {
       .input('token', sql.NVarChar(16), token)
       .query(`
         SELECT b.id, b.bill_number, b.customer_name, b.customer_phone,
+               b.customer_address, b.customer_gstin,
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
                b.total, b.round_off, b.payment_mode, b.created_at, b.finalized_at,
                b.payment_status, b.settled_payment_mode, b.credit_amount, b.credit_collected,
@@ -263,7 +309,7 @@ router.get('/:token', async (req, res) => {
                bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
                bs.email AS shop_email, bs.city, bs.state, bs.pincode,
                bs.gst_number, bs.fssai_number, bs.logo_url, bs.print_logo, bs.bill_footer_note,
-               bs.gst_enabled, bs.default_sac_code
+               bs.gst_enabled, bs.default_sac_code, bs.bill_settings
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
         LEFT JOIN tables t ON t.id = b.table_id
@@ -329,8 +375,15 @@ router.get('/:token', async (req, res) => {
     // Full name, whitespace collapsed ("Ramesh  Patil " → "Ramesh Patil").
     const billedBy = String(bill.billed_by || '').trim().replace(/\s+/g, ' ');
 
+    // Billing Setup (businesses.bill_settings). NULL = defaults = the card as before.
+    const cfg = billSettings.parse(bill.bill_settings);
+    const bank = billSettings.bankLines(cfg);
+    const shopNote = billSettings.noteText(cfg);
+    const cust = cfg.show_customer;
+    const shopPhone = cfg.show_phone ? billSettings.shopPhones(bill.shop_phone, cfg) : null;
+
     const addrParts = [bill.address, bill.city, bill.state, bill.pincode].filter(Boolean);
-    const addressLine = addrParts.length ? esc(addrParts.join(', ')) : '';
+    const addressLine = cfg.show_address && addrParts.length ? esc(addrParts.join(', ')) : '';
 
     // GST tax-invoice extras only render when the business has GST enabled AND
     // the bill actually carries tax. Otherwise the receipt is byte-for-byte as
@@ -348,7 +401,7 @@ router.get('/:token', async (req, res) => {
       - (bill.gst_enabled ? 0 : Number(bill.tax_amount || 0));
     // Per-line HSN/SAC: the item's own code, else the business default SAC.
     const codeFor = (i) => i.hsn_code || bill.default_sac_code || '';
-    const showHsnCol = gstEnabled && items.some((i) => codeFor(i));
+    const showHsnCol = gstEnabled && cfg.show_tax_summary && items.some((i) => codeFor(i));
 
     // Rate-wise GST summary rows: group taxable value + tax by tax_rate.
     // taxable = qty×unit_price; lineTax = line_total − taxable; cgst = sgst = lineTax/2.
@@ -363,7 +416,7 @@ router.get('/:token', async (req, res) => {
         ? (Number(bill.subtotal) - Number(bill.discount_amount || 0)) / Number(bill.subtotal)
         : 1;
     const gstByRate = {};
-    if (gstEnabled) {
+    if (gstEnabled && cfg.show_tax_summary) {
       for (const i of items) {
         const rate = i.tax_rate != null ? Number(i.tax_rate) : 0;
         if (rate <= 0) continue;
@@ -449,11 +502,11 @@ router.get('/:token', async (req, res) => {
     <div class="shop-name">${esc(bill.shop_name)}</div>
     <div class="shop-sub">
       ${addressLine ? addressLine + '<br/>' : ''}
-      ${bill.shop_phone ? 'Tel: ' + esc(bill.shop_phone) : ''}
-      ${bill.shop_phone && bill.shop_email ? '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}
+      ${shopPhone ? 'Tel: ' + esc(shopPhone) : ''}
+      ${shopPhone && bill.shop_email ? '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}
       ${bill.shop_email ? '<a href="mailto:' + esc(bill.shop_email) + '">' + esc(bill.shop_email) + '</a>' : ''}
-      ${bill.gst_number ? '<br/>GSTIN: ' + esc(bill.gst_number) : ''}
-      ${bill.fssai_number ? '<br/>FSSAI: ' + esc(bill.fssai_number) : ''}
+      ${cfg.show_gstin && bill.gst_number ? '<br/>GSTIN: ' + esc(bill.gst_number) : ''}
+      ${cfg.show_fssai && bill.fssai_number ? '<br/>FSSAI: ' + esc(bill.fssai_number) : ''}
     </div>
   </div>
 
@@ -476,19 +529,21 @@ router.get('/:token', async (req, res) => {
       <div class="label">Payment</div>
       <div class="value"><span class="badge${isUnpaidCredit ? ' badge-credit' : ''}">${esc(payLabel)}</span></div>
     </div>
-    ${billedBy ? `
+    ${cfg.show_cashier && billedBy ? `
     <div class="meta-item">
       <div class="label">Cashier</div>
       <div class="value">${esc(billedBy)}</div>
     </div>` : ''}
   </div>
 
-  ${bill.customer_name || bill.customer_phone ? `
+  ${cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin) ? `
   <!-- Customer -->
   <div class="customer">
     <div class="sec-label">Billed To</div>
     ${bill.customer_name ? '<div class="cname">' + esc(bill.customer_name) + '</div>' : ''}
     ${bill.customer_phone ? '<div class="cphone">Mob: ' + esc(bill.customer_phone) + '</div>' : ''}
+    ${bill.customer_address ? '<div class="cphone">Address: ' + esc(bill.customer_address) + '</div>' : ''}
+    ${bill.customer_gstin ? '<div class="cphone">GSTIN: ' + esc(bill.customer_gstin) + '</div>' : ''}
   </div>` : ''}
 
   <!-- Items -->
@@ -575,7 +630,9 @@ router.get('/:token', async (req, res) => {
 
   <!-- Footer -->
   <div class="footer">
-    ${bill.bill_footer_note ? '<div class="note">' + esc(bill.bill_footer_note) + '</div>' : ''}
+    ${shopNote ? '<div class="note"><b>Note</b><br/>' + esc(shopNote) + '</div>' : ''}
+    ${cfg.show_terms && bill.bill_footer_note ? '<div class="note"><b>Terms &amp; Conditions</b><br/>' + esc(bill.bill_footer_note) + '</div>' : ''}
+    ${bank.length ? '<div class="note"><b>Bank Details</b><br/>' + bank.map(esc).join('<br/>') + '</div>' : ''}
     <div class="thanks">Thank you for your business.</div>
     <div class="powered">powered by vittam</div>
   </div>
@@ -583,10 +640,11 @@ router.get('/:token', async (req, res) => {
 </div>
 
 <div class="actions">
-  <button type="button" class="btn-download" onclick="window.print()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-    Download Receipt
+  ${PDF_LINK.replace('<a ', '<a class="btn-download" ')}
+  <button type="button" class="btn-download" onclick="${DOWNLOAD_ONCLICK}">
+    Print
   </button>
+  ${DOWNLOAD_FALLBACK}
 </div>
 
 </body>

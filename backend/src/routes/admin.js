@@ -171,6 +171,24 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
       ORDER BY b.created_at DESC
     `);
 
+    // Everyone at each business with the app build they last reported, for the
+    // Manage drawer. One query for all businesses, grouped here.
+    const userRows = await pool.request().query(`
+      SELECT business_id, name, phone, role, is_active, app_version
+      FROM users
+      ORDER BY CASE WHEN role = 'owner' THEN 0 ELSE 1 END, name
+    `);
+    const usersByBiz = {};
+    for (const u of userRows.recordset) {
+      (usersByBiz[u.business_id] ||= []).push({
+        name:        u.name,
+        phone:       u.phone,
+        role:        u.role,
+        is_active:   u.is_active == null ? true : !!u.is_active,
+        app_version: u.app_version ?? null,
+      });
+    }
+
     const businesses = result.recordset.map((r) => ({
       id:                r.id,
       name:              r.name,
@@ -198,6 +216,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
       staff_count:       r.staff_count,
       bill_count:        r.bill_count,
       item_count:        r.item_count,
+      users:             usersByBiz[r.id] || [],
       deletion_request: r.deletion_requested_at == null ? null : {
         requested_at:  r.deletion_requested_at,
         scheduled_for: r.deletion_scheduled_for,

@@ -7,6 +7,7 @@ const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../au
 const { loginLimiter, registerLimiter, refreshLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
+const billSettings = require('../billSettings');
 const audit = require('../audit');
 const whatsapp = require('../whatsapp');
 const { uniqueStoreToken } = require('../storeToken');
@@ -155,10 +156,10 @@ router.post('/register', registerLimiter, async (req, res) => {
         .input('fssai_number', sql.NVarChar(20), fssai_number || null)
         .query(`
           INSERT INTO businesses (name, business_type, address, phone, inventory_enabled, has_barcode_scanner,
-                                  gst_number, gst_enabled, pan_number, fssai_number, store_token)
+                                  gst_number, gst_enabled, pan_number, fssai_number, store_token, whatsapp_mode)
           OUTPUT INSERTED.id
           VALUES (@name, @business_type, @address, @phone, @inventory_enabled, @has_barcode_scanner,
-                  @gst_number, @gst_enabled, @pan_number, @fssai_number, @store_token)
+                  @gst_number, @gst_enabled, @pan_number, @fssai_number, @store_token, 'api')
         `);
 
       const businessId = businessResult.recordset[0].id;
@@ -191,11 +192,11 @@ router.post('/register', registerLimiter, async (req, res) => {
           `);
       }
 
-      // --- Free trial: 96 hours from registration, no grace period ---
+      // --- Free trial: 30 days from registration, no grace period ---
       // Auto-provision an active trial subscription so the user can log in and
-      // use the app immediately. After 96h the GET /license auto-expire logic
+      // use the app immediately. After 30 days the GET /license auto-expire logic
       // blocks them until a paid subscription is activated via /admin/activate.
-      const trialExpiresAt = new Date(Date.now() + 96 * 60 * 60 * 1000);
+      const trialExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       await transaction.request()
         .input('business_id', sql.UniqueIdentifier, businessId)
         .input('expires_at', sql.DateTime2, trialExpiresAt)
@@ -226,7 +227,7 @@ router.post('/register', registerLimiter, async (req, res) => {
 
       return res.json({
         success: true,
-        message: 'Registration successful. Your 4-day free trial has started.',
+        message: 'Registration successful. Your 30-day free trial has started.',
         trial_expires_at: trialExpiresAt.toISOString(),
       });
     } catch (err) {
@@ -376,12 +377,13 @@ router.post('/login', loginLimiter, async (req, res) => {
       .input('phone', sql.NVarChar(20), phone)
       .query(`
         SELECT u.id, u.business_id, u.name, u.phone, u.pin_hash, u.role,
-               u.failed_attempts, u.locked_until,
+               u.failed_attempts, u.locked_until, u.is_active,
                b.name AS business_name, b.business_type, b.is_verified,
                b.inventory_enabled, b.has_barcode_scanner, b.address,
                b.phone AS business_phone,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
                b.round_off_enabled, b.show_item_no, b.store_enabled, b.logo_url, b.print_logo,
+               b.bill_footer_note, b.bill_settings,
                s.allow_mobile, s.allow_desktop, s.allow_online_store, s.allow_customers
         FROM users u
         JOIN businesses b ON u.business_id = b.id
@@ -520,6 +522,9 @@ router.post('/login', loginLimiter, async (req, res) => {
         // (staff too) so receipts can carry it offline.
         logo_url: row.logo_url ?? null,
         print_logo: !!row.print_logo,
+        // What prints on a bill (Billing Setup) — same reason as the logo.
+        bill_footer_note: row.bill_footer_note ?? null,
+        bill_settings: billSettings.parse(row.bill_settings),
         // Online store master switch. Sent at login so a CASHIER's shell knows
         // whether to poll the order queue — the business profile that carries
         // this is owner-only, so they could not find out any other way.
