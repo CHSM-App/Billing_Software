@@ -2130,6 +2130,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     if (!_validateCustomerPhone()) return;
+    if (!_ensureCustomerPhoneForWarranty(cart)) return;
     if (!_validateCharges()) return;
     // Remember these descriptions for next time's suggestions (best-effort).
     unawaited(_rememberUsedCharges());
@@ -2346,6 +2347,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     setState(() => _showCustomerFields = true);
     _showSnack(context.l10n.billingWhatsappNeedsPhone, isError: true);
     // Focus after the frame so the (possibly just-expanded) field is laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _ensureVisible(_customerPhoneKey);
+      _customerPhoneFocus.requestFocus();
+    });
+    return false;
+  }
+
+  /// True unless the cart holds a warranty-eligible item with no customer
+  /// phone entered. Selling one with no phone silently skips the auto-create
+  /// hook server-side (routes/bills.js) — nothing to look the warranty up by
+  /// later — so this must stop the sale here rather than let it finalize
+  /// into a warranty nobody can ever find. Reveals/focuses the phone field
+  /// and warns, same shape as [_ensureCustomerPhoneForWhatsApp].
+  bool _ensureCustomerPhoneForWarranty(List<CartEntry> cart) {
+    if (_customerPhoneController.text.trim().isNotEmpty) return true;
+    if (!cart.any((e) => e.item.warrantyEligible)) return true;
+    setState(() => _showCustomerFields = true);
+    _showSnack(context.l10n.billingWarrantyNeedsPhone, isError: true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _ensureVisible(_customerPhoneKey);

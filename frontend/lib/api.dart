@@ -8,7 +8,8 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://sophisticated-cdna-laboratory-myspace.trycloudflare.com/api';
+// const String baseUrl = 'http://192.168.1.11:8000/api';
+const String baseUrl = 'https://vittam.vengurlatech.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
 
@@ -985,6 +986,69 @@ Future<Map<String, dynamic>> sendCustomerMessage(
     body: jsonEncode({'customer_ids': customerIds, 'message': message}),
   ));
   return Map<String, dynamic>.from(data as Map);
+}
+
+// ---------------------------------------------------------------------------
+// Warranties ("Retail & Warranty" shops — cashier/owner for records, owner
+// only for field templates and delete)
+// ---------------------------------------------------------------------------
+
+/// One page of warranty records matching [params] (q, status, limit, offset).
+/// Returns { items, total, offset, limit }.
+Future<Map<String, dynamic>> getWarranties(Map<String, String> params) async {
+  final data = _parse(await _authGet(
+      Uri.parse('$baseUrl/warranties').replace(queryParameters: params)));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+Future<Map<String, dynamic>> getWarranty(String id) async {
+  final data = _parse(await _authGet(Uri.parse('$baseUrl/warranties/$id')));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+/// Creates a warranty record. [body] matches routes/warranties.js' POST shape
+/// (customer_name, customer_phone, item_id, item_name, category,
+/// serial_number, purchase_date, warranty_months, extra_data, notes).
+Future<Map<String, dynamic>> createWarranty(Map<String, dynamic> body) async {
+  final data = _parse(await _authPost(
+    Uri.parse('$baseUrl/warranties'),
+    body: jsonEncode(body),
+  ));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+Future<Map<String, dynamic>> updateWarranty(
+    String id, Map<String, dynamic> body) async {
+  final data = _parse(await _authPut(
+    Uri.parse('$baseUrl/warranties/$id'),
+    body: jsonEncode(body),
+  ));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+Future<void> deleteWarranty(String id) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/warranties/$id')));
+}
+
+/// Every category's custom warranty fields for this business.
+Future<List<dynamic>> getWarrantyFieldTemplates() async {
+  final data = _parse(await _authGet(Uri.parse('$baseUrl/warranty-field-templates')));
+  return data as List;
+}
+
+/// Replaces the field list for [category] wholesale. [fields] is
+/// `[{key, label, type}]`.
+Future<void> putWarrantyFieldTemplate(
+    String category, List<Map<String, String>> fields) async {
+  _parse(await _authPut(
+    Uri.parse('$baseUrl/warranty-field-templates/${Uri.encodeComponent(category)}'),
+    body: jsonEncode({'fields': fields}),
+  ));
+}
+
+Future<void> deleteWarrantyFieldTemplate(String category) async {
+  _parse(await _authDelete(
+      Uri.parse('$baseUrl/warranty-field-templates/${Uri.encodeComponent(category)}')));
 }
 
 /// Marks the given credit bills paid in one settlement with [paymentMode].

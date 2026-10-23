@@ -55,6 +55,9 @@ bool isRestaurantBusiness(String businessType) =>
     businessType == 'restaurant_with_tables' ||
     businessType == 'restaurant_no_tables';
 
+bool isRetailWarrantyShop(String businessType) =>
+    businessType == 'retail_warranty';
+
 /// Flattens the stock-tracked things a business can buy into pickable rows.
 ///
 /// Restaurants buy raw materials (buns, patties); everyone else buys the items

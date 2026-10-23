@@ -11,6 +11,7 @@ import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/category_tree_list.dart';
 import '../widgets/bottom_nav_bar.dart';
+import '../widgets/stock_target_picker.dart' show isRetailWarrantyShop;
 import '../widgets/floating_bar_physics.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
@@ -432,7 +433,20 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                       itemId: item.id, itemName: item.name),
                 )
             : null,
+        isWarrantyShop: isRetailWarrantyShop(businessType),
+        onManageWarrantyFields: isRetailWarrantyShop(businessType)
+            ? (category) => _showWarrantyFieldTemplateEditor(category)
+            : null,
       ),
+    );
+  }
+
+  /// Opens the editor for [category]'s custom warranty fields (e.g. "KM
+  /// Reading"/"Vehicle Number" for Tyres) — see warranty_field_templates.js.
+  void _showWarrantyFieldTemplateEditor(String category) {
+    showDialog(
+      context: context,
+      builder: (_) => _WarrantyFieldTemplateDialog(category: category),
     );
   }
 
@@ -1386,6 +1400,14 @@ class _ItemFormDialog extends StatefulWidget {
   final VoidCallback? onManageSizes;
   final VoidCallback? onManageRecipe;
 
+  /// "Retail & Warranty" shops only: shows the "Carries warranty" toggle.
+  final bool isWarrantyShop;
+
+  /// Opens the category's custom warranty-field editor. Only offered once
+  /// warranty is on and a category is entered — there must be something to
+  /// key the template by.
+  final void Function(String category)? onManageWarrantyFields;
+
   const _ItemFormDialog(
       {this.item,
       required this.inventoryEnabled,
@@ -1395,7 +1417,9 @@ class _ItemFormDialog extends StatefulWidget {
       required this.onSaved,
       this.onVariantsCreated,
       this.onManageSizes,
-      this.onManageRecipe});
+      this.onManageRecipe,
+      this.isWarrantyShop = false,
+      this.onManageWarrantyFields});
 
   @override
   State<_ItemFormDialog> createState() => _ItemFormDialogState();
@@ -1438,6 +1462,11 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// handles update/delete of persisted sizes safely.
   bool _hasVariants = false;
   final List<_VariantDraft> _variantDrafts = [];
+
+  /// "Retail & Warranty" shops only: whether selling this item auto-creates a
+  /// warranty record, and the period (months) seeded onto it.
+  bool _warrantyEligible = false;
+  final _warrantyMonthsCtrl = TextEditingController();
 
   /// The item created by a previous save attempt that then failed part-way
   /// through its variants. Held so a retry adds only the MISSING variants
@@ -1515,6 +1544,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _packUnit = item.packUnit;
       _packSizeCtrl.text =
           item.packSize != null ? formatQty(item.packSize!) : '';
+      _warrantyEligible = item.warrantyEligible;
+      _warrantyMonthsCtrl.text = item.defaultWarrantyMonths?.toString() ?? '';
       // The items list never carries image_url, so look this one up.
       getItemImageUrl(item.id).then((url) {
         if (mounted) setState(() => _photoUrl = url);
@@ -1773,6 +1804,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _stockCtrl.dispose();
     _lowStockCtrl.dispose();
     _packSizeCtrl.dispose();
+    _warrantyMonthsCtrl.dispose();
     for (final d in _variantDrafts) {
       d.dispose();
     }
@@ -2011,6 +2043,13 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         'stock_quantity': double.parse(_stockCtrl.text.trim()),
       if (widget.inventoryEnabled && !sizedItem && _lowStockCtrl.text.trim().isNotEmpty)
         'low_stock_threshold': double.parse(_lowStockCtrl.text.trim()),
+      // Always sent (not conditional on the months field) so turning the
+      // toggle off clears the period server-side too.
+      if (widget.isWarrantyShop) 'warranty_eligible': _warrantyEligible,
+      if (widget.isWarrantyShop)
+        'default_warranty_months': _warrantyEligible
+            ? int.parse(_warrantyMonthsCtrl.text.trim())
+            : null,
     };
 
     final drafts = _variantDrafts.where((d) => !d.isBlank).toList();
@@ -2489,6 +2528,50 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     hint: l10n.itemsFieldHsnHint,
                   ),
                 ],
+                // "Retail & Warranty" shops only — selling this item can
+                // auto-create a warranty record (routes/bills.js hook).
+                if (widget.isWarrantyShop) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  SwitchListTile(
+                    value: _warrantyEligible,
+                    onChanged: _saving
+                        ? null
+                        : (v) => setState(() => _warrantyEligible = v),
+                    title: Text(l10n.itemsWarrantyEligible,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  if (_warrantyEligible) ...[
+                    const SizedBox(height: AppSpacing.space12),
+                    AppTextField(
+                      label: l10n.itemsWarrantyDefaultMonths,
+                      controller: _warrantyMonthsCtrl,
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        final n = int.tryParse((v ?? '').trim());
+                        return (n == null || n <= 0)
+                            ? l10n.commonEnterValidNumber
+                            : null;
+                      },
+                    ),
+                    if (widget.onManageWarrantyFields != null &&
+                        _categoryCtrl.text.trim().isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.space8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => widget.onManageWarrantyFields!(
+                              _categoryCtrl.text.trim()),
+                          icon: const Icon(Icons.tune, size: 16),
+                          label: Text(l10n.itemsManageWarrantyFields),
+                        ),
+                      ),
+                    ],
+                  ],
+                ],
                 // A sized item is never scanned directly — each size has its own
                 // barcode, so the item-level one would be ambiguous.
                 if (!_sizedItem) ...[
@@ -2838,6 +2921,167 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Warranty field template editor — the custom fields ("KM Reading", "Serial
+// Number", ...) every warranty record in one item category asks for. See
+// migration 063 / routes/warranty_field_templates.js.
+// ---------------------------------------------------------------------------
+class _WarrantyFieldTemplateDialog extends ConsumerStatefulWidget {
+  final String category;
+  const _WarrantyFieldTemplateDialog({required this.category});
+
+  @override
+  ConsumerState<_WarrantyFieldTemplateDialog> createState() =>
+      _WarrantyFieldTemplateDialogState();
+}
+
+class _FieldDraft {
+  final TextEditingController labelCtrl;
+  String type;
+  final String? originalKey;
+
+  _FieldDraft({required this.labelCtrl, required this.type, this.originalKey});
+}
+
+class _WarrantyFieldTemplateDialogState
+    extends ConsumerState<_WarrantyFieldTemplateDialog> {
+  final List<_FieldDraft> _fields = [];
+  bool _saving = false;
+  bool _loaded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loaded) return;
+    final templates = ref.read(warrantyFieldTemplatesProvider).valueOrNull;
+    final existing = templates?[widget.category];
+    if (existing != null) {
+      for (final f in existing.fields) {
+        _fields.add(_FieldDraft(
+          labelCtrl: TextEditingController(text: f.label),
+          type: f.type,
+          originalKey: f.key,
+        ));
+      }
+    }
+    _loaded = true;
+  }
+
+  @override
+  void dispose() {
+    for (final f in _fields) {
+      f.labelCtrl.dispose();
+    }
+    super.dispose();
+  }
+
+  void _addField() {
+    setState(() => _fields
+        .add(_FieldDraft(labelCtrl: TextEditingController(), type: 'text')));
+  }
+
+  void _removeField(_FieldDraft f) {
+    setState(() => _fields.remove(f));
+    f.labelCtrl.dispose();
+  }
+
+  /// Derives a stable field key from its label (e.g. "KM Reading" →
+  /// "km_reading"), reusing the original key on an edit so renaming a label
+  /// doesn't orphan values already saved under the old key.
+  String _keyFor(_FieldDraft f) =>
+      f.originalKey ??
+      f.labelCtrl.text
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+          .replaceAll(RegExp(r'^_+|_+$'), '');
+
+  Future<void> _save() async {
+    final nonBlank = _fields.where((f) => f.labelCtrl.text.trim().isNotEmpty).toList();
+    setState(() => _saving = true);
+    try {
+      final notifier = ref.read(warrantyFieldTemplatesProvider.notifier);
+      if (nonBlank.isEmpty) {
+        await notifier.remove(widget.category);
+      } else {
+        await notifier.save(
+          widget.category,
+          [
+            for (final f in nonBlank)
+              WarrantyTemplateField(
+                  key: _keyFor(f), label: f.labelCtrl.text.trim(), type: f.type),
+          ],
+        );
+      }
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(sanitizeUiErrorMessage(e)),
+          backgroundColor: AppColors.error,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+      title: Text(l10n.itemsWarrantyFieldsFor(widget.category)),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final f in _fields)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.space8),
+                child: Row(children: [
+                  Expanded(
+                    child: AppTextField(label: l10n.warrantyDetailLabel, controller: f.labelCtrl),
+                  ),
+                  const SizedBox(width: AppSpacing.space8),
+                  DropdownButton<String>(
+                    value: f.type,
+                    items: const [
+                      DropdownMenuItem(value: 'text', child: Text('Text')),
+                      DropdownMenuItem(value: 'number', child: Text('Number')),
+                      DropdownMenuItem(value: 'date', child: Text('Date')),
+                    ],
+                    onChanged: (v) => setState(() => f.type = v ?? 'text'),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => _removeField(f),
+                  ),
+                ]),
+              ),
+            TextButton.icon(
+              onPressed: _addField,
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(l10n.warrantyAddDetail),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: Text(l10n.commonCancel),
+        ),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? l10n.commonSaving : l10n.commonSave),
         ),
       ],
     );

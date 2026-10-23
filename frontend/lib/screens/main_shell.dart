@@ -20,10 +20,12 @@ import 'home_screen.dart';
 import 'items_screen.dart';
 import 'orders_screen.dart';
 import 'kitchen_screen.dart';
+import 'warranty_screen.dart';
 import 'settings_screen.dart';
 import 'license_screen.dart';
 import 'login_screen.dart';
 import '../providers/open_drafts_provider.dart';
+import '../widgets/stock_target_picker.dart' show isRetailWarrantyShop;
 
 class MainShell extends ConsumerStatefulWidget {
   final int initialIndex;
@@ -391,6 +393,10 @@ class _MainShellState extends ConsumerState<MainShell>
         NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu,
             l10n.navKitchen, const KitchenScreen(),
             badge: ref.watch(kitchenReadyCountProvider)),
+      // Tyre/battery/electronics shops track warranty records per customer.
+      if (isRetailWarrantyShop(businessType))
+        NavItem(Icons.verified_user_outlined, Icons.verified_user,
+            l10n.navWarranty, const WarrantyScreen()),
       // History, Reports and Expenses moved into the Profile screen.
       NavItem(Icons.person_outline, Icons.person, l10n.navProfile,
           const SettingsScreen()),
