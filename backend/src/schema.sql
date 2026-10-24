@@ -5,10 +5,11 @@
 CREATE TABLE businesses (
     id               UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
     name             NVARCHAR(200)    NOT NULL,
-    business_type    NVARCHAR(50)     NOT NULL, -- 'retail', 'restaurant_with_tables', 'retail_warranty'  (takeaway-only retired in migration 041)
+    business_type    NVARCHAR(50)     NOT NULL, -- 'retail', 'restaurant_with_tables'  (takeaway-only retired in migration 041; retail_warranty retired in migration 066)
     address          NVARCHAR(500)    NULL,
     phone            NVARCHAR(20)     NOT NULL,
     inventory_enabled    BIT          NOT NULL DEFAULT 0,
+    warranty_enabled     BIT          NOT NULL DEFAULT 0,  -- retail-only warranty tracking feature (migration 066)
     has_barcode_scanner  BIT          NOT NULL DEFAULT 0,
     is_verified          BIT          NOT NULL DEFAULT 0,
     -- GST (added via migration 025) — optional, OFF by default.

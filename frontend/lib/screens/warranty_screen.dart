@@ -8,6 +8,7 @@ import '../api.dart' show sanitizeUiErrorMessage;
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
+import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/bottom_nav_bar.dart' show AppBottomNavBar, HidesWithNavBar;
@@ -52,6 +53,12 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
   Timer? _searchDebounce;
   String _query = '';
   _WarrantyStatusFilter _filter = _WarrantyStatusFilter.all;
+  /// Purchase-date range filter — independent of [_filter] (expiry-based),
+  /// so a shop can e.g. find everything sold last month regardless of
+  /// whether it's since expired.
+  DateTimeRange? _dateRange;
+
+  late final ProviderSubscription<int> _refreshSignalSub;
 
   bool get _hasMore => _items.length < _total;
 
@@ -61,6 +68,13 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
     _scroll.addListener(() {
       if (_scroll.position.extentAfter < 400) _loadMore();
     });
+    // This screen is kept alive off-screen in the shell's IndexedStack, so a
+    // bill finalized while another tab is active still reaches it — not just
+    // while the Warranty tab happens to be the visible one.
+    _refreshSignalSub =
+        ref.listenManual(warrantyRefreshSignalProvider, (prev, next) {
+      if (prev != next) _reload();
+    });
     _reload();
   }
 
@@ -69,12 +83,17 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
     _searchDebounce?.cancel();
     _scroll.dispose();
     _searchCtrl.dispose();
+    _refreshSignalSub.close();
     super.dispose();
   }
 
   Map<String, String> get _params => {
         if (_query.trim().isNotEmpty) 'q': _query.trim(),
         if (_filter.apiValue != null) 'status': _filter.apiValue!,
+        if (_dateRange != null)
+          'from': DateFormat('yyyy-MM-dd').format(_dateRange!.start),
+        if (_dateRange != null)
+          'to': DateFormat('yyyy-MM-dd').format(_dateRange!.end),
       };
 
   Future<void> _reload() async {
@@ -138,6 +157,65 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
     _reload();
   }
 
+  bool get _hasActiveFilters =>
+      _filter != _WarrantyStatusFilter.all ||
+      _query.trim().isNotEmpty ||
+      _dateRange != null;
+
+  void _clearAllFilters() {
+    setState(() {
+      _filter = _WarrantyStatusFilter.all;
+      _query = '';
+      _searchCtrl.clear();
+      _dateRange = null;
+    });
+    _reload();
+  }
+
+  /// Picks the empty-state icon/message for the current filter combination —
+  /// search takes priority (it's the most specific thing the user did),
+  /// then the date range, then the status filter, falling back to the
+  /// true "nothing here yet" state only when nothing is filtered at all.
+  (IconData, String) _emptyStateContent(AppLocalizations l10n) {
+    if (_query.trim().isNotEmpty) {
+      return (Icons.search_off_outlined, l10n.warrantyEmptySearch(_query.trim()));
+    }
+    if (_dateRange != null && _filter == _WarrantyStatusFilter.all) {
+      return (Icons.event_busy_outlined, l10n.warrantyEmptyDateRange);
+    }
+    return switch (_filter) {
+      _WarrantyStatusFilter.active =>
+        (Icons.verified_outlined, l10n.warrantyEmptyActive),
+      _WarrantyStatusFilter.expiringSoon =>
+        (Icons.hourglass_empty_outlined, l10n.warrantyEmptyExpiringSoon),
+      _WarrantyStatusFilter.expired =>
+        (Icons.history_toggle_off_outlined, l10n.warrantyEmptyExpired),
+      _WarrantyStatusFilter.all =>
+        (Icons.verified_user_outlined, l10n.warrantyEmptyState),
+    };
+  }
+
+  Future<void> _showDateFilterSheet() async {
+    final l10n = context.l10n;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _DateFilterSheet(
+        l10n: l10n,
+        initialRange: _dateRange,
+        onApply: (range) {
+          setState(() => _dateRange = range);
+          _reload();
+        },
+        onClear: () {
+          setState(() => _dateRange = null);
+          _reload();
+        },
+      ),
+    );
+  }
+
   Future<void> _openForm({Warranty? existing}) async {
     final saved = await Navigator.push<bool>(
       context,
@@ -167,20 +245,55 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.space16, vertical: AppSpacing.space8),
-          child: SizedBox(
-            height: 40,
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
-                hintText: l10n.warrantySearchHint,
-                isDense: true,
-                prefixIcon: const Icon(Icons.search_outlined,
-                    size: 18, color: AppColors.textSecondary),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.space16, vertical: 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 40,
+                  child: TextField(
+                    controller: _searchCtrl,
+                    decoration: InputDecoration(
+                      hintText: l10n.warrantySearchHint,
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.search_outlined,
+                          size: 18, color: AppColors.textSecondary),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.space16, vertical: 0),
+                    ),
+                    onChanged: _onSearchChanged,
+                  ),
+                ),
               ),
-              onChanged: _onSearchChanged,
-            ),
+              const SizedBox(width: AppSpacing.space8),
+              // Purchase-date filter — a dedicated icon rather than another
+              // horizontal-scroll chip, since picking a range needs its own
+              // sheet (two taps: open, then pick) rather than the one-tap
+              // toggle the status chips below are.
+              Container(
+                height: 40,
+                width: 40,
+                decoration: BoxDecoration(
+                  color: _dateRange != null
+                      ? AppColors.primary
+                      : AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.small),
+                  border: Border.all(
+                      color: _dateRange != null
+                          ? AppColors.primary
+                          : AppColors.border),
+                ),
+                child: IconButton(
+                  tooltip: l10n.warrantyFilterDate,
+                  padding: EdgeInsets.zero,
+                  icon: Icon(Icons.calendar_today_outlined,
+                      size: 18,
+                      color: _dateRange != null
+                          ? Colors.white
+                          : AppColors.textSecondary),
+                  onPressed: _showDateFilterSheet,
+                ),
+              ),
+            ],
           ),
         ),
         SizedBox(
@@ -254,33 +367,66 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
         ]),
       );
     }
+    // A freshly finalized bill's warranty record is created in the background
+    // (autoCreateWarranties in routes/bills.js is fire-and-forget, so the
+    // sale doesn't wait on it) — pulling down lets staff re-check a moment
+    // later instead of force-closing and reopening the tab.
     if (_items.isEmpty) {
-      return Center(
-        child: Padding(
+      final (icon, message) = _emptyStateContent(l10n);
+      return RefreshIndicator(
+        onRefresh: _reload,
+        child: ListView(
           padding: const EdgeInsets.all(AppSpacing.space24),
-          child: Text(l10n.warrantyEmptyState, textAlign: TextAlign.center),
+          children: [
+            const SizedBox(height: 64),
+            Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(icon, size: 48, color: AppColors.textDisabled),
+                const SizedBox(height: AppSpacing.space16),
+                Text(message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.textPrimary)),
+                if (_hasActiveFilters) ...[
+                  const SizedBox(height: AppSpacing.space16),
+                  OutlinedButton(
+                    onPressed: _clearAllFilters,
+                    // Theme default minimumSize is full-width; inside a
+                    // Center/Column it only gets loose width constraints,
+                    // which crashes layout unless overridden — see the
+                    // "Pick item"/Retry buttons above for the same fix.
+                    style:
+                        OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+                    child: Text(l10n.warrantyClearFilters),
+                  ),
+                ],
+              ]),
+            ),
+          ],
         ),
       );
     }
-    return ListView.separated(
-      controller: _scroll,
-      padding: const EdgeInsets.fromLTRB(AppSpacing.space16, 0,
-          AppSpacing.space16, AppSpacing.space16),
-      itemCount: _items.length + (_loadingMore ? 1 : 0),
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.space8),
-      itemBuilder: (context, i) {
-        if (i >= _items.length) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: AppSpacing.space16),
-            child: Center(child: CircularProgressIndicator()),
+    return RefreshIndicator(
+      onRefresh: _reload,
+      child: ListView.separated(
+        controller: _scroll,
+        padding: const EdgeInsets.fromLTRB(AppSpacing.space16, 0,
+            AppSpacing.space16, AppSpacing.space16),
+        itemCount: _items.length + (_loadingMore ? 1 : 0),
+        separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.space8),
+        itemBuilder: (context, i) {
+          if (i >= _items.length) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.space16),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final w = _items[i];
+          return _WarrantyRow(
+            warranty: w,
+            onTap: () => _showDetail(w),
           );
-        }
-        final w = _items[i];
-        return _WarrantyRow(
-          warranty: w,
-          onTap: () => _showDetail(w),
-        );
-      },
+        },
+      ),
     );
   }
 }
@@ -316,6 +462,171 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
+/// Bottom sheet for the purchase-date filter: a "From"/"To" field pair, each
+/// opening a plain single-date picker, plus Clear/Apply actions — simpler
+/// than embedding a range calendar, and consistent with this app's other
+/// bottom-sheet forms (e.g. expenses_screen.dart's add-expense sheet: a drag
+/// handle, title, rounded-top surface card).
+class _DateFilterSheet extends StatefulWidget {
+  final AppLocalizations l10n;
+  final DateTimeRange? initialRange;
+  final void Function(DateTimeRange range) onApply;
+  final VoidCallback onClear;
+
+  const _DateFilterSheet({
+    required this.l10n,
+    required this.initialRange,
+    required this.onApply,
+    required this.onClear,
+  });
+
+  @override
+  State<_DateFilterSheet> createState() => _DateFilterSheetState();
+}
+
+class _DateFilterSheetState extends State<_DateFilterSheet> {
+  static final _fieldFmt = DateFormat('dd MMM yyyy');
+
+  DateTime? _from;
+  DateTime? _to;
+
+  @override
+  void initState() {
+    super.initState();
+    _from = widget.initialRange?.start;
+    _to = widget.initialRange?.end;
+  }
+
+  Future<void> _pick(bool isFrom) async {
+    final now = DateTime.now();
+    final initial = (isFrom ? _from : _to) ?? now;
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2015),
+      lastDate: now,
+      initialDate: initial.isAfter(now) ? now : initial,
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isFrom) {
+        _from = picked;
+        if (_to != null && _to!.isBefore(_from!)) _to = _from;
+      } else {
+        _to = picked;
+        if (_from != null && _from!.isAfter(_to!)) _from = _to;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = widget.l10n;
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final canApply = _from != null && _to != null;
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.large)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(2))),
+          ),
+          const SizedBox(height: 16),
+          Text(l10n.warrantyFilterDate,
+              style: const TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 20),
+          Row(children: [
+            Expanded(
+              child: _DateFieldButton(
+                label: l10n.warrantyFilterDateFrom,
+                date: _from,
+                formatter: _fieldFmt,
+                onTap: () => _pick(true),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.space12),
+            Expanded(
+              child: _DateFieldButton(
+                label: l10n.warrantyFilterDateTo,
+                date: _to,
+                formatter: _fieldFmt,
+                onTap: () => _pick(false),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 20),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  widget.onClear();
+                },
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+                child: Text(l10n.commonClear),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.space12),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: canApply
+                    ? () {
+                        Navigator.pop(context);
+                        widget.onApply(DateTimeRange(start: _from!, end: _to!));
+                      }
+                    : null,
+                style: ElevatedButton.styleFrom(minimumSize: const Size(0, 44)),
+                child: Text(l10n.warrantyFilterDateApply),
+              ),
+            ),
+          ]),
+        ],
+      ),
+    );
+  }
+}
+
+class _DateFieldButton extends StatelessWidget {
+  final String label;
+  final DateTime? date;
+  final DateFormat formatter;
+  final VoidCallback onTap;
+
+  const _DateFieldButton({
+    required this.label,
+    required this.date,
+    required this.formatter,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadius.small),
+      onTap: onTap,
+      child: InputDecorator(
+        decoration: InputDecoration(labelText: label),
+        child: Text(
+          date != null ? formatter.format(date!) : '—',
+          style: TextStyle(
+              color: date != null ? AppColors.textPrimary : AppColors.textSecondary),
+        ),
+      ),
+    );
+  }
+}
+
 class _WarrantyRow extends StatelessWidget {
   final Warranty warranty;
   final VoidCallback onTap;
@@ -343,33 +654,59 @@ class _WarrantyRow extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.space12),
-          child: Row(children: [
-            Expanded(
-              child: Column(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title shares its row with the status badge (not the whole
+              // card) — on a narrow phone the badge only ever competes with
+              // the short item name for width, never with the longer
+              // customer/serial/extra-data line below.
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(w.itemName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 2),
-                  Text(
-                    [
-                      w.displayName,
-                      if (w.serialNumber?.isNotEmpty ?? false) w.serialNumber!,
-                      // So a match on an extra detail (e.g. a vehicle number
-                      // typed into the "KM Reading"/"Vehicle Number" fields)
-                      // is visible in the result, not just a silent hit.
-                      for (final e in w.extraData)
-                        if (e.value.isNotEmpty) '${e.label}: ${e.value}',
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: textTheme.bodySmall
-                        ?.copyWith(color: AppColors.textPrimary),
+                  Expanded(
+                    child: Text(w.itemName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600)),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(width: AppSpacing.space8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.space8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
+                    child: Text(statusLabel,
+                        style: textTheme.labelSmall?.copyWith(
+                            color: statusColor, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                [
+                  w.displayName,
+                  if (w.serialNumber?.isNotEmpty ?? false) w.serialNumber!,
+                  // So a match on an extra detail (e.g. a vehicle number
+                  // typed into the "KM Reading"/"Vehicle Number" fields)
+                  // is visible in the result, not just a silent hit.
+                  for (final e in w.extraData)
+                    if (e.value.isNotEmpty) '${e.label}: ${e.value}',
+                ].join(' · '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    textTheme.bodySmall?.copyWith(color: AppColors.textPrimary),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Icon(Icons.event_outlined,
+                      size: 13, color: AppColors.textSecondary),
+                  const SizedBox(width: 4),
                   Text(
                     l10n.warrantyExpiresOn(_dateFmt.format(w.expiryDate)),
                     style: textTheme.labelSmall
@@ -377,20 +714,8 @@ class _WarrantyRow extends StatelessWidget {
                   ),
                 ],
               ),
-            ),
-            const SizedBox(width: AppSpacing.space8),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.space8, vertical: 4),
-              decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(AppRadius.small),
-              ),
-              child: Text(statusLabel,
-                  style: textTheme.labelSmall
-                      ?.copyWith(color: statusColor, fontWeight: FontWeight.w600)),
-            ),
-          ]),
+            ],
+          ),
         ),
       ),
     );
@@ -536,7 +861,6 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _productCtrl = TextEditingController();
-  final _serialCtrl = TextEditingController();
   final _monthsCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
 
@@ -557,7 +881,6 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
       _nameCtrl.text = w.customerName ?? '';
       _phoneCtrl.text = w.customerPhone;
       _productCtrl.text = w.itemName;
-      _serialCtrl.text = w.serialNumber ?? '';
       _monthsCtrl.text = '${w.warrantyMonths}';
       _notesCtrl.text = w.notes ?? '';
       _itemId = w.itemId;
@@ -576,7 +899,6 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     _productCtrl.dispose();
-    _serialCtrl.dispose();
     _monthsCtrl.dispose();
     _notesCtrl.dispose();
     for (final r in _extraRows) {
@@ -652,7 +974,9 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
       'item_id': _itemId,
       'item_name': _productCtrl.text.trim(),
       'category': _category,
-      'serial_number': _serialCtrl.text.trim().isEmpty ? null : _serialCtrl.text.trim(),
+      // No form field for this anymore — staff add it as an ad-hoc "Serial
+      // Number" label in extra_data instead. Omitted (not sent as null) so
+      // editing an older record that already has one doesn't wipe it.
       'purchase_date': _purchaseDate.toIso8601String().split('T').first,
       'warranty_months': int.tryParse(_monthsCtrl.text.trim()) ?? 0,
       'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
@@ -664,6 +988,7 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
       } else {
         await api.createWarranty(body);
       }
+      rememberWarrantyLabels(adHocWarrantyLabels(_extraRows));
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
@@ -776,11 +1101,6 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
               ),
             ]),
             const SizedBox(height: AppSpacing.space16),
-            AppTextField(
-              label: l10n.warrantySerialNumber,
-              controller: _serialCtrl,
-            ),
-            const SizedBox(height: AppSpacing.space16),
             InkWell(
               onTap: _pickDate,
               child: InputDecorator(
@@ -802,6 +1122,8 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
             WarrantyExtraFieldsEditor(
               title: l10n.warrantyExtraDetails,
               rows: _extraRows,
+              extraSuggestions: allTemplateLabels(
+                  ref.watch(warrantyFieldTemplatesProvider).valueOrNull),
               onAddRow: _addAdHocRow,
               onRemoveRow: _removeRow,
             ),

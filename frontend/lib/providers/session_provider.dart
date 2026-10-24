@@ -12,6 +12,7 @@ class SessionData {
   final String businessName;
   final String businessType;
   final bool inventoryEnabled;
+  final bool warrantyEnabled;
   final bool hasBarcodeScanner;
   final bool gstEnabled;
   final bool roundOffEnabled;
@@ -35,6 +36,7 @@ class SessionData {
     required this.businessName,
     required this.businessType,
     required this.inventoryEnabled,
+    this.warrantyEnabled = false,
     required this.hasBarcodeScanner,
     required this.gstEnabled,
     required this.roundOffEnabled,
@@ -66,6 +68,7 @@ class SessionData {
         businessName: m['business_name'] ?? '',
         businessType: m['business_type'] ?? '',
         inventoryEnabled: m['inventory_enabled'] == true,
+        warrantyEnabled: m['warranty_enabled'] == true,
         hasBarcodeScanner: m['has_barcode_scanner'] == true,
         gstEnabled: m['gst_enabled'] == true,
         roundOffEnabled: m['round_off_enabled'] == true,
@@ -126,6 +129,11 @@ final hasBarcodeProvider = Provider<bool>((ref) => true);
 
 final inventoryEnabledProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.inventoryEnabled ?? false);
+
+// Retail-only warranty tracking feature. When true, the Warranty nav tab and
+// each item's "Carries warranty" fields appear.
+final warrantyEnabledProvider = Provider<bool>((ref) =>
+    ref.watch(sessionProvider).valueOrNull?.warrantyEnabled ?? false);
 
 // Master GST toggle. When false (the default), all GST UI and receipt sections
 // are hidden and the app behaves exactly as before.
