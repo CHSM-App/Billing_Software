@@ -110,6 +110,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get navKitchen => 'किचन';
 
   @override
+  String get navWarranty => 'वॉरंटी';
+
+  @override
   String get navOpenOrders => 'खुल्या ऑर्डर';
 
   @override
@@ -224,6 +227,90 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get customersTitle => 'ग्राहक';
+
+  @override
+  String get warrantyTitle => 'वॉरंटी';
+
+  @override
+  String get warrantySearchHint => 'नाव, फोन किंवा सिरीयल नंबर शोधा';
+
+  @override
+  String get warrantyFilterAll => 'सर्व';
+
+  @override
+  String get warrantyFilterActive => 'सक्रिय';
+
+  @override
+  String get warrantyFilterExpiringSoon => 'लवकरच संपणार';
+
+  @override
+  String get warrantyFilterExpired => 'कालबाह्य';
+
+  @override
+  String get warrantyEmptyState =>
+      'अद्याप कोणतीही वॉरंटी नोंद नाही. जोडण्यासाठी + दाबा.';
+
+  @override
+  String warrantyExpiresOn(String date) {
+    return '$date ला कालबाह्य';
+  }
+
+  @override
+  String get warrantyAddTitle => 'वॉरंटी नोंद जोडा';
+
+  @override
+  String get warrantyEditTitle => 'वॉरंटी नोंद संपादित करा';
+
+  @override
+  String get warrantyCustomerName => 'ग्राहकाचे नाव';
+
+  @override
+  String get warrantyCustomerPhone => 'ग्राहकाचा फोन';
+
+  @override
+  String get warrantyCustomerPhoneRequired => 'ग्राहकाचा फोन आवश्यक आहे';
+
+  @override
+  String get warrantyProduct => 'उत्पादन';
+
+  @override
+  String get warrantyProductRequired => 'उत्पादन आवश्यक आहे';
+
+  @override
+  String get warrantyPickItem => 'आयटम निवडा';
+
+  @override
+  String get warrantySerialNumber => 'सिरीयल नंबर';
+
+  @override
+  String get warrantyPurchaseDate => 'खरेदीची तारीख';
+
+  @override
+  String get warrantyPeriodMonths => 'वॉरंटी कालावधी (महिने)';
+
+  @override
+  String get warrantyPeriodInvalid => 'शून्यपेक्षा जास्त वॉरंटी कालावधी टाका';
+
+  @override
+  String get warrantyExtraDetails => 'अतिरिक्त तपशील';
+
+  @override
+  String get warrantyDetailLabel => 'लेबल';
+
+  @override
+  String get warrantyDetailValue => 'मूल्य';
+
+  @override
+  String get warrantyAddDetail => 'तपशील जोडा';
+
+  @override
+  String get warrantyNotes => 'नोंदी';
+
+  @override
+  String get warrantyDeleteConfirmTitle => 'ही वॉरंटी नोंद हटवायची?';
+
+  @override
+  String get warrantyDeleteConfirmBody => 'ही कृती पूर्ववत केली जाऊ शकत नाही.';
 
   @override
   String get exportTitle => 'निर्यात करा';
@@ -708,6 +795,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get businessTypeRestaurantTakeaway => 'रेस्टॉरंट (पार्सल)';
+
+  @override
+  String get businessTypeRetailWarranty => 'रिटेल आणि वॉरंटी';
 
   @override
   String get appTagline => 'स्मार्ट बिलिंग सोल्युशन';
@@ -1321,6 +1411,10 @@ class AppLocalizationsMr extends AppLocalizations {
       'व्हॉट्सअ‍ॅपवर पाठवण्यासाठी ग्राहकाचा फोन नंबर टाका';
 
   @override
+  String get billingWarrantyNeedsPhone =>
+      'वॉरंटी नोंदवण्यासाठी ग्राहकाचा फोन नंबर टाका';
+
+  @override
   String get billingWhatsappFailed => 'व्हॉट्सअ‍ॅप संदेश पाठवता आला नाही';
 
   @override
@@ -1912,6 +2006,21 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsFieldHsnHint => 'उदा. रेस्टॉरंट सेवेसाठी ९९६३';
+
+  @override
+  String get itemsWarrantyEligible => 'वॉरंटी लागू आहे';
+
+  @override
+  String get itemsWarrantyDefaultMonths => 'डिफॉल्ट वॉरंटी कालावधी (महिने)';
+
+  @override
+  String get itemsManageWarrantyFields =>
+      'या श्रेणीसाठी वॉरंटी फील्ड व्यवस्थापित करा';
+
+  @override
+  String itemsWarrantyFieldsFor(String category) {
+    return '$category साठी वॉरंटी फील्ड';
+  }
 
   @override
   String get itemsFieldItemNo => 'आयटम क्र. (ऐच्छिक)';

@@ -17,7 +17,7 @@ const router = express.Router();
 // A restaurant always runs with tables. The takeaway-only variant was retired in
 // migration 041, which converted the businesses that still carried it — so this
 // list is also what stops a new one being created.
-const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables'];
+const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables', 'retail_warranty'];
 
 // Starter catalog seeded into every new business so the item list isn't empty
 // on first login. Picked by business_type; restaurant types share one menu.
@@ -37,6 +37,15 @@ const STARTER_ITEMS = {
     { name: 'Butter Naan',          category: 'Breads',      price: 40,  unit: 'piece' },
     { name: 'Masala Papad',         category: 'Starters',    price: 30,  unit: 'piece' },
     { name: 'Cold Coffee',          category: 'Beverages',   price: 90,  unit: 'glass' },
+  ],
+  // warranty_eligible + default_warranty_months demonstrate the warranty
+  // feature in the seeded catalog — see routes/warranties.js.
+  retail_warranty: [
+    { name: 'MRF Tyre 155/65 R13', category: 'Tyres',     price: 3200, unit: 'piece', stock_quantity: 10, warranty_eligible: true, default_warranty_months: 60 },
+    { name: 'Exide Car Battery 35Ah', category: 'Batteries', price: 5500, unit: 'piece', stock_quantity: 8, warranty_eligible: true, default_warranty_months: 48 },
+    { name: 'Tyre Puncture Repair Kit', category: 'Accessories', price: 250, unit: 'piece', stock_quantity: 15 },
+    { name: 'Wheel Alignment Service', category: 'Services', price: 400, unit: 'piece' },
+    { name: 'Engine Oil 1L', category: 'Lubricants', price: 450, unit: 'piece', stock_quantity: 20 },
   ],
 };
 
@@ -81,7 +90,7 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
   if (!VALID_BUSINESS_TYPES.includes(business_type)) {
     // Shown verbatim by the app, so plain words — not the stored values.
-    return res.status(400).json({ error: 'Business type must be Retail or Restaurant' });
+    return res.status(400).json({ error: 'Business type must be Retail, Restaurant or Retail & Warranty' });
   }
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
@@ -186,9 +195,11 @@ router.post('/register', registerLimiter, async (req, res) => {
           .input('price', sql.Decimal(10, 2), item.price)
           .input('unit', sql.NVarChar(20), item.unit)
           .input('stock_quantity', sql.Decimal(10, 2), item.stock_quantity ?? null)
+          .input('warranty_eligible', sql.Bit, item.warranty_eligible ? 1 : 0)
+          .input('default_warranty_months', sql.Int, item.default_warranty_months ?? null)
           .query(`
-            INSERT INTO items (business_id, name, category, price, unit, stock_quantity)
-            VALUES (@business_id, @name, @category, @price, @unit, @stock_quantity)
+            INSERT INTO items (business_id, name, category, price, unit, stock_quantity, warranty_eligible, default_warranty_months)
+            VALUES (@business_id, @name, @category, @price, @unit, @stock_quantity, @warranty_eligible, @default_warranty_months)
           `);
       }
 

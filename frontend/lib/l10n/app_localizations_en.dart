@@ -110,6 +110,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navKitchen => 'Kitchen';
 
   @override
+  String get navWarranty => 'Warranty';
+
+  @override
   String get navOpenOrders => 'Open Orders';
 
   @override
@@ -224,6 +227,90 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get customersTitle => 'Customers';
+
+  @override
+  String get warrantyTitle => 'Warranty';
+
+  @override
+  String get warrantySearchHint => 'Search name, phone or serial number';
+
+  @override
+  String get warrantyFilterAll => 'All';
+
+  @override
+  String get warrantyFilterActive => 'Active';
+
+  @override
+  String get warrantyFilterExpiringSoon => 'Expiring soon';
+
+  @override
+  String get warrantyFilterExpired => 'Expired';
+
+  @override
+  String get warrantyEmptyState => 'No warranty records yet. Tap + to add one.';
+
+  @override
+  String warrantyExpiresOn(String date) {
+    return 'Expires $date';
+  }
+
+  @override
+  String get warrantyAddTitle => 'Add warranty record';
+
+  @override
+  String get warrantyEditTitle => 'Edit warranty record';
+
+  @override
+  String get warrantyCustomerName => 'Customer name';
+
+  @override
+  String get warrantyCustomerPhone => 'Customer phone';
+
+  @override
+  String get warrantyCustomerPhoneRequired => 'Customer phone is required';
+
+  @override
+  String get warrantyProduct => 'Product';
+
+  @override
+  String get warrantyProductRequired => 'Product is required';
+
+  @override
+  String get warrantyPickItem => 'Pick item';
+
+  @override
+  String get warrantySerialNumber => 'Serial number';
+
+  @override
+  String get warrantyPurchaseDate => 'Purchase date';
+
+  @override
+  String get warrantyPeriodMonths => 'Warranty period (months)';
+
+  @override
+  String get warrantyPeriodInvalid =>
+      'Enter a warranty period greater than zero';
+
+  @override
+  String get warrantyExtraDetails => 'Extra details';
+
+  @override
+  String get warrantyDetailLabel => 'Label';
+
+  @override
+  String get warrantyDetailValue => 'Value';
+
+  @override
+  String get warrantyAddDetail => 'Add detail';
+
+  @override
+  String get warrantyNotes => 'Notes';
+
+  @override
+  String get warrantyDeleteConfirmTitle => 'Delete this warranty record?';
+
+  @override
+  String get warrantyDeleteConfirmBody => 'This cannot be undone.';
 
   @override
   String get exportTitle => 'Export';
@@ -707,6 +794,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get businessTypeRestaurantTakeaway => 'Restaurant (takeaway)';
+
+  @override
+  String get businessTypeRetailWarranty => 'Retail & Warranty';
 
   @override
   String get appTagline => 'Smart Billing Solution';
@@ -1317,6 +1407,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Add the customer\'s phone number to send on WhatsApp';
 
   @override
+  String get billingWarrantyNeedsPhone =>
+      'Add the customer\'s phone number to register the warranty';
+
+  @override
   String get billingWhatsappFailed => 'Could not send WhatsApp message';
 
   @override
@@ -1907,6 +2001,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsFieldHsnHint => 'e.g. 9963 for restaurant service';
+
+  @override
+  String get itemsWarrantyEligible => 'Carries warranty';
+
+  @override
+  String get itemsWarrantyDefaultMonths => 'Default warranty period (months)';
+
+  @override
+  String get itemsManageWarrantyFields =>
+      'Manage warranty fields for this category';
+
+  @override
+  String itemsWarrantyFieldsFor(String category) {
+    return 'Warranty fields for $category';
+  }
 
   @override
   String get itemsFieldItemNo => 'Item No (optional)';

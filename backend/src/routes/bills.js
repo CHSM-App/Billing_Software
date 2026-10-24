@@ -12,6 +12,63 @@ const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
 const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
 
+// "Retail & Warranty" shops: a finalized bill line sold against a
+// warranty-eligible item becomes a warranty record automatically (manual
+// entries are also possible — see routes/warranties.js). Never awaited by a
+// caller and never throws past this function — same resilience pattern as
+// upsertCustomer (../customers.js): a warranty row is a convenience, not
+// something that may ever block or fail a sale.
+async function autoCreateWarranties(businessId, billId, userId) {
+  try {
+    await poolConnect;
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .input('bill_id', sql.UniqueIdentifier, billId)
+      .query(`
+        SELECT bi.id AS bill_item_id, bi.item_id, bi.item_name, i.category, i.default_warranty_months,
+               b.customer_name, b.customer_phone,
+               CAST(ISNULL(b.finalized_at, b.created_at) AS DATE) AS purchase_date
+        FROM bill_items bi
+        JOIN bills b ON b.id = bi.bill_id
+        JOIN items i ON i.id = bi.item_id
+        WHERE bi.bill_id = @bill_id AND b.business_id = @business_id
+          AND i.warranty_eligible = 1
+          AND NOT EXISTS (SELECT 1 FROM warranties w WHERE w.bill_item_id = bi.id)
+      `);
+
+    for (const row of result.recordset) {
+      // Nothing to look the warranty up by later — skip rather than create an
+      // orphaned record staff could never find again.
+      if (!row.customer_phone) continue;
+      const months = row.default_warranty_months || 12;
+      const expiry = new Date(row.purchase_date);
+      expiry.setUTCMonth(expiry.getUTCMonth() + months);
+
+      await pool.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .input('customer_name', sql.NVarChar(200), row.customer_name || null)
+        .input('customer_phone', sql.NVarChar(20), row.customer_phone)
+        .input('item_id', sql.UniqueIdentifier, row.item_id)
+        .input('item_name', sql.NVarChar(200), row.item_name)
+        .input('category', sql.NVarChar(100), row.category || null)
+        .input('bill_id', sql.UniqueIdentifier, billId)
+        .input('bill_item_id', sql.UniqueIdentifier, row.bill_item_id)
+        .input('purchase_date', sql.Date, row.purchase_date)
+        .input('warranty_months', sql.Int, months)
+        .input('expiry_date', sql.Date, expiry)
+        .input('created_by_user_id', sql.UniqueIdentifier, userId)
+        .query(`
+          INSERT INTO warranties (business_id, customer_name, customer_phone, item_id, item_name,
+            category, bill_id, bill_item_id, purchase_date, warranty_months, expiry_date, created_by_user_id)
+          VALUES (@business_id, @customer_name, @customer_phone, @item_id, @item_name,
+            @category, @bill_id, @bill_item_id, @purchase_date, @warranty_months, @expiry_date, @created_by_user_id)
+        `);
+    }
+  } catch (err) {
+    logger.warn({ err, bill_id: billId }, 'auto-create warranty failed');
+  }
+}
+
 // Shared by create and finalize so a mode accepted when a bill is parked is
 // still accepted when it is settled. 'split' = paid in several parts, listed
 // in bill_payments (migration 050).
@@ -993,6 +1050,13 @@ router.post('/', requireAuth, async (req, res) => {
       // never throws (customers.js), so it cannot affect this sale.
       upsertCustomer(req.user.business_id, customer_phone, customer_name, customer_address, customer_gstin);
 
+      // A bill created already-finalized (the common offline-queue shape: order
+      // and settle in one moment) may contain warranty-eligible items. Not
+      // awaited — see autoCreateWarranties above.
+      if (billStatus === 'finalized') {
+        autoCreateWarranties(req.user.business_id, billId, req.user.user_id);
+      }
+
       // Collect stock targets that just crossed below their threshold (stock was
       // above before, at/below after). Bundle into one notification. For variant
       // lines the variant's own stock/threshold is used; otherwise the item's.
@@ -1528,6 +1592,10 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
     }
 
     const bill = await fetchBill(req.params.id, req.user.business_id);
+
+    // A draft just settled may contain warranty-eligible items. Not awaited —
+    // see autoCreateWarranties above.
+    autoCreateWarranties(req.user.business_id, req.params.id, req.user.user_id);
 
     audit.logBillFinalized(
       { user_id: req.user.user_id, user_name: req.user.name || null },

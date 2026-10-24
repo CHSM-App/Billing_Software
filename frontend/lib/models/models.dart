@@ -181,6 +181,14 @@ class Item {
   /// load during billing.
   final String? imageUrl;
 
+  /// "Retail & Warranty" shops only: whether selling this item should
+  /// auto-create a warranty record (routes/bills.js' auto-create hook).
+  final bool warrantyEligible;
+
+  /// The warranty period (months) seeded onto an auto-created record. Null
+  /// when [warrantyEligible] is false.
+  final int? defaultWarrantyMonths;
+
   Item({
     required this.id,
     required this.businessId,
@@ -201,6 +209,8 @@ class Item {
     this.variants = const [],
     required this.isActive,
     this.imageUrl,
+    this.warrantyEligible = false,
+    this.defaultWarrantyMonths,
   });
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
@@ -229,6 +239,9 @@ class Item {
             .toList(),
         isActive: j['is_active'] == true || j['is_active'] == 1,
         imageUrl: j['image_url'] as String?,
+        warrantyEligible:
+            j['warranty_eligible'] == true || j['warranty_eligible'] == 1,
+        defaultWarrantyMonths: (j['default_warranty_months'] as num?)?.toInt(),
       );
 
   /// Whether this item is sold by a divisible measure (kg, g, litre, ...)
@@ -266,6 +279,8 @@ class Item {
         variants: newVariants,
         isActive: isActive,
         imageUrl: imageUrl,
+        warrantyEligible: warrantyEligible,
+        defaultWarrantyMonths: defaultWarrantyMonths,
       );
 
   bool get isLowStock =>
@@ -997,6 +1012,135 @@ class Customer {
             ? DateTime.tryParse(j['last_visit'].toString())
             : null,
       );
+}
+
+/// One labeled value on a [Warranty] record — either filled from a
+/// [WarrantyFieldTemplate] field or typed ad-hoc by staff. The backend stores
+/// both the same way (routes/warranties.js), so the app never needs to tell
+/// them apart.
+class WarrantyExtraField {
+  final String label;
+  final String value;
+
+  WarrantyExtraField({required this.label, required this.value});
+
+  factory WarrantyExtraField.fromJson(Map<String, dynamic> j) =>
+      WarrantyExtraField(
+        label: (j['label'] as String?) ?? '',
+        value: (j['value'] as String?) ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {'label': label, 'value': value};
+}
+
+/// A warranty record for a "Retail & Warranty" shop (tyre/battery/electronics
+/// retailers): who bought what, when, for how long, and anything extra the
+/// shop's category template or staff chose to capture (km reading, serial
+/// number, ...). See migration 064 / routes/warranties.js.
+class Warranty {
+  final String id;
+  final String? customerName;
+  final String customerPhone;
+  final String? itemId;
+  final String itemName;
+  final String? category;
+  final String? billId;
+  final String? serialNumber;
+  final DateTime purchaseDate;
+  final int warrantyMonths;
+  final DateTime expiryDate;
+  final List<WarrantyExtraField> extraData;
+  final String? notes;
+
+  Warranty({
+    required this.id,
+    this.customerName,
+    required this.customerPhone,
+    this.itemId,
+    required this.itemName,
+    this.category,
+    this.billId,
+    this.serialNumber,
+    required this.purchaseDate,
+    required this.warrantyMonths,
+    required this.expiryDate,
+    this.extraData = const [],
+    this.notes,
+  });
+
+  /// Name, or the phone when no name was recorded — same fallback as
+  /// [Customer.displayName].
+  String get displayName =>
+      (customerName != null && customerName!.trim().isNotEmpty)
+          ? customerName!.trim()
+          : customerPhone;
+
+  bool get isExpired => expiryDate.isBefore(DateTime.now());
+
+  /// Expires within 30 days — the same "expiring soon" horizon the backend
+  /// list filter uses (routes/warranties.js STATUS_FILTER).
+  bool get isExpiringSoon =>
+      !isExpired && expiryDate.isBefore(DateTime.now().add(const Duration(days: 30)));
+
+  factory Warranty.fromJson(Map<String, dynamic> j) => Warranty(
+        id: j['id'] as String,
+        customerName: j['customer_name'] as String?,
+        customerPhone: j['customer_phone'] as String? ?? '',
+        itemId: j['item_id'] as String?,
+        itemName: (j['item_name'] as String?) ?? '',
+        category: j['category'] as String?,
+        billId: j['bill_id'] as String?,
+        serialNumber: j['serial_number'] as String?,
+        purchaseDate: DateTime.parse(j['purchase_date'].toString()),
+        warrantyMonths: (j['warranty_months'] as num?)?.toInt() ?? 0,
+        expiryDate: DateTime.parse(j['expiry_date'].toString()),
+        extraData: (j['extra_data'] as List? ?? [])
+            .map((e) => WarrantyExtraField.fromJson(e))
+            .toList(),
+        notes: j['notes'] as String?,
+      );
+}
+
+/// The extra fields a business wants to ask for on every warranty record in
+/// one item category (migration 063) — e.g. "KM Reading"/"Vehicle Number" for
+/// Tyres, "Serial Number"/"IMEI" for Electronics.
+class WarrantyFieldTemplate {
+  final String category;
+  final List<WarrantyTemplateField> fields;
+
+  WarrantyFieldTemplate({required this.category, required this.fields});
+
+  factory WarrantyFieldTemplate.fromJson(Map<String, dynamic> j) =>
+      WarrantyFieldTemplate(
+        category: j['category'] as String,
+        fields: (j['fields'] as List? ?? [])
+            .map((f) => WarrantyTemplateField.fromJson(f))
+            .toList(),
+      );
+}
+
+/// One field definition within a [WarrantyFieldTemplate]. [type] is a UI
+/// rendering hint only (text/number/date) — the value is always stored as a
+/// string on the record itself.
+class WarrantyTemplateField {
+  final String key;
+  final String label;
+  final String type;
+
+  WarrantyTemplateField({
+    required this.key,
+    required this.label,
+    required this.type,
+  });
+
+  factory WarrantyTemplateField.fromJson(Map<String, dynamic> j) =>
+      WarrantyTemplateField(
+        key: j['key'] as String,
+        label: j['label'] as String,
+        type: (j['type'] as String?) ?? 'text',
+      );
+
+  Map<String, dynamic> toJson() => {'key': key, 'label': label, 'type': type};
 }
 
 class Expense {

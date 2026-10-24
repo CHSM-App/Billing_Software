@@ -252,6 +252,8 @@ app.use('/api/raw-materials', require('./routes/raw_materials'));
 app.use('/api/bills', require('./routes/bills'));
 app.use('/api/credit', require('./routes/credit'));
 app.use('/api/customers', require('./routes/customers'));
+app.use('/api/warranties', require('./routes/warranties'));
+app.use('/api/warranty-field-templates', require('./routes/warranty_field_templates'));
 app.use('/receipt',  require('./routes/receipt'));
 app.use('/order',    require('./routes/public_order'));
 app.use('/store',    require('./routes/public_store'));

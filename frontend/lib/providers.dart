@@ -13,3 +13,4 @@ export 'providers/credit_provider.dart';
 export 'providers/online_orders_provider.dart';
 export 'providers/major_category_order_provider.dart';
 export 'providers/price_lists_provider.dart';
+export 'providers/warranty_provider.dart';

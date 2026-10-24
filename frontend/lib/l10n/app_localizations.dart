@@ -296,6 +296,12 @@ abstract class AppLocalizations {
   /// **'Kitchen'**
   String get navKitchen;
 
+  /// No description provided for @navWarranty.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty'**
+  String get navWarranty;
+
   /// No description provided for @navOpenOrders.
   ///
   /// In en, this message translates to:
@@ -493,6 +499,168 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Customers'**
   String get customersTitle;
+
+  /// No description provided for @warrantyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty'**
+  String get warrantyTitle;
+
+  /// No description provided for @warrantySearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search name, phone or serial number'**
+  String get warrantySearchHint;
+
+  /// No description provided for @warrantyFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get warrantyFilterAll;
+
+  /// No description provided for @warrantyFilterActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get warrantyFilterActive;
+
+  /// No description provided for @warrantyFilterExpiringSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Expiring soon'**
+  String get warrantyFilterExpiringSoon;
+
+  /// No description provided for @warrantyFilterExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get warrantyFilterExpired;
+
+  /// No description provided for @warrantyEmptyState.
+  ///
+  /// In en, this message translates to:
+  /// **'No warranty records yet. Tap + to add one.'**
+  String get warrantyEmptyState;
+
+  /// No description provided for @warrantyExpiresOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Expires {date}'**
+  String warrantyExpiresOn(String date);
+
+  /// No description provided for @warrantyAddTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add warranty record'**
+  String get warrantyAddTitle;
+
+  /// No description provided for @warrantyEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit warranty record'**
+  String get warrantyEditTitle;
+
+  /// No description provided for @warrantyCustomerName.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer name'**
+  String get warrantyCustomerName;
+
+  /// No description provided for @warrantyCustomerPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer phone'**
+  String get warrantyCustomerPhone;
+
+  /// No description provided for @warrantyCustomerPhoneRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer phone is required'**
+  String get warrantyCustomerPhoneRequired;
+
+  /// No description provided for @warrantyProduct.
+  ///
+  /// In en, this message translates to:
+  /// **'Product'**
+  String get warrantyProduct;
+
+  /// No description provided for @warrantyProductRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Product is required'**
+  String get warrantyProductRequired;
+
+  /// No description provided for @warrantyPickItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick item'**
+  String get warrantyPickItem;
+
+  /// No description provided for @warrantySerialNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Serial number'**
+  String get warrantySerialNumber;
+
+  /// No description provided for @warrantyPurchaseDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase date'**
+  String get warrantyPurchaseDate;
+
+  /// No description provided for @warrantyPeriodMonths.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty period (months)'**
+  String get warrantyPeriodMonths;
+
+  /// No description provided for @warrantyPeriodInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a warranty period greater than zero'**
+  String get warrantyPeriodInvalid;
+
+  /// No description provided for @warrantyExtraDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra details'**
+  String get warrantyExtraDetails;
+
+  /// No description provided for @warrantyDetailLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Label'**
+  String get warrantyDetailLabel;
+
+  /// No description provided for @warrantyDetailValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Value'**
+  String get warrantyDetailValue;
+
+  /// No description provided for @warrantyAddDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Add detail'**
+  String get warrantyAddDetail;
+
+  /// No description provided for @warrantyNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get warrantyNotes;
+
+  /// No description provided for @warrantyDeleteConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this warranty record?'**
+  String get warrantyDeleteConfirmTitle;
+
+  /// No description provided for @warrantyDeleteConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This cannot be undone.'**
+  String get warrantyDeleteConfirmBody;
 
   /// No description provided for @exportTitle.
   ///
@@ -1303,6 +1471,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Restaurant (takeaway)'**
   String get businessTypeRestaurantTakeaway;
+
+  /// No description provided for @businessTypeRetailWarranty.
+  ///
+  /// In en, this message translates to:
+  /// **'Retail & Warranty'**
+  String get businessTypeRetailWarranty;
 
   /// No description provided for @appTagline.
   ///
@@ -2438,6 +2612,12 @@ abstract class AppLocalizations {
   /// **'Add the customer\'s phone number to send on WhatsApp'**
   String get billingWhatsappNeedsPhone;
 
+  /// No description provided for @billingWarrantyNeedsPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Add the customer\'s phone number to register the warranty'**
+  String get billingWarrantyNeedsPhone;
+
   /// No description provided for @billingWhatsappFailed.
   ///
   /// In en, this message translates to:
@@ -3447,6 +3627,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'e.g. 9963 for restaurant service'**
   String get itemsFieldHsnHint;
+
+  /// No description provided for @itemsWarrantyEligible.
+  ///
+  /// In en, this message translates to:
+  /// **'Carries warranty'**
+  String get itemsWarrantyEligible;
+
+  /// No description provided for @itemsWarrantyDefaultMonths.
+  ///
+  /// In en, this message translates to:
+  /// **'Default warranty period (months)'**
+  String get itemsWarrantyDefaultMonths;
+
+  /// No description provided for @itemsManageWarrantyFields.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage warranty fields for this category'**
+  String get itemsManageWarrantyFields;
+
+  /// No description provided for @itemsWarrantyFieldsFor.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty fields for {category}'**
+  String itemsWarrantyFieldsFor(String category);
 
   /// No description provided for @itemsFieldItemNo.
   ///
