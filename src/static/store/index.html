@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#FFFFFF" />
+  <title>Order Online</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- The item list, chips and cart are the billing screen's, shared with the
+       table-QR page — see src/static/_shared/menu-list.js. This page adds the
+       checkout, payment and order-status parts. -->
+  <script src="/order/menu-list.js"></script>
+  <style>
+    .sheet textarea { min-height: 78px; resize: vertical; }
+    /* Split address fields: city / state / pincode share a row. */
+    .addr-row { display: flex; gap: 10px; }
+    .addr-row input { flex: 1; min-width: 0; }
+    .addr-row input.pin { flex: 0 0 42%; }
+    .label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--muted); margin: 16px 0 8px; }
+    /* fulfilment chooser */
+    .seg { display: flex; gap: 8px; margin-bottom: 16px; }
+    .seg button { flex: 1; padding: 13px 10px; border: 1px solid var(--border); background: var(--surface-variant);
+      border-radius: var(--r-sm); font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+    .seg button.sel { border-color: var(--primary); background: var(--primary-light); color: var(--primary-dark); }
+    /* Stated fact, not a warning: this shop only does pickup. */
+    .notice { background: var(--surface-variant); border: 1px solid var(--border);
+      border-radius: var(--r-sm); padding: 13px 14px; margin-bottom: 16px;
+      font-size: 14px; line-height: 1.5; color: var(--text); }
+    /* order summary */
+    .sum { background: var(--surface-variant); border-radius: var(--r-sm); padding: 14px; margin-bottom: 16px; }
+    .sum .row { display: flex; justify-content: space-between; gap: 14px; font-size: 14px;
+      padding: 3px 0; color: var(--muted); }
+    .sum .row.line { color: var(--text); font-weight: 500; align-items: flex-start; }
+    .sum .row.line span:first-child { min-width: 0; overflow-wrap: anywhere; }
+    .sum .row.line b { color: var(--muted); font-weight: 600; margin-left: 6px; white-space: nowrap; }
+    .sum .row.line + .row.sub { border-top: 1px dashed #CBD5E1; margin-top: 8px; padding-top: 10px; }
+    .sum .row.grand { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 10px;
+      font-size: 16px; font-weight: 800; color: var(--text); }
+    .sum .row.due { color: var(--primary-dark); font-weight: 700; }
+    /* payment block */
+    .pay { border: 1px dashed var(--primary); background: var(--primary-light); border-radius: var(--r-md);
+      padding: 16px; margin-bottom: 16px; text-align: center; }
+    .pay .amt { font-size: 20px; font-weight: 800; color: var(--primary-dark); }
+    .who { display: flex; align-items: center; gap: 6px; margin: -4px 0 16px; font-size: 13px; color: var(--muted); }
+    .pay-seg { margin-bottom: 12px; }
+    .pay-seg button { background: var(--surface); }
+    .pay-seg button.sel { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .pay .hint { font-size: 13px; color: var(--primary-dark); opacity: .85; margin: 6px 0 12px; line-height: 1.5; }
+    .pay img { width: 190px; max-width: 100%; border-radius: var(--r-sm); background: #fff; padding: 8px; cursor: zoom-in; }
+    .pay input { margin: 14px 0 0; text-align: center; background: #fff; }
+    .upi-btn { display: block; margin: 0 auto 14px; max-width: 320px; padding: 14px 18px;
+      background: var(--primary); color: #fff; border-radius: var(--r-md);
+      font-size: 15px; font-weight: 700; text-decoration: none; }
+    .pay .or { font-size: 12px; color: var(--primary-dark); opacity: .7; margin-bottom: 10px; }
+    /* Status pill on a submitted order. Waiting is amber so "the shop has not
+       looked at this yet" never reads as "done". */
+    .pill { margin-left: auto; font-size: 11px; font-weight: 700; padding: 3px 10px;
+      border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; }
+    .pill.pending  { background: #FEF3C7; color: #92400E; }
+    .pill.accepted { background: #D1FAE5; color: #047857; }
+    .pill.rejected { background: #FEE2E2; color: #991B1B; }
+    .order-card.pending  { background: #FFFBEB; border-color: #FDE68A; }
+    .order-card.pending h3  { color: #92400E; }
+    .order-card.rejected { background: #FEF2F2; border-color: #FECACA; }
+    .order-card.rejected h3 { color: #991B1B; }
+  </style>
+</head>
+<body>
+  <!-- Checkout sheet: how they want it, where it goes, and what to pay now -->
+  <div class="backdrop" id="coBackdrop">
+    <div class="sheet">
+      <h2>Checkout</h2>
+      <p id="coSub">Tell the shop how you'd like your order.</p>
+
+      <div class="label">Your details</div>
+      <input id="coName" type="text" placeholder="Your name" autocomplete="name" />
+      <!-- The OTP-verified number, shown read-only so the customer can see
+           which phone the shop will call about this order. -->
+      <div class="who" id="coPhone" style="display:none"></div>
+
+      <div id="coFulfilWrap">
+        <div class="label">How would you like it?</div>
+        <div class="seg" id="coSeg"></div>
+      </div>
+      <!-- Shown instead of the chooser when the shop does not deliver, so the
+           customer learns that BEFORE they hunt for a missing delivery option. -->
+      <div class="notice" id="coPickupOnly" style="display:none">
+        🏬 <b>Pickup only</b> — this shop does not deliver. Please collect your
+        order from the shop.
+      </div>
+
+      <div id="coAddrWrap" style="display:none">
+        <div class="label">Delivery address</div>
+        <input id="coAddrLine" type="text" placeholder="House / flat no., building, street" autocomplete="address-line1" />
+        <input id="coAddrLandmark" type="text" placeholder="Landmark (optional)" autocomplete="off" />
+        <div class="addr-row">
+          <input id="coAddrCity" type="text" placeholder="City" autocomplete="address-level2" />
+          <input id="coAddrState" type="text" placeholder="State" autocomplete="address-level1" />
+          <input id="coAddrPin" class="pin" type="text" placeholder="Pincode" inputmode="numeric" maxlength="6" autocomplete="postal-code" />
+        </div>
+      </div>
+
+      <div class="label">Anything else? (optional)</div>
+      <textarea id="coNote" placeholder="Notes for the shop"></textarea>
+
+      <div class="sum" id="coSum"></div>
+
+      <div class="pay" id="coPay" style="display:none">
+        <!-- Advance vs full. Only rendered when the two differ. -->
+        <div class="seg pay-seg" id="coPaySeg"></div>
+        <div class="amt" id="coPayAmt"></div>
+        <div class="hint" id="coPayHint"></div>
+        <!-- One tap into the customer's own UPI app, payee and amount already
+             filled. Android only: iOS has no upi:// scheme, so there the QR
+             below is the whole story. -->
+        <a class="upi-btn" id="coUpiBtn" href="#" style="display:none"></a>
+        <div class="or" id="coOr" style="display:none">or scan with another device</div>
+        <img id="coPayQr" alt="Payment QR code" />
+        <input id="coTxn" type="text" placeholder="UPI transaction / reference ID" autocomplete="off" />
+      </div>
+
+      <div class="err" id="coErr"></div>
+      <button class="btn" id="coBtn">Place Order</button>
+    </div>
+  </div>
+
+  <!-- OTP sheet -->
+  <div class="backdrop" id="otpBackdrop">
+    <div class="sheet">
+      <h2 id="otpTitle">Verify your phone</h2>
+      <p id="otpSub">We'll send a one-time code on WhatsApp to confirm your order.</p>
+      <input id="phoneInput" type="tel" placeholder="Mobile number" autocomplete="tel" inputmode="numeric" />
+      <input id="otpInput" type="text" placeholder="Enter OTP" inputmode="numeric" style="display:none" />
+      <button type="button" class="link" id="otpResend" style="display:none">Resend OTP</button>
+      <div class="err" id="otpErr"></div>
+      <button class="btn" id="otpBtn">Send OTP</button>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    // storeToken is the last path segment of /store/:storeToken
+    var parts = location.pathname.split('/').filter(Boolean);
+    var storeToken = parts[parts.length - 1];
+    var API = '/store/' + encodeURIComponent(storeToken);
+    var LS_TOKEN = 'store_token_' + storeToken;
+    var LS_PHONE = 'store_phone_' + storeToken;
+    var LS_ADDR  = 'store_addr_' + storeToken;
+    var LS_NAME  = 'store_name_' + storeToken;
+
+    var authToken = localStorage.getItem(LS_TOKEN) || null;
+    var cfg = null;           // store settings from /menu
+    var fulfilment = null;    // 'pickup' | 'delivery'
+    // 'full' | 'advance'. Defaults to settling the whole bill now: a customer
+    // who has decided to pay online usually means to be done with it, and the
+    // advance stays one tap away.
+    var payChoice = 'full';
+    var shopName = '';
+    var pollTimer = null;
+
+    var ml = MenuList({ actionLabel: 'Checkout', onAction: openCheckout });
+    var esc = ml.esc;
+
+    var $ = function (id) { return document.getElementById(id); };
+    var rupee = function (n) { return '₹' + Number(n).toFixed(Number(n) % 1 ? 2 : 0); };
+
+    // ---- load catalog + this customer's orders ----
+    function load() {
+      fetch(API + '/menu').then(function (r) {
+        if (!r.ok) throw new Error('menu');
+        return r.json();
+      }).then(function (data) {
+        cfg = data.store || {};
+        // Pickup is always available and is the safer default even where the
+        // shop delivers — no address needed, no delivery fee sprung on anyone.
+        fulfilment = 'pickup';
+        shopName = data.shop_name || '';
+        ml.setHeader(data.shop_name, data.shop_address || 'Order online');
+        document.title = data.shop_name + ' — Order Online';
+        // A storefront should let a customer ring the shop instead of hunting
+        // for the number.
+        if (data.shop_phone) {
+          ml.actions.innerHTML = '<a class="ml-ibtn" href="tel:' + esc(data.shop_phone) + '" aria-label="Call the shop">' +
+            '<svg viewBox="0 0 24 24"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02l-2.2 2.2z"/></svg></a>';
+        }
+        ml.setItems(data.items || []);
+        loadOrders();
+      }).catch(function () {
+        ml.showError('This store is not available right now.');
+      });
+    }
+
+    // The customer's own orders and where each one stands. Polled while any of
+    // them is still waiting, because acceptance happens on the shop's phone —
+    // there is nothing on this page that would otherwise tell them.
+    function loadOrders() {
+      if (!authToken) return;
+      fetch(API + '/orders', { headers: { Authorization: 'Bearer ' + authToken } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.verified === false) {
+            authToken = null; localStorage.removeItem(LS_TOKEN); renderOrders([]); return;
+          }
+          renderOrders(d.orders || []);
+        }).catch(function () {});
+    }
+
+    function schedulePoll(orders) {
+      var waiting = orders.some(function (o) { return o.status === 'pending'; });
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+      if (waiting) pollTimer = setTimeout(loadOrders, 10000);
+    }
+
+    function statusLine(o) {
+      if (o.status === 'accepted') return '🎉 Confirmed by the shop';
+      if (o.status === 'rejected') {
+        return '😔 Could not be accepted' + (o.reject_reason ? ' — ' + o.reject_reason : '');
+      }
+      return '⏳ Waiting for the shop to confirm…';
+    }
+
+    function renderOrders(orders) {
+      // Only the last few matter to a customer standing in the app.
+      var recent = orders.slice(0, 3);
+      var html = '';
+      recent.forEach(function (o) {
+        html += '<div class="running order-card ' + o.status + '">' +
+          '<h3>' + esc(o.order_number) +
+          '<span class="pill ' + o.status + '">' +
+            (o.status === 'pending' ? 'Waiting' : o.status === 'accepted' ? 'Confirmed' : 'Declined') +
+          '</span></h3>' +
+          '<div style="font-size:13px;margin-bottom:8px">' + esc(statusLine(o)) + '</div>';
+        (o.items || []).forEach(function (i) {
+          html += '<div class="row"><span>' + esc(i.item_name) + ' × ' + Number(i.quantity) +
+            '</span><span>' + rupee(i.line_total) + '</span></div>';
+        });
+        if (Number(o.delivery_charge) > 0) {
+          html += '<div class="row"><span>Delivery</span><span>' + rupee(o.delivery_charge) + '</span></div>';
+        }
+        html += '<div class="row" style="border-top:1px solid rgba(15,23,42,.12);margin-top:6px;padding-top:6px;font-weight:700">' +
+          '<span>Total</span><span>' + rupee(o.total) + '</span></div>';
+        if (Number(o.paid_amount) > 0) {
+          html += '<div class="row" style="font-size:12px"><span>Paid online</span><span>' +
+            rupee(o.paid_amount) + '</span></div>';
+        }
+        html += '</div>';
+      });
+      ml.extra.innerHTML = html;
+      schedulePoll(orders);
+    }
+
+    // ---- checkout ------------------------------------------------------------
+    // These figures are a PREVIEW only. The server recomputes every one of them
+    // from the catalog and the shop's own settings when the order is submitted,
+    // so a tampered page can only mislead the person doing the tampering.
+    function money() {
+      var sub = ml.total();
+      var delivery = (fulfilment === 'delivery') ? Number(cfg.delivery_charge || 0) : 0;
+      var total = sub + delivery;
+      var due = Math.round((total * Number(cfg.advance_percent || 0)) / 100 * 100) / 100;
+      // What this customer pays now, given their choice. The server re-derives
+      // both figures from the choice alone — this is only what they are shown.
+      var now = (payChoice === 'full' && due > 0) ? total : due;
+      return { sub: sub, delivery: delivery, total: total, due: due, now: now };
+    }
+
+    function renderCheckout() {
+      // Pickup is always on offer, so the chooser only appears when the shop
+      // ALSO delivers. When it does not, say so plainly rather than showing a
+      // one-option "choice" the customer has to tap for no reason.
+      var canDeliver = !!cfg.delivery_enabled;
+      $('coFulfilWrap').style.display = canDeliver ? 'block' : 'none';
+      $('coPickupOnly').style.display = canDeliver ? 'none' : 'block';
+      if (canDeliver) {
+        var modes = [
+          { id: 'pickup', label: '🏬 Pickup' },
+          { id: 'delivery', label: '🛵 Delivery' },
+        ];
+        $('coSeg').innerHTML = modes.map(function (m) {
+          return '<button data-mode="' + m.id + '" class="' + (m.id === fulfilment ? 'sel' : '') + '">' +
+            m.label + '</button>';
+        }).join('');
+        Array.prototype.forEach.call($('coSeg').children, function (b) {
+          b.onclick = function () { fulfilment = b.getAttribute('data-mode'); renderCheckout(); };
+        });
+      } else {
+        // Guard against a stale 'delivery' left over from a shop that turned
+        // delivery off between page load and checkout.
+        fulfilment = 'pickup';
+      }
+
+      $('coAddrWrap').style.display = fulfilment === 'delivery' ? 'block' : 'none';
+
+      var m = money();
+      // What they are actually buying, itemised — the last chance to catch a
+      // wrong size or a stray tap before the order reaches the shop.
+      var rows = '';
+      ml.lines().forEach(function (l) {
+        rows += '<div class="row line"><span>' + esc(l.name) +
+          '<b>× ' + l.qty + '</b></span><span>' + rupee(l.price * l.qty) + '</span></div>';
+      });
+      rows += '<div class="row sub"><span>Subtotal</span><span>' + rupee(m.sub) + '</span></div>';
+      if (m.delivery > 0) {
+        rows += '<div class="row"><span>Delivery</span><span>' + rupee(m.delivery) + '</span></div>';
+      }
+      rows += '<div class="row grand"><span>Total</span><span>' + rupee(m.total) + '</span></div>';
+      if (m.due > 0) {
+        var payingFull = m.now >= m.total;
+        rows += '<div class="row due"><span>Pay now' +
+          (payingFull ? '' : ' (' + Number(cfg.advance_percent) + '% advance)') +
+          '</span><span>' + rupee(m.now) + '</span></div>';
+        if (!payingFull) {
+          rows += '<div class="row"><span>At the shop</span><span>' +
+            rupee(Math.round((m.total - m.now) * 100) / 100) + '</span></div>';
+        }
+      }
+      $('coSum').innerHTML = rows;
+
+      // Payment block only when the shop actually asks for money up front AND
+      // has a QR or UPI ID to pay into — asking for a reference with nothing
+      // to pay into would be a dead end.
+      var wantsPayment = m.due > 0 && (!!cfg.payment_qr_url || !!cfg.upi_id);
+      $('coPay').style.display = wantsPayment ? 'block' : 'none';
+      if (wantsPayment) {
+        // Nothing to choose when the advance IS the whole bill.
+        var canChoose = m.due < m.total;
+        $('coPaySeg').style.display = canChoose ? 'flex' : 'none';
+        if (canChoose) {
+          var opts = [
+            { id: 'full', label: 'Pay full ' + rupee(m.total) },
+            { id: 'advance', label: 'Advance ' + rupee(m.due) },
+          ];
+          $('coPaySeg').innerHTML = opts.map(function (o) {
+            return '<button data-pay="' + o.id + '" class="' +
+              (o.id === payChoice ? 'sel' : '') + '">' + o.label + '</button>';
+          }).join('');
+          Array.prototype.forEach.call($('coPaySeg').children, function (b) {
+            b.onclick = function () {
+              payChoice = b.getAttribute('data-pay');
+              renderCheckout();
+            };
+          });
+        } else {
+          payChoice = 'full';
+        }
+        $('coPayAmt').textContent = 'Pay ' + rupee(m.now);
+
+        // Rebuilt on every render so the link always carries the amount the
+        // customer is currently looking at, not the one they saw first.
+        var link = canOpenUpiApp() ? upiLink(m.now) : null;
+        var btn = $('coUpiBtn');
+        if (link) {
+          btn.href = link;
+          btn.textContent = 'Pay ' + rupee(m.now) + ' in your UPI app';
+          btn.style.display = 'block';
+        } else {
+          btn.style.display = 'none';
+        }
+        // Wording follows what the customer can actually DO on this device: a
+        // "scan this" instruction is noise to someone holding the only phone.
+        var viaApp = canOpenUpiApp() && !!cfg.upi_id;
+        $('coPayHint').textContent = viaApp
+          ? (cfg.payment_required
+              ? 'Pay in your UPI app, then enter the transaction ID below — the shop needs it to confirm your order.'
+              : 'Pay in your UPI app and enter the transaction ID, or pay at the shop.')
+          : (cfg.payment_required
+              ? 'Scan with any UPI app, then enter the transaction ID below. The shop needs it to confirm your order.'
+              : 'Scan with any UPI app and enter the transaction ID, or pay at the shop.');
+        // The QR only exists if the owner uploaded one; a shop may have a UPI
+        // ID and no image at all.
+        var hasQr = !!cfg.payment_qr_url;
+        $('coPayQr').style.display = hasQr ? '' : 'none';
+        if (hasQr) $('coPayQr').src = cfg.payment_qr_url;
+        // With a working button the QR is the second option, not the first.
+        $('coOr').style.display = (link && hasQr) ? 'block' : 'none';
+      }
+
+      $('coBtn').textContent = authToken ? 'Place Order' : 'Continue';
+    }
+
+    $('coPayQr').onclick = function () { ml.openLightbox(this.src, 'Scan to pay'); };
+
+    // Android resolves upi:// to the UPI app chooser (GPay / PhonePe / Paytm /
+    // BHIM). iOS registers no such scheme — each app has its own — and a desktop
+    // browser has nothing to hand it to, so the button is offered only where it
+    // can actually work rather than dead-ending everyone else.
+    function canOpenUpiApp() {
+      return /android/i.test(navigator.userAgent || '');
+    }
+
+    // Joins the split boxes into the single multi-line string the server
+    // stores and the owner sees — no server/DB change needed for this.
+    function composeAddress() {
+      var line = $('coAddrLine').value.trim();
+      var landmark = $('coAddrLandmark').value.trim();
+      var city = $('coAddrCity').value.trim();
+      var state = $('coAddrState').value.trim();
+      var pin = $('coAddrPin').value.trim();
+      var l1 = [line, landmark].filter(Boolean).join(', ');
+      var l2 = [city, state].filter(Boolean).join(', ');
+      if (pin) l2 = l2 ? l2 + ' - ' + pin : pin;
+      return [l1, l2].filter(Boolean).join(String.fromCharCode(10));
+    }
+
+    // ponytail: the uploaded QR carries the VPA but no amount, so a scanner
+    // still types the figure by hand. Rendering a QR of THIS string instead
+    // would prefill it there too — needs a QR encoder on the page; add one if
+    // customers start mistyping amounts.
+    function upiLink(amount) {
+      if (!cfg.upi_id) return null;
+      return 'upi://pay'
+        + '?pa=' + encodeURIComponent(cfg.upi_id)
+        + '&pn=' + encodeURIComponent(shopName || 'Shop')
+        + '&am=' + Number(amount).toFixed(2)
+        + '&cu=INR'
+        + '&tn=' + encodeURIComponent(shopName || 'Order');
+    }
+
+    function openCheckout() {
+      if (!ml.lines().length) return;
+      $('coErr').textContent = '';
+      // Returning customers should not retype what we already know.
+      $('coName').value = $('coName').value || localStorage.getItem(LS_NAME) || '';
+      // Returning customer: prefill each box from the last delivery, not just
+      // the flattened string — so they can still edit any single field.
+      if (!$('coAddrLine').value) {
+        try {
+          var savedAddr = JSON.parse(localStorage.getItem(LS_ADDR) || 'null');
+          if (savedAddr) {
+            $('coAddrLine').value = savedAddr.line || '';
+            $('coAddrLandmark').value = savedAddr.landmark || '';
+            $('coAddrCity').value = savedAddr.city || '';
+            $('coAddrState').value = savedAddr.state || '';
+            $('coAddrPin').value = savedAddr.pin || '';
+          }
+        } catch (e) {}
+      }
+      var knownPhone = localStorage.getItem(LS_PHONE) || '';
+      $('coPhone').style.display = knownPhone ? 'flex' : 'none';
+      if (knownPhone) {
+        $('coPhone').textContent = '📞 ' + knownPhone + ' — the shop will call this number';
+      }
+      renderCheckout();
+      $('coBackdrop').classList.add('show');
+    }
+    $('coBackdrop').onclick = function (e) { if (e.target === this) this.classList.remove('show'); };
+
+    $('coBtn').onclick = function () {
+      var err = $('coErr'); err.textContent = '';
+      // A name is how the shop calls out a ready order and greets whoever
+      // collects it.
+      if (!$('coName').value.trim()) {
+        err.textContent = 'Please enter your name.'; return;
+      }
+      if (fulfilment === 'delivery' && (!$('coAddrLine').value.trim() ||
+          !$('coAddrCity').value.trim() || !$('coAddrPin').value.trim())) {
+        err.textContent = 'Please fill in your address, city and pincode.'; return;
+      }
+      var m = money();
+      if (cfg.payment_required && m.due > 0 && !$('coTxn').value.trim()) {
+        err.textContent = 'Please pay and enter the transaction ID to confirm.'; return;
+      }
+      localStorage.setItem(LS_NAME, $('coName').value.trim());
+      if (fulfilment === 'delivery') {
+        localStorage.setItem(LS_ADDR, JSON.stringify({
+          line: $('coAddrLine').value.trim(),
+          landmark: $('coAddrLandmark').value.trim(),
+          city: $('coAddrCity').value.trim(),
+          state: $('coAddrState').value.trim(),
+          pin: $('coAddrPin').value.trim(),
+        }));
+      }
+      if (authToken) submitOrder(); else openOtp();
+    };
+
+    // ---- OTP gate ------------------------------------------------------------
+    var otpStage = 'phone';
+    function openOtp() {
+      otpStage = 'phone';
+      $('otpErr').textContent = '';
+      $('otpInput').style.display = 'none';
+      $('otpInput').value = '';
+      $('phoneInput').value = localStorage.getItem(LS_PHONE) || '';
+      $('otpBtn').textContent = 'Send OTP';
+      $('otpBtn').disabled = false;
+      clearInterval(resendTimer);
+      $('otpResend').style.display = 'none';
+      $('otpBackdrop').classList.add('show');
+    }
+    $('otpBackdrop').onclick = function (e) { if (e.target === this) this.classList.remove('show'); };
+
+    // Asks for a code on WhatsApp. Shared by Send and Resend; reports the
+    // outcome in the sheet and hands back ok/failed.
+    var resendTimer = null;
+    function sendCode(phone, done) {
+      var err = $('otpErr');
+      fetch(API + '/send-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phone }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok) { err.textContent = res.j.error || 'Failed to send OTP.'; return done(false); }
+          localStorage.setItem(LS_PHONE, phone);
+          $('otpSub').textContent = 'Enter the code we sent to ' + phone + '.';
+          if (res.j.dev_otp) { $('otpInput').value = res.j.dev_otp; } // dev convenience
+          resendCountdown();
+          done(true);
+        }).catch(function () { err.textContent = 'Network error.'; done(false); });
+    }
+
+    // Resend stays locked for 30s after each send — WhatsApp can take a moment,
+    // and the server allows only 5 codes per number per 15 minutes.
+    function resendCountdown() {
+      var b = $('otpResend'), left = 30;
+      clearInterval(resendTimer);
+      b.style.display = 'block';
+      function tick() {
+        b.disabled = left > 0;
+        b.textContent = left > 0 ? 'Resend OTP in ' + left + 's' : 'Resend OTP';
+        if (left-- <= 0) clearInterval(resendTimer);
+      }
+      tick();
+      resendTimer = setInterval(tick, 1000);
+    }
+    $('otpResend').onclick = function () {
+      var phone = $('phoneInput').value.trim();
+      $('otpErr').textContent = '';
+      this.disabled = true; this.textContent = 'Sending…';
+      sendCode(phone, function (ok) {
+        if (ok) { ml.toast('New code sent on WhatsApp'); return; }
+        $('otpResend').disabled = false; $('otpResend').textContent = 'Resend OTP';
+      });
+    };
+
+    $('otpBtn').onclick = function () {
+      var phone = $('phoneInput').value.trim();
+      var err = $('otpErr'); err.textContent = '';
+      if (otpStage === 'phone') {
+        if (phone.length < 8) { err.textContent = 'Enter a valid mobile number.'; return; }
+        $('otpBtn').disabled = true; $('otpBtn').textContent = 'Sending…';
+        sendCode(phone, function (ok) {
+          $('otpBtn').disabled = false;
+          if (!ok) { $('otpBtn').textContent = 'Send OTP'; return; }
+          otpStage = 'otp';
+          $('otpInput').style.display = 'block';
+          $('otpBtn').textContent = 'Verify & Order';
+          $('otpInput').focus();
+        });
+      } else {
+        var otp = $('otpInput').value.trim();
+        if (!otp) { err.textContent = 'Enter the OTP.'; return; }
+        $('otpBtn').disabled = true; $('otpBtn').textContent = 'Verifying…';
+        fetch(API + '/verify-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone, otp: otp }) })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok) { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Verify & Order'; err.textContent = res.j.error || 'Invalid OTP.'; return; }
+            authToken = res.j.store_token;
+            localStorage.setItem(LS_TOKEN, authToken);
+            $('otpBackdrop').classList.remove('show');
+            submitOrder();
+          }).catch(function () { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Verify & Order'; err.textContent = 'Network error.'; });
+      }
+    };
+
+    function submitOrder() {
+      var lines = ml.lines().map(function (l) {
+        return { item_id: l.item_id, variant_id: l.variant_id, quantity: l.qty };
+      });
+      if (lines.length === 0) { $('coBackdrop').classList.remove('show'); return; }
+      $('coBtn').disabled = true; $('coBtn').textContent = 'Placing…';
+      fetch(API, { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
+        body: JSON.stringify({
+          items: lines,
+          name: $('coName').value.trim(),
+          fulfilment: fulfilment,
+          address: fulfilment === 'delivery' ? composeAddress() : undefined,
+          note: $('coNote').value.trim() || undefined,
+          payment_txn_id: $('coTxn').value.trim() || undefined,
+          // The CHOICE, never the figure — the server derives the amount, so a
+          // tampered page can only mislead the person tampering with it.
+          payment_choice: payChoice,
+        }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (res) {
+          $('coBtn').disabled = false;
+          $('coBtn').textContent = authToken ? 'Place Order' : 'Continue';
+          if (res.status === 401) { // token expired — re-verify by OTP
+            authToken = null; localStorage.removeItem(LS_TOKEN);
+            $('coBackdrop').classList.remove('show');
+            openOtp();
+            $('otpErr').textContent = res.j.error || 'Please verify your phone again.';
+            return;
+          }
+          if (!res.ok) {
+            // Keep the sheet open on a rejected submission: the fix (an address,
+            // a transaction ID) is inside the sheet they are looking at.
+            $('coErr').textContent = res.j.error || 'Could not place the order.';
+            $('coBackdrop').classList.add('show');
+            return;
+          }
+          $('coBackdrop').classList.remove('show');
+          ml.clear();
+          $('coTxn').value = '';
+          $('coNote').value = '';
+          ml.toast('Order sent! Waiting for the shop to confirm.');
+          loadOrders();
+        }).catch(function () {
+          $('coBtn').disabled = false;
+          $('coBtn').textContent = authToken ? 'Place Order' : 'Continue';
+          $('coErr').textContent = 'Network error. Please try again.';
+        });
+    }
+
+    // A backgrounded tab stops timing out reliably; refresh the moment the
+    // customer comes back so a confirmation that landed meanwhile is visible.
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) loadOrders();
+    });
+
+    load();
+  })();
+  </script>
+</body>
+</html>

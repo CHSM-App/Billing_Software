@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+iisnode_logs/
+logs/
+coverage/
+scripts/
+
+# Customer-uploaded item photos — created at runtime, never committed. The
+# server recreates the directory on boot, so it needn't be tracked.
+uploads/
