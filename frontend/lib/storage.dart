@@ -129,6 +129,7 @@ class AuthStorage {
   // SharedPreferences keys
   static const _keyUserId           = 'user_id';
   static const _keyUserName         = 'user_name';
+  static const _keyUserPhone        = 'user_phone';
   static const _keyUserRole         = 'user_role';
   static const _keyBusinessId       = 'business_id';
   static const _keyBusinessName     = 'business_name';
@@ -188,6 +189,7 @@ class AuthStorage {
     required String refreshToken,
     required String userId,
     required String userName,
+    String? userPhone,
     required String userRole,
     required String businessId,
     required String businessName,
@@ -211,6 +213,7 @@ class AuthStorage {
     await Future.wait([
       prefs.setString(_keyUserId, userId),
       prefs.setString(_keyUserName, userName),
+      prefs.setString(_keyUserPhone, userPhone ?? ''),
       prefs.setString(_keyUserRole, userRole),
       prefs.setString(_keyBusinessId, businessId),
       prefs.setString(_keyBusinessName, businessName),
@@ -527,6 +530,7 @@ class AuthStorage {
     return {
       'user_id'          : prefs.getString(_keyUserId),
       'user_name'        : prefs.getString(_keyUserName),
+      'user_phone'       : prefs.getString(_keyUserPhone),
       'user_role'        : prefs.getString(_keyUserRole),
       'business_id'      : prefs.getString(_keyBusinessId),
       'business_name'    : prefs.getString(_keyBusinessName),
@@ -582,6 +586,7 @@ Future<void> saveSession({
   required String refreshToken,
   required String userId,
   required String userName,
+  String? userPhone,
   required String userRole,
   required String businessId,
   required String businessName,
@@ -598,6 +603,7 @@ Future<void> saveSession({
       refreshToken: refreshToken,
       userId: userId,
       userName: userName,
+      userPhone: userPhone,
       userRole: userRole,
       businessId: businessId,
       businessName: businessName,

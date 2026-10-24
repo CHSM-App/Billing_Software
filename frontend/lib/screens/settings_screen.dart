@@ -693,6 +693,21 @@ class _SettingsContentState extends State<_SettingsContent>
                         color: Colors.white,
                       ),
                     ),
+                    if (session.userPhone.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Row(children: [
+                        const Icon(Icons.phone_outlined,
+                            size: 14, color: Colors.white70),
+                        const SizedBox(width: 4),
+                        Text(
+                          session.userPhone,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.white.withValues(alpha: 0.9),
+                          ),
+                        ),
+                      ]),
+                    ],
                     const SizedBox(height: 2),
                     Container(
                       padding: const EdgeInsets.symmetric(

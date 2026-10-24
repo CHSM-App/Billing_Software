@@ -1,6 +1,9 @@
 import 'dart:async' show Completer, Timer, unawaited;
 import 'dart:convert';
+import 'dart:math' as math;
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -276,9 +279,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final _barcodeBuffer = StringBuffer();
   DateTime? _lastKeyTime;
 
+  // Wide layout: the cart panel's width, dragged by the divider and kept per
+  // device. Its own notifier so dragging relayouts the row, not the screen.
+  static const _cartWidthKey = 'billing_cart_width';
+  static const _cartWidthDefault = 360.0;
+  final _cartWidth = ValueNotifier<double>(_cartWidthDefault);
+  final _resizingCart = ValueNotifier<bool>(false);
+
   @override
   void initState() {
     super.initState();
+    SharedPreferences.getInstance().then((p) {
+      final w = p.getDouble(_cartWidthKey);
+      if (w != null && mounted) _cartWidth.value = w;
+    });
     // Observe app lifecycle so we can re-check printer reachability on resume —
     // the user may have toggled Bluetooth or powered the printer off/on while
     // the app was backgrounded. See didChangeAppLifecycleState.
@@ -367,6 +381,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _searchController.dispose();
     _cartScrollCtrl.dispose();
     _cartAtBottom.dispose();
+    _cartWidth.dispose();
+    _resizingCart.dispose();
     _sheetScrollCtrl.dispose();
     _sheetAtBottom.dispose();
     _itemsScrollCtrl.dispose();
@@ -584,6 +600,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   List<_MajorSection> _groupByMajor(
       List<Item> items, List<String> cats, List<String> majors) {
     if (majors.isEmpty) {
+      // No major and no minor category anywhere in the menu: a plain list.
+      // An "Other" bar over every item would be the only group there is.
+      if (!cats.any((c) => c.trim().isNotEmpty)) {
+        return [
+          _MajorSection.flat([
+            _CategorySection('', items,
+                expanded: true,
+                headerless: true,
+                openItems: {
+                  for (final it in items)
+                    if (it.hasVariants && _expandedVariantItems.contains(it.id))
+                      it.id,
+                }),
+          ])
+        ];
+      }
       return [_MajorSection.flat(_groupByCategory(items, cats, null))];
     }
     final searching = _searchController.text.trim().isNotEmpty;
@@ -3843,14 +3875,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Widget _buildWideLayout() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(flex: 6, child: _buildItemsPanel()),
-        Container(width: 1, color: AppColors.border),
-        SizedBox(width: 360, child: _buildCartPanel()),
-      ],
-    );
+    // Built once per screen build, not per drag frame: the builder below
+    // reuses these instances, so dragging only relayouts the two panels.
+    final items = _buildItemsPanel();
+    final cart = _buildCartPanel();
+    return LayoutBuilder(builder: (context, box) {
+      // Cart at least 300 px; the items grid keeps at least 360 px.
+      final max = math.max(300.0, box.maxWidth - 360);
+      double fit(double w) => w.clamp(300.0, max);
+      void save() => SharedPreferences.getInstance()
+          .then((p) => p.setDouble(_cartWidthKey, _cartWidth.value));
+      // Width and pointer x when the drag began. The new width comes from the
+      // pointer's total travel, so it tracks the mouse exactly however many
+      // move events land between frames.
+      var startWidth = 0.0;
+      var startX = 0.0;
+      return ValueListenableBuilder<double>(
+        valueListenable: _cartWidth,
+        builder: (context, width, _) {
+          final w = fit(width);
+          return Stack(children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: items),
+                // Drag to resize the cart; double-click resets it.
+                MouseRegion(
+                  cursor: SystemMouseCursors.resizeColumn,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    dragStartBehavior: DragStartBehavior.down,
+                    onHorizontalDragStart: (d) {
+                      startWidth = w;
+                      startX = d.globalPosition.dx;
+                      _resizingCart.value = true;
+                    },
+                    onHorizontalDragUpdate: (d) => _cartWidth.value =
+                        fit(startWidth - (d.globalPosition.dx - startX)),
+                    onHorizontalDragEnd: (_) {
+                      _resizingCart.value = false;
+                      save();
+                    },
+                    onHorizontalDragCancel: () => _resizingCart.value = false,
+                    onDoubleTap: () {
+                      _cartWidth.value = _cartWidthDefault;
+                      save();
+                    },
+                    child: SizedBox(
+                      width: 12,
+                      child: Center(
+                          child: Container(width: 1, color: AppColors.border)),
+                    ),
+                  ),
+                ),
+                SizedBox(width: w, child: cart),
+              ],
+            ),
+            // While dragging, keep the resize cursor wherever the mouse goes
+            // (buttons and fields underneath would otherwise swap it).
+            ValueListenableBuilder<bool>(
+              valueListenable: _resizingCart,
+              builder: (_, resizing, __) => resizing
+                  ? const Positioned.fill(
+                      child: MouseRegion(
+                          cursor: SystemMouseCursors.resizeColumn))
+                  : const SizedBox.shrink(),
+            ),
+          ]);
+        },
+      );
+    });
   }
 
   Widget _buildNarrowLayout() {
@@ -4132,7 +4226,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             final stripCats = flatSubs.isNotEmpty
                 ? [for (final s in flatSubs) s.category]
                 : cats;
-            strip = stripCats.isEmpty ? null : _buildCategoryStrip(stripCats);
+            // A menu with no categories at all has nothing to jump between.
+            final plain = flatSubs.length == 1 && flatSubs.first.headerless;
+            strip = stripCats.isEmpty || plain
+                ? null
+                : _buildCategoryStrip(stripCats);
           }
 
           Future<void> refresh() async {
@@ -4341,9 +4439,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ),
               ),
-            // Header — always visible. Same 16px gutter as the payment mode,
-            // customer and discount fields below, so the trailing icons line up
-            // with the right edge of those inputs rather than floating past it.
+            // Header. Same 16px gutter as the payment mode, customer and
+            // discount fields below, so the trailing icons line up with the
+            // right edge of those inputs rather than floating past it. Left
+            // out on an empty cart with no price list to pick — every control
+            // in it would be hidden, leaving a blank band over the customer.
+            if (cart.isNotEmpty ||
+                (canFinalize &&
+                    (ref.watch(priceListsProvider).valueOrNull?.isNotEmpty ??
+                        false)))
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                   AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
@@ -5919,11 +6023,15 @@ class _CategorySection {
   /// the section (rather than looked up per widget) so the bar, its rail and
   /// its item rows are all guaranteed to be tinted the same.
   final Color accent;
+  /// The whole menu when the business uses no categories at all: no bar and
+  /// no box, just the item rows. Always open — there is nothing to fold.
+  final bool headerless;
   const _CategorySection(this.category, this.items,
       {required this.expanded,
       this.major,
       this.openItems = const {},
-      this.accent = AppColors.primary});
+      this.accent = AppColors.primary,
+      this.headerless = false});
 
   String get key => sectionKey(major, category);
 
@@ -6011,18 +6119,25 @@ class _ListEntry {
   /// matches the card that opened it. See [CategoryAccents].
   final Color accent;
 
+  /// False for the rows of a headerless section: plain list rows, no box.
+  final bool framed;
+
   const _ListEntry.majorHeader(this.majorSection)
       : section = null,
         cells = const [],
         isLastRowOfSection = false,
-        accent = AppColors.primary;
+        accent = AppColors.primary,
+        framed = true;
   const _ListEntry.header(this.section)
       : majorSection = null,
         cells = const [],
         isLastRowOfSection = false,
-        accent = AppColors.primary;
+        accent = AppColors.primary,
+        framed = true;
   const _ListEntry.row(this.cells,
-      {this.isLastRowOfSection = false, this.accent = AppColors.primary})
+      {this.isLastRowOfSection = false,
+      this.accent = AppColors.primary,
+      this.framed = true})
       : section = null,
         majorSection = null;
   bool get isHeader => section != null;
@@ -6150,10 +6265,15 @@ class _ExcelItemTable extends StatefulWidget {
         isLastRowOfSection: r == rows - 1,
         // Inherited from the section, which got it from its major.
         accent: s.accent,
+        framed: !s.headerless,
       ));
     }
     return (out, index);
   }
+
+  /// A section's bar height — none for a headerless (no-categories) list.
+  static double _headerOf(_CategorySection s) =>
+      s.headerless ? 0 : sectionHeaderExtent;
 
   /// Rows a section contributes to the list — none while collapsed.
   static int _rowsIn(_CategorySection s, bool twoColumns) =>
@@ -6172,7 +6292,7 @@ class _ExcelItemTable extends StatefulWidget {
       if (!m.expanded) continue;
       for (final s in m.subs) {
         final start = offset;
-        offset += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        offset += _headerOf(s) + _rowsIn(s, twoColumns) * rowExtent;
         out.add(_SectionSpan(s.key, start, offset, s.expanded));
       }
     }
@@ -6197,7 +6317,7 @@ class _ExcelItemTable extends StatefulWidget {
       y += majorHeaderExtent;
       if (!m.expanded) continue;
       for (final s in m.subs) {
-        y += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        y += _headerOf(s) + _rowsIn(s, twoColumns) * rowExtent;
       }
     }
     return current;
@@ -6213,7 +6333,7 @@ class _ExcelItemTable extends StatefulWidget {
       if (m.major != null) offset += majorHeaderExtent;
       if (!m.expanded) continue;
       for (final s in m.subs) {
-        offset += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        offset += _headerOf(s) + _rowsIn(s, twoColumns) * rowExtent;
       }
     }
     return null;
@@ -6226,7 +6346,7 @@ class _ExcelItemTable extends StatefulWidget {
       if (m.major != null) h += majorHeaderExtent;
       if (!m.expanded) continue;
       for (final s in m.subs) {
-        h += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        h += _headerOf(s) + _rowsIn(s, twoColumns) * rowExtent;
       }
     }
     return h;
@@ -6241,7 +6361,7 @@ class _ExcelItemTable extends StatefulWidget {
       if (m.major != null) offset += majorHeaderExtent;
       if (!m.expanded) continue;
       for (final s in m.subs) {
-        offset += sectionHeaderExtent;
+        offset += _headerOf(s);
         for (final e in _sectionEntries(s, twoColumns, 0).$1) {
           if (e.cells.any((c) => c != null && c.item?.id == itemId)) {
             return offset;
@@ -6410,8 +6530,10 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
       for (final s in m.subs) {
         // The sub bar squashes with its major, so folding a major takes its
         // whole subtree — bars and rows alike — down together.
-        entries.add(
-            (_ListEntry.header(s), _ExcelItemTable.sectionHeaderExtent * mp));
+        if (!s.headerless) {
+          entries.add(
+              (_ListEntry.header(s), _ExcelItemTable.sectionHeaderExtent * mp));
+        }
         final sp = mp * _progress(_sectionFold, s.key, s.expanded);
         if (sp <= 0) {
           index += s.items.length;
@@ -6426,6 +6548,7 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
             major: s.major,
             expanded: true,
             accent: s.accent,
+            headerless: s.headerless,
             openItems: {
               for (final it in s.items)
                 if (it.hasVariants &&
@@ -6591,6 +6714,23 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
     // nothing. Everything else — the box round an open group, its inset, its
     // cell rules — is the same either way, so a shop that never adopted major
     // categories gets the same billing list, minus the tree line.
+    // No categories at all: plain rows, a rule under each, no box.
+    if (!e.framed) {
+      return _folded(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: ColoredBox(
+            color: AppColors.surface,
+            child: Column(children: [
+              Expanded(child: row),
+              const Divider(height: 1, thickness: 1, color: AppColors.border),
+            ]),
+          ),
+        ),
+        extent,
+        _ExcelItemTable.rowExtent,
+      );
+    }
     final railed = widget.tree.isNotEmpty && widget.tree.first.major != null;
     final rowBody = Column(
       children: [

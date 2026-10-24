@@ -250,6 +250,7 @@ class _LoginScreenState extends ConsumerState<_LoginView>
         refreshToken: result['refresh_token'],
         userId: result['user']['id'],
         userName: result['user']['name'],
+        userPhone: result['user']['phone'] as String?,
         userRole: result['user']['role'],
         businessId: business['id'],
         businessName: business['name'],

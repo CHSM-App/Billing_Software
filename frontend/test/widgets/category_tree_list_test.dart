@@ -6,7 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-Item _item(String name, {String? major, required String cat}) => Item(
+Item _item(String name, {String? major, String? cat}) => Item(
     id: name,
     businessId: 'b',
     name: name,
@@ -39,7 +39,8 @@ class _HostState extends State<_Host> with CategoryTreeNav<_Host> {
 
   @override
   Widget build(BuildContext context) {
-    final cats = {for (final i in widget.items) i.category!}.toList()..sort();
+    final cats =
+        widget.items.map((i) => i.category).whereType<String>().toSet().toList()..sort();
     final tree = buildTree(widget.items, cats, widget.majors,
         searching: false, twoColumns: false);
     final strip = buildTreeStrip(widget.majors, cats);
@@ -121,6 +122,34 @@ void main() {
     expect(find.text('row:Soap'), findsOneWidget);
     // Category name appears as a chip and as its card.
     expect(find.text('Grocery'), findsNWidgets(2));
+  });
+
+  // A business that never set a category: just the items, no "Other".
+  testWidgets('no categories at all: plain rows, no Other card or strip',
+      (tester) async {
+    await _pump(tester, [_item('Tea'), _item('Coffee')], const []);
+    await tester.pumpAndSettle();
+    expect(find.text('row:Tea'), findsOneWidget);
+    expect(find.text('row:Coffee'), findsOneWidget);
+    expect(find.text('Other'), findsNothing);
+  });
+
+  testWidgets('one category set: the rest still go under Other',
+      (tester) async {
+    await _pump(
+        tester, [_item('Tea', cat: 'Drinks'), _item('Samosa')], const []);
+    await tester.pumpAndSettle();
+    expect(find.text('Drinks'), findsNWidgets(2)); // chip + card
+    expect(find.text('Other'), findsNWidgets(2));
+  });
+
+  test('a headerless section adds no header height', () {
+    const s = TreeSection('', [], expanded: true, headerless: true);
+    const next = TreeMajor('Veg', [], expanded: true);
+    expect(
+        CategoryTreeList.majorOffset(
+            [const TreeMajor.flat([s]), next], 'Veg', false),
+        0);
   });
 
   test('majorOffset sums the extents above the major', () {

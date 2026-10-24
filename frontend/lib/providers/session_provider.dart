@@ -4,6 +4,9 @@ import '../storage.dart';
 class SessionData {
   final String userId;
   final String userName;
+  /// The logged-in user's own mobile number. Empty until their next login on
+  /// a build that saves it.
+  final String userPhone;
   final String userRole;
   final String businessId;
   final String businessName;
@@ -26,6 +29,7 @@ class SessionData {
   const SessionData({
     required this.userId,
     required this.userName,
+    this.userPhone = '',
     required this.userRole,
     required this.businessId,
     required this.businessName,
@@ -56,6 +60,7 @@ class SessionData {
   static SessionData fromMap(Map<String, dynamic> m) => SessionData(
         userId: m['user_id'] ?? '',
         userName: m['user_name'] ?? '',
+        userPhone: m['user_phone'] ?? '',
         userRole: m['user_role'] ?? '',
         businessId: m['business_id'] ?? '',
         businessName: m['business_name'] ?? '',
