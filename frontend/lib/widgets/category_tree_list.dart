@@ -24,8 +24,15 @@ class TreeSection {
   final bool expanded;
   final Color accent;
 
+  /// The whole menu when the business uses no categories at all: no card and
+  /// no box, just the item rows. Always open — there is nothing to fold.
+  final bool headerless;
+
   const TreeSection(this.category, this.items,
-      {required this.expanded, this.major, this.accent = AppColors.primary});
+      {required this.expanded,
+      this.major,
+      this.accent = AppColors.primary,
+      this.headerless = false});
 
   String get key => sectionKey(major, category);
 
@@ -104,7 +111,8 @@ class CategoryTreeList extends StatefulWidget {
   }
 
   static double _sectionHeight(TreeSection s, bool twoColumns) =>
-      sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+      (s.headerless ? 0 : sectionHeaderExtent) +
+      _rowsIn(s, twoColumns) * rowExtent;
 
   /// Span of every section currently in the list. Sections under a folded
   /// major are not in the list, so they are absent here too.
@@ -185,21 +193,26 @@ class _Entry {
   final bool isLastRow;
   final Color accent;
 
+  /// False for the rows of a headerless section: plain list rows, no box.
+  final bool framed;
+
   const _Entry.major(TreeMajor this.major)
       : section = null,
         isLastSub = false,
         items = const [],
         firstNumber = 0,
         isLastRow = false,
-        accent = AppColors.primary;
+        accent = AppColors.primary,
+        framed = true;
   const _Entry.section(TreeSection this.section, {required this.isLastSub})
       : major = null,
         items = const [],
         firstNumber = 0,
         isLastRow = false,
-        accent = AppColors.primary;
+        accent = AppColors.primary,
+        framed = true;
   const _Entry.row(this.items, this.firstNumber,
-      {required this.isLastRow, required this.accent})
+      {required this.isLastRow, required this.accent, this.framed = true})
       : major = null,
         section = null,
         isLastSub = false;
@@ -296,17 +309,21 @@ class _CategoryTreeListState extends State<CategoryTreeList>
         continue;
       }
       for (final s in m.subs) {
-        out.add((
-          _Entry.section(s, isLastSub: m.subs.last.key == s.key),
-          CategoryTreeList.sectionHeaderExtent * mp,
-        ));
+        if (!s.headerless) {
+          out.add((
+            _Entry.section(s, isLastSub: m.subs.last.key == s.key),
+            CategoryTreeList.sectionHeaderExtent * mp,
+          ));
+        }
         final sp = mp * _progress(_sectionFold, s.key, s.expanded);
         if (sp > 0) {
           for (var i = 0; i < s.items.length; i += cols) {
             final end = (i + cols).clamp(0, s.items.length);
             out.add((
               _Entry.row(s.items.sublist(i, end), number + i,
-                  isLastRow: end == s.items.length, accent: s.accent),
+                  isLastRow: end == s.items.length,
+                  accent: s.accent,
+                  framed: !s.headerless),
               CategoryTreeList.rowExtent * sp,
             ));
           }
@@ -377,6 +394,23 @@ class _CategoryTreeListState extends State<CategoryTreeList>
               Expanded(child: cells.length > 1 ? cells[1] : const SizedBox()),
             ],
           );
+    // No categories at all: plain rows, a rule under each, no box.
+    if (!e.framed) {
+      return _folded(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: ColoredBox(
+            color: AppColors.surface,
+            child: Column(children: [
+              Expanded(child: row),
+              const Divider(height: 1, thickness: 1, color: AppColors.border),
+            ]),
+          ),
+        ),
+        extent,
+        CategoryTreeList.rowExtent,
+      );
+    }
     final framed = ItemRowFrame(
       isLast: e.isLastRow,
       accent: e.accent,
@@ -509,6 +543,14 @@ mixin CategoryTreeNav<T extends StatefulWidget> on State<T> {
   List<TreeMajor> _group(List<Item> items, List<String> cats,
       List<String> majors, bool searching) {
     if (majors.isEmpty) {
+      // No major and no minor category anywhere in the menu: a plain list.
+      // An "Other" card over every item would be the only group there is.
+      if (!cats.any((c) => c.trim().isNotEmpty)) {
+        return [
+          TreeMajor.flat(
+              [TreeSection('', items, expanded: true, headerless: true)])
+        ];
+      }
       return [
         TreeMajor.flat(
             _groupByCategory(items, cats, null, searching, AppColors.primary))
@@ -679,7 +721,10 @@ mixin CategoryTreeNav<T extends StatefulWidget> on State<T> {
     }
     final subs = _tree.isEmpty ? const <TreeSection>[] : _tree.first.subs;
     final cats = subs.isNotEmpty ? [for (final s in subs) s.category] : allCats;
-    if (cats.isEmpty) return null;
+    // A menu with no categories at all has nothing to jump between.
+    if (cats.isEmpty || (subs.length == 1 && subs.first.headerless)) {
+      return null;
+    }
     return ValueListenableBuilder<String?>(
       valueListenable: _activeCategory,
       builder: (_, active, __) => CategoryChipStrip(

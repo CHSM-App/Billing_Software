@@ -22,6 +22,7 @@ import 'orders_screen.dart';
 import 'kitchen_screen.dart';
 import 'warranty_screen.dart';
 import 'settings_screen.dart';
+import 'history_screen.dart';
 import 'license_screen.dart';
 import 'login_screen.dart';
 import '../providers/open_drafts_provider.dart';
@@ -347,7 +348,8 @@ class _MainShellState extends ConsumerState<MainShell>
   static bool _canDecideOnlineOrders(String role) =>
       role == 'owner' || role == 'cashier';
 
-  List<NavItem> _buildNavItems(String userRole, String businessType) {
+  List<NavItem> _buildNavItems(String userRole, String businessType,
+      {bool wide = false}) {
     final l10n = context.l10n;
     final isRestaurant = businessType == 'restaurant_with_tables' ||
         businessType == 'restaurant_no_tables';
@@ -397,7 +399,12 @@ class _MainShellState extends ConsumerState<MainShell>
       if (isRetailWarrantyShop(businessType))
         NavItem(Icons.verified_user_outlined, Icons.verified_user,
             l10n.navWarranty, const WarrantyScreen()),
-      // History, Reports and Expenses moved into the Profile screen.
+      // History, Reports and Expenses moved into the Profile screen. The side
+      // rail (wide screens, Windows) has room, so History is a tab there too —
+      // same roles as its Profile card (not waiters).
+      if (wide && userRole != 'server')
+        NavItem(Icons.history_outlined, Icons.history, l10n.navHistory,
+            const HistoryScreen()),
       NavItem(Icons.person_outline, Icons.person, l10n.navProfile,
           const SettingsScreen()),
     ];
@@ -485,12 +492,13 @@ class _MainShellState extends ConsumerState<MainShell>
           }
         });
 
-        final items = _buildNavItems(session.userRole, session.businessType);
+        final isWide = MediaQuery.of(context).size.width >= 720;
+        final items = _buildNavItems(session.userRole, session.businessType,
+            wide: isWide);
         // Kept so a notification tap can find the Orders tab's index without
         // rebuilding the list outside build().
         _navItems = items;
         final safeIndex = _index.clamp(0, items.length - 1);
-        final isWide = MediaQuery.of(context).size.width >= 720;
         // Coming back from a page pushed over the shell (which has no bottom
         // bar) also brings the bar back, however it was left on the way in.
         // isCurrentOf rebuilds the shell when that page pops — at the START of
