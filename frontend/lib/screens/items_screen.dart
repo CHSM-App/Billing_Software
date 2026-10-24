@@ -753,10 +753,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           );
         } else if (stockMode) {
           final isWide = MediaQuery.of(context).size.width >= 720;
+          // Low-stock items (or any low-stock size) first, order kept otherwise.
+          bool low(Item i) => i.isLowStock || i.variants.any((v) => v.isLowStock);
+          final sorted = [...items.where(low), ...items.where((i) => !low(i))];
           list = CustomScrollView(
             physics: _header.physics,
             slivers: [
-              _buildStockSliver(items, crossAxisCount: isWide ? 3 : 1),
+              _buildStockSliver(sorted, crossAxisCount: isWide ? 3 : 1),
             ],
           );
         } else {
