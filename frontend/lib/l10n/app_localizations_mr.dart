@@ -232,7 +232,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get warrantyTitle => 'वॉरंटी';
 
   @override
-  String get warrantySearchHint => 'नाव, फोन किंवा सिरीयल नंबर शोधा';
+  String get warrantySearchHint => 'नाव, फोन, सिरीयल नंबर किंवा तपशील शोधा';
 
   @override
   String get warrantyFilterAll => 'सर्व';
@@ -292,6 +292,12 @@ class AppLocalizationsMr extends AppLocalizations {
   String get warrantyPeriodInvalid => 'शून्यपेक्षा जास्त वॉरंटी कालावधी टाका';
 
   @override
+  String get warrantyCategory => 'श्रेणी';
+
+  @override
+  String get warrantyExpiryDateLabel => 'कालबाह्यतेची तारीख';
+
+  @override
   String get warrantyExtraDetails => 'अतिरिक्त तपशील';
 
   @override
@@ -302,6 +308,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get warrantyAddDetail => 'तपशील जोडा';
+
+  @override
+  String get warrantyRemoveDetail => 'तपशील काढा';
 
   @override
   String get warrantyNotes => 'नोंदी';
@@ -797,7 +806,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get businessTypeRestaurantTakeaway => 'रेस्टॉरंट (पार्सल)';
 
   @override
-  String get businessTypeRetailWarranty => 'रिटेल आणि वॉरंटी';
+  String get businessTypeRetailWarranty => 'रिटेल आणि वॉरंटी ट्रॅकिंग';
 
   @override
   String get appTagline => 'स्मार्ट बिलिंग सोल्युशन';
@@ -1555,6 +1564,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billSetupNote => 'बिलावरील टीप';
+
+  @override
+  String get billSetupWarrantyDetails => 'वॉरंटी तपशील';
 
   @override
   String get billSetupNoteSubtitle => 'प्रत्येक बिलावर छापला जाणारा संदेश';

@@ -60,24 +60,30 @@ function serializeCharges(charges) {
   return charges && charges.length > 0 ? JSON.stringify(charges) : null;
 }
 
-/**
- * Normalise a bills row for API output: parse the stored JSON into an array
- * (always present, possibly empty) and default charges_amount to 0. Mutates and
- * returns the row so it can be used inline in a `.map()`.
- */
-function attachCharges(row) {
-  if (!row) return row;
-  let list = [];
-  const raw = row.additional_charges;
+/** Parses a JSON-array-or-null column (same shape convention as
+ * additional_charges) into an array, tolerating missing/corrupt JSON. */
+function parseJsonArray(raw) {
+  if (Array.isArray(raw)) return raw;
   if (typeof raw === 'string' && raw.trim()) {
     try {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) list = parsed;
-    } catch (_) { /* corrupt JSON → treat as no charges rather than 500 */ }
-  } else if (Array.isArray(raw)) {
-    list = raw;
+      if (Array.isArray(parsed)) return parsed;
+    } catch (_) { /* corrupt JSON → treat as empty rather than 500 */ }
   }
-  row.additional_charges = list;
+  return [];
+}
+
+/**
+ * Normalise a bills row for API output: parse additional_charges AND
+ * warranty_extra_data (migration 065 — warranty details captured at billing
+ * time, e.g. a tyre's vehicle KM reading) into arrays (always present,
+ * possibly empty), and default charges_amount to 0. Mutates and returns the
+ * row so it can be used inline in a `.map()`.
+ */
+function attachCharges(row) {
+  if (!row) return row;
+  row.additional_charges = parseJsonArray(row.additional_charges);
+  row.warranty_extra_data = parseJsonArray(row.warranty_extra_data);
   if (row.charges_amount === undefined || row.charges_amount === null) {
     row.charges_amount = 0;
   }

@@ -514,6 +514,10 @@ class Bill {
   final double chargesAmount;
   /// Itemised additional charges (delivery, packaging, ...) for display.
   final List<BillCharge> additionalCharges;
+  /// Warranty details captured at billing time (migration 065) — e.g. a
+  /// tyre's vehicle KM reading — printed on the receipt when the owner's
+  /// Billing Setup toggle allows it. Empty for most bills.
+  final List<WarrantyExtraField> warrantyExtraData;
   final double total;
   /// Signed invoice-level round-off adjustment (e.g. -0.22, +0.40). 0 when the
   /// business has rounding disabled. NEVER folded into subtotal/tax/total — the
@@ -672,6 +676,7 @@ class Bill {
     this.discountAmount = 0.0,
     this.chargesAmount = 0.0,
     this.additionalCharges = const [],
+    this.warrantyExtraData = const [],
     required this.total,
     this.roundOff = 0.0,
     required this.paymentMode,
@@ -716,6 +721,9 @@ class Bill {
             ? double.parse(j['charges_amount'].toString())
             : 0.0,
         additionalCharges: BillCharge.listFrom(j['additional_charges']),
+        warrantyExtraData: (j['warranty_extra_data'] as List? ?? [])
+            .map((e) => WarrantyExtraField.fromJson(e as Map<String, dynamic>))
+            .toList(),
         total: double.parse(j['total'].toString()),
         roundOff: j['round_off'] != null
             ? double.parse(j['round_off'].toString())

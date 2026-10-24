@@ -16,13 +16,12 @@ const express = require('express');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
-const { validateText, validateInteger } = require('../validate');
+const { validateText, validateInteger, validateExtraData } = require('../validate');
 
 const router = express.Router();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PAGE_MAX = 100;
-const MAX_EXTRA_DATA = 30;
 
 router.use(requireAuth);
 
@@ -43,25 +42,6 @@ function ownerOnly(req, res, next) {
 }
 
 const intOrNull = (v) => (v === undefined || v === '' || !/^\d+$/.test(String(v)) ? null : parseInt(v, 10));
-
-/// Validates the extra_data array — labeled pairs merged from a category
-/// template and any ad-hoc rows the UI let staff add. Values are always
-/// stored as strings; any type-specific rendering is a UI concern.
-function validateExtraData(extraData) {
-  if (extraData === undefined || extraData === null) return null;
-  if (!Array.isArray(extraData)) return 'extra_data must be an array';
-  if (extraData.length > MAX_EXTRA_DATA) return `At most ${MAX_EXTRA_DATA} extra fields are allowed`;
-  for (const e of extraData) {
-    if (!e || typeof e !== 'object') return 'each extra_data entry must be an object';
-    if (validateText(e.label, 'Extra field label', 100, { required: true })) {
-      return 'each extra_data entry needs a label';
-    }
-    if (e.value != null && String(e.value).length > 500) {
-      return 'each extra_data value must be 500 characters or fewer';
-    }
-  }
-  return null;
-}
 
 const STATUS_FILTER = {
   // 30 days is the same "expiring soon" horizon used nowhere else in this
@@ -93,7 +73,11 @@ router.get('/', cashierOrOwner, async (req, res) => {
     const q = String(req.query.q || '').trim();
     if (q) {
       request.input('q', sql.NVarChar(200), `%${q}%`);
-      where.push('(customer_name LIKE @q OR customer_phone LIKE @q OR serial_number LIKE @q OR item_name LIKE @q)');
+      // extra_data is the category-template + ad-hoc "label: value" pairs
+      // (e.g. a tyre's KM reading, a vehicle number) — stored as JSON text,
+      // so a plain LIKE against it still matches a value typed inside.
+      where.push(`(customer_name LIKE @q OR customer_phone LIKE @q OR serial_number LIKE @q
+        OR item_name LIKE @q OR extra_data LIKE @q)`);
     }
     const statusClause = STATUS_FILTER[req.query.status];
     if (statusClause) where.push(statusClause);

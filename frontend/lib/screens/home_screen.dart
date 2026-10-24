@@ -20,6 +20,7 @@ import '../widgets/floating_bar_physics.dart';
 import '../widgets/whatsapp_mark.dart';
 import '../widgets/stock_target_picker.dart' show isRestaurantBusiness;
 import '../widgets/skeletons.dart';
+import '../widgets/warranty_extra_fields_editor.dart';
 import '../services/printer_service.dart';
 import '../services/receipt_output.dart';
 import '../services/receipt_labels.dart';
@@ -141,6 +142,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // customer section is open; opens on tap or when a draft / picked customer
   // already has them.
   bool _showMoreCustomerFields = false;
+  // "Retail & Warranty" shops only: rows for the "Warranty Details" section,
+  // shown (already expanded, no extra tap needed) whenever the cart holds a
+  // warranty-eligible item — e.g. a tyre's vehicle KM reading.
+  final List<WarrantyExtraRow> _warrantyRows = [];
   // How the bill is paid: rows of [mode][amount] at the bottom of the cart.
   // One row is an ordinary single-mode bill; "+" adds a row and splits it.
   // The last row always takes whatever the others leave of the payable (see
@@ -380,6 +385,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _customerPhoneController.dispose();
     _customerAddressController.dispose();
     _customerGstinController.dispose();
+    for (final r in _warrantyRows) {
+      r.dispose();
+    }
     _discountPctController.dispose();
     _discountAmtController.dispose();
     _customerNameFocus.dispose();
@@ -2467,11 +2475,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _customerAddressController.text.trim().nullIfEmpty;
   String? get _customerGstin => _customerGstinController.text.trim().nullIfEmpty;
 
+  /// The "Warranty Details" rows as the API's extra_data shape — empty when
+  /// nothing was entered (the server/receipt simply omit the section then).
+  List<Map<String, String>> get _warrantyExtraDataPayload =>
+      warrantyRowsPayload(_warrantyRows);
+
   /// Address + GSTIN go with the customer: cleared and folded with them.
+  /// Warranty details go with the sale: cleared the same moment, so the next
+  /// customer's bill doesn't inherit this one's KM reading etc.
   void _clearCustomerExtras() {
     _customerAddressController.clear();
     _customerGstinController.clear();
     _showMoreCustomerFields = false;
+    for (final r in _warrantyRows) {
+      r.dispose();
+    }
+    _warrantyRows.clear();
   }
 
   /// Fill BOTH fields from a picked suggestion, whichever field was typed in.
@@ -2542,6 +2561,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   static final _gstinRe =
       RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$');
+
+  /// "Retail & Warranty" shops only: "Warranty Details" under the phone
+  /// field, shown (already expanded) whenever [cart] holds a
+  /// warranty-eligible item — e.g. a tyre's vehicle KM reading, printed on
+  /// the receipt and copied onto the auto-created warranty record. Hidden
+  /// (and empty) otherwise. [setLocal] repaints the host (panel or sheet).
+  Widget _warrantyDetailsSection(
+      List<CartEntry> cart, void Function(VoidCallback) setLocal) {
+    final warrantyItem = cart.where((e) => e.item.warrantyEligible).firstOrNull;
+    if (warrantyItem == null) return const SizedBox.shrink();
+    // Fills in this category's template fields the first time they're needed
+    // (or when switching to a different category) — mutating _warrantyRows
+    // here, before building the editor below, so this same build already
+    // shows them; no separate setState round-trip required.
+    final templates = ref.watch(warrantyFieldTemplatesProvider).valueOrNull;
+    applyWarrantyFieldTemplate(_warrantyRows, warrantyItem.item.category, templates);
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.space8),
+      child: WarrantyExtraFieldsEditor(
+        // No title here: this sits right under "More details (address,
+        // GSTIN)" — a second "…details" heading next to that one reads as
+        // the same thing twice. The "+ Add detail" action alone is enough;
+        // the Warranty tab's own form (no such neighbour) still shows one.
+        rows: _warrantyRows,
+        onAddRow: () => setLocal(() => _warrantyRows.add(WarrantyExtraRow(
+              labelCtrl: TextEditingController(),
+              valueCtrl: TextEditingController(),
+            ))),
+        onRemoveRow: (row) {
+          setLocal(() => _warrantyRows.remove(row));
+          row.dispose();
+        },
+      ),
+    );
+  }
 
   /// "More details" under the phone field: the customer's address and GSTIN,
   /// folded until tapped. [setLocal] repaints the host (panel or sheet).
@@ -2946,7 +3000,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         result = await finalizeBill(widget.activeBillId!,
             paymentMode: _paymentMode,
             payments: _splitPaymentsJson,
-            collect: _collectMap);
+            collect: _collectMap,
+            warrantyExtraData: _warrantyExtraDataPayload);
       } else {
         final draft = await createBill({
           'items': _cartPayload,
@@ -2968,7 +3023,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         result = await finalizeBill(draft['id'],
             paymentMode: _paymentMode,
             payments: _splitPaymentsJson,
-            collect: _collectMap);
+            collect: _collectMap,
+            warrantyExtraData: _warrantyExtraDataPayload);
       }
       // Old dues ticked for collection were paid off by the server in the
       // same transaction, and this bill carries them as "Prev. due" lines —
@@ -4566,6 +4622,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 ),
                                 _customerSuggestionList('phone'),
                                 _moreCustomerFields(l10n, setLocal),
+                                _warrantyDetailsSection(cart, setLocal),
                               ],
                             ),
                           )

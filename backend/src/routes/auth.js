@@ -90,7 +90,7 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
   if (!VALID_BUSINESS_TYPES.includes(business_type)) {
     // Shown verbatim by the app, so plain words — not the stored values.
-    return res.status(400).json({ error: 'Business type must be Retail, Restaurant or Retail & Warranty' });
+    return res.status(400).json({ error: 'Business type must be Retail, Restaurant or Retail & Warranty Tracking' });
   }
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });

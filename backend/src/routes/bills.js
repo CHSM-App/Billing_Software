@@ -11,6 +11,7 @@ const { sendLowStockNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
 const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
+const { validateExtraData } = require('../validate');
 
 // "Retail & Warranty" shops: a finalized bill line sold against a
 // warranty-eligible item becomes a warranty record automatically (manual
@@ -26,7 +27,7 @@ async function autoCreateWarranties(businessId, billId, userId) {
       .input('bill_id', sql.UniqueIdentifier, billId)
       .query(`
         SELECT bi.id AS bill_item_id, bi.item_id, bi.item_name, i.category, i.default_warranty_months,
-               b.customer_name, b.customer_phone,
+               b.customer_name, b.customer_phone, b.warranty_extra_data,
                CAST(ISNULL(b.finalized_at, b.created_at) AS DATE) AS purchase_date
         FROM bill_items bi
         JOIN bills b ON b.id = bi.bill_id
@@ -56,12 +57,16 @@ async function autoCreateWarranties(businessId, billId, userId) {
         .input('purchase_date', sql.Date, row.purchase_date)
         .input('warranty_months', sql.Int, months)
         .input('expiry_date', sql.Date, expiry)
+        // Captured at billing time (migration 065), e.g. a tyre's vehicle KM
+        // reading — copied verbatim, same JSON text, onto every warranty row
+        // this bill creates. Null when nothing was entered.
+        .input('extra_data', sql.NVarChar(sql.MAX), row.warranty_extra_data || null)
         .input('created_by_user_id', sql.UniqueIdentifier, userId)
         .query(`
           INSERT INTO warranties (business_id, customer_name, customer_phone, item_id, item_name,
-            category, bill_id, bill_item_id, purchase_date, warranty_months, expiry_date, created_by_user_id)
+            category, bill_id, bill_item_id, purchase_date, warranty_months, expiry_date, extra_data, created_by_user_id)
           VALUES (@business_id, @customer_name, @customer_phone, @item_id, @item_name,
-            @category, @bill_id, @bill_item_id, @purchase_date, @warranty_months, @expiry_date, @created_by_user_id)
+            @category, @bill_id, @bill_item_id, @purchase_date, @warranty_months, @expiry_date, @extra_data, @created_by_user_id)
         `);
     }
   } catch (err) {
@@ -619,6 +624,7 @@ async function fetchBill(billId, businessId) {
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
              b.customer_address, b.customer_gstin,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+             b.warranty_extra_data,
              b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
              b.payment_status, b.settled_at, b.settled_payment_mode, b.credit_amount,
              b.credit_collected,
@@ -668,7 +674,7 @@ async function fetchBill(billId, businessId) {
 
 // POST /api/bills
 router.post('/', requireAuth, async (req, res) => {
-  const { items, table_id, customer_name, customer_phone, customer_address, customer_gstin, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at } = req.body;
+  const { items, table_id, customer_name, customer_phone, customer_address, customer_gstin, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at, warranty_extra_data } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
@@ -737,6 +743,15 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ error: parsedCharges.error });
   }
   const { charges: chargeList, chargesAmount } = parsedCharges;
+  // Warranty details captured at billing time (migration 065) — e.g. a
+  // tyre's vehicle KM reading — copied verbatim into every warranty record
+  // autoCreateWarranties creates for this bill, and printed on the receipt
+  // (gated on the owner's Billing Setup toggle). Optional: never blocks the
+  // sale, unlike the customer-phone requirement.
+  const warrantyExtraDataInvalid = validateExtraData(warranty_extra_data);
+  if (warrantyExtraDataInvalid) {
+    return res.status(400).json({ error: warrantyExtraDataInvalid });
+  }
   // Offline sync sends when the sale actually happened; without it the bill
   // would be dated when the device came back online.
   const saleTime = billStatus === 'finalized' ? clientSaleTime(finalized_at) : null;
@@ -941,6 +956,9 @@ router.post('/', requireAuth, async (req, res) => {
         .input('discount_amount', sql.Decimal(10, 2),   discountAmount)
         .input('charges_amount',  sql.Decimal(10, 2),   chargesAmount)
         .input('additional_charges', sql.NVarChar(sql.MAX), serializeCharges(chargeList))
+        .input('warranty_extra_data', sql.NVarChar(sql.MAX),
+          Array.isArray(warranty_extra_data) && warranty_extra_data.length > 0
+            ? JSON.stringify(warranty_extra_data) : null)
         .input('total',           sql.Decimal(10, 2),   total)
         .input('round_off',       sql.Decimal(10, 2),   roundOff)
         .input('payment_mode',    sql.NVarChar(20),     payment_mode)
@@ -958,6 +976,7 @@ router.post('/', requireAuth, async (req, res) => {
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
                              customer_address, customer_gstin,
                              subtotal, tax_amount, discount_amount, charges_amount, additional_charges,
+                             warranty_extra_data,
                              total, round_off, payment_mode, payment_status, credit_amount, status,
                              created_by_user_id, client_bill_id, receipt_token, price_list_id,
                              created_at, finalized_at, finalized_by_user_id)
@@ -965,6 +984,7 @@ router.post('/', requireAuth, async (req, res) => {
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
                   @customer_address, @customer_gstin,
                   @subtotal, @tax_amount, @discount_amount, @charges_amount, @additional_charges,
+                  @warranty_extra_data,
                   @total, @round_off, @payment_mode, @payment_status, @credit_amount, @status,
                   @created_by_user_id, @client_bill_id, @receipt_token, @price_list_id,
                   COALESCE(@sale_time, SYSUTCDATETIME()),
@@ -1153,6 +1173,7 @@ router.get('/', requireAuth, async (req, res) => {
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
              b.customer_address, b.customer_gstin,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+             b.warranty_extra_data,
              b.total, b.round_off, b.payment_mode, b.status,
              b.payment_status, b.credit_amount, b.credit_collected,
              b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token,
@@ -1209,6 +1230,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
         SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
                b.customer_address, b.customer_gstin,
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+             b.warranty_extra_data,
                b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
                b.created_by_user_id, b.created_at, b.receipt_token,
                -- See the single-bill query above: an accepted online order
@@ -1518,7 +1540,7 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   // credit ledger all reported the wrong tender. Optional: callers that do not
   // send it keep the stored mode, which is what every offline-queued finalize
   // relies on.
-  const { payment_mode, payments, collect } = req.body || {};
+  const { payment_mode, payments, collect, warranty_extra_data } = req.body || {};
   if (payment_mode !== undefined && !validPaymentModes.includes(payment_mode)) {
     return res.status(400).json({ error: `payment_mode must be one of: ${validPaymentModes.join(', ')}` });
   }
@@ -1527,6 +1549,13 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   // Old credit bills the customer is paying off with this one.
   const collections = parseCollections(collect);
   if (collections.error) return res.status(400).json({ error: collections.error });
+  // Warranty details (migration 065) — optional, same validation as create.
+  // Covers a bill drafted/held before this field existed: the cashier can
+  // still attach them right at the moment it's actually settled.
+  const warrantyExtraDataInvalid = validateExtraData(warranty_extra_data);
+  if (warrantyExtraDataInvalid) {
+    return res.status(400).json({ error: warrantyExtraDataInvalid });
+  }
   let tendered = null;
   try {
     await poolConnect;
@@ -1588,6 +1617,17 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
         .query(`
           UPDATE tables SET status = 'empty'
           WHERE id = @table_id AND business_id = @business_id
+        `);
+    }
+
+    if (Array.isArray(warranty_extra_data) && warranty_extra_data.length > 0) {
+      await pool.request()
+        .input('id', sql.UniqueIdentifier, req.params.id)
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('warranty_extra_data', sql.NVarChar(sql.MAX), JSON.stringify(warranty_extra_data))
+        .query(`
+          UPDATE bills SET warranty_extra_data = @warranty_extra_data
+          WHERE id = @id AND business_id = @business_id
         `);
     }
 

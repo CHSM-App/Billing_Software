@@ -22,6 +22,12 @@ const FLAGS = {
   show_terms: true,
   show_bank: false,
   show_note: false,
+  // Warranty details captured at billing time (migration 065) — e.g. a
+  // tyre's vehicle KM reading — printed on the receipt. Defaults on: a
+  // "Retail & Warranty" shop wants this the moment it exists, and it has no
+  // effect on any other business type since bills.warranty_extra_data is
+  // only ever filled for a warranty-eligible sale.
+  show_warranty_details: true,
 };
 
 // The shop-wide note printed on every bill ("Free delivery above Rs.500").

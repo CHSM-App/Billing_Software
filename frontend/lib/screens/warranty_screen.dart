@@ -10,7 +10,9 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../widgets/bottom_nav_bar.dart' show AppBottomNavBar, HidesWithNavBar;
 import '../widgets/shell_app_bar.dart';
+import '../widgets/warranty_extra_fields_editor.dart';
 
 final _dateFmt = DateFormat('dd MMM yyyy');
 
@@ -144,6 +146,18 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
     if (saved == true) _reload();
   }
 
+  /// Tapping a row shows its details first (read-only) — the record might
+  /// just be a lookup ("is this still under warranty?"), so jumping straight
+  /// into an editable form was more than most taps needed. Edit is one tap
+  /// away from there.
+  Future<void> _showDetail(Warranty w) async {
+    final edit = await showDialog<bool>(
+      context: context,
+      builder: (_) => WarrantyDetailDialog(warranty: w),
+    );
+    if (edit == true) await _openForm(existing: w);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
@@ -201,9 +215,20 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
         const SizedBox(height: AppSpacing.space8),
         Expanded(child: _buildBody(l10n)),
       ]),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openForm(),
-        child: const Icon(Icons.add),
+      floatingActionButton: HidesWithNavBar(
+        // Lifted clear of the floating glass nav bar, and dropped out of
+        // sight along with it when scrolling hides the bar (2 = its own
+        // height plus the bottom margin, so it fully clears the edge) —
+        // same fix as the Items tab's FAB (items_screen.dart).
+        drop: 2,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: AppBottomNavBar.fabLift(context)),
+          child: FloatingActionButton(
+            heroTag: 'addWarrantyFab',
+            onPressed: () => _openForm(),
+            child: const Icon(Icons.add),
+          ),
+        ),
       ),
     );
   }
@@ -253,7 +278,7 @@ class _WarrantyScreenState extends ConsumerState<WarrantyScreen> {
         final w = _items[i];
         return _WarrantyRow(
           warranty: w,
-          onTap: () => _openForm(existing: w),
+          onTap: () => _showDetail(w),
         );
       },
     );
@@ -333,6 +358,11 @@ class _WarrantyRow extends StatelessWidget {
                     [
                       w.displayName,
                       if (w.serialNumber?.isNotEmpty ?? false) w.serialNumber!,
+                      // So a match on an extra detail (e.g. a vehicle number
+                      // typed into the "KM Reading"/"Vehicle Number" fields)
+                      // is visible in the result, not just a silent hit.
+                      for (final e in w.extraData)
+                        if (e.value.isNotEmpty) '${e.label}: ${e.value}',
                     ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -368,18 +398,130 @@ class _WarrantyRow extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Add / edit form
+// Read-only detail view — shown on tap, before committing to editing.
 // ---------------------------------------------------------------------------
 
-class _ExtraRow {
-  final TextEditingController labelCtrl;
-  final TextEditingController valueCtrl;
-  /// null for an ad-hoc row the staff added themselves; set for a row that
-  /// came from the category template, so its label stays read-only.
-  final String? templateKey;
+/// Shows one warranty record read-only, with an Edit action — rather than
+/// jumping straight into an editable form on every tap, when most taps are
+/// just "is this still under warranty?" lookups. Pops `true` when the user
+/// chooses Edit, so the caller can then push [WarrantyFormScreen].
+class WarrantyDetailDialog extends StatelessWidget {
+  final Warranty warranty;
+  const WarrantyDetailDialog({super.key, required this.warranty});
 
-  _ExtraRow({required this.labelCtrl, required this.valueCtrl, this.templateKey});
+  Widget _row(BuildContext context, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: AppColors.textSecondary)),
+          ),
+          const SizedBox(width: AppSpacing.space8),
+          Expanded(
+            flex: 3,
+            child: Text(value,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w500)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final w = warranty;
+    final (statusLabel, statusType) = w.isExpired
+        ? (l10n.warrantyFilterExpired, StatusType.error)
+        : w.isExpiringSoon
+            ? (l10n.warrantyFilterExpiringSoon, StatusType.warning)
+            : (l10n.warrantyFilterActive, StatusType.success);
+
+    return AlertDialog(
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(w.itemName,
+                maxLines: 2, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: AppSpacing.space8),
+          StatusBadge(label: statusLabel, status: statusType),
+        ],
+      ),
+      content: SizedBox(
+        width: 400,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _row(context, l10n.warrantyCustomerName, w.displayName),
+              _row(context, l10n.warrantyCustomerPhone, w.customerPhone),
+              if (w.category?.isNotEmpty ?? false)
+                _row(context, l10n.warrantyCategory, w.category!),
+              if (w.serialNumber?.isNotEmpty ?? false)
+                _row(context, l10n.warrantySerialNumber, w.serialNumber!),
+              _row(context, l10n.warrantyPurchaseDate,
+                  _dateFmt.format(w.purchaseDate)),
+              _row(context, l10n.warrantyPeriodMonths, '${w.warrantyMonths}'),
+              _row(context, l10n.warrantyExpiryDateLabel,
+                  _dateFmt.format(w.expiryDate)),
+              if (w.extraData.isNotEmpty) ...[
+                const Divider(height: AppSpacing.space24),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(l10n.warrantyExtraDetails,
+                      style: Theme.of(context).textTheme.titleSmall),
+                ),
+                const SizedBox(height: AppSpacing.space4),
+                for (final e in w.extraData) _row(context, e.label, e.value),
+              ],
+              if (w.notes?.isNotEmpty ?? false) ...[
+                const Divider(height: AppSpacing.space24),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(l10n.warrantyNotes,
+                      style: Theme.of(context).textTheme.titleSmall),
+                ),
+                const SizedBox(height: AppSpacing.space4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(w.notes!,
+                      style: Theme.of(context).textTheme.bodyMedium),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(l10n.commonClose),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(l10n.commonEdit),
+        ),
+      ],
+    );
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Add / edit form
+// ---------------------------------------------------------------------------
 
 class WarrantyFormScreen extends ConsumerStatefulWidget {
   final Warranty? existing;
@@ -401,7 +543,7 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
   String? _itemId;
   String? _category;
   DateTime _purchaseDate = DateTime.now();
-  final List<_ExtraRow> _extraRows = [];
+  final List<WarrantyExtraRow> _extraRows = [];
   bool _saving = false;
   bool _deleting = false;
 
@@ -422,10 +564,7 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
       _category = w.category;
       _purchaseDate = w.purchaseDate;
       for (final e in w.extraData) {
-        _extraRows.add(_ExtraRow(
-          labelCtrl: TextEditingController(text: e.label),
-          valueCtrl: TextEditingController(text: e.value),
-        ));
+        _extraRows.add(WarrantyExtraRow.fromField(e));
       }
     } else {
       _monthsCtrl.text = '12';
@@ -441,8 +580,7 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
     _monthsCtrl.dispose();
     _notesCtrl.dispose();
     for (final r in _extraRows) {
-      r.labelCtrl.dispose();
-      r.valueCtrl.dispose();
+      r.dispose();
     }
     super.dispose();
   }
@@ -484,38 +622,25 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
   }
 
   /// Adds a row for every template field of [_category] that isn't already
-  /// present (by templateKey), so switching products doesn't wipe values the
-  /// staff already typed for fields the two products happen to share.
+  /// present, so switching products doesn't wipe values the staff already
+  /// typed for a field the two products happen to share.
   void _applyTemplateForCategory() {
-    final category = _category;
-    if (category == null || category.trim().isEmpty) return;
     final templates = ref.read(warrantyFieldTemplatesProvider).valueOrNull;
-    final template = templates?[category];
-    if (template == null) return;
-    final existingKeys = _extraRows.map((r) => r.templateKey).toSet();
-    setState(() {
-      for (final f in template.fields) {
-        if (existingKeys.contains(f.key)) continue;
-        _extraRows.add(_ExtraRow(
-          labelCtrl: TextEditingController(text: f.label),
-          valueCtrl: TextEditingController(),
-          templateKey: f.key,
-        ));
-      }
-    });
+    if (applyWarrantyFieldTemplate(_extraRows, _category, templates)) {
+      setState(() {});
+    }
   }
 
   void _addAdHocRow() {
-    setState(() => _extraRows.add(_ExtraRow(
+    setState(() => _extraRows.add(WarrantyExtraRow(
           labelCtrl: TextEditingController(),
           valueCtrl: TextEditingController(),
         )));
   }
 
-  void _removeRow(_ExtraRow row) {
+  void _removeRow(WarrantyExtraRow row) {
     setState(() => _extraRows.remove(row));
-    row.labelCtrl.dispose();
-    row.valueCtrl.dispose();
+    row.dispose();
   }
 
   Future<void> _save() async {
@@ -531,11 +656,7 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
       'purchase_date': _purchaseDate.toIso8601String().split('T').first,
       'warranty_months': int.tryParse(_monthsCtrl.text.trim()) ?? 0,
       'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-      'extra_data': [
-        for (final r in _extraRows)
-          if (r.labelCtrl.text.trim().isNotEmpty)
-            {'label': r.labelCtrl.text.trim(), 'value': r.valueCtrl.text.trim()},
-      ],
+      'extra_data': warrantyRowsPayload(_extraRows),
     };
     try {
       if (_isEdit) {
@@ -678,39 +799,11 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
               },
             ),
             const SizedBox(height: AppSpacing.space24),
-            Text(l10n.warrantyExtraDetails,
-                style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: AppSpacing.space8),
-            for (final row in _extraRows)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.space8),
-                child: Row(children: [
-                  Expanded(
-                    flex: 2,
-                    child: AppTextField(
-                      label: l10n.warrantyDetailLabel,
-                      controller: row.labelCtrl,
-                      enabled: row.templateKey == null,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.space8),
-                  Expanded(
-                    flex: 3,
-                    child: AppTextField(
-                      label: l10n.warrantyDetailValue,
-                      controller: row.valueCtrl,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: () => _removeRow(row),
-                  ),
-                ]),
-              ),
-            OutlinedButton.icon(
-              onPressed: _addAdHocRow,
-              icon: const Icon(Icons.add, size: 18),
-              label: Text(l10n.warrantyAddDetail),
+            WarrantyExtraFieldsEditor(
+              title: l10n.warrantyExtraDetails,
+              rows: _extraRows,
+              onAddRow: _addAdHocRow,
+              onRemoveRow: _removeRow,
             ),
             const SizedBox(height: AppSpacing.space16),
             AppTextField(
