@@ -43,6 +43,13 @@ describe('billSettings', () => {
     expect(normalize({ note: 'x'.repeat(301) }).error).toMatch(/Note/);
   });
 
+  test('warranty details print by default, and the toggle round-trips', () => {
+    expect(parse(null).show_warranty_details).toBe(true);
+    const r = normalize({ show_warranty_details: false });
+    expect(r.error).toBeUndefined();
+    expect(parse(r.value).show_warranty_details).toBe(false);
+  });
+
   test('alternate number is saved and printed after the main one', () => {
     const s = parse(normalize({ alt_phone: ' 02366-262626 ' }).value);
     expect(s.alt_phone).toBe('02366-262626');

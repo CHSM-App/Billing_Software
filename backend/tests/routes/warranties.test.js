@@ -49,6 +49,14 @@ describe('GET /api/warranties', () => {
     expect(res.body.items[0].extra_data).toEqual([{ label: 'KM Reading', value: '12500' }]);
   });
 
+  test('search (?q) matches extra_data too, e.g. a vehicle number typed into a custom field', async () => {
+    mockRequest.query.mockResolvedValueOnce({ recordsets: [[{ total: 0 }], []] });
+    await request(app).get('/api/warranties?q=MH12AB1234').set(owner());
+    expect(mockRequest.inputs.q).toBe('%MH12AB1234%');
+    const sql = mockRequest.query.mock.calls[0][0];
+    expect(sql).toMatch(/extra_data LIKE @q/);
+  });
+
   test('a server (no billing role) is refused — only cashier/owner manage warranties',
     async () => {
       const res = await request(app).get('/api/warranties').set(server());

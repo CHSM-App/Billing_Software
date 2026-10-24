@@ -1094,20 +1094,25 @@ Future<Map<String, dynamic>> whatsAppSettlement(String settlementId) async {
 Future<Map<String, dynamic>> finalizeBill(String id,
     {String? paymentMode,
     List<Map<String, dynamic>>? payments,
-    Map<String, double>? collect}) async {
+    Map<String, double>? collect,
+    // Warranty details captured at billing time (migration 065) — e.g. a
+    // tyre's vehicle KM reading. Covers settling a draft that was held
+    // before these were typed in.
+    List<Map<String, String>>? warrantyExtraData}) async {
+  final body = <String, dynamic>{
+    if (paymentMode != null) 'payment_mode': paymentMode,
+    if (payments != null) 'payments': payments,
+    if (collect != null && collect.isNotEmpty)
+      'collect': [
+        for (final e in collect.entries)
+          {'bill_id': e.key, 'amount': e.value},
+      ],
+    if (warrantyExtraData != null && warrantyExtraData.isNotEmpty)
+      'warranty_extra_data': warrantyExtraData,
+  };
   return _parse(await _authPut(
     Uri.parse('$baseUrl/bills/$id/finalize'),
-    body: paymentMode != null
-        ? jsonEncode({
-            'payment_mode': paymentMode,
-            if (payments != null) 'payments': payments,
-            if (collect != null && collect.isNotEmpty)
-              'collect': [
-                for (final e in collect.entries)
-                  {'bill_id': e.key, 'amount': e.value},
-              ],
-          })
-        : null,
+    body: body.isEmpty ? null : jsonEncode(body),
   ));
 }
 

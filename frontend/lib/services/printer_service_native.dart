@@ -496,7 +496,8 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       bool gstEnabled = true,
-      ReceiptLabels? labels}) {
+      ReceiptLabels? labels,
+      BillSettings settings = const BillSettings()}) {
     final inner = _ColProfile(
       cols: basep.cols - 2,
       nameCols: basep.nameCols - 2,
@@ -515,7 +516,8 @@ class PrinterService {
           businessGstin: businessGstin,
           businessFssai: businessFssai,
           gstEnabled: gstEnabled,
-          labels: labels);
+          labels: labels,
+          settings: settings);
     }
 
     final body = _buildReceiptBody(bill, inner,
@@ -525,7 +527,8 @@ class PrinterService {
         businessGstin: businessGstin,
         businessFssai: businessFssai,
         gstEnabled: gstEnabled,
-        labels: labels);
+        labels: labels,
+        settings: settings);
 
     final edge = '+${'-' * inner.cols}+';
     final divider = '-' * inner.cols;
@@ -562,7 +565,8 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       bool gstEnabled = true,
-      ReceiptLabels? labels}) {
+      ReceiptLabels? labels,
+      BillSettings settings = const BillSettings()}) {
     // Size the item columns to this bill's actual values, giving the slack to
     // the name column. Falls back to the static profile when it can't improve.
     final p = _fitProfile(basep, bill, gstEnabled, labels);
@@ -624,6 +628,14 @@ class PrinterService {
     }
     if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty) {
       lines.add('${labels?.customerPhone ?? 'Ph:'} ${bill.customerPhone}');
+    }
+    // Warranty details captured at billing time (migration 065) — e.g. a
+    // tyre's vehicle KM reading — printed as plain "Label: value" lines
+    // alongside the customer info, same as every other bill-info line here.
+    if (settings.showWarrantyDetails) {
+      for (final e in bill.warrantyExtraData) {
+        lines.add('${e.label}: ${e.value}');
+      }
     }
     lines.add('-' * p.cols);
 
@@ -818,6 +830,14 @@ class PrinterService {
       }
       if (bill.customerGstin != null && bill.customerGstin!.isNotEmpty) {
         rows.add(line('${labels?.gstin ?? 'GSTIN:'} ${bill.customerGstin}'));
+      }
+      // Warranty details captured at billing time (migration 065) — e.g. a
+      // tyre's vehicle KM reading — printed as plain "Label: value" lines
+      // alongside the rest of the customer info, not a separate section.
+      if (settings.showWarrantyDetails) {
+        for (final e in bill.warrantyExtraData) {
+          rows.add(line('${e.label}: ${e.value}'));
+        }
       }
     }
     rows.add(ReceiptRow.rule());

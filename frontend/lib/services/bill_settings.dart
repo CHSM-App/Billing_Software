@@ -21,6 +21,9 @@ class BillSettings {
   final bool showBank;
   /// Shop-wide note printed on every bill, when [showNote].
   final bool showNote;
+  /// Warranty details captured at billing time (a tyre's vehicle KM reading,
+  /// etc. — see WarrantyExtraFieldsEditor), printed on the receipt.
+  final bool showWarrantyDetails;
   final String note;
   /// Second shop number, printed after the main one ("Ph: 98…, 02366-…").
   final String altPhone;
@@ -41,6 +44,7 @@ class BillSettings {
     this.showTerms = true,
     this.showBank = false,
     this.showNote = false,
+    this.showWarrantyDetails = true,
     this.note = '',
     this.altPhone = '',
     this.bank = const {},
@@ -61,6 +65,7 @@ class BillSettings {
       showTerms: f('show_terms', true),
       showBank: f('show_bank', false),
       showNote: f('show_note', false),
+      showWarrantyDetails: f('show_warranty_details', true),
       note: j?['note'] is String ? j!['note'] as String : '',
       altPhone: j?['alt_phone'] is String ? j!['alt_phone'] as String : '',
       bank: {for (final k in bankKeys) k: b[k] is String ? b[k] as String : ''},
@@ -79,6 +84,7 @@ class BillSettings {
         'show_terms': showTerms,
         'show_bank': showBank,
         'show_note': showNote,
+        'show_warranty_details': showWarrantyDetails,
         'note': note,
         'alt_phone': altPhone,
         'bank': {for (final k in bankKeys) k: bank[k] ?? ''},

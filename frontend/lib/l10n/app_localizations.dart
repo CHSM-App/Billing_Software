@@ -509,7 +509,7 @@ abstract class AppLocalizations {
   /// No description provided for @warrantySearchHint.
   ///
   /// In en, this message translates to:
-  /// **'Search name, phone or serial number'**
+  /// **'Search name, phone, serial number or details'**
   String get warrantySearchHint;
 
   /// No description provided for @warrantyFilterAll.
@@ -620,6 +620,18 @@ abstract class AppLocalizations {
   /// **'Enter a warranty period greater than zero'**
   String get warrantyPeriodInvalid;
 
+  /// No description provided for @warrantyCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Category'**
+  String get warrantyCategory;
+
+  /// No description provided for @warrantyExpiryDateLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Expiry date'**
+  String get warrantyExpiryDateLabel;
+
   /// No description provided for @warrantyExtraDetails.
   ///
   /// In en, this message translates to:
@@ -643,6 +655,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Add detail'**
   String get warrantyAddDetail;
+
+  /// No description provided for @warrantyRemoveDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove detail'**
+  String get warrantyRemoveDetail;
 
   /// No description provided for @warrantyNotes.
   ///
@@ -1475,7 +1493,7 @@ abstract class AppLocalizations {
   /// No description provided for @businessTypeRetailWarranty.
   ///
   /// In en, this message translates to:
-  /// **'Retail & Warranty'**
+  /// **'Retail & Warranty Tracking'**
   String get businessTypeRetailWarranty;
 
   /// No description provided for @appTagline.
@@ -2857,6 +2875,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Note on bill'**
   String get billSetupNote;
+
+  /// No description provided for @billSetupWarrantyDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty details'**
+  String get billSetupWarrantyDetails;
 
   /// No description provided for @billSetupNoteSubtitle.
   ///

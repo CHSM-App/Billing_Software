@@ -301,6 +301,7 @@ router.get('/:token', async (req, res) => {
         SELECT b.id, b.bill_number, b.customer_name, b.customer_phone,
                b.customer_address, b.customer_gstin,
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+               b.warranty_extra_data,
                b.total, b.round_off, b.payment_mode, b.created_at, b.finalized_at,
                b.payment_status, b.settled_payment_mode, b.credit_amount, b.credit_collected,
                t.table_number,
@@ -536,14 +537,17 @@ router.get('/:token', async (req, res) => {
     </div>` : ''}
   </div>
 
-  ${cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin) ? `
+  ${(cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin)) ||
+    (cfg.show_warranty_details && bill.warranty_extra_data.length) ? `
   <!-- Customer -->
   <div class="customer">
     <div class="sec-label">Billed To</div>
-    ${bill.customer_name ? '<div class="cname">' + esc(bill.customer_name) + '</div>' : ''}
-    ${bill.customer_phone ? '<div class="cphone">Mob: ' + esc(bill.customer_phone) + '</div>' : ''}
-    ${bill.customer_address ? '<div class="cphone">Address: ' + esc(bill.customer_address) + '</div>' : ''}
-    ${bill.customer_gstin ? '<div class="cphone">GSTIN: ' + esc(bill.customer_gstin) + '</div>' : ''}
+    ${cust && bill.customer_name ? '<div class="cname">' + esc(bill.customer_name) + '</div>' : ''}
+    ${cust && bill.customer_phone ? '<div class="cphone">Mob: ' + esc(bill.customer_phone) + '</div>' : ''}
+    ${cust && bill.customer_address ? '<div class="cphone">Address: ' + esc(bill.customer_address) + '</div>' : ''}
+    ${cust && bill.customer_gstin ? '<div class="cphone">GSTIN: ' + esc(bill.customer_gstin) + '</div>' : ''}
+    ${cfg.show_warranty_details ? bill.warranty_extra_data.map((e) =>
+        '<div class="cphone">' + esc(e.label) + ': ' + esc(e.value) + '</div>').join('') : ''}
   </div>` : ''}
 
   <!-- Items -->

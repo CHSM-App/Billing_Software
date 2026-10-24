@@ -232,7 +232,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get warrantyTitle => 'Warranty';
 
   @override
-  String get warrantySearchHint => 'Search name, phone or serial number';
+  String get warrantySearchHint =>
+      'Search name, phone, serial number or details';
 
   @override
   String get warrantyFilterAll => 'All';
@@ -292,6 +293,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'Enter a warranty period greater than zero';
 
   @override
+  String get warrantyCategory => 'Category';
+
+  @override
+  String get warrantyExpiryDateLabel => 'Expiry date';
+
+  @override
   String get warrantyExtraDetails => 'Extra details';
 
   @override
@@ -302,6 +309,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get warrantyAddDetail => 'Add detail';
+
+  @override
+  String get warrantyRemoveDetail => 'Remove detail';
 
   @override
   String get warrantyNotes => 'Notes';
@@ -796,7 +806,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get businessTypeRestaurantTakeaway => 'Restaurant (takeaway)';
 
   @override
-  String get businessTypeRetailWarranty => 'Retail & Warranty';
+  String get businessTypeRetailWarranty => 'Retail & Warranty Tracking';
 
   @override
   String get appTagline => 'Smart Billing Solution';
@@ -1551,6 +1561,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billSetupNote => 'Note on bill';
+
+  @override
+  String get billSetupWarrantyDetails => 'Warranty details';
 
   @override
   String get billSetupNoteSubtitle => 'A message printed on every bill';

@@ -235,7 +235,14 @@ class InvoicePdf {
                 bill.displayNumber, dateStr, shaped,
                 billedBy: settings.showCashier ? bill.billedByName : null,
                 logo: logo),
-            _billToBox(bill, shaped, showCustomer: settings.showCustomer),
+            _billToBox(bill, shaped,
+                showCustomer: settings.showCustomer,
+                warrantyDetails: settings.showWarrantyDetails
+                    ? [
+                        for (final e in bill.warrantyExtraData)
+                          '${e.label}: ${e.value}',
+                      ]
+                    : const []),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money, shaped),
             pw.SizedBox(height: 10),
             _summary(bill, grandTotal, showGst, money),
@@ -523,12 +530,17 @@ class InvoicePdf {
 
   // --- Bill To --------------------------------------------------------------
   static pw.Widget _billToBox(Bill bill, ShapedText shaped,
-      {bool showCustomer = true}) {
+      {bool showCustomer = true,
+      // Warranty details captured at billing time (migration 065) — a
+      // tyre's vehicle KM reading, etc. — printed as plain lines alongside
+      // the rest of the customer info, not a separate section. Already
+      // empty when the owner's Billing Setup toggle is off.
+      List<String> warrantyDetails = const []}) {
     bool has(String? v) => v != null && v.isNotEmpty;
     final cust = showCustomer &&
         (has(bill.customerName) || has(bill.customerPhone) ||
             has(bill.customerAddress) || has(bill.customerGstin));
-    if (!cust && !has(bill.tableNumber)) {
+    if (!cust && !has(bill.tableNumber) && warrantyDetails.isEmpty) {
       return pw.SizedBox(height: 8);
     }
     return pw.Container(
@@ -560,6 +572,8 @@ class InvoicePdf {
           if (cust && has(bill.customerGstin))
             pw.Text('GSTIN: ${bill.customerGstin}',
                 style: const pw.TextStyle(fontSize: 9)),
+          for (final l in warrantyDetails)
+            pw.Text(l, style: const pw.TextStyle(fontSize: 9)),
           if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty)
             pw.Text('Table: ${bill.tableNumber}',
                 style: const pw.TextStyle(fontSize: 9)),

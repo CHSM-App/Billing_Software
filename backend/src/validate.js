@@ -68,6 +68,31 @@ function validateEnum(value, label, allowed) {
   return null;
 }
 
+// Largest number of {label, value} pairs an extra_data array may carry —
+// shared by routes/warranties.js (a warranty record's own extra_data) and
+// routes/bills.js (warranty details captured at billing time, migration 065).
+const MAX_EXTRA_DATA = 30;
+
+/// Validates an extra_data array — labeled pairs, e.g. warranty details
+/// filled from a category template plus any ad-hoc rows staff added. Values
+/// are always stored as strings; any type-specific rendering (number/date)
+/// is a UI concern, not a storage concern.
+function validateExtraData(extraData) {
+  if (extraData === undefined || extraData === null) return null;
+  if (!Array.isArray(extraData)) return 'extra_data must be an array';
+  if (extraData.length > MAX_EXTRA_DATA) return `At most ${MAX_EXTRA_DATA} extra fields are allowed`;
+  for (const e of extraData) {
+    if (!e || typeof e !== 'object') return 'each extra_data entry must be an object';
+    if (validateText(e.label, 'Extra field label', 100, { required: true })) {
+      return 'each extra_data entry needs a label';
+    }
+    if (e.value != null && String(e.value).length > 500) {
+      return 'each extra_data value must be 500 characters or fewer';
+    }
+  }
+  return null;
+}
+
 module.exports = {
   MAX_DECIMAL_10_2,
   MAX_DECIMAL_12_4,
@@ -75,4 +100,5 @@ module.exports = {
   validateInteger,
   validateText,
   validateEnum,
+  validateExtraData,
 };
