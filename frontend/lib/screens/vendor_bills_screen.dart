@@ -7,14 +7,13 @@ import 'package:intl/intl.dart';
 
 import '../api.dart' as api;
 import '../l10n/l10n_ext.dart';
-import '../models/models.dart' show formatQty;
+import '../models/models.dart' show formatQty, unitShort;
 import '../providers.dart';
 import '../services/purchase_list_pdf_import.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/stock_target_picker.dart';
-import 'items_screen.dart' show itemUnitLabel;
 import 'purchase_list_screen.dart';
 
 final _money = NumberFormat('#,##0.00');
@@ -1044,7 +1043,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          UnitSuffix(itemUnitLabel(context,
+                          UnitSuffix(unitShort(
                               l.inPacks ? l.packUnit! : (l.unit ?? 'piece'))),
                           const Icon(Icons.swap_vert,
                               size: 16, color: AppColors.textSecondary),
@@ -1120,8 +1119,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                   l.unit == null || l.unit!.isEmpty
                       ? context.l10n.purchaseUpdatesStock
                       : context.l10n.purchaseUpdatesStockUnit(l.inPacks
-                          ? '${formatQty(l.quantity)} ${l.unit}'
-                          : l.unit!),
+                          ? '${formatQty(l.quantity)} ${unitShort(l.unit!)}'
+                          : unitShort(l.unit!)),
                   style:
                       const TextStyle(fontSize: 11, color: AppColors.primary),
                 ),
@@ -1137,7 +1136,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                       _rate(l.unitPrice),
                       l.unit == null || l.unit!.isEmpty
                           ? context.l10n.purchaseUnitFallback
-                          : l.unit!),
+                          : unitShort(l.unit!)),
                   style: const TextStyle(
                       fontSize: 11, color: AppColors.textSecondary),
                 ),
@@ -1214,7 +1213,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                       subtitle: t.currentStock != null
                           ? Text(
                               context.l10n.purchaseInStock(
-                                  _qty(t.currentStock!), t.unit),
+                                  _qty(t.currentStock!), unitShort(t.unit)),
                               style: const TextStyle(fontSize: 11))
                           : null,
                       onTap: () => onSelected(t),

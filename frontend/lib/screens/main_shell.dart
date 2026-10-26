@@ -86,6 +86,7 @@ class _MainShellState extends ConsumerState<MainShell>
     // exactly when a shop is most likely to miss an order.
     NotificationService.instance.onlineOrderPing.addListener(_onOnlineOrderPing);
     NotificationService.instance.onlineOrderTap.addListener(_onOnlineOrderTapped);
+    NotificationService.instance.lowStockTap.addListener(_onLowStockTapped);
     NotificationService.instance.tableOrderPing.addListener(_onTableOrderPing);
 
     // Ensure the socket is live for this session. The app bootstrap starts it on
@@ -124,11 +125,13 @@ class _MainShellState extends ConsumerState<MainShell>
           ref.read(onlineOrdersProvider.notifier).refreshSilently();
           // A COLD launch from tapping the notification: the tap was handled
           // during startup, before this shell existed to hear it.
-          if (NotificationService.instance.consumeOnlineOrderTap()) {
+          if (NotificationService.instance.consumeTap('online_order')) {
             _openOnlineOrders();
           }
         }
       }
+      // Same cold-launch case for the owner's low-stock alert.
+      if (NotificationService.instance.consumeTap('low_stock')) _openItems();
     });
   }
 
@@ -168,6 +171,11 @@ class _MainShellState extends ConsumerState<MainShell>
       case 'store':
         // A customer placed an order, or another device accepted/rejected one.
         ref.read(onlineOrdersProvider.notifier).refreshSilently();
+        break;
+      case 'stock':
+        // A sale, order edit or void moved stock — on this device or another —
+        // so the billing list's out-of-stock rows stay current.
+        ref.read(itemsProvider.notifier).refreshInBackground();
         break;
     }
   }
@@ -260,6 +268,7 @@ class _MainShellState extends ConsumerState<MainShell>
         .removeListener(_onTableOrderPing);
     NotificationService.instance.onlineOrderTap
         .removeListener(_onOnlineOrderTapped);
+    NotificationService.instance.lowStockTap.removeListener(_onLowStockTapped);
     _railAnimController.dispose();
     HardwareKeyboard.instance.removeHandler(_onEscBack);
     super.dispose();
@@ -318,8 +327,21 @@ class _MainShellState extends ConsumerState<MainShell>
 
   void _onOnlineOrderTapped() {
     if (!mounted) return;
-    NotificationService.instance.consumeOnlineOrderTap();
+    NotificationService.instance.consumeTap('online_order');
     _openOnlineOrders();
+  }
+
+  void _onLowStockTapped() {
+    if (!mounted) return;
+    NotificationService.instance.consumeTap('low_stock');
+    _openItems();
+  }
+
+  /// Jump to Items, where low-stock items sort to the top. Owner-only tab, and
+  /// only owners get the alert — anyone else simply stays where they are.
+  void _openItems() {
+    final i = _navItems.indexWhere((n) => n.screen is ItemsScreen);
+    if (i >= 0) _onNav(i);
   }
 
   /// Bring the Online orders queue to the front.

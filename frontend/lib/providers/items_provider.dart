@@ -38,6 +38,11 @@ final itemCacheInfoProvider = StateProvider<ItemCacheInfo>(
 class ItemsNotifier extends AsyncNotifier<List<Item>> {
   @override
   Future<List<Item>> build() async {
+    // EXPERIMENT (receipt_units): keep the receipt unit lookup current.
+    listenSelf((_, next) {
+      final items = next.valueOrNull;
+      if (items != null) catalogUnits = {for (final i in items) i.id: i.unit};
+    });
     return _fetch();
   }
 

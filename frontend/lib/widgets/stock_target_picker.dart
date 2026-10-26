@@ -207,7 +207,7 @@ class _StockTargetPickerSheetState extends State<_StockTargetPickerSheet> {
                           title: Text(r.name),
                           subtitle: r.currentStock != null
                               ? Text(
-                                  'In stock: ${_fmtQty(r.currentStock!)} ${r.unit}')
+                                  'In stock: ${_fmtQty(r.currentStock!)} ${unitShort(r.unit)}')
                               : null,
                           onTap: () => Navigator.pop(context, r),
                         );

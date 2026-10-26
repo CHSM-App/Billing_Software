@@ -11,6 +11,47 @@ String formatQty(double qty) {
       .replaceAll(RegExp(r'\.$'), '');
 }
 
+/// Short display name for a unit, shown after a quantity ("2 kg", "3 btl").
+/// SI symbols for metric units; the rest follow India's GST UQC names in the
+/// lowercase form shop bills use. Dropdowns keep the full localized name.
+String unitShort(String unit) => const {
+      'piece': 'pcs',
+      'kg': 'kg',
+      'g': 'g',
+      'litre': 'L',
+      'ml': 'ml',
+      'metre': 'm',
+      'dozen': 'doz',
+      'plate': 'plt',
+      'packet': 'pkt',
+      'box': 'box',
+      'bottle': 'btl',
+      'pair': 'pr',
+      'set': 'set',
+      'bundle': 'bdl',
+      'bag': 'bag',
+      'sqft': 'sqft',
+      'ton': 't',
+      'quintal': 'qtl',
+      'roll': 'roll',
+      'case': 'cs',
+      'crate': 'crt',
+      'carton': 'ctn',
+    }[unit] ??
+    unit;
+
+/// EXPERIMENT (docs/experiments/receipt_units.md): item id → unit, refreshed
+/// by ItemsNotifier, so receipts can print "2 kg" — bill lines carry no unit.
+/// ponytail: global catalog map; store the unit on bill_items if this sticks.
+Map<String, String> catalogUnits = const {};
+
+/// A bill line's quantity for a receipt, with its short unit when the catalog
+/// knows the item: "2 kg", "1.5 L", or just "3".
+String receiptQty(BillItem item, String qty) {
+  final unit = item.itemId == null ? null : catalogUnits[item.itemId];
+  return unit == null ? qty : '$qty ${unitShort(unit)}';
+}
+
 /// [qty] base units as whole packs plus the loose rest: 17 bottles with a box of
 /// 15 is (packs: 1, loose: 2). Null when there is no pack or not one full pack.
 /// Display only: stock and bills always count base units.

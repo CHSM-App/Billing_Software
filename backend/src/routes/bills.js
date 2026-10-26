@@ -1065,6 +1065,8 @@ router.post('/', requireAuth, async (req, res) => {
       }
 
       await transaction.commit();
+      // Real-time: stock moved — billing screens re-read their item list.
+      if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
 
       // The bill is saved — keep the customers table in step. Not awaited and
       // never throws (customers.js), so it cannot affect this sale.
@@ -1857,6 +1859,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
       addedLineItems = lineItems;
       await transaction.commit();
+      if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
 
       // Collect targets that just crossed below their threshold, send one
       // notification. Handles variant lines via their own stock/threshold.
@@ -2213,6 +2216,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
 
       replacementLineItems = lineItems;
       await transaction.commit();
+      if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
     } catch (err) {
       await transaction.rollback();
       throw err;
@@ -2341,6 +2345,7 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
     // drops off the open-orders list.
     broadcast(req.user.business_id, { type: 'kitchen' });
     broadcast(req.user.business_id, { type: bill.table_id ? 'tables' : 'drafts' });
+    if (bill.inventory_enabled) broadcast(req.user.business_id, { type: 'stock' });
 
     return res.json({ success: true });
   } catch (err) {

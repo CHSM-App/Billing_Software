@@ -13,6 +13,7 @@ import '../models/models.dart';
 import '../models/cart_entry.dart';
 import '../utils/money.dart';
 import '../utils/text_formatters.dart' show UpperCaseTextFormatter;
+import '../utils/platform_utils.dart' show isWindows;
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
@@ -34,7 +35,6 @@ import '../storage.dart';
 import '../main.dart' show rootMessengerKey;
 import 'bill_preview_screen.dart';
 import 'customers_screen.dart' show CustomerBillsScreen;
-import 'items_screen.dart' show itemUnitLabel;
 import 'login_screen.dart';
 import 'printer_setup_screen.dart';
 import '../widgets/category_sheet.dart'
@@ -154,6 +154,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // The last row always takes whatever the others leave of the payable (see
   // _syncPayRows), so a single row simply IS the total.
   final List<_PayRow> _payRows = [];
+  // Pins the settle confirm box to the action row, so it stays right above
+  // the buttons even while the closing keyboard moves the row.
+  final _settleRowLink = LayerLink();
   // The payable the rows were last filled against. When the cart, discount,
   // charges or round-off move it, the last row is refilled.
   double? _payRowsBase;
@@ -2347,8 +2350,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   ///
   /// Every settle path runs the credit guard first, so no finish can bypass the
   /// name/phone a credit bill requires.
-  void _settle({required bool inSheet, bool? withReceipt}) {
+  Future<void> _settle(BuildContext anchor,
+      {required bool inSheet, bool? withReceipt}) async {
     if (!_validatePayment()) return;
+    if (!await _confirmSettle(anchor,
+        confirmLabel: context.l10n.billingConfirmSettle,
+        icon: const Icon(Icons.check_rounded, size: 20),
+        color: AppColors.primary)) {
+      return;
+    }
+    if (!mounted) return;
     final canPrint = ref.read(printReadyProvider);
     final wantsPrint = (withReceipt ?? true) && canPrint;
     if (inSheet) Navigator.pop(context);
@@ -2369,13 +2380,165 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Settle, then hand the bill to WhatsApp. Not a share — this finalizes the
   /// sale exactly as [_settle] does, which is why its tile is captioned and
   /// coloured as a money action rather than as a share icon.
-  void _settleWhatsApp({required bool inSheet}) {
+  Future<void> _settleWhatsApp(BuildContext anchor, {required bool inSheet}) async {
     // Both guards run BEFORE anything is finalized: a missing phone must not
     // leave a settled bill with nowhere to send it.
     if (!_validatePayment()) return;
     if (!_ensureCustomerPhoneForWhatsApp()) return;
+    if (!await _confirmSettle(anchor,
+        confirmLabel: context.l10n.billingConfirmWhatsapp,
+        icon: const WhatsAppMark(size: 18, color: Colors.white),
+        color: whatsAppGreen)) {
+      return;
+    }
+    if (!mounted) return;
     if (inSheet) Navigator.pop(context);
     _generateBillAndWhatsApp();
+  }
+
+  /// The "are you sure?" before a settle: a card sitting just above the action
+  /// row (pinned via [_settleRowLink]) instead of a centred dialog, so the
+  /// thumb barely moves. Shows the total and how it is being paid, so a wrong
+  /// mode is caught before the bill is final. Tapping outside — including a
+  /// double-tap on the button — cancels. Off in Settings → true straight away.
+  Future<bool> _confirmSettle(BuildContext actionRow,
+      {required String confirmLabel,
+      required Widget icon,
+      required Color color}) async {
+    if (!ref.read(settleConfirmProvider)) return true;
+    final l10n = context.l10n;
+    final width = (actionRow.findRenderObject() as RenderBox).size.width;
+    final total = _netPayable();
+    final parts = _payRows.length == 1
+        ? [(_payRows.first.mode, total)]
+        : [for (final r in _payRows) (r.mode, r.amount)];
+    String money(double v) => '₹${v.toStringAsFixed(2)}';
+    IconData modeIcon(String m) => switch (m) {
+          'cash' => Icons.payments_outlined,
+          'upi' => Icons.qr_code_2,
+          'card' => Icons.credit_card,
+          'credit' => Icons.schedule,
+          _ => Icons.account_balance_wallet_outlined,
+        };
+    const figures = [FontFeature.tabularFigures()];
+
+    final ok = await showGeneralDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: l10n.commonCancel,
+      barrierColor: Colors.black26,
+      transitionDuration: const Duration(milliseconds: 160),
+      pageBuilder: (ctx, anim, _) => Align(
+        alignment: Alignment.topLeft,
+        child: CompositedTransformFollower(
+          link: _settleRowLink,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.topCenter,
+          followerAnchor: Alignment.bottomCenter,
+          offset: const Offset(0, -AppSpacing.space8),
+          child: SlideTransition(
+            position: Tween(begin: const Offset(0, 0.06), end: Offset.zero)
+                .animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+            child: SizedBox(
+              width: width,
+              child: Material(
+                color: AppColors.surface,
+                elevation: 12,
+                shadowColor: Colors.black45,
+                borderRadius: BorderRadius.circular(AppRadius.large),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.space16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(l10n.billingNetPayable,
+                          style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
+                              color: AppColors.textSecondary)),
+                      Text(money(total),
+                          style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                              fontFeatures: figures)),
+                      const SizedBox(height: AppSpacing.space12),
+                      // How it is being paid — one line per part.
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.space12,
+                            vertical: AppSpacing.space4),
+                        decoration: BoxDecoration(
+                          color: AppColors.background,
+                          borderRadius: BorderRadius.circular(AppRadius.medium),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Column(children: [
+                          for (final (mode, amount) in parts)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: AppSpacing.space8),
+                              child: Row(children: [
+                                Icon(modeIcon(mode),
+                                    size: 20, color: AppColors.textSecondary),
+                                const SizedBox(width: AppSpacing.space8),
+                                Expanded(
+                                  child: Text(paymentModeLabel(l10n, mode),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                                Text(money(amount),
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontFeatures: figures)),
+                              ]),
+                            ),
+                        ]),
+                      ),
+                      const SizedBox(height: AppSpacing.space16),
+                      // Confirm on the right, over the Settle button.
+                      Row(children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(48),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(AppRadius.medium)),
+                            ),
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: Text(l10n.commonCancel),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.space8),
+                        Expanded(
+                          flex: 2,
+                          child: FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: color,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size.fromHeight(48),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(AppRadius.medium)),
+                              textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 16),
+                            ),
+                            onPressed: () => Navigator.pop(ctx, true),
+                            icon: icon,
+                            label: Text(confirmLabel,
+                                maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    return ok == true;
   }
 
 
@@ -4278,7 +4441,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               Iterable.generate(treeKeys.length)
                   .any((k) => treeKeys[k] != oldKeys[k]);
           _tree = tree;
-          _twoColumns = MediaQuery.of(context).size.width >= 1200;
           if (sectionsChanged) {
             WidgetsBinding.instance
                 .addPostFrameCallback((_) => _syncActiveCategoryToScroll());
@@ -4340,6 +4502,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ));
           }
 
+          // Columns follow the panel's own width, not the window's — dragging
+          // the cart wider shrinks this panel and must drop it to one column.
+          return LayoutBuilder(builder: (context, box) {
+          _twoColumns = box.maxWidth >= 720;
           return withStrip(RefreshIndicator(
             onRefresh: refresh,
             child: _ExcelItemTable(
@@ -4405,6 +4571,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       .setQty(CartNotifier.keyFor(item.id, v.id), qty)),
             ),
           ));
+          });
         },
       );
     });
@@ -4496,6 +4663,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // Still watched so the settle menu's print row reflects a printer that
       // connects or drops while the cart is open.
       ref.watch(printReadyProvider);
+      // An open retail order whose lines are all ticked off ('delivered').
+      // Read from the Open Orders list, so a tick on another device shows here.
+      final openBill = widget.activeBillId == null ||
+              ref.watch(sessionProvider).valueOrNull?.businessType != 'retail'
+          ? null
+          : ref
+              .watch(openDraftsProvider)
+              .valueOrNull
+              ?.where((b) => b.id == widget.activeBillId)
+              .firstOrNull;
+      final allTicked = openBill != null &&
+          openBill.items.isNotEmpty &&
+          openBill.items.every((it) => it.kitchenStatus == 'delivered');
 
       return Container(
         color: AppColors.surface,
@@ -4564,6 +4744,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ),
                             ),
                           ),
+                          // Retail: every line of this open order was ticked
+                          // off on the Open Orders page — same green tick.
+                          if (allTicked) ...[
+                            const SizedBox(width: 6),
+                            Tooltip(
+                              message: l10n.billingAllItemsTicked,
+                              child: Container(
+                                width: 20,
+                                height: 20,
+                                decoration: const BoxDecoration(
+                                    color: AppColors.success,
+                                    shape: BoxShape.circle),
+                                child: const Icon(Icons.check,
+                                    size: 14, color: Colors.white),
+                              ),
+                            ),
+                          ],
                         ],
                       ],
                     ),
@@ -5313,7 +5510,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
+                  // The settle confirm box hangs off this row (see
+                  // _confirmSettle), so it opens right above the buttons.
+                  CompositedTransformTarget(
+                  link: _settleRowLink,
+                  child: Builder(builder: (actionRow) => Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (canFinalize) ...[
@@ -5340,7 +5541,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           tooltip: l10n.billingSettleWhatsapp,
                           onPressed: (cart.isEmpty || _generatingBill)
                               ? null
-                              : () => _settleWhatsApp(inSheet: inSheet),
+                              : () => _settleWhatsApp(actionRow, inSheet: inSheet),
                         ),
                         const SizedBox(width: AppSpacing.space8),
                         Expanded(
@@ -5358,12 +5559,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             longPressHint: l10n.billingSettleOnlyHint,
                             onPressed: (cart.isEmpty || _generatingBill)
                                 ? null
-                                : () => _settle(inSheet: inSheet),
+                                : () => _settle(actionRow, inSheet: inSheet),
                             // The deliberate skip, for when a printer is
                             // connected but this one sale needs no slip.
                             onLongPress: (cart.isEmpty || _generatingBill)
                                 ? null
-                                : () => _settle(inSheet: inSheet, withReceipt: false),
+                                : () => _settle(actionRow, inSheet: inSheet, withReceipt: false),
                           ),
                         ),
                       ] else
@@ -5381,7 +5582,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                         ),
                     ],
-                  ),
+                  ))),
                   if (canFinalize)
                     _PrinterStatusLine(onConnect: _openPrinterSetup),
                 ],
@@ -5555,7 +5756,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           color: AppColors.primary,
           fontWeight: FontWeight.w600,
         );
-    final packLabel = cartPackLabel(context, entry);
+    // Windows also shows the unit under a full pack ("1 pcs").
+    final packLabel = cartPackLabel(context, entry) ??
+        (isWindows
+            ? '${formatQty(entry.quantity)} ${unitShort(entry.item.unit)}'
+            : null);
     final packUnit = entry.packUnit;
     final packSize = entry.packSize;
     final row = Padding(
@@ -5615,32 +5820,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
           ),
+          // "−Box" (Windows): takes a whole pack back off, once there is one.
+          if (isWindows &&
+              packUnit != null &&
+              packSize != null &&
+              entry.quantity >= packSize)
+            _packButton('−${unitShort(packUnit)}',
+                () => ref.read(cartProvider.notifier).changeQty(entry.key, -packSize)),
           // "+Box": a whole pack in one tap.
           if (packUnit != null && packSize != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: InkWell(
-                onTap: () => _cartChange(
+            _packButton(
+                '+${unitShort(packUnit)}',
+                () => _cartChange(
                     entry.key,
                     () => ref
                         .read(cartProvider.notifier)
-                        .changeQty(entry.key, packSize)),
-                borderRadius: BorderRadius.circular(AppRadius.small),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(AppRadius.small),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Text('+${itemUnitLabel(context, packUnit)}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w600,
-                          )),
-                ),
-              ),
-            ),
+                        .changeQty(entry.key, packSize))),
           Container(
             decoration: BoxDecoration(
               color: AppColors.surfaceVariant,
@@ -5716,6 +5911,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Outlined "+Box" / "−Box" chip beside a cart line's stepper.
+  Widget _packButton(String label, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.small),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Text(label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  )),
+        ),
+      ),
+    );
+  }
+
   Widget _qtyButton(IconData icon, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -5735,9 +5953,9 @@ String? cartPackLabel(BuildContext context, CartEntry e) {
   final p = e.packs;
   final unit = e.packUnit;
   if (p == null || unit == null) return null;
-  final packs = '${p.packs} ${itemUnitLabel(context, unit)}';
+  final packs = '${p.packs} ${unitShort(unit)}';
   return p.loose > 0
-      ? '$packs + ${formatQty(p.loose)} ${itemUnitLabel(context, e.item.unit)}'
+      ? '$packs + ${formatQty(p.loose)} ${unitShort(e.item.unit)}'
       : packs;
 }
 
@@ -7126,7 +7344,7 @@ class _ExcelItemRow extends ConsumerStatefulWidget {
     if (treatAsVariantItem) return '';
     final p = rowPrice(list);
     if (p == null) return '';
-    final suffix = item.isMeasured && !isVariantRow ? '/${item.unit}' : '';
+    final suffix = item.isMeasured && !isVariantRow ? '/${unitShort(item.unit)}' : '';
     return '₹${p.toStringAsFixed(2)}$suffix';
   }
 
@@ -7253,6 +7471,9 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
             (widget.variant != null || !widget.item.hasVariants)
         ? stockAlertColor(widget.item, widget.variant)
         : null;
+    // Out of stock greys the whole row instead of drawing the red stripe.
+    final outOfStock = stockColor == stockOutColor;
+    final stripeColor = outOfStock ? null : stockColor;
 
     return ClipRect(
       child: Stack(
@@ -7313,6 +7534,8 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                 decoration: BoxDecoration(
                   color: inCart
                       ? const Color(0xFFEEF2FF) // solid indigo-50
+                      : outOfStock
+                          ? const Color(0xFFD1D5DB) // gray-300: greyed out
                       : widget.expanded || widget.nested
                           ? const Color(0xFFFAFBFF) // faint tint: open group
                           : AppColors.surface,
@@ -7320,10 +7543,10 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                 // Stock alert stripe on the row's left edge. Painted over the
                 // row, so it shifts nothing. A size row shows it on its own
                 // rail below instead.
-                foregroundDecoration: stockColor != null && !widget.nested
+                foregroundDecoration: stripeColor != null && !widget.nested
                     ? BoxDecoration(
                         border: Border(
-                            left: BorderSide(color: stockColor, width: 3)))
+                            left: BorderSide(color: stripeColor, width: 3)))
                     : null,
                 // The accent rail marks SIZE rows only — the category bar has
                 // its own, and the parent dish is an ordinary item that happens
@@ -7339,7 +7562,9 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                       ? BoxDecoration(
                           border: Border(
                               left: BorderSide(
-                                  color: stockColor ?? widget.accent,
+                                  color: outOfStock
+                                      ? const Color(0xFF9CA3AF) // gray-400
+                                      : stripeColor ?? widget.accent,
                                   width: 3)))
                       : null,
                   padding: EdgeInsets.only(
@@ -7360,12 +7585,25 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                               inCart ? FontWeight.w600 : FontWeight.w400,
                           color: inCart
                               ? AppColors.primaryDark
-                              : AppColors.textPrimary,
+                              : outOfStock
+                                  ? AppColors.textSecondary
+                                  : AppColors.textPrimary,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    if (outOfStock) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        context.l10n.billingOutOfStock,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
                     // Price (with /unit suffix for measured items). FittedBox
                     // shrinks the text to fit rather than wrapping "₹200.00/
                     // glass" onto a second line — the row has no room to grow
@@ -7399,6 +7637,7 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                           _GridBtn(
                             icon: Icons.remove,
                             enabled: inCart,
+                            muted: outOfStock,
                             onTap: widget.onDecrement,
                           ),
                           // Editable qty field (read-only for a parent variant item)
@@ -7465,6 +7704,7 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                                         ),
                                         decoration: InputDecoration(
                                           isDense: true,
+                                          filled: !outOfStock,
                                           contentPadding:
                                               const EdgeInsets.symmetric(
                                                   vertical: 4),
@@ -7502,6 +7742,7 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                           _GridBtn(
                             icon: Icons.add,
                             enabled: true,
+                            muted: outOfStock,
                             onTap: inCart ? widget.onIncrement : widget.onAdd,
                           ),
                         ],
@@ -7524,11 +7765,13 @@ class _GridBtn extends StatelessWidget {
   final IconData icon;
   final bool enabled;
   final VoidCallback onTap;
+  final bool muted;
 
   const _GridBtn({
     required this.icon,
     required this.enabled,
     required this.onTap,
+    this.muted = false,
   });
 
   @override
@@ -7540,15 +7783,17 @@ class _GridBtn extends StatelessWidget {
         width: 28,
         height: 28,
         decoration: BoxDecoration(
-          color: enabled
-              ? AppColors.primary
-              : AppColors.surfaceVariant,
+          color: muted
+              ? const Color(0xFF9CA3AF) // gray-400: out-of-stock row
+              : enabled
+                  ? AppColors.primary
+                  : AppColors.surfaceVariant,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
           icon,
           size: 16,
-          color: enabled ? Colors.white : AppColors.textSecondary,
+          color: enabled || muted ? Colors.white : AppColors.textSecondary,
         ),
       ),
     );

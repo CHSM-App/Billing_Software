@@ -716,11 +716,36 @@ class AppLocalizationsMr extends AppLocalizations {
       'आयटम क्र. असलेले आयटम बिलिंगवर (101) आयटमचे नाव असे दिसतील';
 
   @override
+  String get settingsNotifyOrders => 'ऑर्डर सूचना';
+
+  @override
+  String get settingsNotifyOrdersSubtitle =>
+      'ऑनलाइन किंवा टेबल ऑर्डर आल्यावर या खात्याला सूचना द्या';
+
+  @override
+  String get settingsNotifyLowStock => 'कमी स्टॉक सूचना';
+
+  @override
+  String get settingsNotifyLowStockSubtitle =>
+      'आयटम कमी स्टॉक मर्यादेखाली गेल्यावर एक शांत सूचना';
+
+  @override
+  String get settingsGroupBilling => 'बिलिंग';
+
+  @override
+  String get settingsGroupStock => 'स्टॉक';
+
+  @override
+  String get settingsGroupOrdering => 'ऑर्डरिंग';
+
+  @override
+  String get settingsGroupNotifications => 'सूचना';
+
+  @override
   String get settingsToggles => 'सेटिंग्ज';
 
   @override
-  String get settingsTogglesSubtitle =>
-      'GST, इन्व्हेंटरी, राउंड-ऑफ व इतर पर्याय';
+  String get settingsTogglesSubtitle => 'GST, इन्व्हेंटरी, सूचना व इतर पर्याय';
 
   @override
   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
@@ -751,6 +776,13 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get settingsLanguage => 'भाषा';
+
+  @override
+  String get settingsConfirmSettle => 'बिल पूर्ण करण्यापूर्वी विचारा';
+
+  @override
+  String get settingsConfirmSettleSubtitle =>
+      'पैसे घेण्यापूर्वी एकदा खात्री करा';
 
   @override
   String get settingsLanguageSubtitle => 'तुमची अ‍ॅप भाषा निवडा';
@@ -1280,6 +1312,12 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingWhatsappCaption => 'पाठवा';
 
   @override
+  String get billingConfirmSettle => 'खात्री करा, पैसे घ्या';
+
+  @override
+  String get billingConfirmWhatsapp => 'पैसे घ्या आणि पाठवा';
+
+  @override
   String get billingSettleAndPrint => 'आणि प्रिंट';
 
   @override
@@ -1433,6 +1471,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingOutOfStock => 'स्टॉक संपला';
+
+  @override
+  String get billingAllItemsTicked => 'सर्व वस्तू टिक केल्या';
 
   @override
   String get billingInsufficientStock => 'स्टॉक अपुरा आहे';
@@ -2138,6 +2179,13 @@ class AppLocalizationsMr extends AppLocalizations {
   String itemsSizeEditTitle(String label) {
     return 'संपादन — $label';
   }
+
+  @override
+  String get itemsListPrice => 'यादीतील किंमत';
+
+  @override
+  String get itemsPriceListSaveFailed =>
+      'वस्तू जतन झाली, पण दर यादीतील किंमत जतन झाली नाही. पुन्हा प्रयत्नासाठी जतन करा दाबा.';
 
   @override
   String get itemsHasVariants => 'या वस्तूचे प्रकार आहेत';

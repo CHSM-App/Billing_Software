@@ -640,7 +640,7 @@ class InvoicePdf {
         ),
       ];
       if (anyHsn) cells.add(cell(codeOf(i), align: pw.Alignment.center));
-      cells.add(cell(formatQty(i.quantity), align: pw.Alignment.centerRight));
+      cells.add(cell(receiptQty(i, formatQty(i.quantity)), align: pw.Alignment.centerRight));
       cells.add(cell(money(i.receiptPrice), align: pw.Alignment.centerRight));
       if (showGst) {
         final rate = i.taxRate ?? 0;

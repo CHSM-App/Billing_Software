@@ -715,11 +715,37 @@ class AppLocalizationsEn extends AppLocalizations {
       'Items with an Item No show as (101) Item name on the billing page';
 
   @override
+  String get settingsNotifyOrders => 'Order alerts';
+
+  @override
+  String get settingsNotifyOrdersSubtitle =>
+      'Notify this account when an online or table order arrives';
+
+  @override
+  String get settingsNotifyLowStock => 'Low stock alerts';
+
+  @override
+  String get settingsNotifyLowStockSubtitle =>
+      'One quiet notification when items drop below their low stock limit';
+
+  @override
+  String get settingsGroupBilling => 'BILLING';
+
+  @override
+  String get settingsGroupStock => 'STOCK';
+
+  @override
+  String get settingsGroupOrdering => 'ORDERING';
+
+  @override
+  String get settingsGroupNotifications => 'NOTIFICATIONS';
+
+  @override
   String get settingsToggles => 'Settings';
 
   @override
   String get settingsTogglesSubtitle =>
-      'GST, inventory, round-off and other options';
+      'GST, inventory, notifications and other options';
 
   @override
   String get settingsManageStaff => 'Manage Staff';
@@ -750,6 +776,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsLanguage => 'Language';
+
+  @override
+  String get settingsConfirmSettle => 'Confirm before settling';
+
+  @override
+  String get settingsConfirmSettleSubtitle =>
+      'Ask once more before a bill is settled';
 
   @override
   String get settingsLanguageSubtitle => 'Choose your app language';
@@ -1278,6 +1311,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingWhatsappCaption => 'Settle';
 
   @override
+  String get billingConfirmSettle => 'Confirm & Settle';
+
+  @override
+  String get billingConfirmWhatsapp => 'Settle & Send';
+
+  @override
   String get billingSettleAndPrint => 'and print';
 
   @override
@@ -1430,6 +1469,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingOutOfStock => 'Out of stock';
+
+  @override
+  String get billingAllItemsTicked => 'All items ticked';
 
   @override
   String get billingInsufficientStock => 'Insufficient Stock';
@@ -2133,6 +2175,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String itemsSizeEditTitle(String label) {
     return 'Edit — $label';
   }
+
+  @override
+  String get itemsListPrice => 'List price';
+
+  @override
+  String get itemsPriceListSaveFailed =>
+      'Item saved, but its price list price did not. Tap Save to try again.';
 
   @override
   String get itemsHasVariants => 'This item has variants';

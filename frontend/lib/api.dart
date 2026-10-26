@@ -9,7 +9,7 @@ import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
 // const String baseUrl = 'http://192.168.1.11:8000/api';
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'https://removing-browse-spent-titanium.trycloudflare.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
 
@@ -1408,5 +1408,18 @@ Future<void> deleteFcmToken(String token) async {
   _parse(await _authPost(
     Uri.parse('$baseUrl/fcm/token/remove'),
     body: jsonEncode({'token': token}),
+  ));
+}
+
+/// This user's own notification switches:
+/// `{notify_low_stock: bool, notify_online_orders: bool}`.
+Future<Map<String, dynamic>> getNotifyPrefs() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/fcm/prefs')));
+}
+
+Future<void> updateNotifyPrefs(Map<String, bool> prefs) async {
+  _parse(await _authPut(
+    Uri.parse('$baseUrl/fcm/prefs'),
+    body: jsonEncode(prefs),
   ));
 }

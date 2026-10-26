@@ -326,6 +326,13 @@ class _DraftTicketState extends State<_DraftTicket> {
         context, CartEntry(item: item, variant: variant, quantity: it.quantity));
   }
 
+  /// The line's short unit ("kg", "pcs"), from the live catalog like
+  /// [_packLabel].
+  String? _unit(BillItem it) {
+    final unit = widget.catalog.where((i) => i.id == it.itemId).firstOrNull?.unit;
+    return unit == null ? null : unitShort(unit);
+  }
+
   /// The dish list hit its top/bottom under a finger: keep the drag going on
   /// the page instead of stopping dead. (A mouse wheel already passes to the
   /// page by itself once the list can't move.)
@@ -571,6 +578,7 @@ class _DraftTicketState extends State<_DraftTicket> {
                                       key: ValueKey(items[i].id),
                                       item: items[i],
                                       packLabel: _packLabel(items[i]),
+                                      unit: _unit(items[i]),
                                       ticked:
                                           _status(items[i]) == 'delivered',
                                       busy: widget.busy.contains(items[i].id),
@@ -726,6 +734,7 @@ class _ReadyBadge extends StatelessWidget {
 class _TickTile extends StatelessWidget {
   final BillItem item;
   final String? packLabel;
+  final String? unit;
   final bool ticked;
   final bool busy;
   final VoidCallback onTap;
@@ -734,6 +743,7 @@ class _TickTile extends StatelessWidget {
     super.key,
     required this.item,
     this.packLabel,
+    this.unit,
     required this.ticked,
     required this.busy,
     required this.onTap,
@@ -788,7 +798,7 @@ class _TickTile extends StatelessWidget {
               const SizedBox(width: 6),
             ],
             Text(
-              '× ${formatQty(item.quantity)}',
+              ['× ${formatQty(item.quantity)}', unit].nonNulls.join(' '),
               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
           ],

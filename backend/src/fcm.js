@@ -26,9 +26,14 @@ function getMessaging() {
 }
 
 /**
- * Send ONE notification covering all items that just crossed below their
- * low-stock threshold in a single bill. Uses multicast so all device tokens
- * are reached in one API call.
+ * Low-stock alert for owners. Called only when a bill moves items ACROSS their
+ * threshold (see collectLowStock in routes/bills.js), never for every sale of an
+ * already-low item.
+ *
+ * Anti-spam: the title carries the business's TOTAL low-stock count and the
+ * message is tagged, so each send REPLACES the previous low-stock notification
+ * instead of stacking — the tray holds one "Low stock — N items" at most.
+ * Quiet (no sound): stock running low is not urgent the way an order is.
  *
  * @param {object} pool
  * @param {object} sql
@@ -36,11 +41,6 @@ function getMessaging() {
  * @param {Array<{name: string, remaining: number}>} lowItems  — items that crossed threshold
  */
 async function sendLowStockNotification(pool, sql, businessId, lowItems) {
-  // Disabled: we show no notifications to any role. Low-stock is surfaced in-app
-  // (stock screens / badges), not via push. Kept as a no-op so callers don't
-  // need to change.
-  return;
-  // eslint-disable-next-line no-unreachable
   if (!lowItems || lowItems.length === 0) return;
 
   const messaging = getMessaging();
@@ -50,7 +50,13 @@ async function sendLowStockNotification(pool, sql, businessId, lowItems) {
   try {
     const result = await pool.request()
       .input('business_id', sql.UniqueIdentifier, businessId)
-      .query(`SELECT token FROM fcm_tokens WHERE business_id = @business_id`);
+      .query(`
+        SELECT ft.token
+        FROM fcm_tokens ft
+        JOIN users u ON u.id = ft.user_id
+        WHERE ft.business_id = @business_id AND u.role = 'owner'
+          AND u.notify_low_stock = 1
+      `);
     tokens = result.recordset.map((r) => r.token);
   } catch (err) {
     console.error('[FCM] Failed to fetch tokens:', err.message);
@@ -59,23 +65,42 @@ async function sendLowStockNotification(pool, sql, businessId, lowItems) {
 
   if (tokens.length === 0) return;
 
-  const title = lowItems.length === 1
-    ? 'Low Stock Alert'
-    : `Low Stock Alert — ${lowItems.length} items`;
+  // Everything low right now, not just this bill's — the notification replaces
+  // the last one, so it has to carry the running total.
+  let lowCount = lowItems.length;
+  try {
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .query(`
+        SELECT
+          (SELECT COUNT(*) FROM item_variants v JOIN items i ON i.id = v.item_id
+           WHERE i.business_id = @business_id AND i.is_active = 1 AND v.is_active = 1
+             AND v.stock_quantity <= v.low_stock_threshold)
+        + (SELECT COUNT(*) FROM items i
+           WHERE i.business_id = @business_id AND i.is_active = 1
+             AND i.stock_quantity <= i.low_stock_threshold
+             AND NOT EXISTS (SELECT 1 FROM item_variants v
+                             WHERE v.item_id = i.id AND v.is_active = 1)) AS low_count
+      `);
+    lowCount = Math.max(lowCount, Number(result.recordset[0]?.low_count) || 0);
+  } catch (err) {
+    console.error('[FCM] Failed to count low-stock items:', err.message);
+  }
 
-  const body = lowItems.length === 1
-    ? `${lowItems[0].name} is running low — only ${lowItems[0].remaining} left.`
-    : lowItems.map((i) => `${i.name} (${i.remaining} left)`).join(', ');
+  const { title, body } = lowStockText(lowItems, lowCount);
 
   const message = {
     notification: { title, body },
-    data: {
-      type: 'low_stock',
-      count: String(lowItems.length),
-      items: JSON.stringify(lowItems),
+    data: { type: 'low_stock', count: String(lowCount) },
+    android: {
+      notification: {
+        channelId: 'low_stock',
+        // Same tag = replaces the previous low-stock notification.
+        tag: 'low_stock',
+        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+      },
     },
-    android: { notification: { channelId: 'low_stock', priority: 'high' } },
-    apns: { payload: { aps: { sound: 'default' } } },
+    apns: { headers: { 'apns-collapse-id': 'low_stock' } },
     tokens,
   };
 
@@ -108,6 +133,15 @@ async function sendLowStockNotification(pool, sql, businessId, lowItems) {
   } catch (err) {
     console.error('[FCM] sendEachForMulticast error:', err.message);
   }
+}
+
+/** Title shows the business-wide count; body names (up to 3 of) the items
+ *  that just crossed. */
+function lowStockText(lowItems, lowCount) {
+  const title = lowCount === 1 ? 'Low stock' : `Low stock — ${lowCount} items`;
+  const shown = lowItems.slice(0, 3).map((i) => `${i.name} (${i.remaining} left)`);
+  const more = lowItems.length - shown.length;
+  return { title, body: shown.join(', ') + (more > 0 ? ` …and ${more} more` : '') };
 }
 
 /**
@@ -253,8 +287,9 @@ async function sendKitchenStatusChanged(pool, sql, businessId) {
 /**
  * Notify the shop that an online-store order is waiting for a decision.
  *
- * This is the ONE VISIBLE notification the product sends. Everything else in
- * this file is a silent data ping on purpose (see sendKitchenNotification), but
+ * One of the two VISIBLE notifications the product sends (low stock is the
+ * other, and that one is quiet). The kitchen pings are silent data on purpose
+ * (see sendKitchenNotification), but
  * an online order arrives with nobody looking at the app — a silent refresh of a
  * screen that is not open is an order the shop loses. So this one carries a real
  * `notification` block, its own channel and a sound.
@@ -282,6 +317,7 @@ async function sendOnlineOrderNotification(pool, sql, businessId, order = {}) {
         FROM fcm_tokens ft
         JOIN users u ON u.id = ft.user_id
         WHERE ft.business_id = @business_id AND u.role IN ('owner', 'cashier')
+          AND u.notify_online_orders = 1
       `);
     tokens = result.recordset.map((r) => r.token);
   } catch (err) {
@@ -382,6 +418,7 @@ async function sendTableOrderNotification(pool, sql, businessId, order = {}) {
         FROM fcm_tokens ft
         JOIN users u ON u.id = ft.user_id
         WHERE ft.business_id = @business_id AND u.role IN ('owner', 'cashier')
+          AND u.notify_online_orders = 1
       `);
     tokens = result.recordset.map((r) => r.token);
   } catch (err) {
@@ -449,6 +486,7 @@ async function sendTableOrderNotification(pool, sql, businessId, order = {}) {
 
 module.exports = {
   sendLowStockNotification,
+  lowStockText,
   sendKitchenNotification,
   sendKitchenStatusChanged,
   sendOnlineOrderNotification,

@@ -1334,6 +1334,54 @@ abstract class AppLocalizations {
   /// **'Items with an Item No show as (101) Item name on the billing page'**
   String get settingsShowItemNoSubtitle;
 
+  /// No description provided for @settingsNotifyOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Order alerts'**
+  String get settingsNotifyOrders;
+
+  /// No description provided for @settingsNotifyOrdersSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Notify this account when an online or table order arrives'**
+  String get settingsNotifyOrdersSubtitle;
+
+  /// No description provided for @settingsNotifyLowStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Low stock alerts'**
+  String get settingsNotifyLowStock;
+
+  /// No description provided for @settingsNotifyLowStockSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'One quiet notification when items drop below their low stock limit'**
+  String get settingsNotifyLowStockSubtitle;
+
+  /// No description provided for @settingsGroupBilling.
+  ///
+  /// In en, this message translates to:
+  /// **'BILLING'**
+  String get settingsGroupBilling;
+
+  /// No description provided for @settingsGroupStock.
+  ///
+  /// In en, this message translates to:
+  /// **'STOCK'**
+  String get settingsGroupStock;
+
+  /// No description provided for @settingsGroupOrdering.
+  ///
+  /// In en, this message translates to:
+  /// **'ORDERING'**
+  String get settingsGroupOrdering;
+
+  /// No description provided for @settingsGroupNotifications.
+  ///
+  /// In en, this message translates to:
+  /// **'NOTIFICATIONS'**
+  String get settingsGroupNotifications;
+
   /// No description provided for @settingsToggles.
   ///
   /// In en, this message translates to:
@@ -1343,7 +1391,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsTogglesSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'GST, inventory, round-off and other options'**
+  /// **'GST, inventory, notifications and other options'**
   String get settingsTogglesSubtitle;
 
   /// No description provided for @settingsManageStaff.
@@ -1405,6 +1453,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Language'**
   String get settingsLanguage;
+
+  /// No description provided for @settingsConfirmSettle.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm before settling'**
+  String get settingsConfirmSettle;
+
+  /// No description provided for @settingsConfirmSettleSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask once more before a bill is settled'**
+  String get settingsConfirmSettleSubtitle;
 
   /// No description provided for @settingsLanguageSubtitle.
   ///
@@ -2402,6 +2462,18 @@ abstract class AppLocalizations {
   /// **'Settle'**
   String get billingWhatsappCaption;
 
+  /// No description provided for @billingConfirmSettle.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm & Settle'**
+  String get billingConfirmSettle;
+
+  /// No description provided for @billingConfirmWhatsapp.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle & Send'**
+  String get billingConfirmWhatsapp;
+
   /// No description provided for @billingSettleAndPrint.
   ///
   /// In en, this message translates to:
@@ -2653,6 +2725,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Out of stock'**
   String get billingOutOfStock;
+
+  /// No description provided for @billingAllItemsTicked.
+  ///
+  /// In en, this message translates to:
+  /// **'All items ticked'**
+  String get billingAllItemsTicked;
 
   /// No description provided for @billingInsufficientStock.
   ///
@@ -3873,6 +3951,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Edit — {label}'**
   String itemsSizeEditTitle(String label);
+
+  /// No description provided for @itemsListPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'List price'**
+  String get itemsListPrice;
+
+  /// No description provided for @itemsPriceListSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Item saved, but its price list price did not. Tap Save to try again.'**
+  String get itemsPriceListSaveFailed;
 
   /// No description provided for @itemsHasVariants.
   ///

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:image_picker/image_picker.dart';
@@ -133,7 +134,7 @@ class _PackRow extends StatelessWidget {
               controller: size,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              suffixIcon: UnitSuffix(itemUnitLabel(context, baseUnit)),
+              suffixIcon: UnitSuffix(unitShort(baseUnit)),
               validator: (v) => (double.tryParse(v?.trim() ?? '') ?? 0) > 1
                   ? null
                   : l10n.itemsPackSizeInvalid,
@@ -437,8 +438,40 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         onManageWarrantyFields: isRetailWarrantyShop(businessType)
             ? (category) => _showWarrantyFieldTemplateEditor(category)
             : null,
+        // Only the owner may write price lists (routes/price_lists.js).
+        priceLists: ref.read(userRoleProvider) == 'owner'
+            ? ref.read(priceListsProvider).valueOrNull ?? const []
+            : const [],
+        onSavePriceListPrices: _savePriceListPrices,
       ),
     );
+  }
+
+  /// Writes [prices] (list id → this item's price, null = drop it) into the
+  /// price lists. A list is saved whole, so each is merged into a FRESH copy —
+  /// the cached one could be missing prices another device just set.
+  Future<void> _savePriceListPrices(
+      String itemId, Map<String, double?> prices) async {
+    final id = itemId.toLowerCase();
+    for (final list in (await getPriceLists()).whereType<Map>()) {
+      if (!prices.containsKey(list['id'])) continue;
+      final price = prices[list['id']];
+      await updatePriceList(list['id'], {
+        'name': list['name'],
+        'adjust_pct': list['adjust_pct'],
+        'items': [
+          for (final e in (list['items'] as List? ?? const []).whereType<Map>())
+            if ('${e['item_id']}'.toLowerCase() != id || e['variant_id'] != null)
+              {
+                'item_id': e['item_id'],
+                if (e['variant_id'] != null) 'variant_id': e['variant_id'],
+                'price': e['price'],
+              },
+          if (price != null) {'item_id': itemId, 'price': price},
+        ],
+      });
+    }
+    await ref.read(priceListsProvider.notifier).reload();
   }
 
   /// Opens the editor for [category]'s custom warranty fields (e.g. "KM
@@ -890,7 +923,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
             StockOverviewRow(
               name: v.label,
               stockQuantity: v.stockQuantity,
-              unitLabel: itemUnitLabel(context, item.unit),
+              unitLabel: unitShort(item.unit),
               isLowStock: v.isLowStock,
             ),
         ],
@@ -901,7 +934,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
       StockOverviewRow(
         name: item.name,
         stockQuantity: item.stockQuantity,
-        unitLabel: itemUnitLabel(context, item.unit),
+        unitLabel: unitShort(item.unit),
         isLowStock: item.isLowStock,
       ),
     );
@@ -1239,7 +1272,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '${formatQty(_current)} ${itemUnitLabel(context, widget.item.unit)}',
+                    '${formatQty(_current)} ${unitShort(widget.item.unit)}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -1300,7 +1333,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      '${formatQty(_total)} ${itemUnitLabel(context, widget.item.unit)}',
+                      '${formatQty(_total)} ${unitShort(widget.item.unit)}',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                             color: hasInput
@@ -1411,6 +1444,15 @@ class _ItemFormDialog extends StatefulWidget {
   /// key the template by.
   final void Function(String category)? onManageWarrantyFields;
 
+  /// The shop's price lists, offered under the price so this item's list
+  /// price can be set right here. Empty → the row is hidden.
+  final List<PriceList> priceLists;
+
+  /// Saves the list prices changed in this form (list id → price, null =
+  /// back to the list's default) once the item has an id.
+  final Future<void> Function(String itemId, Map<String, double?> prices)?
+      onSavePriceListPrices;
+
   const _ItemFormDialog(
       {this.item,
       required this.inventoryEnabled,
@@ -1422,7 +1464,9 @@ class _ItemFormDialog extends StatefulWidget {
       this.onManageSizes,
       this.onManageRecipe,
       this.isWarrantyShop = false,
-      this.onManageWarrantyFields});
+      this.onManageWarrantyFields,
+      this.priceLists = const [],
+      this.onSavePriceListPrices});
 
   @override
   State<_ItemFormDialog> createState() => _ItemFormDialogState();
@@ -1499,6 +1543,21 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// to fall through to the plain-item branch and demand a price the item does
   /// not have.
   bool get _sizedItem => _hasVariants || (widget.item?.hasVariants ?? false);
+
+  /// List price per price list id, as typed, and as it was when the form
+  /// opened — only lists whose text changed are written on save.
+  late final Map<String, String> _plOriginal = {
+    for (final l in widget.priceLists)
+      l.id: widget.item == null || l.prices[widget.item!.id] == null
+          ? ''
+          : _fmtPrice(l.prices[widget.item!.id]!),
+  };
+  late final Map<String, String> _plPrices = {..._plOriginal};
+  late String? _plId =
+      widget.priceLists.isEmpty ? null : widget.priceLists.first.id;
+  late final _plCtrl = TextEditingController(text: _plPrices[_plId] ?? '');
+
+  static String _fmtPrice(double v) => v.toStringAsFixed(v % 1 == 0 ? 0 : 2);
 
   static const _units = [
     'piece',
@@ -1786,6 +1845,76 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         : l10n.itemsFieldPriceExclusive;
   }
 
+  /// [price list ▾][₹ list price]: pick a list, type this item's price on it.
+  /// Each list remembers its own figure while switching, and the dropdown
+  /// shows the ones already set. A blank box bills at the list's % rule on
+  /// the price above (shown as the hint), or at that price itself.
+  Widget _buildPriceListRow(AppLocalizations l10n) {
+    final list = widget.priceLists.firstWhere((l) => l.id == _plId);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 5,
+          child: DropdownButtonFormField<String>(
+            initialValue: _plId,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: l10n.priceListPick,
+              prefixIcon: const Icon(Icons.sell_outlined,
+                  size: 18, color: AppColors.textSecondary),
+            ),
+            items: [
+              for (final l in widget.priceLists)
+                DropdownMenuItem(
+                  value: l.id,
+                  child: Text(
+                      (_plPrices[l.id] ?? '').trim().isEmpty
+                          ? l.name
+                          : '${l.name} · ₹${_plPrices[l.id]!.trim()}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (v) => setState(() {
+              _plId = v;
+              _plCtrl.text = _plPrices[v] ?? '';
+            }),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.space8),
+        Expanded(
+          flex: 4,
+          child: ListenableBuilder(
+            listenable: _priceCtrl,
+            builder: (context, _) {
+              final base = double.tryParse(_priceCtrl.text.trim());
+              final pct = list.adjustPct;
+              final ruled = base == null || pct == null || pct == 0
+                  ? base
+                  : base * (1 + pct / 100);
+              return TextFormField(
+                controller: _plCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                ],
+                textAlign: TextAlign.right,
+                decoration: InputDecoration(
+                  labelText: l10n.itemsListPrice,
+                  prefixText: '₹ ',
+                  hintText: ruled?.toStringAsFixed(2),
+                ),
+                onChanged: (v) => setState(() => _plPrices[_plId!] = v),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Tax rate for display: "5" not "5.0", but "2.5" kept intact.
   String _trimRate(double rate) => rate == rate.roundToDouble()
       ? rate.toStringAsFixed(0)
@@ -1808,6 +1937,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _lowStockCtrl.dispose();
     _packSizeCtrl.dispose();
     _warrantyMonthsCtrl.dispose();
+    _plCtrl.dispose();
     for (final d in _variantDrafts) {
       d.dispose();
     }
@@ -2002,6 +2132,22 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       }
     }
 
+    // Changed list prices only; blank = drop this item's price from the list.
+    // A sized item prices its lists per size (Price Lists screen), so none.
+    final listPrices = <String, double?>{};
+    if (!_sizedItem) {
+      for (final e in _plPrices.entries) {
+        final text = e.value.trim();
+        if (text == _plOriginal[e.key]) continue;
+        final p = text.isEmpty ? null : double.tryParse(text);
+        if (text.isNotEmpty && (p == null || p < 0)) {
+          _showError(context.l10n.priceListBadNumber);
+          return;
+        }
+        listPrices[e.key] = p;
+      }
+    }
+
     setState(() {
       _saving = true;
       _formError = null;
@@ -2102,6 +2248,18 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
           if (!mounted) return;
           setState(() => _formError = context.l10n
               .itemsVariantsPartialFail(failed.length, drafts.length));
+          return;
+        }
+      }
+
+      // Needs the item's id too. Safe to repeat on a retry: it sets, not adds.
+      if (listPrices.isNotEmpty && widget.onSavePriceListPrices != null) {
+        try {
+          await widget.onSavePriceListPrices!(saved.id, listPrices);
+          _plOriginal.addAll(_plPrices);
+        } catch (_) {
+          if (!mounted) return;
+          setState(() => _formError = context.l10n.itemsPriceListSaveFailed);
           return;
         }
       }
@@ -2455,6 +2613,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                       return null;
                     },
                   ),
+                  if (widget.priceLists.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.space12),
+                    _buildPriceListRow(l10n),
+                  ],
                 ],
                 const SizedBox(height: AppSpacing.space12),
                 DropdownButtonFormField<String>(
@@ -2597,7 +2759,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                         const TextInputType.numberWithOptions(decimal: true),
                     // Echoes the unit picked above, so "12" is unambiguously
                     // 12 kg and not 12 pieces.
-                    suffixIcon: UnitSuffix(itemUnitLabel(context, _unit)),
+                    suffixIcon: UnitSuffix(unitShort(_unit)),
                   ),
                   const SizedBox(height: AppSpacing.space12),
                   // Low-stock alert level. Until now this was hardcoded to 50
@@ -2608,7 +2770,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     controller: _lowStockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
-                    suffixIcon: UnitSuffix(itemUnitLabel(context, _unit)),
+                    suffixIcon: UnitSuffix(unitShort(_unit)),
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return null;
                       final n = double.tryParse(v.trim());
@@ -3387,9 +3549,9 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                     if (widget.inventoryEnabled && v.stockQuantity != null)
                       l10n.itemsStockLabel(formatQty(v.stockQuantity!)),
                     if (v.packUnit != null && v.packSize != null)
-                      '1 ${itemUnitLabel(context, v.packUnit!)} = '
+                      '1 ${unitShort(v.packUnit!)} = '
                           '${formatQty(v.packSize!)} '
-                          '${itemUnitLabel(context, widget.item.unit)}',
+                          '${unitShort(widget.item.unit)}',
                   ].join('  ·  ');
                   return ListTile(
                     dense: true,
@@ -3471,7 +3633,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                   // A size has no unit of its own — it is counted in the parent
                   // item's unit, which is what the stock rows below display.
                   suffixIcon:
-                      UnitSuffix(itemUnitLabel(context, widget.item.unit)),
+                      UnitSuffix(unitShort(widget.item.unit)),
                 ),
                 const SizedBox(height: AppSpacing.space8),
                 // Same per-size alert as the create form's size rows — the
@@ -3482,7 +3644,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   suffixIcon:
-                      UnitSuffix(itemUnitLabel(context, widget.item.unit)),
+                      UnitSuffix(unitShort(widget.item.unit)),
                 ),
               ],
               const SizedBox(height: AppSpacing.space8),
@@ -3759,7 +3921,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600)),
                             Text(
-                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? '${formatQty(v.stockQuantity!)} ${itemUnitLabel(context, widget.item.unit)}' : '—'}',
+                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? '${formatQty(v.stockQuantity!)} ${unitShort(widget.item.unit)}' : '—'}',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -3768,7 +3930,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                             // Live preview of the resulting stock after the adjustment.
                             if (_entered(v) > 0)
                               Text(
-                                '${_removing ? l10n.itemsTotalAfterRemoving : l10n.itemsTotalAfterAdding}: ${formatQty(((v.stockQuantity ?? 0) + _adding(v)).clamp(0, double.infinity))} ${itemUnitLabel(context, widget.item.unit)}',
+                                '${_removing ? l10n.itemsTotalAfterRemoving : l10n.itemsTotalAfterAdding}: ${formatQty(((v.stockQuantity ?? 0) + _adding(v)).clamp(0, double.infinity))} ${unitShort(widget.item.unit)}',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall

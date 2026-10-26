@@ -39,6 +39,7 @@ import 'reports_screen.dart';
 import 'vendor_bills_screen.dart';
 import 'expenses_screen.dart';
 import 'store_settings_screen.dart';
+import '../services/notification_service.dart';
 import '../services/offline_service.dart';
 import '../services/realtime_service.dart';
 
@@ -482,6 +483,14 @@ class _SettingsContentState extends State<_SettingsContent>
                       onTap: () => showLanguagePicker(context),
                     ),
 
+                    // A cashier's own order alerts. They have no Settings
+                    // screen, so the switch lives here; the owner's are in
+                    // Settings → Notifications.
+                    if (session.userRole == 'cashier') ...[
+                      const SizedBox(height: AppSpacing.space8),
+                      const _NotificationToggles(showLowStock: false),
+                    ],
+
                     // Hidden from the kitchen: a chef never prints a bill, and
                     // the one printer they DO care about — the pass printer —
                     // is already on the Kitchen screen's own app bar, which is
@@ -898,17 +907,6 @@ class _SettingsContentState extends State<_SettingsContent>
     );
   }
 
-  Widget _sectionLabel(BuildContext context, String label) {
-    return Text(
-      label,
-      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: AppColors.textSecondary,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.0,
-          ),
-    );
-  }
-
   String _formatType(String type) {
     final l10n = context.l10n;
     return switch (type) {
@@ -918,6 +916,19 @@ class _SettingsContentState extends State<_SettingsContent>
       _ => type,
     };
   }
+}
+
+/// Small caps label above a group of cards — Profile sections and the groups
+/// on the Settings (toggles) screen.
+Widget _sectionLabel(BuildContext context, String label) {
+  return Text(
+    label,
+    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: AppColors.textSecondary,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.0,
+        ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1195,6 +1206,104 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
   }
 }
 
+/// This user's own push-notification switches (stored per person on the
+/// server, so they follow the user to every device they sign in on).
+class _NotificationToggles extends StatefulWidget {
+  /// Low-stock alerts go to owners only.
+  final bool showLowStock;
+
+  const _NotificationToggles({required this.showLowStock});
+
+  @override
+  State<_NotificationToggles> createState() => _NotificationTogglesState();
+}
+
+class _NotificationTogglesState extends State<_NotificationToggles> {
+  Map<String, bool>? _prefs;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final p = await getNotifyPrefs();
+      if (mounted) {
+        setState(() => _prefs = {
+              'notify_online_orders': p['notify_online_orders'] == true,
+              'notify_low_stock': p['notify_low_stock'] == true,
+            });
+      }
+    } catch (_) {
+      // Offline / failed: leave the switches disabled rather than guess.
+    }
+  }
+
+  Future<void> _toggle(String key, bool value) async {
+    final previous = _prefs![key]!;
+    setState(() {
+      _prefs![key] = value;
+      _saving = true;
+    });
+    try {
+      await updateNotifyPrefs({key: value});
+      // Turning an alert on is the moment the OS prompt makes sense.
+      if (value) await NotificationService.instance.requestPermission();
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _prefs![key] = previous);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(sanitizeUiErrorMessage(e)), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Widget _tile(String key, IconData icon, String title, String subtitle) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: SwitchListTile(
+        value: _prefs?[key] ?? false,
+        onChanged: (_prefs == null || _saving) ? null : (v) => _toggle(key, v),
+        secondary: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(AppRadius.small),
+          ),
+          child: Icon(icon, color: AppColors.primary, size: 20),
+        ),
+        title: Text(title),
+        subtitle: Text(subtitle),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Column(children: [
+      _tile('notify_online_orders', Icons.notifications_active_outlined,
+          l10n.settingsNotifyOrders, l10n.settingsNotifyOrdersSubtitle),
+      if (widget.showLowStock) ...[
+        const SizedBox(height: AppSpacing.space8),
+        _tile('notify_low_stock', Icons.inventory_outlined,
+            l10n.settingsNotifyLowStock, l10n.settingsNotifyLowStockSubtitle),
+      ],
+    ]);
+  }
+}
+
 /// Owner's on/off business options, opened from Profile → Settings.
 class _TogglesScreen extends ConsumerWidget {
   const _TogglesScreen();
@@ -1213,27 +1322,10 @@ class _TogglesScreen extends ConsumerWidget {
                 bottom:
                     AppSpacing.space16 + MediaQuery.paddingOf(context).bottom),
             children: [
-              // Customer QR self-ordering — restaurants only.
-              if (businessType == 'restaurant_with_tables') ...[
-                _BusinessFlagToggle(
-                  field: 'self_order_enabled',
-                  icon: Icons.qr_code_2,
-                  title: l10n.settingsSelfOrder,
-                  subtitle: l10n.settingsSelfOrderSubtitle,
-                ),
-              ],
-              // Inventory tracking — any business type. (Barcode
-              // scanning is always on now, so it has no toggle.)
+              _sectionLabel(context, l10n.settingsGroupBilling),
               const SizedBox(height: AppSpacing.space8),
-              _BusinessFlagToggle(
-                field: 'inventory_enabled',
-                icon: Icons.inventory_2_outlined,
-                title: l10n.settingsInventory,
-                subtitle: l10n.settingsInventorySubtitle,
-              ),
               // GST tax invoices — off by default. When on, items gain a
               // tax rate + HSN/SAC field and receipts show CGST/SGST.
-              const SizedBox(height: AppSpacing.space8),
               _BusinessFlagToggle(
                 field: 'gst_enabled',
                 icon: Icons.receipt_long_outlined,
@@ -1259,6 +1351,62 @@ class _TogglesScreen extends ConsumerWidget {
                 title: l10n.settingsShowItemNo,
                 subtitle: l10n.settingsShowItemNoSubtitle,
               ),
+              // The "are you sure?" before Settle — per device, on by default.
+              const SizedBox(height: AppSpacing.space8),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.medium),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: SwitchListTile(
+                  value: ref.watch(settleConfirmProvider),
+                  onChanged: (v) => ref.read(settleConfirmProvider.notifier).set(v),
+                  secondary: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
+                    child: const Icon(Icons.task_alt_outlined,
+                        color: AppColors.primary, size: 20),
+                  ),
+                  title: Text(l10n.settingsConfirmSettle),
+                  subtitle: Text(l10n.settingsConfirmSettleSubtitle),
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.space24),
+              _sectionLabel(context, l10n.settingsGroupStock),
+              const SizedBox(height: AppSpacing.space8),
+              // Inventory tracking — any business type. (Barcode
+              // scanning is always on now, so it has no toggle.)
+              _BusinessFlagToggle(
+                field: 'inventory_enabled',
+                icon: Icons.inventory_2_outlined,
+                title: l10n.settingsInventory,
+                subtitle: l10n.settingsInventorySubtitle,
+              ),
+
+              // Customer QR self-ordering — restaurants only.
+              if (businessType == 'restaurant_with_tables') ...[
+                const SizedBox(height: AppSpacing.space24),
+                _sectionLabel(context, l10n.settingsGroupOrdering),
+                const SizedBox(height: AppSpacing.space8),
+                _BusinessFlagToggle(
+                  field: 'self_order_enabled',
+                  icon: Icons.qr_code_2,
+                  title: l10n.settingsSelfOrder,
+                  subtitle: l10n.settingsSelfOrderSubtitle,
+                ),
+              ],
+
+              // The owner's own push alerts (per person, not per business).
+              const SizedBox(height: AppSpacing.space24),
+              _sectionLabel(context, l10n.settingsGroupNotifications),
+              const SizedBox(height: AppSpacing.space8),
+              const _NotificationToggles(showLowStock: true),
             ],
           ),
         ),

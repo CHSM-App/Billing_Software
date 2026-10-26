@@ -237,7 +237,7 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
   Widget _rowCard(int i) {
     final r = _rows[i];
     final lowStockNote = (r.currentStock != null && r.lowStockThreshold != null)
-        ? 'In stock: ${_fmt(r.currentStock!)} ${r.unit} · Reorder level: ${_fmt(r.lowStockThreshold!)} ${r.unit}'
+        ? 'In stock: ${_fmt(r.currentStock!)} ${unitShort(r.unit)} · Reorder level: ${_fmt(r.lowStockThreshold!)} ${unitShort(r.unit)}'
         : null;
     return AppCard(
       child: Row(children: [
@@ -278,7 +278,7 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
               padding: const EdgeInsets.only(right: 10),
               child: Center(
                 widthFactor: 1,
-                child: Text(r.unit,
+                child: Text(unitShort(r.unit),
                     style: const TextStyle(
                         fontSize: 12, color: AppColors.textSecondary)),
               ),

@@ -452,7 +452,7 @@ class _RawMaterialsTabState extends ConsumerState<RawMaterialsTab> {
                                 name: m.name,
                                 stockQuantity: m.stockQuantity,
                                 unitLabel:
-                                    rawMaterialUnitLabel(context, m.unit),
+                                    unitShort(m.unit),
                                 isLowStock: m.isLowStock,
                               ),
                             )
@@ -473,7 +473,7 @@ class _RawMaterialsTabState extends ConsumerState<RawMaterialsTab> {
   Widget _buildCard(BuildContext context, RawMaterial m) {
     final l10n = context.l10n;
     final stockStr = m.stockQuantity != null
-        ? '${formatQty(m.stockQuantity!)} ${rawMaterialUnitLabel(context, m.unit)}'
+        ? '${formatQty(m.stockQuantity!)} ${unitShort(m.unit)}'
         : '—';
     return Container(
       decoration: BoxDecoration(
@@ -632,7 +632,7 @@ class _MaterialStockPopupDialogState extends State<_MaterialStockPopupDialog> {
     final material = widget.material;
     final hasInput = _entered > 0;
     final l10n = context.l10n;
-    final unitLabel = rawMaterialUnitLabel(context, material.unit);
+    final unitLabel = unitShort(material.unit);
 
     return AlertDialog(
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 8, 0),
@@ -873,7 +873,7 @@ class _RawMaterialFormDialogState extends State<RawMaterialFormDialog> {
                       const TextInputType.numberWithOptions(decimal: true),
                   // Echoes the unit picked above, so "12" is unambiguously
                   // 12 kg and not 12 pieces.
-                  suffixIcon: UnitSuffix(rawMaterialUnitLabel(context, _unit)),
+                  suffixIcon: UnitSuffix(unitShort(_unit)),
                 ),
                 const SizedBox(height: AppSpacing.space12),
                 AppTextField(
@@ -881,7 +881,7 @@ class _RawMaterialFormDialogState extends State<RawMaterialFormDialog> {
                   controller: _thresholdCtrl,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  suffixIcon: UnitSuffix(rawMaterialUnitLabel(context, _unit)),
+                  suffixIcon: UnitSuffix(unitShort(_unit)),
                 ),
               ],
             ),
