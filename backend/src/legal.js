@@ -15,4 +15,4 @@
  * ponytail: one version for all three documents; split per document if they
  * ever need to change independently.
  */
-module.exports = { TERMS_VERSION: '2026-10-01' };
+module.exports = { TERMS_VERSION: null };
