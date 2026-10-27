@@ -313,7 +313,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get warrantyFilterExpired => 'Expired';
 
   @override
+  String get warrantyFilterDate => 'Purchase date';
+
+  @override
+  String get warrantyFilterDateFrom => 'From';
+
+  @override
+  String get warrantyFilterDateTo => 'To';
+
+  @override
+  String get warrantyFilterDateApply => 'Apply';
+
+  @override
   String get warrantyEmptyState => 'No warranty records yet. Tap + to add one.';
+
+  @override
+  String get warrantyEmptyActive => 'No active warranties.';
+
+  @override
+  String get warrantyEmptyExpiringSoon =>
+      'Nothing is expiring in the next 30 days.';
+
+  @override
+  String get warrantyEmptyExpired => 'No expired warranties.';
+
+  @override
+  String warrantyEmptySearch(String query) {
+    return 'No warranties match \"$query\".';
+  }
+
+  @override
+  String get warrantyEmptyDateRange =>
+      'No warranties purchased in that date range.';
+
+  @override
+  String get warrantyClearFilters => 'Clear filters';
 
   @override
   String warrantyExpiresOn(String date) {
@@ -364,7 +398,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get warrantyExpiryDateLabel => 'Expiry date';
 
   @override
-  String get warrantyExtraDetails => 'Extra details';
+  String get warrantyExtraDetails => 'Additional Information';
 
   @override
   String get warrantyDetailLabel => 'Label';
@@ -743,6 +777,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsInventorySubtitle =>
       'Track stock and reduce it automatically on each sale';
+
+  @override
+  String get settingsWarranty => 'Warranty Tracking';
+
+  @override
+  String get settingsWarrantySubtitle =>
+      'Mark items as under warranty and track claims in the Warranty tab';
 
   @override
   String get settingsGst => 'GST Invoices';
@@ -1670,7 +1711,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billSetupNote => 'Note on bill';
 
   @override
-  String get billSetupWarrantyDetails => 'Warranty details';
+  String get billSetupWarrantyDetails => 'Extra details';
 
   @override
   String get billSetupNoteSubtitle => 'A message printed on every bill';

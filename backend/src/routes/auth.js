@@ -16,8 +16,10 @@ const router = express.Router();
 
 // A restaurant always runs with tables. The takeaway-only variant was retired in
 // migration 041, which converted the businesses that still carried it — so this
-// list is also what stops a new one being created.
-const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables', 'retail_warranty'];
+// list is also what stops a new one being created. 'retail_warranty' was
+// retired the same way in migration 066: warranty tracking is now a toggle
+// (warranty_enabled) on a plain 'retail' business instead of a separate type.
+const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables'];
 
 // Starter catalog seeded into every new business so the item list isn't empty
 // on first login. Picked by business_type; restaurant types share one menu.
@@ -37,15 +39,6 @@ const STARTER_ITEMS = {
     { name: 'Butter Naan',          category: 'Breads',      price: 40,  unit: 'piece' },
     { name: 'Masala Papad',         category: 'Starters',    price: 30,  unit: 'piece' },
     { name: 'Cold Coffee',          category: 'Beverages',   price: 90,  unit: 'glass' },
-  ],
-  // warranty_eligible + default_warranty_months demonstrate the warranty
-  // feature in the seeded catalog — see routes/warranties.js.
-  retail_warranty: [
-    { name: 'MRF Tyre 155/65 R13', category: 'Tyres',     price: 3200, unit: 'piece', stock_quantity: 10, warranty_eligible: true, default_warranty_months: 60 },
-    { name: 'Exide Car Battery 35Ah', category: 'Batteries', price: 5500, unit: 'piece', stock_quantity: 8, warranty_eligible: true, default_warranty_months: 48 },
-    { name: 'Tyre Puncture Repair Kit', category: 'Accessories', price: 250, unit: 'piece', stock_quantity: 15 },
-    { name: 'Wheel Alignment Service', category: 'Services', price: 400, unit: 'piece' },
-    { name: 'Engine Oil 1L', category: 'Lubricants', price: 450, unit: 'piece', stock_quantity: 20 },
   ],
 };
 
@@ -90,7 +83,7 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
   if (!VALID_BUSINESS_TYPES.includes(business_type)) {
     // Shown verbatim by the app, so plain words — not the stored values.
-    return res.status(400).json({ error: 'Business type must be Retail, Restaurant or Retail & Warranty Tracking' });
+    return res.status(400).json({ error: 'Business type must be Retail or Restaurant' });
   }
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
@@ -390,7 +383,7 @@ router.post('/login', loginLimiter, async (req, res) => {
         SELECT u.id, u.business_id, u.name, u.phone, u.pin_hash, u.role,
                u.failed_attempts, u.locked_until, u.is_active,
                b.name AS business_name, b.business_type, b.is_verified,
-               b.inventory_enabled, b.has_barcode_scanner, b.address,
+               b.inventory_enabled, b.warranty_enabled, b.has_barcode_scanner, b.address,
                b.phone AS business_phone,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
                b.round_off_enabled, b.show_item_no, b.quotations_enabled, b.store_enabled, b.logo_url, b.print_logo,
@@ -522,6 +515,7 @@ router.post('/login', loginLimiter, async (req, res) => {
         // The shop's own number, printed on receipts so a customer can call.
         phone: row.business_phone ?? null,
         inventory_enabled: !!row.inventory_enabled,
+        warranty_enabled: !!row.warranty_enabled,
         has_barcode_scanner: !!row.has_barcode_scanner,
         gst_enabled: !!row.gst_enabled,
         gst_number: row.gst_number ?? null,

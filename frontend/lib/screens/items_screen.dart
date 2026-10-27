@@ -8,14 +8,16 @@ import '../utils/jpeg_compress.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
+import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/category_tree_list.dart';
 import '../widgets/bottom_nav_bar.dart';
-import '../widgets/stock_target_picker.dart' show isRetailWarrantyShop;
 import '../widgets/floating_bar_physics.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
+import '../widgets/warranty_extra_fields_editor.dart'
+    show WarrantyLabelField, allTemplateLabels;
 import '../api.dart';
 import '../services/printer_service.dart';
 import 'menu_photos_screen.dart';
@@ -434,8 +436,8 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                       itemId: item.id, itemName: item.name),
                 )
             : null,
-        isWarrantyShop: isRetailWarrantyShop(businessType),
-        onManageWarrantyFields: isRetailWarrantyShop(businessType)
+        isWarrantyShop: ref.read(warrantyEnabledProvider),
+        onManageWarrantyFields: ref.read(warrantyEnabledProvider)
             ? (category) => _showWarrantyFieldTemplateEditor(category)
             : null,
         // Only the owner may write price lists (routes/price_lists.js).
@@ -3184,6 +3186,8 @@ class _WarrantyFieldTemplateDialogState
           ],
         );
       }
+      rememberWarrantyLabels(
+          [for (final f in nonBlank) f.labelCtrl.text.trim()]);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -3200,6 +3204,11 @@ class _WarrantyFieldTemplateDialogState
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    // Other categories' already-defined field labels (e.g. another item's
+    // "Vehicle" or "IMEI"), suggested here too so a label predefined for one
+    // item is reused instead of retyped.
+    final otherLabels = allTemplateLabels(
+        ref.watch(warrantyFieldTemplatesProvider).valueOrNull);
     return AlertDialog(
       title: Text(l10n.itemsWarrantyFieldsFor(widget.category)),
       content: SizedBox(
@@ -3211,9 +3220,12 @@ class _WarrantyFieldTemplateDialogState
             for (final f in _fields)
               Padding(
                 padding: const EdgeInsets.only(bottom: AppSpacing.space8),
-                child: Row(children: [
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Expanded(
-                    child: AppTextField(label: l10n.warrantyDetailLabel, controller: f.labelCtrl),
+                    child: WarrantyLabelField(
+                        label: l10n.warrantyDetailLabel,
+                        controller: f.labelCtrl,
+                        extraSuggestions: otherLabels),
                   ),
                   const SizedBox(width: AppSpacing.space8),
                   DropdownButton<String>(

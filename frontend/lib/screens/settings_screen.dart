@@ -420,6 +420,20 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const _TogglesScreen()),
                         ),
                       ),
+                      // Warranty tracking — retail only. Also on the Toggles
+                      // screen; repeated here because it decides whether the
+                      // Warranty tab exists at all. Keyed on the session flag
+                      // so a change made on Toggles reloads this copy.
+                      if (widget.session.businessType == 'retail') ...[
+                        const SizedBox(height: AppSpacing.space8),
+                        _BusinessFlagToggle(
+                          key: ValueKey(widget.session.warrantyEnabled),
+                          field: 'warranty_enabled',
+                          icon: Icons.verified_user_outlined,
+                          title: l10n.settingsWarranty,
+                          subtitle: l10n.settingsWarrantySubtitle,
+                        ),
+                      ],
                       // What prints on a bill: header lines, cashier,
                       // customer, terms, bank details.
                       const SizedBox(height: AppSpacing.space8),
@@ -1052,6 +1066,7 @@ class _BusinessFlagToggle extends ConsumerStatefulWidget {
   final String subtitle;
 
   const _BusinessFlagToggle({
+    super.key,
     required this.field,
     required this.icon,
     required this.title,
@@ -1106,6 +1121,9 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
       // which is otherwise only refreshed at login).
       if (widget.field == 'inventory_enabled') {
         await updateInventoryEnabled(value);
+        await ref.read(sessionProvider.notifier).refresh();
+      } else if (widget.field == 'warranty_enabled') {
+        await updateWarrantyEnabled(value);
         await ref.read(sessionProvider.notifier).refresh();
       } else if (widget.field == 'has_barcode_scanner') {
         await updateHasBarcodeScanner(value);
@@ -1327,6 +1345,17 @@ class _TogglesScreen extends ConsumerWidget {
             children: [
               _sectionLabel(context, l10n.settingsGroupBilling),
               const SizedBox(height: AppSpacing.space8),
+              // Warranty tracking — retail only. Turns on the Warranty tab
+              // and each item's "Carries warranty" fields.
+              if (businessType == 'retail') ...[
+                _BusinessFlagToggle(
+                  field: 'warranty_enabled',
+                  icon: Icons.verified_user_outlined,
+                  title: l10n.settingsWarranty,
+                  subtitle: l10n.settingsWarrantySubtitle,
+                ),
+                const SizedBox(height: AppSpacing.space8),
+              ],
               // GST tax invoices — off by default. When on, items gain a
               // tax rate + HSN/SAC field and receipts show CGST/SGST.
               _BusinessFlagToggle(

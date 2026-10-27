@@ -17,6 +17,7 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { validateText, validateInteger, validateExtraData } = require('../validate');
+const { isValidDateString } = require('../dateUtils');
 
 const router = express.Router();
 
@@ -81,6 +82,28 @@ router.get('/', cashierOrOwner, async (req, res) => {
     }
     const statusClause = STATUS_FILTER[req.query.status];
     if (statusClause) where.push(statusClause);
+
+    // Purchase-date range (YYYY-MM-DD, inclusive both ends) — a plain DATE
+    // column, so a direct string comparison is sargable with no CAST needed
+    // (unlike the DATETIME2 columns dateUtils.js's day-boundary helpers are
+    // for).
+    const { from, to } = req.query;
+    if (from !== undefined || to !== undefined) {
+      if (from !== undefined && !isValidDateString(from)) {
+        return res.status(400).json({ error: 'from must be a valid date in YYYY-MM-DD format' });
+      }
+      if (to !== undefined && !isValidDateString(to)) {
+        return res.status(400).json({ error: 'to must be a valid date in YYYY-MM-DD format' });
+      }
+      if (from !== undefined) {
+        request.input('from', sql.Date, from);
+        where.push('purchase_date >= @from');
+      }
+      if (to !== undefined) {
+        request.input('to', sql.Date, to);
+        where.push('purchase_date <= @to');
+      }
+    }
 
     const limit = Math.min(intOrNull(req.query.limit) ?? 30, PAGE_MAX);
     const offset = intOrNull(req.query.offset) || 0;

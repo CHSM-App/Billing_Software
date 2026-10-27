@@ -632,11 +632,71 @@ abstract class AppLocalizations {
   /// **'Expired'**
   String get warrantyFilterExpired;
 
+  /// No description provided for @warrantyFilterDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase date'**
+  String get warrantyFilterDate;
+
+  /// No description provided for @warrantyFilterDateFrom.
+  ///
+  /// In en, this message translates to:
+  /// **'From'**
+  String get warrantyFilterDateFrom;
+
+  /// No description provided for @warrantyFilterDateTo.
+  ///
+  /// In en, this message translates to:
+  /// **'To'**
+  String get warrantyFilterDateTo;
+
+  /// No description provided for @warrantyFilterDateApply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply'**
+  String get warrantyFilterDateApply;
+
   /// No description provided for @warrantyEmptyState.
   ///
   /// In en, this message translates to:
   /// **'No warranty records yet. Tap + to add one.'**
   String get warrantyEmptyState;
+
+  /// No description provided for @warrantyEmptyActive.
+  ///
+  /// In en, this message translates to:
+  /// **'No active warranties.'**
+  String get warrantyEmptyActive;
+
+  /// No description provided for @warrantyEmptyExpiringSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing is expiring in the next 30 days.'**
+  String get warrantyEmptyExpiringSoon;
+
+  /// No description provided for @warrantyEmptyExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'No expired warranties.'**
+  String get warrantyEmptyExpired;
+
+  /// No description provided for @warrantyEmptySearch.
+  ///
+  /// In en, this message translates to:
+  /// **'No warranties match \"{query}\".'**
+  String warrantyEmptySearch(String query);
+
+  /// No description provided for @warrantyEmptyDateRange.
+  ///
+  /// In en, this message translates to:
+  /// **'No warranties purchased in that date range.'**
+  String get warrantyEmptyDateRange;
+
+  /// No description provided for @warrantyClearFilters.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear filters'**
+  String get warrantyClearFilters;
 
   /// No description provided for @warrantyExpiresOn.
   ///
@@ -731,7 +791,7 @@ abstract class AppLocalizations {
   /// No description provided for @warrantyExtraDetails.
   ///
   /// In en, this message translates to:
-  /// **'Extra details'**
+  /// **'Additional Information'**
   String get warrantyExtraDetails;
 
   /// No description provided for @warrantyDetailLabel.
@@ -1369,6 +1429,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Track stock and reduce it automatically on each sale'**
   String get settingsInventorySubtitle;
+
+  /// No description provided for @settingsWarranty.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty Tracking'**
+  String get settingsWarranty;
+
+  /// No description provided for @settingsWarrantySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark items as under warranty and track claims in the Warranty tab'**
+  String get settingsWarrantySubtitle;
 
   /// No description provided for @settingsGst.
   ///
@@ -3053,7 +3125,7 @@ abstract class AppLocalizations {
   /// No description provided for @billSetupWarrantyDetails.
   ///
   /// In en, this message translates to:
-  /// **'Warranty details'**
+  /// **'Extra details'**
   String get billSetupWarrantyDetails;
 
   /// No description provided for @billSetupNoteSubtitle.

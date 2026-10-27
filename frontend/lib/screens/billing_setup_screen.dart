@@ -3,13 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
-import '../providers.dart';
 import '../services/bill_settings.dart';
 import '../theme/app_theme.dart';
 import '../utils/text_formatters.dart' show UpperCaseTextFormatter;
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
-import '../widgets/stock_target_picker.dart' show isRetailWarrantyShop;
 
 /// Owner's "Billing Setup": what prints on a bill. Ticked parts show on every
 /// printed bill (thermal, A4/A5) and on the shared receipt link.
@@ -283,11 +281,10 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
                 ),
               ),
           ]),
-          if (isRetailWarrantyShop(ref.watch(businessTypeProvider)))
-            _card([
-              _check('show_warranty_details', s.showWarrantyDetails,
-                  Icons.verified_outlined, l10n.billSetupWarrantyDetails),
-            ]),
+          _card([
+            _check('show_warranty_details', s.showWarrantyDetails,
+                Icons.verified_outlined, l10n.billSetupWarrantyDetails),
+          ]),
           _card([
             _check('show_bank', s.showBank, Icons.account_balance_outlined,
                 l10n.billSetupBank),

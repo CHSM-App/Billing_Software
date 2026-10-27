@@ -150,9 +150,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // customer section is open; opens on tap or when a draft / picked customer
   // already has them.
   bool _showMoreCustomerFields = false;
-  // "Retail & Warranty" shops only: rows for the "Warranty Details" section,
-  // shown (already expanded, no extra tap needed) whenever the cart holds a
-  // warranty-eligible item — e.g. a tyre's vehicle KM reading.
+  // Rows for the ad-hoc "extra details" section under the customer fields —
+  // e.g. a tyre's vehicle KM reading, available on every bill. Pre-filled
+  // from the category's warranty template whenever the cart holds a
+  // warranty-eligible item.
   final List<WarrantyExtraRow> _warrantyRows = [];
   // How the bill is paid: rows of [mode][amount] at the bottom of the cart.
   // One row is an ordinary single-mode bill; "+" adds a row and splits it.
@@ -2763,6 +2764,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _customerAddressController.clear();
     _customerGstinController.clear();
     _showMoreCustomerFields = false;
+    final newLabels = adHocWarrantyLabels(_warrantyRows);
+    if (newLabels.isNotEmpty) rememberWarrantyLabels(newLabels);
     for (final r in _warrantyRows) {
       r.dispose();
     }
@@ -2838,21 +2841,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   static final _gstinRe =
       RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$');
 
-  /// "Retail & Warranty" shops only: "Warranty Details" under the phone
-  /// field, shown (already expanded) whenever [cart] holds a
-  /// warranty-eligible item — e.g. a tyre's vehicle KM reading, printed on
-  /// the receipt and copied onto the auto-created warranty record. Hidden
-  /// (and empty) otherwise. [setLocal] repaints the host (panel or sheet).
+  /// Ad-hoc "label: value" extra details under the phone field — e.g. a
+  /// tyre's vehicle KM reading, or any other free-text note a shop wants on
+  /// the bill. Available to every shop, not just ones with warranty tracking
+  /// on; printed on the receipt and, when the cart holds a warranty-eligible
+  /// item, also copied onto the auto-created warranty record. [setLocal]
+  /// repaints the host (panel or sheet).
   Widget _warrantyDetailsSection(
       List<CartEntry> cart, void Function(VoidCallback) setLocal) {
     final warrantyItem = cart.where((e) => e.item.warrantyEligible).firstOrNull;
-    if (warrantyItem == null) return const SizedBox.shrink();
-    // Fills in this category's template fields the first time they're needed
-    // (or when switching to a different category) — mutating _warrantyRows
-    // here, before building the editor below, so this same build already
-    // shows them; no separate setState round-trip required.
     final templates = ref.watch(warrantyFieldTemplatesProvider).valueOrNull;
-    applyWarrantyFieldTemplate(_warrantyRows, warrantyItem.item.category, templates);
+    // Template auto-fill is category-specific, so it only applies when the
+    // cart actually has a warranty-eligible item; otherwise rows just start
+    // empty with the generic "+ Add detail" affordance.
+    if (warrantyItem != null) {
+      // Fills in this category's template fields the first time they're
+      // needed (or when switching to a different category) — mutating
+      // _warrantyRows here, before building the editor below, so this same
+      // build already shows them; no separate setState round-trip required.
+      applyWarrantyFieldTemplate(_warrantyRows, warrantyItem.item.category, templates);
+    }
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.space8),
       child: WarrantyExtraFieldsEditor(
@@ -2861,6 +2869,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         // the same thing twice. The "+ Add detail" action alone is enough;
         // the Warranty tab's own form (no such neighbour) still shows one.
         rows: _warrantyRows,
+        extraSuggestions: allTemplateLabels(templates),
         onAddRow: () => setLocal(() => _warrantyRows.add(WarrantyExtraRow(
               labelCtrl: TextEditingController(),
               valueCtrl: TextEditingController(),
@@ -2873,10 +2882,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
-  /// "More details" under the phone field: the customer's address and GSTIN,
-  /// folded until tapped. [setLocal] repaints the host (panel or sheet).
-  Widget _moreCustomerFields(
-      AppLocalizations l10n, void Function(VoidCallback) setLocal) {
+  /// "More details" under the phone field: the customer's address, GSTIN and
+  /// ad-hoc extra-detail rows, folded until tapped. [setLocal] repaints the
+  /// host (panel or sheet).
+  Widget _moreCustomerFields(AppLocalizations l10n, List<CartEntry> cart,
+      void Function(VoidCallback) setLocal) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -2936,6 +2946,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             size: 16, color: AppColors.textSecondary),
                       ),
                     ),
+                    _warrantyDetailsSection(cart, setLocal),
                   ],
                 ),
         ),
@@ -3324,6 +3335,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               widget.tableId!,
               billId: widget.activeBillId ?? bill.id,
             );
+      }
+      // Lets the Warranty tab (alive but off-screen in the shell's
+      // IndexedStack) refresh itself immediately instead of waiting for a
+      // manual pull-to-refresh — only when this bill could actually have
+      // produced a new record, so an ordinary sale doesn't trigger a
+      // pointless re-fetch over there.
+      if (cart.any((e) => e.item.warrantyEligible)) {
+        ref.read(warrantyRefreshSignalProvider.notifier).state++;
       }
       ref.read(cartProvider.notifier).clear();
       _customerNameController.clear();
@@ -5009,8 +5028,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       color: AppColors.textSecondary),
                                 ),
                                 _customerSuggestionList('phone'),
-                                _moreCustomerFields(l10n, setLocal),
-                                _warrantyDetailsSection(cart, setLocal),
+                                _moreCustomerFields(l10n, cart, setLocal),
                               ],
                             ),
                           )

@@ -16,7 +16,7 @@ const router = express.Router();
  *  profile row back after a write, so they can never drift apart. */
 const PROFILE_COLUMNS = `
   id, name, business_type, address, phone,
-  inventory_enabled, has_barcode_scanner,
+  inventory_enabled, warranty_enabled, has_barcode_scanner,
   self_order_enabled,
   gst_number, pan_number, fssai_number, email, website,
   city, state, pincode, logo_url, print_logo,
@@ -63,7 +63,7 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
       .query(`
         SELECT
           b.id, b.name, b.business_type, b.address, b.phone,
-          b.inventory_enabled, b.has_barcode_scanner,
+          b.inventory_enabled, b.warranty_enabled, b.has_barcode_scanner,
           b.self_order_enabled,
           b.gst_number, b.pan_number, b.fssai_number, b.email, b.website,
           b.city, b.state, b.pincode, b.logo_url, b.print_logo,
@@ -150,6 +150,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     bill_settings,
     self_order_enabled,
     inventory_enabled,
+    warranty_enabled,
     has_barcode_scanner,
     gst_enabled,
     default_sac_code,
@@ -266,6 +267,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     bill_settings: billSettingsText,
     self_order_enabled,
     inventory_enabled,
+    warranty_enabled,
     has_barcode_scanner,
     gst_enabled,
     default_sac_code,
@@ -407,7 +409,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       const sqlType = _sqlTypeFor(key);
       // BIT columns take a normalised 0/1; text columns treat '' as NULL.
       const isBit = key === 'self_order_enabled' ||
-          key === 'inventory_enabled' || key === 'has_barcode_scanner' ||
+          key === 'inventory_enabled' || key === 'warranty_enabled' || key === 'has_barcode_scanner' ||
           key === 'gst_enabled' || key === 'round_off_enabled' ||
           key === 'show_item_no' || key === 'quotations_enabled' ||
           key === 'store_enabled' || key === 'store_delivery_enabled' ||
@@ -571,6 +573,7 @@ function _formatBusiness(row) {
     address:             row.address ?? null,
     phone:               row.phone,
     inventory_enabled:   !!row.inventory_enabled,
+    warranty_enabled:    !!row.warranty_enabled,
     has_barcode_scanner: !!row.has_barcode_scanner,
     self_order_enabled:  !!row.self_order_enabled,
     gst_number:          row.gst_number ?? null,
@@ -627,6 +630,7 @@ function _sqlTypeFor(key) {
     bill_settings:    sql.NVarChar(2000),
     self_order_enabled: sql.Bit,
     inventory_enabled: sql.Bit,
+    warranty_enabled: sql.Bit,
     has_barcode_scanner: sql.Bit,
     gst_enabled:       sql.Bit,
     default_sac_code:  sql.NVarChar(10),

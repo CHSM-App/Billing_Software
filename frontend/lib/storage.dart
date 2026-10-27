@@ -135,6 +135,7 @@ class AuthStorage {
   static const _keyBusinessName     = 'business_name';
   static const _keyBusinessType     = 'business_type';
   static const _keyInventoryEnabled = 'inventory_enabled';
+  static const _keyWarrantyEnabled  = 'warranty_enabled';
   static const _keyHasBarcodeScanner = 'has_barcode_scanner';
   static const _keyGstEnabled       = 'gst_enabled';
   static const _keyRoundOffEnabled  = 'round_off_enabled';
@@ -180,6 +181,12 @@ class AuthStorage {
   static const _keyKitchenAutoPrint = 'kitchen_auto_print';
   static const _keyKitchenPaperSize = 'kitchen_paper_size';
   static const _keyRecentNetworkPrinters = 'recent_network_printers';
+  // Ad-hoc warranty/extra-detail labels typed on the spot (e.g. "Vehicle",
+  // "IMEI"), newest first — offered as suggestions so a label typed once
+  // doesn't need retyping on the next bill. Business-specific vocabulary, so
+  // it's cleared on logout like the rest of the session (unlike the printer
+  // list above, which is per-device).
+  static const _keyWarrantyLabelSuggestions = 'warranty_label_suggestions';
 
   // -------------------------------------------------------------------------
   // Write
@@ -196,6 +203,7 @@ class AuthStorage {
     required String businessName,
     required String businessType,
     bool inventoryEnabled = false,
+    bool warrantyEnabled = false,
     bool hasBarcodeScanner = false,
     bool gstEnabled = false,
     bool roundOffEnabled = false,
@@ -221,6 +229,7 @@ class AuthStorage {
       prefs.setString(_keyBusinessName, businessName),
       prefs.setString(_keyBusinessType, businessType),
       prefs.setBool(_keyInventoryEnabled, inventoryEnabled),
+      prefs.setBool(_keyWarrantyEnabled, warrantyEnabled),
       prefs.setBool(_keyHasBarcodeScanner, hasBarcodeScanner),
       prefs.setBool(_keyGstEnabled, gstEnabled),
       prefs.setBool(_keyRoundOffEnabled, roundOffEnabled),
@@ -241,6 +250,11 @@ class AuthStorage {
   Future<void> updateInventoryEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyInventoryEnabled, enabled);
+  }
+
+  Future<void> updateWarrantyEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyWarrantyEnabled, enabled);
   }
 
   Future<void> updateHasBarcodeScanner(bool enabled) async {
@@ -506,6 +520,32 @@ class AuthStorage {
         [address, ...previous.where((a) => a != address)].take(5).toList());
   }
 
+  /// Ad-hoc extra-detail labels typed before, newest first.
+  Future<List<String>> getWarrantyLabelSuggestions() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_keyWarrantyLabelSuggestions) ?? const [];
+  }
+
+  /// Remembers [labels] (ad-hoc labels just used on a saved bill/warranty
+  /// record) so they're offered as suggestions next time — same
+  /// newest-first, deduped, capped pattern as [rememberNetworkPrinter].
+  /// Dedup is case-insensitive so "Vehicle" and "vehicle" collapse to one
+  /// suggestion (keeping whichever casing was typed most recently).
+  Future<void> rememberWarrantyLabels(Iterable<String> labels) async {
+    final toAdd = labels.map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+    if (toAdd.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final previous = prefs.getStringList(_keyWarrantyLabelSuggestions) ?? const [];
+    final merged = [...toAdd.reversed, ...previous];
+    final seen = <String>{};
+    final deduped = <String>[];
+    for (final label in merged) {
+      if (seen.add(label.toLowerCase())) deduped.add(label);
+    }
+    await prefs.setStringList(
+        _keyWarrantyLabelSuggestions, deduped.take(20).toList());
+  }
+
   Future<void> saveAccessToken(String accessToken) =>
       _secure.write(key: _keyAccessToken, value: accessToken);
 
@@ -544,6 +584,7 @@ class AuthStorage {
       'business_name'    : prefs.getString(_keyBusinessName),
       'business_type'    : prefs.getString(_keyBusinessType),
       'inventory_enabled': prefs.getBool(_keyInventoryEnabled) ?? false,
+      'warranty_enabled' : prefs.getBool(_keyWarrantyEnabled) ?? false,
       'has_barcode_scanner': prefs.getBool(_keyHasBarcodeScanner) ?? false,
       'gst_enabled'      : prefs.getBool(_keyGstEnabled) ?? false,
       'round_off_enabled': prefs.getBool(_keyRoundOffEnabled) ?? false,
@@ -601,6 +642,7 @@ Future<void> saveSession({
   required String businessName,
   required String businessType,
   bool inventoryEnabled = false,
+  bool warrantyEnabled = false,
   bool hasBarcodeScanner = false,
   bool gstEnabled = false,
   bool roundOffEnabled = false,
@@ -619,6 +661,7 @@ Future<void> saveSession({
       businessName: businessName,
       businessType: businessType,
       inventoryEnabled: inventoryEnabled,
+      warrantyEnabled: warrantyEnabled,
       hasBarcodeScanner: hasBarcodeScanner,
       gstEnabled: gstEnabled,
       roundOffEnabled: roundOffEnabled,
@@ -670,7 +713,12 @@ Future<String>  getKitchenPaperSize()          => AuthStorage.instance.getKitche
 Future<List<String>> getRecentNetworkPrinters() => AuthStorage.instance.getRecentNetworkPrinters();
 Future<void>    rememberNetworkPrinter(String address) =>
     AuthStorage.instance.rememberNetworkPrinter(address);
+Future<List<String>> getWarrantyLabelSuggestions() =>
+    AuthStorage.instance.getWarrantyLabelSuggestions();
+Future<void>    rememberWarrantyLabels(Iterable<String> labels) =>
+    AuthStorage.instance.rememberWarrantyLabels(labels);
 Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInventoryEnabled(e);
+Future<void>    updateWarrantyEnabled(bool e)  => AuthStorage.instance.updateWarrantyEnabled(e);
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);
 Future<void>    updateRoundOffEnabled(bool e)  => AuthStorage.instance.updateRoundOffEnabled(e);

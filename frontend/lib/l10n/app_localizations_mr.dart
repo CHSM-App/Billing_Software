@@ -306,8 +306,42 @@ class AppLocalizationsMr extends AppLocalizations {
   String get warrantyFilterExpired => 'कालबाह्य';
 
   @override
+  String get warrantyFilterDate => 'खरेदी तारीख';
+
+  @override
+  String get warrantyFilterDateFrom => 'पासून';
+
+  @override
+  String get warrantyFilterDateTo => 'पर्यंत';
+
+  @override
+  String get warrantyFilterDateApply => 'लागू करा';
+
+  @override
   String get warrantyEmptyState =>
       'अद्याप कोणतीही वॉरंटी नोंद नाही. जोडण्यासाठी + दाबा.';
+
+  @override
+  String get warrantyEmptyActive => 'कोणतीही सक्रिय वॉरंटी नाही.';
+
+  @override
+  String get warrantyEmptyExpiringSoon =>
+      'पुढील 30 दिवसांत काहीही कालबाह्य होत नाही.';
+
+  @override
+  String get warrantyEmptyExpired => 'कोणतीही कालबाह्य वॉरंटी नाही.';
+
+  @override
+  String warrantyEmptySearch(String query) {
+    return '\"$query\" शी जुळणारी कोणतीही वॉरंटी नाही.';
+  }
+
+  @override
+  String get warrantyEmptyDateRange =>
+      'त्या तारीख श्रेणीत कोणतीही वॉरंटी खरेदी केलेली नाही.';
+
+  @override
+  String get warrantyClearFilters => 'फिल्टर साफ करा';
 
   @override
   String warrantyExpiresOn(String date) {
@@ -357,7 +391,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get warrantyExpiryDateLabel => 'कालबाह्यतेची तारीख';
 
   @override
-  String get warrantyExtraDetails => 'अतिरिक्त तपशील';
+  String get warrantyExtraDetails => 'अतिरिक्त माहिती';
 
   @override
   String get warrantyDetailLabel => 'लेबल';
@@ -738,6 +772,13 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get settingsInventorySubtitle =>
       'स्टॉक ट्रॅक करा आणि प्रत्येक विक्रीवर तो आपोआप कमी करा';
+
+  @override
+  String get settingsWarranty => 'वॉरंटी ट्रॅकिंग';
+
+  @override
+  String get settingsWarrantySubtitle =>
+      'वस्तू वॉरंटी अंतर्गत आहेत असे चिन्हांकित करा आणि वॉरंटी टॅबमध्ये क्लेम ट्रॅक करा';
 
   @override
   String get settingsGst => 'GST बिल';
@@ -1666,7 +1707,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billSetupNote => 'बिलावरील टीप';
 
   @override
-  String get billSetupWarrantyDetails => 'वॉरंटी तपशील';
+  String get billSetupWarrantyDetails => 'अतिरिक्त तपशील';
 
   @override
   String get billSetupNoteSubtitle => 'प्रत्येक बिलावर छापला जाणारा संदेश';
