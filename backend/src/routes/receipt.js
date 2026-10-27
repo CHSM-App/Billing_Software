@@ -530,7 +530,7 @@ router.get('/:token', async (req, res) => {
     <div class="shop-name">${esc(bill.shop_name)}</div>
     <div class="shop-sub">
       ${addressLine ? addressLine + '<br/>' : ''}
-      ${shopPhone ? 'Tel: ' + esc(shopPhone) : ''}
+      ${shopPhone ? 'Tel: ' + esc(shopPhone).replace(/\n/g, '<br/>') : ''}
       ${shopPhone && bill.shop_email ? '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}
       ${bill.shop_email ? '<a href="mailto:' + esc(bill.shop_email) + '">' + esc(bill.shop_email) + '</a>' : ''}
       ${cfg.show_gstin && bill.gst_number ? '<br/>GSTIN: ' + esc(bill.gst_number) : ''}

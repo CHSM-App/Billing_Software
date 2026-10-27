@@ -98,8 +98,16 @@ function validateExtraData(extraData) {
 /// Mirrors isIndianMobile() in frontend/lib/utils/text_formatters.dart.
 const isIndianMobile = (v) => /^[6-9]\d{9}$/.test(String(v ?? ''));
 
+/// The shop's own phone: a mobile, or a landline with its STD code (0 + 10
+/// digits, spaces/hyphens allowed: 02366-262626). Only the business phone
+/// takes landlines — logins, staff and customers get OTPs/WhatsApp, so they
+/// stay isIndianMobile. Mirrors isBusinessPhone() in text_formatters.dart.
+const isBusinessPhone = (v) =>
+  isIndianMobile(v) || /^0[1-9]\d{9}$/.test(String(v ?? '').trim().replace(/[\s-]/g, ''));
+
 module.exports = {
   isIndianMobile,
+  isBusinessPhone,
   MAX_DECIMAL_10_2,
   MAX_DECIMAL_12_4,
   validateNumber,

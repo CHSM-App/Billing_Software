@@ -215,7 +215,7 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
       <div>
       <div class="name">${esc(bill.shop_name)}</div>
       ${cfg.show_address && bill.address ? `<div>${esc(bill.address).replace(/\r?\n/g, '<br/>')}</div>` : ''}
-      ${cfg.show_phone && phones ? `<div>Ph: ${esc(phones)}</div>` : ''}
+      ${cfg.show_phone && phones ? `<div>Ph: ${esc(phones).replace(/\n/g, '<br/>')}</div>` : ''}
       ${cfg.show_gstin && bill.gst_enabled && bill.gst_number ? `<div>GSTIN: ${esc(bill.gst_number)}</div>` : ''}
       ${cfg.show_fssai && bill.fssai_number ? `<div>FSSAI: ${esc(bill.fssai_number)}</div>` : ''}
       </div>

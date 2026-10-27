@@ -611,8 +611,13 @@ class PrinterService {
       lines.addAll(_centreMultiline(businessAddress, p.cols));
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
-      lines.add(
-          _centre('${labels?.phonePrefix ?? 'Ph:'} $businessPhone', p.cols));
+      // One number per line (BillSettings.shopPhones); "Ph:" on the first.
+      final nums = businessPhone.split('\n');
+      for (var i = 0; i < nums.length; i++) {
+        lines.add(_centre(
+            i == 0 ? '${labels?.phonePrefix ?? 'Ph:'} ${nums[i]}' : nums[i],
+            p.cols));
+      }
     }
     if (gst) {
       lines.add(_centre('${labels?.gstin ?? 'GSTIN:'} $businessGstin', p.cols));
@@ -1046,8 +1051,13 @@ class PrinterService {
       }
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
-      rows.add(ReceiptRow.center(
-          '${labels?.phonePrefix ?? 'Ph:'} $businessPhone', size: sizeBody));
+      // One number per line (BillSettings.shopPhones); "Ph:" on the first.
+      final nums = businessPhone.split('\n');
+      for (var i = 0; i < nums.length; i++) {
+        rows.add(ReceiptRow.center(
+            i == 0 ? '${labels?.phonePrefix ?? 'Ph:'} ${nums[i]}' : nums[i],
+            size: sizeBody));
+      }
     }
     if (businessGstin != null && businessGstin.isNotEmpty) {
       rows.add(ReceiptRow.center(

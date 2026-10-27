@@ -2189,7 +2189,7 @@ abstract class AppLocalizations {
   /// No description provided for @registerBusinessPhoneHint.
   ///
   /// In en, this message translates to:
-  /// **'10-digit number'**
+  /// **'Mobile, or landline with STD code'**
   String get registerBusinessPhoneHint;
 
   /// No description provided for @registerAddress.
@@ -5455,13 +5455,13 @@ abstract class AppLocalizations {
   /// No description provided for @businessProfilePhoneHint.
   ///
   /// In en, this message translates to:
-  /// **'10-digit mobile number'**
+  /// **'Mobile, or landline with STD code'**
   String get businessProfilePhoneHint;
 
   /// No description provided for @businessProfilePhoneInvalid.
   ///
   /// In en, this message translates to:
-  /// **'Must be 10 digits'**
+  /// **'Enter a 10-digit mobile, or a landline with STD code'**
   String get businessProfilePhoneInvalid;
 
   /// No description provided for @businessProfileEmail.

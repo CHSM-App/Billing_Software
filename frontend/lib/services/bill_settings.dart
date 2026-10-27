@@ -114,7 +114,8 @@ class BillSettings {
     ];
   }
 
-  /// The shop's number(s) as printed. Same as shopPhones() in billSettings.js.
+  /// The shop's number(s) as printed, one per line ('\n'): the alternate
+  /// number prints under the main one. Same as shopPhones() in billSettings.js.
   String? shopPhones(String? phone) {
     final alt = altPhone.trim();
     final label = altPhoneLabel.trim();
@@ -122,7 +123,7 @@ class BillSettings {
       phone?.trim() ?? '',
       alt.isNotEmpty && label.isNotEmpty ? '$label: $alt' : alt,
     ].where((p) => p.isNotEmpty);
-    return all.isEmpty ? null : all.join(', ');
+    return all.isEmpty ? null : all.join('\n');
   }
 
   /// The note to print, or '' when off or empty. Same as noteText() in billSettings.js.

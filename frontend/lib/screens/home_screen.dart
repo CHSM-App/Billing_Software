@@ -164,6 +164,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // Pins the settle confirm box to the action row, so it stays right above
   // the buttons even while the closing keyboard moves the row.
   final _settleRowLink = LayerLink();
+  // The action row while its confirm box is open. Content that lands late
+  // (the previous-credit banner) would push the row — and the box hanging off
+  // it — out of view, so _trackCartScroll keeps scrolling it back.
+  BuildContext? _confirmRow;
   // The payable the rows were last filled against. When the cart, discount,
   // charges or round-off move it, the last row is refilled.
   double? _payRowsBase;
@@ -2461,6 +2465,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _clearCharges();
       setState(() => _resetPayRows());
       _navigateAfterBill();
+      // Prints like a settle does — same printer gate, same receipt path.
+      if (ref.read(printReadyProvider)) _autoPrint(saved.bill);
     } on NetworkException {
       _showSnack(l10n.quotationNeedsInternet, isError: true);
     } on ApiException catch (e) {
@@ -2548,6 +2554,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         };
     const figures = [FontFeature.tabularFigures()];
 
+    _confirmRow = actionRow;
+    Scrollable.ensureVisible(actionRow,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
     final ok = await showGeneralDialog<bool>(
       context: context,
       barrierDismissible: true,
@@ -2663,7 +2672,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
         ),
       ),
-    );
+    ).whenComplete(() => _confirmRow = null);
     return ok == true;
   }
 
@@ -5892,6 +5901,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         m.axis == Axis.vertical &&
         (n as ViewportNotificationMixin).depth == 0) {
       (into ?? _cartAtBottom).value = m.extentAfter < 120;
+      final row = _confirmRow;
+      if (n is ScrollMetricsNotification && row != null && row.mounted) {
+        Scrollable.ensureVisible(row,
+            alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+      }
     }
     return false;
   }

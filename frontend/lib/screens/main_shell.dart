@@ -484,8 +484,8 @@ class _MainShellState extends ConsumerState<MainShell>
         NavItem(Icons.restaurant_menu_outlined, Icons.restaurant_menu,
             l10n.navKitchen, const KitchenScreen(),
             badge: ref.watch(kitchenReadyCountProvider)),
-      // Retail shops with warranty tracking turned on track warranty records
-      // per customer.
+      // Shops with warranty tracking turned on (Settings) track warranty
+      // records per customer.
       if (ref.watch(warrantyEnabledProvider))
         NavItem(Icons.verified_user_outlined, Icons.verified_user,
             l10n.navWarranty, const WarrantyScreen()),

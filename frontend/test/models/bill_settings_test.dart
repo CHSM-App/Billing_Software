@@ -31,7 +31,7 @@ void main() {
 
   test('alternate number prints after the main one', () {
     final s = BillSettings.fromJson({'alt_phone': '02366-262626'});
-    expect(s.shopPhones('9876500000'), '9876500000, 02366-262626');
+    expect(s.shopPhones('9876500000'), '9876500000\n02366-262626');
     expect(s.shopPhones(null), '02366-262626');
     expect(const BillSettings().shopPhones('9876500000'), '9876500000');
     expect(const BillSettings().shopPhones(''), isNull);

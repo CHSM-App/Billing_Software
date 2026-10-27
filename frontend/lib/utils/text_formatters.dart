@@ -5,6 +5,14 @@ import 'package:flutter/services.dart';
 /// account made before this rule can still sign in.
 bool isIndianMobile(String v) => RegExp(r'^[6-9]\d{9}$').hasMatch(v.trim());
 
+/// The shop's own phone: a mobile, or a landline with its STD code (0 + 10
+/// digits, spaces/hyphens allowed: 02366-262626). Only the business phone
+/// takes landlines — logins, staff and customers get OTPs/WhatsApp, so they
+/// stay [isIndianMobile]. Same rule as isBusinessPhone() in validate.js.
+bool isBusinessPhone(String v) =>
+    isIndianMobile(v) ||
+    RegExp(r'^0[1-9]\d{9}$').hasMatch(v.trim().replaceAll(RegExp(r'[\s-]'), ''));
+
 /// Capitalizes the first letter of each word as the user types.
 /// Works on any input method (including physical keyboards on desktop),
 /// unlike [TextCapitalization] which only hints virtual keyboards.

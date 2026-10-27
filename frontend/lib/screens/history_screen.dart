@@ -292,11 +292,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         );
       },
     );
-    if (!billsAsync.isLoading || !billsAsync.hasValue) return body;
+    // Always the Stack: wrapping [body] only while refetching changed its
+    // parent, which rebuilt the search field and closed the keyboard.
     return Stack(children: [
       body,
-      const Positioned(
-          top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
+      if (billsAsync.isLoading && billsAsync.hasValue)
+        const Positioned(
+            top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
     ]);
   }
 

@@ -1184,10 +1184,10 @@ class AppLocalizationsMr extends AppLocalizations {
   String get registerBusinessNameHint => 'उदा. शर्मा जनरल स्टोअर';
 
   @override
-  String get registerBusinessPhone => 'व्यवसायाचा मोबाइल नंबर';
+  String get registerBusinessPhone => 'व्यवसायाचा फोन नंबर';
 
   @override
-  String get registerBusinessPhoneHint => '१० अंकी नंबर';
+  String get registerBusinessPhoneHint => 'मोबाइल, किंवा STD कोडसह लँडलाइन';
 
   @override
   String get registerAddress => 'पत्ता (ऐच्छिक)';
@@ -3006,7 +3006,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get businessProfileAddress => 'पत्ता';
 
   @override
-  String get businessProfilePhone => 'मोबाइल';
+  String get businessProfilePhone => 'फोन';
 
   @override
   String get businessProfileGst => 'जीएसटीआयएन (ऐच्छिक)';
@@ -3058,10 +3058,11 @@ class AppLocalizationsMr extends AppLocalizations {
   String get businessProfileNameHint => 'उदा. कांबळे प्रोव्हिजन्स';
 
   @override
-  String get businessProfilePhoneHint => '१० अंकी मोबाइल नंबर';
+  String get businessProfilePhoneHint => 'मोबाइल, किंवा STD कोडसह लँडलाइन';
 
   @override
-  String get businessProfilePhoneInvalid => '१० अंकी असणे आवश्यक';
+  String get businessProfilePhoneInvalid =>
+      '१० अंकी मोबाइल, किंवा STD कोडसह लँडलाइन टाका';
 
   @override
   String get businessProfileEmail => 'ईमेल (ऐच्छिक)';

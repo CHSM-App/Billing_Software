@@ -150,14 +150,14 @@ function bankLines(s) {
 }
 
 /**
- * The shop's number(s) as printed: "9876500000, 9822012345", or with a label
- * on the alternate one: "9876500000, GPay: 9822012345".
+ * The shop's number(s) as printed, one per line: "9876500000\n9822012345", or
+ * with a label on the alternate one: "9876500000\nGPay: 9822012345".
  */
 function shopPhones(phone, s) {
   const alt = String(s.alt_phone || '').trim();
   const label = String(s.alt_phone_label || '').trim();
   return [String(phone || '').trim(), alt && label ? `${label}: ${alt}` : alt]
-    .filter(Boolean).join(', ');
+    .filter(Boolean).join('\n');
 }
 
 /** The shop-wide note to print, or '' when off or empty. */

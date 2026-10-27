@@ -13,7 +13,7 @@ const whatsapp = require('../whatsapp');
 const { uniqueStoreToken } = require('../storeToken');
 const authState = require('../authState');
 const { TERMS_VERSION } = require('../legal');
-const { isIndianMobile } = require('../validate');
+const { isIndianMobile, isBusinessPhone } = require('../validate');
 
 const router = express.Router();
 
@@ -29,23 +29,34 @@ const OTP_SECRET = publicTokenSecret('otp');
 const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables'];
 
 // Starter catalog seeded into every new business so the item list isn't empty
-// on first login. Picked by business_type; restaurant types share one menu.
-// stock_quantity is only meaningful for retail (restaurants don't track stock
-// per dish here), so it's omitted for restaurant items.
+// on first login. Picked by business_type. major = the group, category = the
+// subcategory under it (migration 036). stock_quantity is only meaningful for
+// retail (restaurants don't track stock per dish here), so it's omitted for
+// restaurant items.
 const STARTER_ITEMS = {
   retail: [
-    { name: 'Parle-G Biscuit',     category: 'Snacks',    price: 10,  unit: 'piece', stock_quantity: 50 },
-    { name: 'Amul Milk 500ml',     category: 'Dairy',      price: 30,  unit: 'piece', stock_quantity: 30 },
-    { name: 'Tata Salt 1kg',       category: 'Grocery',    price: 25,  unit: 'piece', stock_quantity: 40 },
-    { name: 'Colgate Toothpaste',  category: 'Personal Care', price: 55, unit: 'piece', stock_quantity: 20 },
-    { name: 'Basmati Rice',        category: 'Grocery',    price: 120, unit: 'kg',    stock_quantity: 25 },
+    { name: 'Basmati Rice',          major: 'Grocery',       category: 'Rice & Grains', price: 120, unit: 'kg',    stock_quantity: 25 },
+    { name: 'Toor Dal',              major: 'Grocery',       category: 'Pulses',        price: 160, unit: 'kg',    stock_quantity: 20 },
+    { name: 'Tata Salt 1kg',         major: 'Grocery',       category: 'Essentials',    price: 28,  unit: 'piece', stock_quantity: 40 },
+    { name: 'Fortune Sunflower Oil 1L', major: 'Grocery',    category: 'Oil & Ghee',    price: 150, unit: 'piece', stock_quantity: 20 },
+    { name: 'Amul Milk 500ml',       major: 'Dairy',         category: 'Milk',          price: 30,  unit: 'piece', stock_quantity: 30 },
+    { name: 'Amul Butter 100g',      major: 'Dairy',         category: 'Butter & Cheese', price: 58, unit: 'piece', stock_quantity: 15 },
+    { name: 'Parle-G Biscuit',       major: 'Snacks',        category: 'Biscuits',      price: 10,  unit: 'piece', stock_quantity: 50 },
+    { name: 'Lays Classic Salted',   major: 'Snacks',        category: 'Chips',         price: 20,  unit: 'piece', stock_quantity: 40 },
+    { name: 'Colgate Toothpaste',    major: 'Personal Care', category: 'Oral Care',     price: 55,  unit: 'piece', stock_quantity: 20 },
+    { name: 'Lifebuoy Soap',         major: 'Personal Care', category: 'Bath & Body',   price: 35,  unit: 'piece', stock_quantity: 30 },
   ],
   restaurant_with_tables: [
-    { name: 'Paneer Butter Masala', category: 'Main Course', price: 220, unit: 'plate' },
-    { name: 'Veg Biryani',          category: 'Rice',        price: 180, unit: 'plate' },
-    { name: 'Butter Naan',          category: 'Breads',      price: 40,  unit: 'piece' },
-    { name: 'Masala Papad',         category: 'Starters',    price: 30,  unit: 'piece' },
-    { name: 'Cold Coffee',          category: 'Beverages',   price: 90,  unit: 'glass' },
+    { name: 'Paneer Tikka',          major: 'Indian',    category: 'Starters',     price: 220, unit: 'plate' },
+    { name: 'Paneer Butter Masala',  major: 'Indian',    category: 'Main Course',  price: 240, unit: 'plate' },
+    { name: 'Dal Tadka',             major: 'Indian',    category: 'Main Course',  price: 160, unit: 'plate' },
+    { name: 'Butter Naan',           major: 'Indian',    category: 'Breads',       price: 45,  unit: 'piece' },
+    { name: 'Veg Biryani',           major: 'Indian',    category: 'Rice',         price: 190, unit: 'plate' },
+    { name: 'Veg Manchurian',        major: 'Chinese',   category: 'Chinese Starters',    price: 180, unit: 'plate' },
+    { name: 'Veg Hakka Noodles',     major: 'Chinese',   category: 'Noodles & Rice',      price: 170, unit: 'plate' },
+    { name: 'Veg Fried Rice',        major: 'Chinese',   category: 'Noodles & Rice',      price: 170, unit: 'plate' },
+    { name: 'Cold Coffee',           major: 'Beverages', category: 'Cold Drinks',  price: 110, unit: 'glass' },
+    { name: 'Masala Chai',           major: 'Beverages', category: 'Hot Drinks',   price: 30,  unit: 'cup' },
   ],
 };
 
@@ -110,8 +121,11 @@ router.post('/register', registerLimiter, registerAccountLimiter, async (req, re
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
   }
-  if (!isIndianMobile(phone) || !isIndianMobile(owner_phone)) {
+  if (!isIndianMobile(owner_phone)) {
     return res.status(400).json({ error: 'Phone must be a valid 10-digit mobile number' });
+  }
+  if (!isBusinessPhone(phone)) {
+    return res.status(400).json({ error: 'Business phone must be a 10-digit mobile number, or a landline with its STD code' });
   }
   // Optional tax identifiers — same formats the Business Profile screen enforces.
   if (gst_number) {
@@ -261,6 +275,7 @@ router.post('/register', registerLimiter, registerAccountLimiter, async (req, re
         await transaction.request()
           .input('business_id', sql.UniqueIdentifier, businessId)
           .input('name', sql.NVarChar(200), item.name)
+          .input('major_category', sql.NVarChar(100), item.major)
           .input('category', sql.NVarChar(100), item.category)
           .input('price', sql.Decimal(10, 2), item.price)
           .input('unit', sql.NVarChar(20), item.unit)
@@ -268,8 +283,8 @@ router.post('/register', registerLimiter, registerAccountLimiter, async (req, re
           .input('warranty_eligible', sql.Bit, item.warranty_eligible ? 1 : 0)
           .input('default_warranty_months', sql.Int, item.default_warranty_months ?? null)
           .query(`
-            INSERT INTO items (business_id, name, category, price, unit, stock_quantity, warranty_eligible, default_warranty_months)
-            VALUES (@business_id, @name, @category, @price, @unit, @stock_quantity, @warranty_eligible, @default_warranty_months)
+            INSERT INTO items (business_id, name, major_category, category, price, unit, stock_quantity, warranty_eligible, default_warranty_months)
+            VALUES (@business_id, @name, @major_category, @category, @price, @unit, @stock_quantity, @warranty_eligible, @default_warranty_months)
           `);
       }
 

@@ -247,15 +247,16 @@ class _RegisterScreenState extends State<RegisterScreen>
                           controller: _businessPhoneController,
                           hint: l10n.registerBusinessPhoneHint,
                           keyboardType: TextInputType.phone,
-                          maxLength: 10,
+                          // 13 fits a spaced landline: 022 2345 6789.
+                          maxLength: 13,
                           prefixIcon: const Icon(Icons.phone_outlined,
                               size: 18, color: AppColors.textSecondary),
                           validator: (v) {
                             if (v == null || v.isEmpty) {
                               return l10n.commonRequired;
                             }
-                            if (!isIndianMobile(v)) {
-                              return l10n.loginPhoneInvalid;
+                            if (!isBusinessPhone(v)) {
+                              return l10n.businessProfilePhoneInvalid;
                             }
                             return null;
                           },

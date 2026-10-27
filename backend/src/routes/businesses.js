@@ -6,7 +6,7 @@ const { requireAuth } = require('../auth');
 const audit = require('../audit');
 const logger = require('../logger');
 const billSettings = require('../billSettings');
-const { isIndianMobile } = require('../validate');
+const { isBusinessPhone } = require('../validate');
 const {
   uniqueStoreToken, validateSlug, isSlugAvailable, looksAutoDerived,
 } = require('../storeToken');
@@ -172,8 +172,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
   if (name !== undefined && (!name || name.trim().length === 0)) {
     return res.status(400).json({ error: 'Business name cannot be empty' });
   }
-  if (phone !== undefined && !isIndianMobile(phone)) {
-    return res.status(400).json({ error: 'Phone must be a 10-digit number' });
+  if (phone !== undefined && !isBusinessPhone(phone)) {
+    return res.status(400).json({ error: 'Enter a 10-digit mobile number, or a landline with its STD code' });
   }
   if (email !== undefined && email !== null && email !== '') {
     // Simple RFC-ish check: local@domain.tld

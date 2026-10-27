@@ -1191,7 +1191,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get registerBusinessPhone => 'Business phone';
 
   @override
-  String get registerBusinessPhoneHint => '10-digit number';
+  String get registerBusinessPhoneHint => 'Mobile, or landline with STD code';
 
   @override
   String get registerAddress => 'Address (optional)';
@@ -3058,10 +3058,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get businessProfileNameHint => 'e.g. Kamble Provisions';
 
   @override
-  String get businessProfilePhoneHint => '10-digit mobile number';
+  String get businessProfilePhoneHint => 'Mobile, or landline with STD code';
 
   @override
-  String get businessProfilePhoneInvalid => 'Must be 10 digits';
+  String get businessProfilePhoneInvalid =>
+      'Enter a 10-digit mobile, or a landline with STD code';
 
   @override
   String get businessProfileEmail => 'Email (optional)';
