@@ -134,6 +134,71 @@ class AppLocalizationsEn extends AppLocalizations {
   String get ordersTabCredit => 'Credit';
 
   @override
+  String get ordersTabQuotations => 'Quotations';
+
+  @override
+  String get settingsQuotations => 'Quotations';
+
+  @override
+  String get settingsQuotationsSubtitle =>
+      'Give customers a priced quote, then turn it into a bill later';
+
+  @override
+  String get quotationQuoteShort => 'Quote';
+
+  @override
+  String get quotationSave => 'Save as quotation';
+
+  @override
+  String quotationSaved(String number) {
+    return 'Quotation $number saved';
+  }
+
+  @override
+  String get quotationNeedsInternet => 'Saving a quotation needs the internet';
+
+  @override
+  String get quotationConvertNeedsInternet =>
+      'Connect to the internet to bill a quotation';
+
+  @override
+  String get quotationsEmpty =>
+      'No quotations yet. Tap Quote on the billing page to make one.';
+
+  @override
+  String quotationItemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items',
+      one: '1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quotationPrint => 'Print';
+
+  @override
+  String get quotationShare => 'Share';
+
+  @override
+  String get quotationConvert => 'Convert to bill';
+
+  @override
+  String quotationDeleteConfirm(String number) {
+    return 'Delete quotation $number?';
+  }
+
+  @override
+  String quotationShareText(String number, String business) {
+    return 'Quotation $number from $business';
+  }
+
+  @override
+  String get receiptQuotation => 'QUOTATION';
+
+  @override
   String get billingCreditCustomerRequired =>
       'Customer name and phone are required for a credit bill.';
 

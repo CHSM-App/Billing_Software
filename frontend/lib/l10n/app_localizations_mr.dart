@@ -134,6 +134,65 @@ class AppLocalizationsMr extends AppLocalizations {
   String get ordersTabCredit => 'उधारी';
 
   @override
+  String get ordersTabQuotations => 'कोटेशन';
+
+  @override
+  String get settingsQuotations => 'कोटेशन';
+
+  @override
+  String get settingsQuotationsSubtitle =>
+      'ग्राहकाला किंमतीचे कोटेशन द्या, नंतर त्याचे बिल करा';
+
+  @override
+  String get quotationQuoteShort => 'कोटेशन';
+
+  @override
+  String get quotationSave => 'कोटेशन म्हणून जतन करा';
+
+  @override
+  String quotationSaved(String number) {
+    return 'कोटेशन $number जतन झाले';
+  }
+
+  @override
+  String get quotationNeedsInternet => 'कोटेशन जतन करण्यासाठी इंटरनेट हवे';
+
+  @override
+  String get quotationConvertNeedsInternet =>
+      'कोटेशनचे बिल करण्यासाठी इंटरनेट हवे';
+
+  @override
+  String get quotationsEmpty =>
+      'अजून कोटेशन नाही. बिलिंग पानावरील कोटेशन बटण दाबा.';
+
+  @override
+  String quotationItemCount(int count) {
+    return '$count वस्तू';
+  }
+
+  @override
+  String get quotationPrint => 'प्रिंट';
+
+  @override
+  String get quotationShare => 'शेअर करा';
+
+  @override
+  String get quotationConvert => 'बिल करा';
+
+  @override
+  String quotationDeleteConfirm(String number) {
+    return 'कोटेशन $number हटवायचे?';
+  }
+
+  @override
+  String quotationShareText(String number, String business) {
+    return '$business कडून कोटेशन $number';
+  }
+
+  @override
+  String get receiptQuotation => 'कोटेशन';
+
+  @override
   String get billingCreditCustomerRequired =>
       'उधारीच्या बिलासाठी ग्राहकाचे नाव आणि फोन आवश्यक आहे.';
 

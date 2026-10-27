@@ -226,13 +226,19 @@ class InvoicePdf {
               // tax breakdown a buyer can claim input credit against. With GST
               // off there are no GST columns and no CGST/SGST box, so calling
               // it that would misrepresent a plain sale bill.
-              child: pw.Text(showGst ? 'Tax Invoice' : 'Invoice',
+              child: pw.Text(
+                  bill.status == 'quotation'
+                      ? 'Quotation'
+                      : (showGst ? 'Tax Invoice' : 'Invoice'),
                   style: pw.TextStyle(
                       fontSize: 16, fontWeight: pw.FontWeight.bold)),
             ),
             pw.SizedBox(height: 8),
             _headerBox(businessName, address, phone, gstin, fssai,
                 bill.displayNumber, dateStr, shaped,
+                numberLabel: bill.status == 'quotation'
+                    ? 'Quotation No.'
+                    : 'Invoice No.',
                 billedBy: settings.showCashier ? bill.billedByName : null,
                 logo: logo),
             _billToBox(bill, shaped,
@@ -700,18 +706,24 @@ class InvoicePdf {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text('Invoice Amount in Words',
+              pw.Text(
+                  bill.status == 'quotation'
+                      ? 'Amount in Words'
+                      : 'Invoice Amount in Words',
                   style: const pw.TextStyle(fontSize: 9)),
               pw.SizedBox(height: 2),
               pw.Text(amountToWords(grandTotal),
                   style: pw.TextStyle(
                       fontSize: 10, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 10),
+              // A quotation takes no money, so it has no payment mode.
+              if (bill.status != 'quotation')
               pw.Text('Payment mode',
                   style: const pw.TextStyle(fontSize: 9)),
               // A split bill: "Cash Rs.300.00 + Credit Rs.200.00" (Rs., not
               // ₹ — the base PDF font has no ₹ glyph). With old dues collected
               // it is everything handed over, not just this bill's share.
+              if (bill.status != 'quotation')
               pw.Text(
                   bill.tendered.length > 1 || bill.collected.isNotEmpty
                       ? bill.tendered

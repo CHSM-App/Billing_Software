@@ -1116,6 +1116,9 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
       } else if (widget.field == 'show_item_no') {
         await updateShowItemNo(value);
         await ref.read(sessionProvider.notifier).refresh();
+      } else if (widget.field == 'quotations_enabled') {
+        await updateQuotationsEnabled(value);
+        await ref.read(sessionProvider.notifier).refresh();
       } else if (widget.field == 'round_off_enabled') {
         await updateRoundOffEnabled(value);
         await ref.read(sessionProvider.notifier).refresh();
@@ -1350,6 +1353,15 @@ class _TogglesScreen extends ConsumerWidget {
                 icon: Icons.tag,
                 title: l10n.settingsShowItemNo,
                 subtitle: l10n.settingsShowItemNoSubtitle,
+              ),
+              // Quotations — off by default. When on, billing gets a Quote
+              // button and Orders a Quotations tab.
+              const SizedBox(height: AppSpacing.space8),
+              _BusinessFlagToggle(
+                field: 'quotations_enabled',
+                icon: Icons.request_quote_outlined,
+                title: l10n.settingsQuotations,
+                subtitle: l10n.settingsQuotationsSubtitle,
               ),
               // The "are you sure?" before Settle — per device, on by default.
               const SizedBox(height: AppSpacing.space8),

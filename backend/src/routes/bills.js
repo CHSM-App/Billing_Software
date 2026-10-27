@@ -674,7 +674,7 @@ async function fetchBill(billId, businessId) {
 
 // POST /api/bills
 router.post('/', requireAuth, async (req, res) => {
-  const { items, table_id, customer_name, customer_phone, customer_address, customer_gstin, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at, warranty_extra_data } = req.body;
+  const { items, table_id, customer_name, customer_phone, customer_address, customer_gstin, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at, warranty_extra_data, quotation_id } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
@@ -720,6 +720,11 @@ router.post('/', requireAuth, async (req, res) => {
   // client_bill_id must be a UUID v4 when supplied
   if (client_bill_id !== undefined && (typeof client_bill_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(client_bill_id))) {
     return res.status(400).json({ error: 'client_bill_id must be a valid UUID' });
+  }
+  // quotation_id: this bill converts that quotation (routes/quotations.js) —
+  // marked converted inside the same transaction below.
+  if (quotation_id !== undefined && quotation_id !== null && (typeof quotation_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(quotation_id))) {
+    return res.status(400).json({ error: 'quotation_id must be a valid UUID' });
   }
   // bill_number, when supplied (offline sync), preserves the number already
   // printed on the customer's receipt. Constrain it to a safe invoice-number
@@ -996,6 +1001,24 @@ router.post('/', requireAuth, async (req, res) => {
       const billId = billResult.recordset[0].id;
 
       if (split) await insertPayments(transaction.request(), billId, split.rows);
+
+      // Converting a quotation: it closes with this bill or not at all, so a
+      // second device converting the same quote gets a 409, not a twin bill.
+      if (quotation_id) {
+        const conv = await transaction.request()
+          .input('quotation_id', sql.UniqueIdentifier, quotation_id)
+          .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+          .input('bill_id', sql.UniqueIdentifier, billId)
+          .query(`
+            UPDATE quotations
+            SET status = 'converted', bill_id = @bill_id, converted_at = SYSUTCDATETIME()
+            WHERE id = @quotation_id AND business_id = @business_id AND status = 'open'
+          `);
+        if (!conv.rowsAffected[0]) {
+          await transaction.rollback();
+          return res.status(409).json({ error: 'Quotation already converted' });
+        }
+      }
 
       // Insert bill_items — one multi-row INSERT instead of one network round
       // trip per line (a 15-item bill was 15 sequential awaits in series; this

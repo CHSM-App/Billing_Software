@@ -21,7 +21,7 @@ const PROFILE_COLUMNS = `
   gst_number, pan_number, fssai_number, email, website,
   city, state, pincode, logo_url, print_logo,
   bill_prefix, bill_footer_note, bill_settings,
-  gst_enabled, default_sac_code, round_off_enabled, show_item_no,
+  gst_enabled, default_sac_code, round_off_enabled, show_item_no, quotations_enabled,
   store_enabled, store_token, store_delivery_enabled,
   store_delivery_charge, store_payment_qr_url, store_upi_id,
   store_advance_percent, store_payment_required,
@@ -69,7 +69,7 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
           b.city, b.state, b.pincode, b.logo_url, b.print_logo,
           b.bill_prefix, b.bill_footer_note, b.bill_settings,
           b.gst_enabled, b.default_sac_code,
-          b.round_off_enabled, b.show_item_no,
+          b.round_off_enabled, b.show_item_no, b.quotations_enabled,
           b.store_enabled, b.store_token,
           b.store_delivery_enabled, b.store_delivery_charge,
           b.store_payment_qr_url, b.store_upi_id,
@@ -155,6 +155,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     default_sac_code,
     round_off_enabled,
     show_item_no,
+    quotations_enabled,
     store_enabled,
     store_delivery_enabled,
     store_delivery_charge,
@@ -270,6 +271,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     default_sac_code,
     round_off_enabled,
     show_item_no,
+    quotations_enabled,
     store_enabled,
     store_delivery_enabled,
     store_delivery_charge,
@@ -298,7 +300,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           name, address, phone, email, website,
           city, state, pincode, gst_number, pan_number, fssai_number,
           logo_url, print_logo, bill_prefix, bill_footer_note, bill_settings,
-          gst_enabled, default_sac_code, round_off_enabled, show_item_no,
+          gst_enabled, default_sac_code, round_off_enabled, show_item_no, quotations_enabled,
           store_enabled, store_delivery_enabled,
           store_delivery_charge, store_advance_percent, store_payment_required,
           store_upi_id,
@@ -407,7 +409,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       const isBit = key === 'self_order_enabled' ||
           key === 'inventory_enabled' || key === 'has_barcode_scanner' ||
           key === 'gst_enabled' || key === 'round_off_enabled' ||
-          key === 'show_item_no' ||
+          key === 'show_item_no' || key === 'quotations_enabled' ||
           key === 'store_enabled' || key === 'store_delivery_enabled' ||
           key === 'store_payment_required';
       const normalised = isBit
@@ -588,6 +590,7 @@ function _formatBusiness(row) {
     default_sac_code:    row.default_sac_code ?? null,
     round_off_enabled:   !!row.round_off_enabled,
     show_item_no:        !!row.show_item_no,
+    quotations_enabled:  !!row.quotations_enabled,
     // Online store. store_token is never settable from the profile payload —
     // the server derives it from the business name (see src/storeToken.js) at
     // sign-up and again whenever the name changes.
@@ -629,6 +632,7 @@ function _sqlTypeFor(key) {
     default_sac_code:  sql.NVarChar(10),
     round_off_enabled: sql.Bit,
     show_item_no:      sql.Bit,
+    quotations_enabled: sql.Bit,
     store_enabled:          sql.Bit,
     store_delivery_enabled: sql.Bit,
     store_delivery_charge:  sql.Decimal(10, 2),

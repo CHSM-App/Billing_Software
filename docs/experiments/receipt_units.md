@@ -21,6 +21,10 @@ only copy, so keep it.
 - Bill lines store no unit, so the unit comes from the live item list. `catalogUnits` in
   `models.dart` is refreshed by `ItemsNotifier` (`listenSelf`) and read by `receiptQty()`.
 
+**Since 2026-10-27, `catalogUnits` is also read through `qtyWithUnit()` by history, the credit
+customer's bills, sync conflicts and the customer export.** The patch does not cover those, so
+undoing it now breaks the build there. Before undoing, switch those back to the bare quantity.
+
 ## Things to check
 
 - On 58 mm paper the Qty column widens and the item-name column shrinks, so long names

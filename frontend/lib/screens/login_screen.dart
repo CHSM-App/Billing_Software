@@ -260,6 +260,7 @@ class _LoginScreenState extends ConsumerState<_LoginView>
         gstEnabled: business['gst_enabled'] == true,
         roundOffEnabled: business['round_off_enabled'] == true,
         showItemNo: business['show_item_no'] == true,
+        quotationsEnabled: business['quotations_enabled'] == true,
         storeEnabled: business['store_enabled'] == true,
         customersEnabled: business['allow_customers'] != false,
       );

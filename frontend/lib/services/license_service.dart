@@ -180,6 +180,10 @@ class LicenseService {
         await syncBusinessLogo(
             data['logo_url'] as String?, data['print_logo'] as bool);
       }
+      // The owner's Quotations switch, same reason.
+      if (data['quotations_enabled'] is bool) {
+        await updateQuotationsEnabled(data['quotations_enabled'] as bool);
+      }
       // Billing Setup, same reason. No key (older backend) = left alone.
       await BillSettings.sync(data);
 

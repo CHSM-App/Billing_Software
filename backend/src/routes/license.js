@@ -53,6 +53,7 @@ router.get('/', requireAuth, async (req, res) => {
         s.is_trial,
         s.updated_at,
         b.store_enabled,
+        b.quotations_enabled,
         b.logo_url,
         b.print_logo,
         b.bill_footer_note,
@@ -121,6 +122,8 @@ router.get('/', requireAuth, async (req, res) => {
       // this is how an owner's logo change reaches their devices.
       logo_url: sub.logo_url ?? null,
       print_logo: !!sub.print_logo,
+      // Quotations switch — how an owner turning it on reaches staff devices.
+      quotations_enabled: !!sub.quotations_enabled,
       // Billing Setup — reaches staff devices the same way.
       bill_footer_note: sub.bill_footer_note ?? null,
       bill_settings: billSettings.parse(sub.bill_settings),

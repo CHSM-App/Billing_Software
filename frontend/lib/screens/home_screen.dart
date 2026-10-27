@@ -78,10 +78,15 @@ class HomeScreen extends ConsumerStatefulWidget {
   /// order is opened from the Orders page, so staff land on the cart, not the
   /// item list. Phones only; wide layouts already show the cart beside items.
   final bool openCart;
+  /// Opened from the Quotations tab: the quote's cart loads like a held bill,
+  /// Quote saves changes back to it, and settling bills it as a NEW bill that
+  /// closes the quotation (POST /bills quotation_id).
+  final Quotation? quotation;
 
   const HomeScreen(
       {super.key, this.tableId, this.tableNumber, this.activeBillId,
-      this.activeBillFuture, this.onBillDone, this.openCart = false});
+      this.activeBillFuture, this.onBillDone, this.openCart = false,
+      this.quotation});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -197,6 +202,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _announceSave = true;
   bool _generatingBill = false;
   bool _savingDraft = false;
+  bool _savingQuote = false;
   bool _draftLoaded = false;
 
   // Search bar expand state
@@ -339,7 +345,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _discountAmtFocus.addListener(() {
       if (_discountAmtFocus.hasFocus) _ensureVisible(_discountAmtKey);
     });
-    if (widget.activeBillId != null) {
+    if (widget.activeBillId != null || widget.quotation != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _tryLoadDraft());
     }
     // Silently refresh item prices/stock on open so the cache never goes stale
@@ -479,7 +485,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _tryLoadDraft() async {
-    if (_draftLoaded || widget.activeBillId == null) return;
+    if (_draftLoaded ||
+        (widget.activeBillId == null && widget.quotation == null)) {
+      return;
+    }
     final itemsAsync = ref.read(itemsProvider);
     if (!itemsAsync.hasValue) {
       ref.listenManual(itemsProvider, (_, next) {
@@ -491,7 +500,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     try {
       // Await the in-flight fetch (started before navigation) or fall back to
       // a fresh network call if no future was provided.
-      final bill = (widget.activeBillFuture != null
+      final bill = widget.quotation?.bill ??
+          (widget.activeBillFuture != null
               ? await widget.activeBillFuture
               : null) ??
           Bill.fromJson(await getBill(widget.activeBillId!));
@@ -2209,6 +2219,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       await _generateBillOnline(cart, onBillReady: onBillReady);
       return;
     }
+    // Converting a quotation: it closes with its bill on the server, in the
+    // bill's own transaction. The offline queue can't carry that link, and a
+    // bill made without it would leave the quote open to be billed twice — so
+    // this one sale needs the network, with no offline fallback.
+    if (widget.quotation != null) {
+      final needsNet = context.l10n.quotationConvertNeedsInternet;
+      if (!ref.read(connectivityProvider)) {
+        _showSnack(needsNet, isError: true);
+        return;
+      }
+      try {
+        await _generateBillOnline(cart, onBillReady: onBillReady);
+      } on NetworkException {
+        _showSnack(needsNet, isError: true);
+      } on ApiException catch (e) {
+        _showSnack(e.serverMessage ?? e.message, isError: true);
+      }
+      return;
+    }
     // Retail billing — online when connected, offline when not.
     //
     // The connectivity flag is only a HINT: it starts optimistically "online"
@@ -2342,6 +2371,58 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void _park({required bool inSheet}) {
     if (inSheet) Navigator.pop(context);
     _saveDraft();
+  }
+
+  /// Saves the cart as a quotation: a priced quote, not a sale — nothing is
+  /// finalized, no stock moves and no invoice number is used. Opened from the
+  /// Quotations tab, it saves the changes back to that quote instead. Needs
+  /// the network (the server numbers it QT-0001…).
+  Future<void> _saveQuotation({required bool inSheet}) async {
+    final l10n = context.l10n;
+    final cart = ref.read(cartProvider);
+    if (cart.isEmpty) {
+      _showSnack(l10n.billingAddAtLeastOneItem, isError: true);
+      return;
+    }
+    if (!_validateCustomerPhone() || !_validateCharges()) return;
+    final bill = _buildBillFromCart(cart);
+    final body = {
+      'customer_name': bill.customerName,
+      'customer_phone': bill.customerPhone,
+      'total': bill.grandTotal,
+      'snapshot': {
+        ...bill.toSnapshotJson(),
+        // No payment is taken on a quote; it reopens as a plain cash bill.
+        'payment_mode': 'cash',
+        'status': 'quotation',
+        'price_list_id': _priceListId,
+      },
+    };
+    setState(() => _savingQuote = true);
+    try {
+      final saved = Quotation.fromJson(widget.quotation == null
+          ? await createQuotation(body)
+          : await updateQuotation(widget.quotation!.id, body));
+      unawaited(ref.read(quotationsProvider.notifier).reload());
+      if (!mounted) return;
+      if (inSheet) Navigator.pop(context);
+      _showSnack(l10n.quotationSaved(saved.number));
+      ref.read(cartProvider.notifier).clear();
+      _customerNameController.clear();
+      _customerPhoneController.clear();
+      _clearCustomerExtras();
+      _discountPctController.clear();
+      _discountAmtController.clear();
+      _clearCharges();
+      setState(() => _resetPayRows());
+      _navigateAfterBill();
+    } on NetworkException {
+      _showSnack(l10n.quotationNeedsInternet, isError: true);
+    } on ApiException catch (e) {
+      _showSnack(e.serverMessage ?? e.message, isError: true);
+    } finally {
+      if (mounted) setState(() => _savingQuote = false);
+    }
   }
 
   /// Settle the bill. [print] defaults to whatever the printer can do; passing
@@ -3214,6 +3295,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'discount_amount': double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
           if (additionalCharges.isNotEmpty)
             'additional_charges': additionalCharges,
+          // Closes the quotation this cart came from (409 if already billed).
+          if (widget.quotation != null) 'quotation_id': widget.quotation!.id,
         });
         result = await finalizeBill(draft['id'],
             paymentMode: _paymentMode,
@@ -3258,6 +3341,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // A just-finalized draft (table or not) leaves the Open Orders queue —
       // refresh it so the completed order drops off the list.
       unawaited(ref.read(openDraftsProvider.notifier).refreshSilently());
+      // A converted quotation leaves the Quotations tab.
+      if (widget.quotation != null) {
+        unawaited(ref.read(quotationsProvider.notifier).reload());
+      }
       // A finalized order is no longer a draft, so it leaves the kitchen queue —
       // ping so the Kitchen screen drops it immediately.
       NotificationService.instance.pingKitchen();
@@ -5528,6 +5615,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               ? null
                               : () => _park(inSheet: inSheet),
                         ),
+                        // A quote, not a sale — like Hold, it takes no money.
+                        if (ref.watch(quotationsEnabledProvider)) ...[
+                          const SizedBox(width: AppSpacing.space8),
+                          IconAction(
+                            icon: Icons.request_quote_outlined,
+                            caption: l10n.quotationQuoteShort,
+                            color: AppColors.info,
+                            tooltip: l10n.quotationSave,
+                            onPressed: (cart.isEmpty || _savingQuote)
+                                ? null
+                                : () => _saveQuotation(inSheet: inSheet),
+                          ),
+                        ],
                         const SizedBox(width: AppSpacing.space8),
                         IconAction(
                           // The real mark, so the destination is unmistakable —

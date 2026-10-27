@@ -622,6 +622,9 @@ class PrinterService {
     }
     lines.add('-' * p.cols);
 
+    if (bill.status == 'quotation') {
+      lines.add(_boldLineMarker + _centre(labels?.quotation ?? 'QUOTATION', p.cols));
+    }
     // Bill info
     lines.add('${labels?.billNo ?? 'Bill#:'} ${bill.displayNumber}');
     // Table orders print their table number so the receipt is identifiable.
@@ -805,6 +808,10 @@ class PrinterService {
         labels: labels,
         logo: logo));
 
+    if (bill.status == 'quotation') {
+      rows.add(ReceiptRow.center(labels?.quotation ?? 'QUOTATION',
+          size: sizeTitle, bold: true));
+    }
     // Bill info (label left, value right)
     rows.add(ReceiptRow.cols([
       ReceiptCell('${labels?.billNo ?? 'Bill#:'} ${bill.displayNumber}',
@@ -1959,6 +1966,8 @@ class PrinterService {
       out.add((labels?.totalPaid ?? 'Total:',
           rs(grandTotal + bill.collectedTotal), true));
     }
+    // A quotation takes no money, so it has no payment line.
+    if (bill.status == 'quotation') return out;
     final tendered = bill.tendered;
     final many = tendered.length > 1;
     out.add((labels?.payment ?? 'Payment:',

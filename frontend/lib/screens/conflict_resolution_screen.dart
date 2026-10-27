@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../l10n/l10n_ext.dart';
+import '../models/models.dart' show qtyWithUnit;
 import '../services/offline_service.dart';
 import '../services/sync_service.dart';
 import '../theme/app_theme.dart';
@@ -393,7 +394,7 @@ class _BillCard extends StatelessWidget {
                                 TextStyle(color: AppColors.textSecondary)),
                         Expanded(
                           child: Text(
-                            '${item['item_name']} × ${item['quantity']}',
+                            '${item['item_name']} × ${qtyWithUnit(item['item_id'] as String?, '${item['quantity']}')}',
                             style: const TextStyle(
                                 fontSize: 13,
                                 color: AppColors.textSecondary),

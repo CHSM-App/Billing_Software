@@ -15,6 +15,8 @@ CREATE TABLE businesses (
     gst_enabled      BIT              NOT NULL DEFAULT 0,   -- master toggle for all GST UI/receipt
     -- Show items.item_no on the billing page as "(101) Masala Dosa" (migration 056).
     show_item_no     BIT              NOT NULL CONSTRAINT DF_businesses_show_item_no DEFAULT 0,
+    -- Quotations feature opt-in (migration 068).
+    quotations_enabled BIT            NOT NULL CONSTRAINT DF_businesses_quotations_enabled DEFAULT 0,
     default_sac_code NVARCHAR(10)     NULL,   -- bill-level fallback HSN/SAC (e.g. restaurant 9963)
     -- Extended profile fields (added via migration 005)
     gst_number       NVARCHAR(15)     NULL,   -- 15-char GSTIN
@@ -171,6 +173,30 @@ CREATE TABLE price_lists (
 );
 
 CREATE INDEX IX_price_lists_business_id ON price_lists (business_id);
+
+-- Quotations (migration 068): a quote given before the sale. Outside `bills`
+-- so it takes no stock and no invoice number; `snapshot` is the billing
+-- page's Bill-shaped cart JSON. Converted by POST /api/bills quotation_id.
+CREATE TABLE quotations (
+    id                 UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,
+    business_id        UNIQUEIDENTIFIER NOT NULL,
+    quotation_number   NVARCHAR(50)     NOT NULL,
+    customer_name      NVARCHAR(200)    NULL,
+    customer_phone     NVARCHAR(20)     NULL,
+    total              DECIMAL(10,2)    NOT NULL,
+    snapshot           NVARCHAR(MAX)    NOT NULL,
+    status             NVARCHAR(20)     NOT NULL DEFAULT 'open', -- 'open', 'converted'
+    bill_id            UNIQUEIDENTIFIER NULL,
+    converted_at       DATETIME2        NULL,
+    created_by_user_id UNIQUEIDENTIFIER NOT NULL,
+    created_at         DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
+    updated_at         DATETIME2        NOT NULL DEFAULT GETUTCDATE(),
+
+    CONSTRAINT FK_quotations_business
+        FOREIGN KEY (business_id) REFERENCES businesses (id),
+    CONSTRAINT UQ_quotations_business_number
+        UNIQUE (business_id, quotation_number)
+);
 
 CREATE TABLE price_list_items (
     id            UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID() PRIMARY KEY,

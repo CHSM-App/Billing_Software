@@ -569,8 +569,10 @@ class _SettlementSheetState extends State<_SettlementSheet> {
             ),
           // Items
           ...bill.items.map((it) {
-            final qty = it.quantity.toStringAsFixed(
-                it.quantity == it.quantity.roundToDouble() ? 0 : 2);
+            final qty = receiptQty(
+                it,
+                it.quantity.toStringAsFixed(
+                    it.quantity == it.quantity.roundToDouble() ? 0 : 2));
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(

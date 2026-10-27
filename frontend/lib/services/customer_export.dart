@@ -46,7 +46,9 @@ class CustomerExport {
           [
             b.billNumber,
             _dateTimeFmt.format(b.billDate.toLocal()),
-            b.items.map((i) => '${i.itemName} ×${_qty(i.quantity)}').join(', '),
+            b.items
+                .map((i) => '${i.itemName} ×${receiptQty(i, _qty(i.quantity))}')
+                .join(', '),
             b.subtotal,
             b.taxAmount,
             b.discountAmount,

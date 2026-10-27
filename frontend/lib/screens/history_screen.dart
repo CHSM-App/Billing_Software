@@ -569,16 +569,29 @@ class BillDetailDialog extends StatelessWidget {
               const SizedBox(height: AppSpacing.space16),
               ...bill.items.map((item) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3),
+                    // Name wraps in its own column; "× 12 pkt" stays one
+                    // unit so the unit never drops onto a line by itself.
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
                           child: Text(
-                            '${item.receiptName} × ${item.quantity % 1 == 0 ? item.quantity.toInt() : item.quantity}',
+                            item.receiptName,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ),
+                        const SizedBox(width: AppSpacing.space8),
+                        Text(
+                          '× ${receiptQty(item, formatQty(item.quantity))}',
+                          softWrap: false,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(color: AppColors.textSecondary),
+                        ),
+                        const SizedBox(width: AppSpacing.space12),
                         Text(
                           '₹${item.lineTotal.toStringAsFixed(2)}',
                           style: Theme.of(context)
@@ -664,7 +677,10 @@ class BillDetailDialog extends StatelessWidget {
           ),
         ),
       ),
+      // A Wrap, not plain actions: four buttons don't fit a phone-width
+      // dialog, and AlertDialog would stack them one per line.
       actions: [
+        Wrap(alignment: WrapAlignment.end, children: [
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(l10n.commonClose)),
@@ -730,6 +746,7 @@ class BillDetailDialog extends StatelessWidget {
             child: Text(l10n.historyVoid,
                 style: const TextStyle(color: AppColors.error)),
           ),
+        ]),
       ],
     );
   }

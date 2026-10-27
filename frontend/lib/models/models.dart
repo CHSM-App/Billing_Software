@@ -45,12 +45,15 @@ String unitShort(String unit) => const {
 /// ponytail: global catalog map; store the unit on bill_items if this sticks.
 Map<String, String> catalogUnits = const {};
 
-/// A bill line's quantity for a receipt, with its short unit when the catalog
-/// knows the item: "2 kg", "1.5 L", or just "3".
-String receiptQty(BillItem item, String qty) {
-  final unit = item.itemId == null ? null : catalogUnits[item.itemId];
+/// [qty] with the item's short unit when the catalog knows [itemId]: "2 kg",
+/// "1.5 L", or just "3". Used wherever a bill line is listed.
+String qtyWithUnit(String? itemId, String qty) {
+  final unit = itemId == null ? null : catalogUnits[itemId];
   return unit == null ? qty : '$qty ${unitShort(unit)}';
 }
+
+/// A bill line's quantity for a receipt — see [qtyWithUnit].
+String receiptQty(BillItem item, String qty) => qtyWithUnit(item.itemId, qty);
 
 /// [qty] base units as whole packs plus the loose rest: 17 bottles with a box of
 /// 15 is (packs: 1, loose: 2). Null when there is no pack or not one full pack.
@@ -462,6 +465,20 @@ class BillItem {
             double.tryParse((j['discount_amount'] ?? 0).toString()) ?? 0.0,
         kitchenStatus: j['kitchen_status'] as String?,
       );
+
+  /// The keys [BillItem.fromJson] reads — see [Bill.toSnapshotJson].
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'item_id': itemId,
+        'variant_id': variantId,
+        'item_name': itemName,
+        'quantity': quantity,
+        'unit_price': unitPrice,
+        'tax_rate': taxRate,
+        'hsn_code': hsnCode,
+        'line_total': lineTotal,
+        'discount_amount': discountAmount,
+      };
 }
 
 /// A bill-level additional charge — delivery, packaging, service, etc.
@@ -640,7 +657,33 @@ class Bill {
   /// (printed receipts, invoice PDFs, WhatsApp). 'INV-0007' → '0007',
   /// offline 'INV-a7f4-0001' → 'a7f4-0001'. Numbers with no prefix are
   /// returned unchanged. The full [billNumber] stays the in-app identifier.
-  String get displayNumber => stripBillPrefix(billNumber);
+  /// A quotation keeps its 'QT-' so it can't pass for an invoice number.
+  String get displayNumber =>
+      status == 'quotation' ? billNumber : stripBillPrefix(billNumber);
+
+  /// What a [Quotation] stores: the billing page's cart as a bill, in exactly
+  /// the keys [Bill.fromJson] reads back, so a saved quote reopens into the
+  /// cart and prints as it was built.
+  Map<String, dynamic> toSnapshotJson() => {
+        'id': id,
+        'bill_number': billNumber,
+        'customer_name': customerName,
+        'customer_phone': customerPhone,
+        'customer_address': customerAddress,
+        'customer_gstin': customerGstin,
+        'subtotal': subtotal,
+        'tax_amount': taxAmount,
+        'discount_amount': discountAmount,
+        'charges_amount': chargesAmount,
+        'additional_charges': [for (final c in additionalCharges) c.toJson()],
+        'total': total,
+        'round_off': roundOff,
+        'payment_mode': paymentMode,
+        'status': status,
+        'price_list_id': priceListId,
+        'created_at': createdAt.toIso8601String(),
+        'items': [for (final i in items) i.toJson()],
+      };
 
   /// The final amount the customer pays: total, less discount, plus round-off.
   double get grandTotal => total - discountAmount + roundOff;
@@ -809,6 +852,44 @@ class Bill {
             ),
         ],
       );
+}
+
+/// A priced quote given to a customer before the sale (routes/quotations.js).
+/// [bill] is the cart it was built from, numbered with the quotation's QT-
+/// number and status 'quotation' — so it prints with the bill templates and
+/// reopens into the cart like a held bill. It is NOT a bill: no stock moved
+/// and no invoice number was used until it is converted.
+class Quotation {
+  final String id;
+  final String number;
+  final double total;
+  final DateTime createdAt;
+  final Bill bill;
+
+  const Quotation({
+    required this.id,
+    required this.number,
+    required this.total,
+    required this.createdAt,
+    required this.bill,
+  });
+
+  factory Quotation.fromJson(Map<String, dynamic> j) {
+    final number = '${j['quotation_number']}';
+    return Quotation(
+      id: '${j['id']}',
+      number: number,
+      total: double.tryParse('${j['total']}') ?? 0.0,
+      createdAt: DateTime.parse('${j['created_at']}'),
+      bill: Bill.fromJson({
+        ...Map<String, dynamic>.from(j['snapshot'] as Map),
+        'id': j['id'],
+        'bill_number': number,
+        'status': 'quotation',
+        'created_at': '${j['created_at']}',
+      }),
+    );
+  }
 }
 
 /// A named set of prices — "Party", "Wholesale" — the cashier can bill with.

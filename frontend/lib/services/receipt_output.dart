@@ -110,8 +110,40 @@ class ReceiptOutput {
     }
 
     // PDF page size — one document, a page per bill, one print dialog.
-    final pageFormat = size == PaperSizes.a5 ? PdfPageFormat.a5 : PdfPageFormat.a4;
-    final bytes = await InvoicePdf.buildMany(
+    final bytes = await pdf(bills,
+        pageFormat: size == PaperSizes.a5 ? PdfPageFormat.a5 : PdfPageFormat.a4,
+        businessName: businessName,
+        businessAddress: businessAddress,
+        businessPhone: businessPhone,
+        businessGstin: businessGstin,
+        businessFssai: businessFssai,
+        defaultSacCode: defaultSacCode,
+        gstEnabled: gstEnabled,
+        footerNote: footerNote);
+
+    await Printing.layoutPdf(
+      onLayout: (_) async => bytes,
+      name: 'Invoice-${bills.first.displayNumber}',
+    );
+  }
+
+  /// [bills] as one PDF (a page each) — what [emit] prints on A5/A4, also used
+  /// to share a quotation as a file.
+  static Future<Uint8List> pdf(
+    List<Bill> bills, {
+    required PdfPageFormat pageFormat,
+    required String businessName,
+    String? businessAddress,
+    String? businessPhone,
+    String? businessGstin,
+    String? businessFssai,
+    String? defaultSacCode,
+    required bool gstEnabled,
+    String? footerNote,
+  }) async {
+    final (settings, address, phone, fssai, note) =
+        await _setup(businessAddress, businessPhone, businessFssai, footerNote);
+    return InvoicePdf.buildMany(
       bills: bills,
       pageFormat: pageFormat,
       businessName: businessName,
@@ -124,11 +156,6 @@ class ReceiptOutput {
       footerNote: note,
       logo: await _logoBytes(),
       settings: settings,
-    );
-
-    await Printing.layoutPdf(
-      onLayout: (_) async => bytes,
-      name: 'Invoice-${bills.first.displayNumber}',
     );
   }
 

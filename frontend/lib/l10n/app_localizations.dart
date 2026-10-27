@@ -344,6 +344,102 @@ abstract class AppLocalizations {
   /// **'Credit'**
   String get ordersTabCredit;
 
+  /// No description provided for @ordersTabQuotations.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotations'**
+  String get ordersTabQuotations;
+
+  /// No description provided for @settingsQuotations.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotations'**
+  String get settingsQuotations;
+
+  /// No description provided for @settingsQuotationsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Give customers a priced quote, then turn it into a bill later'**
+  String get settingsQuotationsSubtitle;
+
+  /// No description provided for @quotationQuoteShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Quote'**
+  String get quotationQuoteShort;
+
+  /// No description provided for @quotationSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as quotation'**
+  String get quotationSave;
+
+  /// No description provided for @quotationSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotation {number} saved'**
+  String quotationSaved(String number);
+
+  /// No description provided for @quotationNeedsInternet.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving a quotation needs the internet'**
+  String get quotationNeedsInternet;
+
+  /// No description provided for @quotationConvertNeedsInternet.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect to the internet to bill a quotation'**
+  String get quotationConvertNeedsInternet;
+
+  /// No description provided for @quotationsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No quotations yet. Tap Quote on the billing page to make one.'**
+  String get quotationsEmpty;
+
+  /// No description provided for @quotationItemCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item} other{{count} items}}'**
+  String quotationItemCount(int count);
+
+  /// No description provided for @quotationPrint.
+  ///
+  /// In en, this message translates to:
+  /// **'Print'**
+  String get quotationPrint;
+
+  /// No description provided for @quotationShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get quotationShare;
+
+  /// No description provided for @quotationConvert.
+  ///
+  /// In en, this message translates to:
+  /// **'Convert to bill'**
+  String get quotationConvert;
+
+  /// No description provided for @quotationDeleteConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete quotation {number}?'**
+  String quotationDeleteConfirm(String number);
+
+  /// No description provided for @quotationShareText.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotation {number} from {business}'**
+  String quotationShareText(String number, String business);
+
+  /// No description provided for @receiptQuotation.
+  ///
+  /// In en, this message translates to:
+  /// **'QUOTATION'**
+  String get receiptQuotation;
+
   /// No description provided for @billingCreditCustomerRequired.
   ///
   /// In en, this message translates to:

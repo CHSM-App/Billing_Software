@@ -9,7 +9,7 @@ import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
 // const String baseUrl = 'http://192.168.1.11:8000/api';
-const String baseUrl = 'https://removing-browse-spent-titanium.trycloudflare.com/api';
+const String baseUrl = 'https://figured-achieved-argument-lessons.trycloudflare.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
 
@@ -747,6 +747,25 @@ Future<Map<String, dynamic>> updatePriceList(String id, Map<String, dynamic> dat
 
 Future<void> deletePriceList(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/price-lists/$id')));
+}
+
+// Quotations (routes/quotations.js). Body: { customer_name, customer_phone,
+// total, snapshot } where snapshot is a Bill-shaped map (Bill.toSnapshotJson).
+// Converted by createBill with 'quotation_id'.
+Future<List<dynamic>> getQuotations() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/quotations')));
+}
+
+Future<Map<String, dynamic>> createQuotation(Map<String, dynamic> data) async {
+  return _parse(await _authPost(Uri.parse('$baseUrl/quotations'), body: jsonEncode(data)));
+}
+
+Future<Map<String, dynamic>> updateQuotation(String id, Map<String, dynamic> data) async {
+  return _parse(await _authPut(Uri.parse('$baseUrl/quotations/$id'), body: jsonEncode(data)));
+}
+
+Future<void> deleteQuotation(String id) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/quotations/$id')));
 }
 
 /// Regenerate a table's QR token, invalidating the old sticker. Owner-only.
