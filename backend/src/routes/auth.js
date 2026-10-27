@@ -3,16 +3,23 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool, poolConnect, sql } = require('../db');
 const crypto = require('crypto');
-const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../auth');
-const { loginLimiter, registerLimiter, refreshLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
+const { signAccessToken, signRefreshToken, verifyRefreshToken, publicTokenSecret } = require('../auth');
+const { loginLimiter, loginIpFailLimiter, otpPhoneDailyLimiter, registerLimiter, registerAccountLimiter, refreshLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const billSettings = require('../billSettings');
 const audit = require('../audit');
 const whatsapp = require('../whatsapp');
 const { uniqueStoreToken } = require('../storeToken');
+const authState = require('../authState');
+const { TERMS_VERSION } = require('../legal');
+const { isIndianMobile } = require('../validate');
 
 const router = express.Router();
+
+// Signs the short-lived "this phone passed OTP" token (verify-otp → reset-pin /
+// register). Derived per kind, see auth.js publicTokenSecret.
+const OTP_SECRET = publicTokenSecret('otp');
 
 // A restaurant always runs with tables. The takeaway-only variant was retired in
 // migration 041, which converted the businesses that still carried it — so this
@@ -48,13 +55,28 @@ const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const PAN_RE   = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
 const FSSAI_RE = /^[0-9]{14}$/;
 
-// How many consecutive PIN failures before locking the account
-const MAX_FAILED_ATTEMPTS = 10;
-// How long to lock the account after MAX_FAILED_ATTEMPTS (milliseconds)
-const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+// Lock the account on every LOCK_EVERY-th consecutive PIN failure. A 4-digit
+// PIN has 10,000 values, so the budget must stay tiny: 5 guesses, then 15 min,
+// doubling each further lock (30 min, 1 h, 2 h ...) up to a day. A correct PIN
+// or a forgot-PIN reset clears the count. That keeps a sustained guesser to a
+// handful of tries a day, while a real user with a typo never notices.
+const LOCK_EVERY = 5;
+const FIRST_LOCK_MS = 15 * 60 * 1000;
+const MAX_LOCK_MS = 24 * 60 * 60 * 1000;
+
+/** Lock length after this many consecutive failures, or 0 for no lock. */
+function lockoutMs(failedAttempts) {
+  if (failedAttempts <= 0 || failedAttempts % LOCK_EVERY !== 0) return 0;
+  const nth = failedAttempts / LOCK_EVERY; // 1st, 2nd ... lock
+  return Math.min(FIRST_LOCK_MS * 2 ** (nth - 1), MAX_LOCK_MS);
+}
+
+// Compared against when the phone is unknown, so that answer takes as long as
+// a wrong PIN and timing cannot tell the two apart.
+const DUMMY_PIN_HASH = bcrypt.hashSync('not-a-real-pin', 10);
 
 // POST /api/register
-router.post('/register', registerLimiter, async (req, res) => {
+router.post('/register', registerLimiter, registerAccountLimiter, async (req, res) => {
   const {
     business_name,
     address,
@@ -88,8 +110,8 @@ router.post('/register', registerLimiter, async (req, res) => {
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
   }
-  if (!/^\d{10}$/.test(phone) || !/^\d{10}$/.test(owner_phone)) {
-    return res.status(400).json({ error: 'Phone must be a 10-digit number' });
+  if (!isIndianMobile(phone) || !isIndianMobile(owner_phone)) {
+    return res.status(400).json({ error: 'Phone must be a valid 10-digit mobile number' });
   }
   // Optional tax identifiers — same formats the Business Profile screen enforces.
   if (gst_number) {
@@ -102,6 +124,32 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
   if (fssai_number && !FSSAI_RE.test(fssai_number)) {
     return res.status(400).json({ error: 'Invalid FSSAI number — must be exactly 14 digits' });
+  }
+
+  // Legal terms (src/legal.js). The app sends accept_terms: true once the box
+  // on the sign-up consent block is ticked; the server records ITS version, so
+  // a client can never claim a version of its choosing. Builds before the
+  // consent block send nothing — enforced only once REQUIRE_TERMS_ACCEPT=true,
+  // same rollout as REQUIRE_REGISTER_OTP below.
+  const acceptedTerms = !!TERMS_VERSION && req.body.accept_terms === true;
+  if (TERMS_VERSION && !acceptedTerms && process.env.REQUIRE_TERMS_ACCEPT === 'true') {
+    return res.status(400).json({ error: 'Please accept the Terms of Service to continue' });
+  }
+
+  // Proof that whoever is signing up controls owner_phone: the verified_token
+  // from POST /verify-otp (purpose 'register'). Apps before this change verify
+  // the OTP but never send the token, so it is enforced only once
+  // REQUIRE_REGISTER_OTP=true — flip it when those builds have aged out.
+  if (process.env.REQUIRE_REGISTER_OTP === 'true') {
+    let proof;
+    try {
+      proof = jwt.verify(String(req.body.verified_token || ''), OTP_SECRET);
+    } catch {
+      return res.status(401).json({ error: 'Please verify your phone number with the OTP first' });
+    }
+    if (proof.typ !== 'otp' || proof.purpose !== 'register' || proof.verified_phone !== owner_phone) {
+      return res.status(401).json({ error: 'Please verify your phone number with the OTP first' });
+    }
   }
 
   const toTitleCase = (str) => str.replace(/\b\w/g, (c) => c.toUpperCase());
@@ -117,6 +165,17 @@ router.post('/register', registerLimiter, async (req, res) => {
     await transaction.begin();
 
     try {
+      // One phone = one login, across every business (migration 071). Login
+      // finds a user by phone alone, so a second row would hijack or lock out
+      // the first.
+      const phoneTaken = await transaction.request()
+        .input('phone', sql.NVarChar(20), owner_phone)
+        .query('SELECT TOP 1 id FROM users WHERE phone = @phone');
+      if (phoneTaken.recordset.length > 0) {
+        await transaction.rollback();
+        return res.status(409).json({ error: 'An account with this phone number already exists.' });
+      }
+
       // A GSTIN identifies exactly one business — reject a duplicate up front
       // rather than letting it through and confusing two businesses' invoices.
       if (gst_number) {
@@ -167,15 +226,33 @@ router.post('/register', registerLimiter, async (req, res) => {
       const businessId = businessResult.recordset[0].id;
 
       // Insert owner user
-      await transaction.request()
+      const ownerResult = await transaction.request()
         .input('business_id', sql.UniqueIdentifier, businessId)
         .input('name', sql.NVarChar(200), ownerNameSaved)
         .input('phone', sql.NVarChar(20), owner_phone)
         .input('pin_hash', sql.NVarChar(255), pinHash)
         .query(`
           INSERT INTO users (business_id, name, phone, pin_hash, role)
+          OUTPUT INSERTED.id
           VALUES (@business_id, @name, @phone, @pin_hash, 'owner')
         `);
+
+      // Evidence of the sign-up consent, in the same transaction: a failed
+      // registration must not leave an acceptance behind, and vice versa.
+      if (acceptedTerms) {
+        const ownerId = ownerResult.recordset[0].id;
+        await transaction.request()
+          .input('user_id', sql.UniqueIdentifier, ownerId)
+          .input('business_id', sql.UniqueIdentifier, businessId)
+          .input('terms_version', sql.NVarChar(20), TERMS_VERSION)
+          .input('ip_address', sql.NVarChar(45), req.ip || null)
+          .query(`
+            INSERT INTO terms_acceptances (user_id, business_id, terms_version, source, ip_address)
+            VALUES (@user_id, @business_id, @terms_version, 'register', @ip_address)
+          `);
+        await audit.logTermsAccepted(businessId, ownerId, ownerNameSaved,
+          TERMS_VERSION, 'register', transaction.request());
+      }
 
       // Seed a small starter catalog so the Items screen isn't empty on first
       // login — picked by business_type. Best-effort: never block registration.
@@ -199,7 +276,7 @@ router.post('/register', registerLimiter, async (req, res) => {
       // --- Free trial: 30 days from registration, no grace period ---
       // Auto-provision an active trial subscription so the user can log in and
       // use the app immediately. After 30 days the GET /license auto-expire logic
-      // blocks them until a paid subscription is activated via /admin/activate.
+      // blocks them until a paid subscription is activated from the admin dashboard.
       const trialExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       await transaction.request()
         .input('business_id', sql.UniqueIdentifier, businessId)
@@ -247,7 +324,7 @@ router.post('/register', registerLimiter, async (req, res) => {
 // POST /api/send-otp
 // Sends a WhatsApp OTP to the given phone number.
 // purpose: 'register' (before registration) | 'forgot_pin' (reset PIN)
-router.post('/send-otp', registerLimiter, otpSendLimiter, async (req, res) => {
+router.post('/send-otp', registerLimiter, otpSendLimiter, otpPhoneDailyLimiter, async (req, res) => {
   const { phone, purpose } = req.body;
 
   if (!phone || !purpose) {
@@ -300,6 +377,9 @@ router.post('/verify-otp', otpVerifyLimiter, async (req, res) => {
   if (!phone || !otp || !purpose) {
     return res.status(400).json({ error: 'phone, otp, and purpose are required' });
   }
+  if (!['register', 'forgot_pin'].includes(purpose)) {
+    return res.status(400).json({ error: 'purpose must be "register" or "forgot_pin"' });
+  }
 
   const valid = await whatsapp.verifyOtp(phone, otp, purpose);
   if (!valid) {
@@ -308,9 +388,11 @@ router.post('/verify-otp', otpVerifyLimiter, async (req, res) => {
 
   // Issue a short-lived signed token so the next step (register / reset-pin)
   // knows this phone was verified without storing extra session state.
+  // Its own derived key and a `typ`, like the store/order tokens: signed with
+  // ACCESS_SECRET and untyped, this verified cleanly as a staff access token.
   const verifiedToken = jwt.sign(
-    { verified_phone: phone, purpose },
-    process.env.JWT_ACCESS_SECRET,
+    { typ: 'otp', verified_phone: phone, purpose },
+    OTP_SECRET,
     { expiresIn: '15m' }
   );
 
@@ -332,12 +414,12 @@ router.post('/reset-pin', otpVerifyLimiter, async (req, res) => {
 
   let payload;
   try {
-    payload = jwt.verify(verified_token, process.env.JWT_ACCESS_SECRET);
+    payload = jwt.verify(verified_token, OTP_SECRET);
   } catch {
     return res.status(401).json({ error: 'Invalid or expired verification token' });
   }
 
-  if (payload.purpose !== 'forgot_pin' || !payload.verified_phone) {
+  if (payload.typ !== 'otp' || payload.purpose !== 'forgot_pin' || !payload.verified_phone) {
     return res.status(400).json({ error: 'Token is not valid for PIN reset' });
   }
 
@@ -345,18 +427,31 @@ router.post('/reset-pin', otpVerifyLimiter, async (req, res) => {
     await poolConnect;
     const pinHash = await bcrypt.hash(new_pin, 10);
 
+    // A reset is what an owner does after a takeover, so it also ends every
+    // existing session: refresh tokens are revoked, and access tokens issued
+    // before now stop working (sessions_valid_after, read by requireAuth).
+    // The cut-off uses this server's clock, the same one that stamps `iat`.
     const result = await pool.request()
       .input('phone',    sql.NVarChar(20),  payload.verified_phone)
       .input('pin_hash', sql.NVarChar(255), pinHash)
+      .input('now',      sql.DateTime2,     new Date())
       .query(`
         UPDATE users
-        SET pin_hash = @pin_hash, failed_attempts = 0, locked_until = NULL
-        WHERE phone = @phone
+        SET pin_hash = @pin_hash, failed_attempts = 0, locked_until = NULL,
+            sessions_valid_after = @now
+        OUTPUT INSERTED.id
+        WHERE phone = @phone;
+
+        UPDATE rt SET revoked = 1
+        FROM refresh_tokens rt
+        JOIN users u ON u.id = rt.user_id
+        WHERE u.phone = @phone AND rt.revoked = 0;
       `);
 
-    if (result.rowsAffected[0] === 0) {
+    if (result.recordset.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
+    for (const u of result.recordset) authState.forgetUser(u.id);
 
     return res.json({ success: true, message: 'PIN reset successfully.' });
   } catch (err) {
@@ -366,7 +461,7 @@ router.post('/reset-pin', otpVerifyLimiter, async (req, res) => {
 });
 
 // POST /api/login
-router.post('/login', loginLimiter, async (req, res) => {
+router.post('/login', loginIpFailLimiter, loginLimiter, async (req, res) => {
   const { phone, pin } = req.body;
 
   if (!phone || !pin) {
@@ -393,25 +488,19 @@ router.post('/login', loginLimiter, async (req, res) => {
         JOIN businesses b ON u.business_id = b.id
         LEFT JOIN subscriptions s ON s.business_id = u.business_id
         WHERE u.phone = @phone
+        -- Deterministic until users.phone is unique (migration 071).
+        ORDER BY u.created_at
       `);
 
+    // Unknown phone gets the same answer as a wrong PIN, after the same bcrypt
+    // work. A distinct 404 let anyone list which numbers have accounts, and
+    // then spray the commonest PINs at each one.
     if (userResult.recordset.length === 0) {
-      return res.status(404).json({ error: 'phone_not_found' });
+      await bcrypt.compare(pin, DUMMY_PIN_HASH);
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const row = userResult.recordset[0];
-
-    // A disabled staff account is refused before the PIN is even checked: the
-    // owner revoked access, and "wrong PIN" would send them to reset it instead
-    // of asking why.
-    if (row.is_active === false || row.is_active === 0) {
-      return res.status(403).json({ error: 'account_disabled',
-        message: 'This account has been disabled. Please contact the owner.' });
-    }
-
-    if (!row.is_verified) {
-      return res.status(403).json({ error: 'Your account is pending verification. Please wait.' });
-    }
 
     // Check account lockout
     if (row.locked_until && new Date(row.locked_until) > new Date()) {
@@ -426,11 +515,11 @@ router.post('/login', loginLimiter, async (req, res) => {
     const pinMatch = await bcrypt.compare(pin, row.pin_hash);
 
     if (!pinMatch) {
-      // Increment failure counter; lock if threshold reached
+      // Increment failure counter; lock on every LOCK_EVERY-th failure, for
+      // longer each time (see lockoutMs).
       const newAttempts = (row.failed_attempts || 0) + 1;
-      const lockedUntil = newAttempts >= MAX_FAILED_ATTEMPTS
-        ? new Date(Date.now() + LOCKOUT_DURATION_MS)
-        : null;
+      const lockMs = lockoutMs(newAttempts);
+      const lockedUntil = lockMs ? new Date(Date.now() + lockMs) : null;
 
       await pool.request()
         .input('id', sql.UniqueIdentifier, row.id)
@@ -444,19 +533,32 @@ router.post('/login', loginLimiter, async (req, res) => {
 
       if (lockedUntil) {
         audit.logUserLocked(row.business_id, row.id, row.name);
-        const retryAfterSec = Math.ceil(LOCKOUT_DURATION_MS / 1000);
+        const retryAfterSec = Math.ceil(lockMs / 1000);
         res.set('Retry-After', retryAfterSec);
         return res.status(423).json({
-          error: 'Account locked due to too many failed attempts. Try again in 15 minutes.',
+          error: `Account locked due to too many failed attempts. Try again in ${Math.round(lockMs / 60000)} minutes, or reset your PIN.`,
           retry_after_seconds: retryAfterSec,
         });
       }
 
+      // No attempts_remaining: it told an attacker exactly how many guesses
+      // were left before the lock.
       audit.logLoginFailed(row.business_id, phone);
-      return res.status(401).json({
-        error: 'Invalid credentials',
-        attempts_remaining: MAX_FAILED_ATTEMPTS - newAttempts,
-      });
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Only someone who knows the PIN learns why they cannot get in — before,
+    // these answered any caller who merely knew the phone number.
+    //
+    // A disabled staff account: the owner revoked access, and "wrong PIN"
+    // would send them to reset it instead of asking why.
+    if (row.is_active === false || row.is_active === 0) {
+      return res.status(403).json({ error: 'account_disabled',
+        message: 'This account has been disabled. Please contact the owner.' });
+    }
+
+    if (!row.is_verified) {
+      return res.status(403).json({ error: 'Your account is pending verification. Please wait.' });
     }
 
     // PIN correct — reset lockout counters
@@ -591,11 +693,20 @@ router.post('/refresh', refreshLimiter, async (req, res) => {
       return res.status(401).json({ error: 'Invalid or expired refresh token' });
     }
 
+    // The refresh token was minted at login and still carries that day's role;
+    // a disabled, deleted or demoted user must not be able to renew it into a
+    // fresh 8-hour token. Always a fresh read (refresh is rare, ~3x a day).
+    // null = DB state unknown → fall back to the token, as before.
+    const state = await authState.load(payload.user_id, payload.business_id);
+    if (state && !state.active) {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+
     // Issue a new access token — refresh token stays unchanged
     const newAccessToken = signAccessToken({
       user_id:     payload.user_id,
       business_id: payload.business_id,
-      role:        payload.role,
+      role:        (state && state.role) || payload.role,
     });
 
     return res.json({ access_token: newAccessToken });
@@ -634,9 +745,16 @@ router.post('/logout', async (req, res) => {
 router.post('/logout-all', requireAuth, async (req, res) => {
   try {
     await poolConnect;
+    // Revoke refresh tokens AND cut off access tokens already handed out —
+    // otherwise "sign out everywhere" left a stolen device working for 8 hours.
     await pool.request()
       .input('user_id', sql.UniqueIdentifier, req.user.user_id)
-      .query(`UPDATE refresh_tokens SET revoked = 1 WHERE user_id = @user_id AND revoked = 0`);
+      .input('now', sql.DateTime2, new Date())
+      .query(`
+        UPDATE refresh_tokens SET revoked = 1 WHERE user_id = @user_id AND revoked = 0;
+        UPDATE users SET sessions_valid_after = @now WHERE id = @user_id;
+      `);
+    authState.forgetUser(req.user.user_id);
 
     return res.json({ success: true });
   } catch (err) {

@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'invoice_pdf.dart' show ShapedText;
+
 /// One line on a purchase (reorder) list: an item name plus the quantity to
 /// buy.
 class PurchaseListLine {
@@ -22,6 +24,13 @@ class PurchaseListLine {
 /// a purchase list precedes the vendor bill rather than replacing it.
 class PurchaseListPdf {
   static Future<Uint8List> build(List<PurchaseListLine> lines) async {
+    // Marathi item names: pre-shaped, the pdf package cannot shape
+    // Devanagari (see ShapedText). ~ the Item column's width on A4.
+    final shaped = ShapedText();
+    for (final l in lines) {
+      await shaped.add(l.name, maxWidth: 360);
+    }
+
     final doc = pw.Document();
     final head = pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9);
     const cell = pw.TextStyle(fontSize: 9);
@@ -70,7 +79,11 @@ class PurchaseListPdf {
               ),
               for (final l in lines)
                 pw.TableRow(children: [
-                  cellText(l.name),
+                  pw.Padding(
+                    padding:
+                        const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                    child: shaped.widget(l.name, style: cell),
+                  ),
                   cellText('${fmtQty(l.quantity)} ${l.unit}', right: true),
                 ]),
               if (lines.isEmpty)

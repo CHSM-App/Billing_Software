@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'invoice_pdf.dart' show ShapedText;
+
 /// Builds the downloadable artefacts for the GSTR-1 report.
 ///
 /// SCOPE NOTE: bills carry no buyer GSTIN, so every sale is B2C. The return
@@ -122,6 +124,12 @@ class Gstr1Export {
     final b2cs = (report['b2cs'] as List? ?? []);
     final hsn = (report['hsn'] as List? ?? []);
 
+    // A Marathi business name: pre-shaped, the pdf package cannot shape
+    // Devanagari (see ShapedText).
+    final shaped = ShapedText();
+    await shaped.add((business['name'] ?? '').toString(),
+        bold: true, maxWidth: 420);
+
     final head = pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9);
     const cell = pw.TextStyle(fontSize: 9);
 
@@ -130,7 +138,7 @@ class Gstr1Export {
           child: pw.Row(children: [
             pw.SizedBox(
                 width: 110, child: pw.Text(k, style: const pw.TextStyle(fontSize: 9))),
-            pw.Text(v, style: head),
+            shaped.widget(v, bold: true, style: head),
           ]),
         );
 

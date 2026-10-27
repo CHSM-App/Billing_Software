@@ -112,7 +112,23 @@ function dateRange(fromStr, toStr) {
   return { start: utcDayStart(fromStr), end: utcDayEnd(toStr) };
 }
 
+/**
+ * `date` + `months` calendar months, clamped to the last day of the target
+ * month: 31 Jan + 1 → 28/29 Feb (not 3 Mar), 29 Feb 2028 + 12 → 28 Feb 2029.
+ * Used for warranty expiry dates.
+ */
+function addMonths(date, months) {
+  const d = new Date(date);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, last));
+  return d;
+}
+
 module.exports = {
+  addMonths,
   isValidDateString,
   requireDateParam,
   utcDayStart,

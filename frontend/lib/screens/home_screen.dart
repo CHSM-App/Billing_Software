@@ -12,7 +12,8 @@ import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../models/cart_entry.dart';
 import '../utils/money.dart';
-import '../utils/text_formatters.dart' show UpperCaseTextFormatter;
+import '../utils/text_formatters.dart'
+    show UpperCaseTextFormatter, isIndianMobile;
 import '../utils/platform_utils.dart' show isWindows;
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
@@ -167,6 +168,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // charges or round-off move it, the last row is refilled.
   double? _payRowsBase;
   bool _payRefillPending = false;
+  // What the customer already paid online (UPI) for a reopened online-store
+  // order, and their reference — prefilled as its own UPI row so the counter
+  // only collects the balance. Zero for every other bill.
+  double _onlinePaid = 0;
+  String? _onlinePaidRef;
   // Bills this device settled per mode — "+" offers the most-used one.
   Map<String, int> _modeUse = const {};
   // Inline error shown inside the billing card when a credit bill is missing
@@ -511,7 +517,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       if (mounted) {
         setState(() {
           // A draft is never split — its parts are chosen when it is settled.
-          _resetPayRows(bill.paymentMode);
+          _resetPayRows(bill.hasOnlinePrepayment ? 'upi' : bill.paymentMode);
+          if (bill.hasOnlinePrepayment) _prefillOnlinePayment(bill);
           if (bill.customerName != null) {
             _customerNameController.text = bill.customerName!;
             _showCustomerFields = true;
@@ -1112,11 +1119,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ..clear()
       ..add(_newPayRow(_payModes.contains(mode) ? mode : 'cash'));
     _payRowsBase = null;
+    _onlinePaid = 0;
+    _onlinePaidRef = null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final r in old) {
         r.dispose();
       }
     });
+  }
+
+  /// A reopened online-store order the customer already paid (part of) by UPI:
+  /// the first row (already UPI, see [_resetPayRows]) is that payment, and a
+  /// cash row takes the balance. Paid in full → the single UPI row stays and
+  /// fills itself with the whole payable.
+  void _prefillOnlinePayment(Bill bill) {
+    _onlinePaid = bill.onlinePaidAmount;
+    _onlinePaidRef = bill.onlinePaymentTxnId;
+    if (_onlinePaid >= bill.total - bill.discountAmount - 0.004) return;
+    _payRows.first.amountController.text = _fmtPayAmount(_onlinePaid);
+    _payRows.add(_newPayRow('cash'));
+  }
+
+  /// What is still to collect at the counter: the payable less any advance
+  /// already paid online. Shown on the Settle button.
+  double get _toCollect {
+    final v = _netPayable() - _onlinePaid;
+    return v < 0 ? 0 : v;
   }
 
   /// The most-used mode on this device that no row has yet. Ties keep the
@@ -1213,6 +1241,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_onlinePaid > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.space4),
+              child: Text(
+                l10n.billingPaidOnline(
+                        '₹${_onlinePaid.toStringAsFixed(2)}',
+                        '₹${_toCollect.toStringAsFixed(2)}') +
+                    (_onlinePaidRef?.isNotEmpty == true
+                        ? ' · $_onlinePaidRef'
+                        : ''),
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.success),
+              ),
+            ),
           for (final (i, row) in _payRows.indexed) _buildPayRow(l10n, i, row),
           if (!_payRefillPending && remaining.abs() >= 0.005)
             Padding(
@@ -2665,7 +2709,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _validateCustomerPhone() {
     final phone = _customerPhoneController.text.trim();
     if (phone.isEmpty) return true;
-    if (RegExp(r'^\d{10}$').hasMatch(phone)) return true;
+    if (isIndianMobile(phone)) return true;
     setState(() => _showCustomerFields = true);
     _showSnack(context.l10n.billingPhoneInvalid, isError: true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -5667,7 +5711,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             // The amount IS the label: the cashier reads the
                             // figure at the instant of committing to it.
                             amountLabel: l10n.billingSettleAmount(
-                                '₹${_netPayable().toStringAsFixed(2)}'),
+                                '₹${_toCollect.toStringAsFixed(2)}'),
                             // ...and the second line says how it ends, so a
                             // printer that dropped is visible BEFORE the tap.
                             outcomeLabel: ref.watch(printReadyProvider)

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +14,7 @@ import '../services/receipt_output.dart';
 import '../services/receipt_labels.dart';
 import '../storage.dart';
 import '../theme/app_theme.dart';
+import '../utils/text_formatters.dart' show isIndianMobile;
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/whatsapp_mark.dart';
@@ -44,11 +47,25 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   final _timeFmt = DateFormat('hh:mm a');
   final _orderedFmt = DateFormat('dd MMM, hh:mm a');
 
+  // Seeded from the filter: it outlives this screen, so a revisit keeps the
+  // query the list is still filtered by.
+  late final _searchCtrl =
+      TextEditingController(text: ref.read(billFilterProvider).search ?? '');
+  Timer? _searchDebounce;
+
   @override
-  void initState() {
-    super.initState();
-    // Listen for search text changes to debounce-free update
-    ref.listenManual(billFilterProvider, (_, __) {});
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Every keystroke used to refetch (and flash a spinner over the field);
+  /// wait until typing pauses, same as Customers / Warranty.
+  void _onSearchChanged(String v) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350),
+        () => ref.read(billFilterProvider.notifier).setSearch(v.trim()));
   }
 
   Future<void> _pickDateRange() async {
@@ -178,6 +195,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 child: SizedBox(
                   height: 40,
                   child: TextField(
+                    controller: _searchCtrl,
                     decoration: InputDecoration(
                       hintText: l10n.historySearchBillOrPhone,
                       isDense: true,
@@ -186,8 +204,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: AppSpacing.space16, vertical: 0),
                     ),
-                    onChanged: (v) =>
-                        ref.read(billFilterProvider.notifier).setSearch(v),
+                    onChanged: _onSearchChanged,
                   ),
                 ),
               ),
@@ -220,7 +237,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
   Widget _buildBody(AppLocalizations l10n, AsyncValue<List<Bill>> billsAsync,
       BillFilterState filter) {
-    return billsAsync.when(
+    // skipLoadingOnReload: a refetch (search, date chip) keeps the list and the
+    // search field mounted instead of swapping them for a spinner, which closed
+    // the keyboard on every keystroke.
+    final body = billsAsync.when(
+      skipLoadingOnReload: true,
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => RefreshIndicator(
         onRefresh: () async {
@@ -271,6 +292,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         );
       },
     );
+    if (!billsAsync.isLoading || !billsAsync.hasValue) return body;
+    return Stack(children: [
+      body,
+      const Positioned(
+          top: 0, left: 0, right: 0, child: LinearProgressIndicator(minHeight: 2)),
+    ]);
   }
 
   /// Responsive bill list: single column on phones, a grid (2–3 columns) on
@@ -797,7 +824,7 @@ class _PhonePromptDialogState extends State<_PhonePromptDialog> {
 
   void _submit() {
     final phone = _controller.text.trim();
-    if (!RegExp(r'^\d{10}$').hasMatch(phone)) {
+    if (!isIndianMobile(phone)) {
       setState(() => _error = context.l10n.billingPhoneInvalid);
       return;
     }

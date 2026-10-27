@@ -39,7 +39,7 @@ const { cleanLines, priceLines } = require('../menuPricing');
 const { upsertCustomer } = require('../customers');
 const { publicTokenSecret } = require('../auth');
 const { sendTableOrderNotification, sendKitchenNotification } = require('../fcm');
-const { otpSendLimiter, otpVerifyLimiter, publicPageLimiter: orderLimiter } = require('../middleware/rateLimiter');
+const { otpSendLimiter, otpPhoneDailyLimiter, otpVerifyLimiter, publicPageLimiter: orderLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -303,7 +303,7 @@ router.get('/:qrToken/current', orderLimiter, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /order/:qrToken/send-otp  — { phone }
 // ---------------------------------------------------------------------------
-router.post('/:qrToken/send-otp', orderLimiter, otpSendLimiter, async (req, res) => {
+router.post('/:qrToken/send-otp', orderLimiter, otpSendLimiter, otpPhoneDailyLimiter, async (req, res) => {
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'phone is required' });
   try {

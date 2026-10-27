@@ -1823,7 +1823,7 @@ abstract class AppLocalizations {
   /// No description provided for @loginIncorrectPin.
   ///
   /// In en, this message translates to:
-  /// **'Incorrect PIN. Please try again.'**
+  /// **'Incorrect phone number or PIN. Please try again.'**
   String get loginIncorrectPin;
 
   /// No description provided for @loginAccountLocked.
@@ -3071,8 +3071,20 @@ abstract class AppLocalizations {
   /// No description provided for @billSetupAltPhoneInvalid.
   ///
   /// In en, this message translates to:
-  /// **'Enter a valid phone number'**
+  /// **'Enter a valid 10-digit mobile number'**
   String get billSetupAltPhoneInvalid;
+
+  /// No description provided for @billSetupAltPhoneLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Label (optional)'**
+  String get billSetupAltPhoneLabel;
+
+  /// No description provided for @billSetupAltPhoneLabelHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. GPay, WhatsApp'**
+  String get billSetupAltPhoneLabelHint;
 
   /// No description provided for @billSetupGstin.
   ///
@@ -3529,6 +3541,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{amount} extra'**
   String billingPayExtra(String amount);
+
+  /// No description provided for @billingPaidOnline.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid online {paid} · Balance {balance}'**
+  String billingPaidOnline(String paid, String balance);
 
   /// No description provided for @billingSplitMismatch.
   ///
@@ -4603,7 +4621,7 @@ abstract class AppLocalizations {
   /// No description provided for @historySearchBillOrPhone.
   ///
   /// In en, this message translates to:
-  /// **'Search bill no. or phone…'**
+  /// **'Search bill no., name or phone…'**
   String get historySearchBillOrPhone;
 
   /// No description provided for @historyNoBillsForPeriod.
@@ -7419,6 +7437,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enter a valid number'**
   String get priceListBadNumber;
+
+  /// No description provided for @termsConsentTos.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms of Service'**
+  String get termsConsentTos;
+
+  /// No description provided for @termsConsentAup.
+  ///
+  /// In en, this message translates to:
+  /// **'Acceptable Use Policy'**
+  String get termsConsentAup;
+
+  /// No description provided for @termsConsentPrivacy.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy Policy'**
+  String get termsConsentPrivacy;
+
+  /// No description provided for @termsConsentLead.
+  ///
+  /// In en, this message translates to:
+  /// **'I have read and agree to the'**
+  String get termsConsentLead;
+
+  /// No description provided for @termsConsentAnd.
+  ///
+  /// In en, this message translates to:
+  /// **'and'**
+  String get termsConsentAnd;
+
+  /// No description provided for @termsUpdatedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'We\'ve updated our Terms'**
+  String get termsUpdatedTitle;
+
+  /// No description provided for @termsUpdatedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Please review the documents below. To keep using Vittam, tick the box at the bottom and tap Agree.'**
+  String get termsUpdatedBody;
+
+  /// No description provided for @termsUpdatedVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}'**
+  String termsUpdatedVersion(String version);
+
+  /// No description provided for @termsAgree.
+  ///
+  /// In en, this message translates to:
+  /// **'Agree'**
+  String get termsAgree;
+
+  /// No description provided for @termsSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save your acceptance. Check your connection and try again.'**
+  String get termsSaveFailed;
+
+  /// No description provided for @settingsTermsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The agreement for using Vittam'**
+  String get settingsTermsSubtitle;
+
+  /// No description provided for @settingsAupSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What is not allowed on Vittam'**
+  String get settingsAupSubtitle;
 }
 
 class _AppLocalizationsDelegate

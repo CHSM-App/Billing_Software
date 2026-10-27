@@ -7,6 +7,8 @@ export default defineConfig({
   server: {
     // Reachable from other devices on the LAN (phone testing, 192.168.x.y).
     host: true,
+    // The legal pages import their text from ../docs/legal/*.md (LegalPage.jsx).
+    fs: { allow: ['..'] },
     // Same-origin /api in development. A production build is served BY the
     // backend out of backend/public (see build.outDir), so the page and the API
     // already share an origin there — this makes dev match, which means the

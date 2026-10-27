@@ -166,6 +166,8 @@
     '.ml-tot{display:flex;justify-content:space-between;font-size:16px;font-weight:800;margin-bottom:12px}',
     '.ml-go{width:100%;height:48px;border:0;border-radius:var(--r-md);background:var(--primary);color:#fff;',
     'font-size:15px;font-weight:700;cursor:pointer}.ml-go:disabled{opacity:.5;cursor:default}',
+    '.ml-note{margin-top:8px;font-size:12px;line-height:1.4;color:var(--muted,#64748b);text-align:center}',
+    '.ml-note a{color:inherit;text-decoration:underline}',
     '.ml-fab{position:fixed;left:16px;right:16px;bottom:16px;z-index:30}.ml-fab[hidden]{display:none}',
     '.ml-fab button{width:100%;height:48px;border:0;border-radius:16px;background:var(--primary);color:#fff;font-size:14px;',
     'font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 4px 12px rgba(15,23,42,.25);cursor:pointer}',
@@ -618,7 +620,10 @@
       });
       h += '</div><div class="ml-cpf"><div class="ml-tot"><span>Total</span><span data-total>' + money(total()) + '</span></div>' +
         '<button class="ml-go" data-act="go"' + (cart.size && !busy ? '' : ' disabled') + '>' +
-        esc(busy ? 'Please wait…' : (opts.actionLabel || 'Place Order')) + '</button></div>';
+        esc(busy ? 'Please wait…' : (opts.actionLabel || 'Place Order')) + '</button>' +
+        // opts.actionNote: trusted markup from the page itself (the Ordering
+        // Terms notice and its link) — never customer or shop data.
+        (opts.actionNote ? '<div class="ml-note">' + opts.actionNote + '</div>' : '') + '</div>';
       return '<div class="ml-cp">' + h + '</div>';
     }
 

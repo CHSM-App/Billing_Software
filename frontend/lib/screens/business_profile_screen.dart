@@ -292,7 +292,7 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                   if (v == null || v.trim().isEmpty) {
                                     return l10n.commonRequired;
                                   }
-                                  if (!RegExp(r'^\d{10}$').hasMatch(v.trim())) {
+                                  if (!isIndianMobile(v.trim())) {
                                     return l10n.businessProfilePhoneInvalid;
                                   }
                                   return null;

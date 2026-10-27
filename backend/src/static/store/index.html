@@ -45,6 +45,8 @@
       padding: 16px; margin-bottom: 16px; text-align: center; }
     .pay .amt { font-size: 20px; font-weight: 800; color: var(--primary-dark); }
     .who { display: flex; align-items: center; gap: 6px; margin: -4px 0 16px; font-size: 13px; color: var(--muted); }
+    .terms-note { margin: 10px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); text-align: center; }
+    .terms-note a { color: inherit; text-decoration: underline; }
     .pay-seg { margin-bottom: 12px; }
     .pay-seg button { background: var(--surface); }
     .pay-seg button.sel { background: var(--primary); border-color: var(--primary); color: #fff; }
@@ -124,6 +126,8 @@
 
       <div class="err" id="coErr"></div>
       <button class="btn" id="coBtn">Place Order</button>
+      <p class="terms-note">By placing this order, you agree to the shop&rsquo;s applicable ordering policies and
+        Vittam&rsquo;s <a href="/ordering-terms" target="_blank" rel="noopener">Customer Ordering Terms</a>.</p>
     </div>
   </div>
 

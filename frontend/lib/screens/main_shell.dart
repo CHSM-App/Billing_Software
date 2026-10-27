@@ -25,6 +25,7 @@ import 'settings_screen.dart';
 import 'history_screen.dart';
 import 'license_screen.dart';
 import 'login_screen.dart';
+import 'terms_accept_screen.dart';
 import '../providers/open_drafts_provider.dart';
 
 class MainShell extends ConsumerStatefulWidget {
@@ -68,6 +69,10 @@ class _MainShellState extends ConsumerState<MainShell>
     // returns to the foreground — enforcing a restriction the admin applied
     // while the app was backgrounded, without needing a full restart.
     WidgetsBinding.instance.addObserver(this);
+    // Legal terms: ask now if the check that led here already said so, and
+    // again whenever ANY later license check (resume, Settings, …) says so.
+    LicenseService.instance.termsRequired.addListener(_maybeAskTerms);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAskTerms());
     _railAnimController = AnimationController(
       duration: const Duration(milliseconds: 400),
       vsync: this,
@@ -87,6 +92,7 @@ class _MainShellState extends ConsumerState<MainShell>
     NotificationService.instance.onlineOrderTap.addListener(_onOnlineOrderTapped);
     NotificationService.instance.lowStockTap.addListener(_onLowStockTapped);
     NotificationService.instance.tableOrderPing.addListener(_onTableOrderPing);
+    NotificationService.instance.tableOrderTap.addListener(_onTableOrderTapped);
 
     // Ensure the socket is live for this session. The app bootstrap starts it on
     // cold launch, but a re-login (login screen → new shell) mounts here without
@@ -129,8 +135,11 @@ class _MainShellState extends ConsumerState<MainShell>
           }
         }
       }
-      // Same cold-launch case for the owner's low-stock alert.
+      // Same cold-launch case for the owner's low-stock alert and table orders.
       if (NotificationService.instance.consumeTap('low_stock')) _openItems();
+      if (NotificationService.instance.consumeTap('table_order')) {
+        _openTableOrders();
+      }
     });
   }
 
@@ -249,6 +258,7 @@ class _MainShellState extends ConsumerState<MainShell>
           ),
           (_) => false,
         );
+        return;
       }
     } catch (_) {
       // Never let a resume-time check crash the app; the next launch re-checks.
@@ -257,8 +267,26 @@ class _MainShellState extends ConsumerState<MainShell>
     }
   }
 
+  bool _termsScreenOpen = false;
+
+  /// The full-page consent screen for an owner who has not accepted the
+  /// current legal terms (GET /license terms_required). Owner-only and off
+  /// entirely until the server sets a version, so nobody sees it before then.
+  Future<void> _maybeAskTerms() async {
+    final license = LicenseService.instance;
+    final version = license.termsVersion;
+    if (!mounted || _termsScreenOpen || !license.termsRequired.value || version == null) return;
+    _termsScreenOpen = true;
+    await Navigator.of(context).push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => TermsAcceptScreen(termsVersion: version),
+    ));
+    _termsScreenOpen = false;
+  }
+
   @override
   void dispose() {
+    LicenseService.instance.termsRequired.removeListener(_maybeAskTerms);
     WidgetsBinding.instance.removeObserver(this);
     _realtimeSub?.cancel();
     NotificationService.instance.onlineOrderPing
@@ -268,6 +296,8 @@ class _MainShellState extends ConsumerState<MainShell>
     NotificationService.instance.onlineOrderTap
         .removeListener(_onOnlineOrderTapped);
     NotificationService.instance.lowStockTap.removeListener(_onLowStockTapped);
+    NotificationService.instance.tableOrderTap
+        .removeListener(_onTableOrderTapped);
     _railAnimController.dispose();
     HardwareKeyboard.instance.removeHandler(_onEscBack);
     super.dispose();
@@ -336,11 +366,48 @@ class _MainShellState extends ConsumerState<MainShell>
     _openItems();
   }
 
+  void _onTableOrderTapped() {
+    if (!mounted) return;
+    NotificationService.instance.consumeTap('table_order');
+    _openTableOrders();
+  }
+
+  /// A notification tap switches the shell's tab — invisible while a page is
+  /// pushed over the shell (a draft opened from Open Orders, a settings page),
+  /// which is why tapping an order used to seem to do nothing. Pops back to the
+  /// shell first. maybePop honours PopScope, so an unsaved bill still asks; if
+  /// that page stays, so does the user, and false is returned.
+  Future<bool> _popToShell() async {
+    final shell = ModalRoute.of(context);
+    final nav = Navigator.of(context);
+    while (mounted && shell != null && !shell.isCurrent) {
+      Route<dynamic>? top;
+      nav.popUntil((r) {
+        top = r; // peek at the top route without popping anything
+        return true;
+      });
+      await nav.maybePop();
+      if (!mounted || (top?.isActive ?? false)) return false;
+    }
+    return mounted;
+  }
+
   /// Jump to Items, where low-stock items sort to the top. Owner-only tab, and
   /// only owners get the alert — anyone else simply stays where they are.
-  void _openItems() {
+  Future<void> _openItems() async {
+    if (!await _popToShell()) return;
     final i = _navItems.indexWhere((n) => n.screen is ItemsScreen);
     if (i >= 0) _onNav(i);
+  }
+
+  /// Bring Orders › Tables (Open Orders with no tables) to the front, where a
+  /// QR table order lands as that table's running draft.
+  Future<void> _openTableOrders() async {
+    if (!await _popToShell()) return;
+    final i = _navItems.indexWhere((n) => n.screen is OrdersScreen);
+    if (i < 0) return;
+    ref.read(openTableOrdersRequestProvider.notifier).state = true;
+    if (i != _index) setState(() => _index = i);
   }
 
   /// Bring the Online orders queue to the front.
@@ -350,6 +417,7 @@ class _MainShellState extends ConsumerState<MainShell>
   /// aim at a tab that is not there yet. The post-frame hop is what lets the
   /// rebuilt nav list be read back.
   Future<void> _openOnlineOrders() async {
+    if (!await _popToShell()) return;
     await ref.read(onlineOrdersProvider.notifier).refreshSilently();
     if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {

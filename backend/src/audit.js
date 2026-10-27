@@ -489,6 +489,27 @@ async function logAccountDeleted(businessId, userId, userName) {
   });
 }
 
+// ── Legal terms ────────────────────────────────────────────────────────────
+
+/**
+ * Log that an owner accepted a version of the legal terms (src/legal.js).
+ * Pass the transaction's request when recording inside /register, so the audit
+ * row rolls back together with the registration.
+ * @param {string} source - 'register' | 'reaccept'
+ */
+async function logTermsAccepted(businessId, userId, userName, termsVersion, source, requestObj) {
+  await writeAudit({
+    business_id:  businessId,
+    user_id:      userId,
+    user_name:    userName,
+    event_type:   'terms_accepted',
+    entity_id:    userId,
+    entity_label: termsVersion,
+    new_value:    { terms_version: termsVersion, source },
+    description:  `Terms version ${termsVersion} accepted by "${userName}"`,
+  }, requestObj);
+}
+
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -622,6 +643,8 @@ module.exports = {
   logAccountDeletionRequested,
   logAccountDeletionCancelled,
   logAccountDeleted,
+  // Legal terms
+  logTermsAccepted,
   // Vendor bills
   logVendorBillCreated,
   logVendorBillUpdated,

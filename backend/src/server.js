@@ -13,15 +13,24 @@ if (process.env.NODE_ENV && !['development', 'production', 'test'].includes(proc
 }
 
 const WEAK_DEFAULTS = ['changeme', 'secret', 'jwt_secret', 'your_secret'];
+let weakSecret = false;
 for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET']) {
   if (process.env[key]) {
     if (WEAK_DEFAULTS.includes(process.env[key].toLowerCase())) {
       console.error(`[startup] ${key} is set to a weak default — replace it with a cryptographically strong secret.`);
+      weakSecret = true;
     }
     if (process.env[key].length < 32) {
       console.error(`[startup] ${key} is too short (${process.env[key].length} chars) — must be at least 32 characters.`);
+      weakSecret = true;
     }
   }
+}
+// In production a missing or weak secret is fatal: booting anyway would sign
+// every session with a guessable key. Dev and test only warn.
+if (process.env.NODE_ENV === 'production' && (missing.length > 0 || weakSecret)) {
+  console.error('[startup] Refusing to start in production with the configuration errors above.');
+  process.exit(1);
 }
 
 // Logger is safe to initialise now that NODE_ENV is validated
@@ -48,6 +57,22 @@ const app = express();
 // One hop (IIS only) is the current setup; put a CDN in front and this becomes
 // 2, hence the override rather than a literal.
 app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
+
+// Baseline security headers on every response (no helmet — these five lines
+// are all of it we use). No CSP yet: the static pages run inline scripts, so a
+// policy needs them moved into files first.
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  // The store / order / receipt pages must not be framed by another site
+  // (clickjacking an "order" or "pay" button).
+  res.set('X-Frame-Options', 'SAMEORIGIN');
+  res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (process.env.NODE_ENV === 'production') {
+    res.set('Strict-Transport-Security', 'max-age=15552000');
+  }
+  next();
+});
 
 // ---------------------------------------------------------------------------
 // Canonical host — send page requests arriving on any other hostname (notably
@@ -157,8 +182,13 @@ app.use(cors({
 app.use(pinoHttp({
   logger,
   // Auto-assign a unique request ID to each request for tracing
+  // A client-sent id is kept only if it looks like one, so nobody can write
+  // arbitrary text into our logs or impersonate another request's trail.
   genReqId(req) {
-    return req.headers['x-request-id'] || require('crypto').randomUUID();
+    const sent = req.headers['x-request-id'];
+    return typeof sent === 'string' && /^[\w-]{1,64}$/.test(sent)
+      ? sent
+      : require('crypto').randomUUID();
   },
   // Attach the request ID to the response so clients can correlate
   customSuccessMessage(req, res) {

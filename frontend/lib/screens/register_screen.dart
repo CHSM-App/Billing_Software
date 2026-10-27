@@ -5,6 +5,7 @@ import '../theme/app_theme.dart';
 import '../utils/text_formatters.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/language_selector.dart';
+import '../widgets/terms_consent.dart';
 import 'otp_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -48,6 +49,8 @@ class _RegisterScreenState extends State<RegisterScreen>
   String get _apiBusinessType =>
       _businessType == 'restaurant' ? 'restaurant_with_tables' : _businessType;
   bool _inventoryEnabled = false;
+  // The consent box is ticked — gates Create Account.
+  bool _termsAccepted = false;
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -107,21 +110,22 @@ class _RegisterScreenState extends State<RegisterScreen>
 
     if (!mounted) return;
 
-    // Step 2 — open OTP screen; returns true on success, null if user went back
-    final verified = await Navigator.push<bool>(
+    // Step 2 — open OTP screen; returns the verified_token on success, null if
+    // the user went back
+    final verifiedToken = await Navigator.push<String>(
       context,
       MaterialPageRoute(
         builder: (_) => OtpScreen(phone: ownerPhone, purpose: 'register'),
       ),
     );
 
-    if (!mounted || verified != true) return;
+    if (!mounted || verifiedToken == null) return;
 
-    // Step 3 — OTP confirmed, submit registration
-    await _submitRegistration();
+    // Step 3 — OTP confirmed, submit registration with the proof
+    await _submitRegistration(verifiedToken);
   }
 
-  Future<void> _submitRegistration() async {
+  Future<void> _submitRegistration(String verifiedToken) async {
     final l10n = context.l10n;
     setState(() {
       _isLoading = true;
@@ -145,6 +149,8 @@ class _RegisterScreenState extends State<RegisterScreen>
         // FSSAI only applies to food businesses; never send it for retail even
         // if the field held a stale value before the type was switched.
         fssaiNumber: _isRestaurant ? _fssaiController.text.trim() : null,
+        verifiedToken: verifiedToken,
+        acceptTerms: _termsAccepted,
       );
 
       if (!mounted) return;
@@ -248,7 +254,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                             if (v == null || v.isEmpty) {
                               return l10n.commonRequired;
                             }
-                            if (!RegExp(r'^\d{10}$').hasMatch(v)) {
+                            if (!isIndianMobile(v)) {
                               return l10n.loginPhoneInvalid;
                             }
                             return null;
@@ -396,7 +402,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                             if (v == null || v.isEmpty) {
                               return l10n.commonRequired;
                             }
-                            if (!RegExp(r'^\d{10}$').hasMatch(v)) {
+                            if (!isIndianMobile(v)) {
                               return l10n.loginPhoneInvalid;
                             }
                             return null;
@@ -476,9 +482,13 @@ class _RegisterScreenState extends State<RegisterScreen>
                       ),
                     ],
                     const SizedBox(height: AppSpacing.space24),
+                    TermsConsent(
+                      onChanged: (v) => setState(() => _termsAccepted = v),
+                    ),
+                    const SizedBox(height: AppSpacing.space16),
                     PrimaryButton(
                       text: l10n.registerCreateAccount,
-                      onPressed: _register,
+                      onPressed: _termsAccepted ? _register : null,
                       isLoading: _isLoading,
                       icon: Icons.rocket_launch_outlined,
                     ),

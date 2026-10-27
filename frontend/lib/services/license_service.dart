@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart' show ValueNotifier, debugPrint, kIsWeb;
 import '../api.dart';
 import '../storage.dart';
 import '../utils/platform_utils.dart' show isDesktopDevice;
@@ -136,10 +136,23 @@ class LicenseService {
   // Last error message — shown on the blocked screen when online check fails
   String? lastOnlineError;
 
+  /// Legal terms (GET /license). True only for an owner who has not accepted
+  /// the server's current version. A notifier, because many screens run the
+  /// license check (startup, login, resume, Settings…): main_shell LISTENS and
+  /// shows TermsAcceptScreen whenever it turns true, whoever fetched it.
+  /// Only an online check can raise it; offline, nobody is asked.
+  final termsRequired = ValueNotifier<bool>(false);
+  String? termsVersion;
+
   Future<LicenseStatus> _checkOnline() async {
     lastOnlineError = null;
     try {
       final data = await getLicense();
+      // Absent (older backend, or the flow switched off) → never ask.
+      // Version first: a listener reacting to termsRequired reads it.
+      termsVersion = data['terms_version'] as String?;
+      termsRequired.value =
+          data['terms_required'] == true && termsVersion != null;
       // ignore: avoid_print
       print('[LICENSE] server response: $data');
 
@@ -451,6 +464,9 @@ class LicenseService {
 
   /// Clear cached license (call on logout)
   Future<void> clear() async {
+    // A new login starts clean: the previous user's terms answer is not theirs.
+    termsRequired.value = false;
+    termsVersion = null;
     await Future.wait([
       _secure.delete(key: _keyStatus),
       _secure.delete(key: _keyExpiresAt),

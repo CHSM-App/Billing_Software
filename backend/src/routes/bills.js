@@ -4,14 +4,14 @@ const { requireAuth } = require('../auth');
 const { whatsappLimiter } = require('../middleware/rateLimiter');
 const logger = require('../logger');
 const audit = require('../audit');
-const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUtils');
+const { isValidDateString, todayUtc, dayRange, dateRange, addMonths } = require('../dateUtils');
 const { sendBillLink, normalisePhone, sendReceiptLink } = require('../whatsapp');
 const { generateReceiptToken, RECEIPT_BASE } = require('../receiptToken');
-const { sendLowStockNotification } = require('../fcm');
+const { sendLowStockNotification, sendBillVoidedNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
 const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
-const { validateExtraData } = require('../validate');
+const { validateExtraData, isIndianMobile } = require('../validate');
 
 // "Retail & Warranty" shops: a finalized bill line sold against a
 // warranty-eligible item becomes a warranty record automatically (manual
@@ -32,7 +32,11 @@ async function autoCreateWarranties(businessId, billId, userId) {
         FROM bill_items bi
         JOIN bills b ON b.id = bi.bill_id
         JOIN items i ON i.id = bi.item_id
+        JOIN businesses bz ON bz.id = b.business_id
         WHERE bi.bill_id = @bill_id AND b.business_id = @business_id
+          -- Shop switched warranty tracking off (Settings): items keep their
+          -- flag for when it comes back on, but no new records are made.
+          AND bz.warranty_enabled = 1
           AND i.warranty_eligible = 1
           AND NOT EXISTS (SELECT 1 FROM warranties w WHERE w.bill_item_id = bi.id)
       `);
@@ -42,8 +46,7 @@ async function autoCreateWarranties(businessId, billId, userId) {
       // orphaned record staff could never find again.
       if (!row.customer_phone) continue;
       const months = row.default_warranty_months || 12;
-      const expiry = new Date(row.purchase_date);
-      expiry.setUTCMonth(expiry.getUTCMonth() + months);
+      const expiry = addMonths(row.purchase_date, months);
 
       await pool.request()
         .input('business_id', sql.UniqueIdentifier, businessId)
@@ -244,6 +247,22 @@ function cashierOrOwner(req, res, next) {
     return res.status(403).json({ error: 'Only a cashier or owner can finalize a bill or take payment' });
   }
   next();
+}
+
+// Largest quantity one staff line may carry. Far above any real sale (a
+// wholesale 5000 kg line fits) and well inside Decimal(10,2).
+const STAFF_MAX_LINE_QTY = 99999;
+
+// Every line's quantity must be a positive, sane number. Without this a
+// negative line lowered the bill total and ADDED stock (stock - (-qty) passes
+// the `stock >= @qty` guard), and NaN reached the database. There is no
+// returns flow that sends negatives. Returns an error message, or null.
+function badQuantity(items) {
+  const bad = items.find((i) => {
+    const qty = Number(i && i.quantity);
+    return !Number.isFinite(qty) || qty <= 0 || qty > STAFF_MAX_LINE_QTY;
+  });
+  return bad ? `Each item needs a quantity between 0 and ${STAFF_MAX_LINE_QTY}` : null;
 }
 
 // Load the variants referenced by a set of request line items, scoped to the
@@ -679,6 +698,8 @@ router.post('/', requireAuth, async (req, res) => {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
   }
+  const qtyError = badQuantity(items);
+  if (qtyError) return res.status(400).json({ error: qtyError });
   if (!payment_mode) {
     return res.status(400).json({ error: 'payment_mode is required' });
   }
@@ -1191,7 +1212,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
     if (search) {
       request.input('search', sql.NVarChar(100), `%${search}%`);
-      where += ' AND (b.bill_number LIKE @search OR b.customer_phone LIKE @search)';
+      where += ' AND (b.bill_number LIKE @search OR b.customer_phone LIKE @search OR b.customer_name LIKE @search)';
     }
 
     const billsResult = await request.query(`
@@ -1692,6 +1713,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required' });
   }
+  const qtyError = badQuantity(items);
+  if (qtyError) return res.status(400).json({ error: qtyError });
 
   let addedLineItems = [];
 
@@ -1929,6 +1952,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required' });
   }
+  const qtyError = badQuantity(items);
+  if (qtyError) return res.status(400).json({ error: qtyError });
   // Only overwrite a field when the key was actually sent, so callers that omit
   // them (e.g. the kitchen) never wipe existing details.
   const setCustomerName = Object.prototype.hasOwnProperty.call(req.body, 'customer_name');
@@ -2286,7 +2311,8 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT b.id, b.status, b.table_id, b.bill_number, b.total,
-               b.credit_collected, bs.inventory_enabled
+               b.credit_collected, bs.inventory_enabled,
+               COALESCE(b.finalized_at, b.created_at) AS settled_at
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
         WHERE b.id = @id AND b.business_id = @business_id
@@ -2301,6 +2327,14 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
     // for the common case where a bill was already voided).
     if (bill.status === 'voided') {
       return res.status(409).json({ error: 'Bill is already voided' });
+    }
+
+    // A cashier may cancel any open order and correct today's sales; an older
+    // settled bill is the owner's call. Without this a cashier could take the
+    // cash for any past bill and void it quietly. "Today" is the shop's IST day.
+    if (req.user.role !== 'owner' && bill.status === 'finalized' &&
+        new Date(bill.settled_at) < dayRange(todayUtc()).start) {
+      return res.status(403).json({ error: 'Only the owner can void a bill from an earlier day' });
     }
 
     const transaction = pool.transaction();
@@ -2369,6 +2403,15 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
     broadcast(req.user.business_id, { type: 'kitchen' });
     broadcast(req.user.business_id, { type: bill.table_id ? 'tables' : 'drafts' });
     if (bill.inventory_enabled) broadcast(req.user.business_id, { type: 'stock' });
+
+    // Owners hear about every void of a settled bill. Not awaited, never throws.
+    if (bill.status === 'finalized') {
+      sendBillVoidedNotification(pool, sql, req.user.business_id, {
+        billNumber: stripBillPrefix(bill.bill_number),
+        total: bill.total,
+        voidedByUserId: req.user.user_id,
+      });
+    }
 
     return res.json({ success: true });
   } catch (err) {
@@ -2527,7 +2570,7 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
     // Ignored when the bill has a phone — this only fills a gap.
     if (!customer_phone && req.body && req.body.phone != null) {
       const typed = String(req.body.phone).trim();
-      if (!/^\d{10}$/.test(typed)) {
+      if (!isIndianMobile(typed)) {
         return res.status(400).json({ error: 'Customer phone must be 10 digits' });
       }
       await pool.request()

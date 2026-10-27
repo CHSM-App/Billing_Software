@@ -6,6 +6,7 @@ const { requireAuth } = require('../auth');
 const audit = require('../audit');
 const logger = require('../logger');
 const billSettings = require('../billSettings');
+const { isIndianMobile } = require('../validate');
 const {
   uniqueStoreToken, validateSlug, isSlugAvailable, looksAutoDerived,
 } = require('../storeToken');
@@ -171,7 +172,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
   if (name !== undefined && (!name || name.trim().length === 0)) {
     return res.status(400).json({ error: 'Business name cannot be empty' });
   }
-  if (phone !== undefined && !/^\d{10}$/.test(phone)) {
+  if (phone !== undefined && !isIndianMobile(phone)) {
     return res.status(400).json({ error: 'Phone must be a 10-digit number' });
   }
   if (email !== undefined && email !== null && email !== '') {

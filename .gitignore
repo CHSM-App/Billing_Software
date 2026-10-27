@@ -57,3 +57,5 @@ ios_distribution.*
 
 appstore_screenshots
 appstore_screenshots_ipad
+# Cygwin/Git-bash crash dumps
+*.stackdump

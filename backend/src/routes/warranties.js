@@ -17,7 +17,7 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { validateText, validateInteger, validateExtraData } = require('../validate');
-const { isValidDateString } = require('../dateUtils');
+const { isValidDateString, addMonths } = require('../dateUtils');
 
 const router = express.Router();
 
@@ -173,12 +173,6 @@ function validateBody(body, { partial } = {}) {
   return validateText(serial_number, 'Serial number', 100)
     || validateText(notes, 'Notes', 500)
     || validateExtraData(extra_data);
-}
-
-function addMonths(dateStr, months) {
-  const d = new Date(dateStr);
-  d.setUTCMonth(d.getUTCMonth() + months);
-  return d;
 }
 
 // POST /api/warranties — manual create.

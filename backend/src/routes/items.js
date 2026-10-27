@@ -464,12 +464,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   if (!name && price === undefined && !major_category && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined && item_no === undefined && pack_unit === undefined && pack_size === undefined && warranty_eligible === undefined && default_warranty_months === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
-  // Turning the flag on (or leaving it on) without a period would leave the
-  // auto-create hook in routes/bills.js with nothing to compute an expiry from.
   const warrantyOn = warranty_eligible === true;
-  if (warrantyOn && default_warranty_months == null) {
-    return res.status(400).json({ error: 'default_warranty_months is required when warranty_eligible is true' });
-  }
   const invalid = (name !== undefined
         ? validateText(name, 'Name', 200, { required: true })
         : null)
@@ -502,7 +497,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT i.id, i.name, i.price, i.stock_quantity,
+        SELECT i.id, i.name, i.price, i.stock_quantity, i.default_warranty_months,
                (SELECT COUNT(*) FROM item_variants v
                  WHERE v.item_id = i.id AND v.is_active = 1) AS variant_count
         FROM items i
@@ -513,6 +508,15 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       return res.status(404).json({ error: 'Item not found' });
     }
     const before = check.recordset[0];
+
+    // Turning the flag on (or leaving it on) without a period would leave the
+    // auto-create hook in routes/bills.js with nothing to compute an expiry
+    // from. A period already stored on the item counts — re-saving needn't resend it.
+    const months = default_warranty_months !== undefined
+      ? default_warranty_months : before.default_warranty_months;
+    if (warrantyOn && months == null) {
+      return res.status(400).json({ error: 'default_warranty_months is required when warranty_eligible is true' });
+    }
     const sizedItem = before.variant_count > 0;
 
     // Renaming onto another item's name is the same collision as creating one.

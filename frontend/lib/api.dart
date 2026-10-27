@@ -461,6 +461,8 @@ Future<Map<String, dynamic>> register({
   String? gstNumber,
   String? panNumber,
   String? fssaiNumber,
+  String? verifiedToken,
+  bool acceptTerms = false,
 }) async {
   final response = await _post(
     Uri.parse('$baseUrl/register'),
@@ -481,9 +483,24 @@ Future<Map<String, dynamic>> register({
       if (panNumber != null && panNumber.isNotEmpty) 'pan_number': panNumber,
       if (fssaiNumber != null && fssaiNumber.isNotEmpty)
         'fssai_number': fssaiNumber,
+      // Proof from /verify-otp that this owner phone passed the OTP; the
+      // server requires it once REQUIRE_REGISTER_OTP is switched on.
+      if (verifiedToken != null) 'verified_token': verifiedToken,
+      // The sign-up consent box was ticked. The server records
+      // its own current terms version against it.
+      if (acceptTerms) 'accept_terms': true,
     }),
   );
   return _parse(response);
+}
+
+/// The owner agreed on the updated-terms screen. [termsVersion] must be the
+/// one GET /license sent; the server answers 409 if the terms changed since.
+Future<void> acceptTerms(String termsVersion) async {
+  _parse(await _authPost(
+    Uri.parse('$baseUrl/account/accept-terms'),
+    body: jsonEncode({'terms_version': termsVersion}),
+  ));
 }
 
 // ---------------------------------------------------------------------------

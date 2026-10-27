@@ -57,7 +57,15 @@ class NotificationService {
   /// and jumps to Items, where low-stock items sort to the top.
   final ValueNotifier<int> lowStockTap = ValueNotifier<int>(0);
 
-  /// The type ('online_order' / 'low_stock') of a tap that arrived before
+  /// Ticks when a QR table-order notification is TAPPED. The shell listens and
+  /// jumps to Orders, where that table's running order is.
+  final ValueNotifier<int> tableOrderTap = ValueNotifier<int>(0);
+
+  /// init() runs on every login as well as at startup; the stream listeners
+  /// must be added once, or each re-login doubled every banner and chime.
+  bool _listening = false;
+
+  /// The type ('online_order' / 'table_order' / 'low_stock') of a tap that arrived before
   /// anything was listening. A COLD launch from the notification lands here:
   /// the tap is handled during init(), long before the shell exists to hear the
   /// notifier, so the shell claims it on mount instead.
@@ -75,6 +83,9 @@ class NotificationService {
     if (type == 'online_order') {
       _pendingTap = type;
       onlineOrderTap.value++;
+    } else if (type == 'table_order') {
+      _pendingTap = type;
+      tableOrderTap.value++;
     } else if (type == 'low_stock') {
       _pendingTap = type;
       lowStockTap.value++;
@@ -95,6 +106,17 @@ class NotificationService {
   /// that only bumps a notifier — the chef is already watching that screen.
   /// Each person can switch the visible ones off in Settings (server-side).
   Future<void> init() async {
+    if (!_listening) {
+      _listening = true;
+      await _listen();
+    }
+
+    // Upload token to backend and listen for token refresh, so the server can
+    // still push to this device. Every call: a re-login is a new user.
+    await _uploadToken();
+  }
+
+  Future<void> _listen() async {
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     await _initLocalNotifications();
@@ -107,10 +129,10 @@ class NotificationService {
         kitchenPing.value++;
       } else if (type == 'online_order') {
         onlineOrderPing.value++;
-        _showOnlineOrder(message);
+        _showOnlineOrder(message, 'online_order');
       } else if (type == 'table_order') {
         tableOrderPing.value++;
-        _showOnlineOrder(message);
+        _showOnlineOrder(message, 'table_order');
       } else if (type == 'low_stock') {
         _showLowStock(message);
       }
@@ -131,9 +153,6 @@ class NotificationService {
       debugPrint('getInitialMessage failed: $e');
     }
 
-    // Upload token to backend and listen for token refresh, so the server can
-    // still push to this device.
-    await _uploadToken();
     _fcm.onTokenRefresh.listen((_) => _uploadToken());
   }
 
@@ -155,6 +174,12 @@ class NotificationService {
         onDidReceiveNotificationResponse: (response) =>
             _tapped(response.payload),
       );
+      // App was killed and then launched by tapping a banner THIS app posted
+      // (a foreground order) — that tap arrives here, not on any stream.
+      final launch = await _local.getNotificationAppLaunchDetails();
+      if (launch?.didNotificationLaunchApp ?? false) {
+        _tapped(launch!.notificationResponse?.payload);
+      }
       final android = _local.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
       await android?.createNotificationChannel(const AndroidNotificationChannel(
@@ -191,7 +216,7 @@ class NotificationService {
     }
   }
 
-  Future<void> _showOnlineOrder(RemoteMessage message) async {
+  Future<void> _showOnlineOrder(RemoteMessage message, String type) async {
     final n = message.notification;
     try {
       await _local.show(
@@ -212,9 +237,9 @@ class NotificationService {
           ),
           iOS: DarwinNotificationDetails(),
         ),
-        // Read back by onDidReceiveNotificationResponse above to know a tap
-        // belongs to an order rather than some future notification type.
-        payload: 'online_order',
+        // Read back by onDidReceiveNotificationResponse above, so the tap
+        // opens the right queue: a table order is not in the Online tab.
+        payload: type,
       );
     } catch (e) {
       debugPrint('Online order notification failed: $e');

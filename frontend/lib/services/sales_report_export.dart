@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/models.dart';
+import 'invoice_pdf.dart' show ShapedText;
 
 /// Builds the downloadable sales report (CSV + PDF) for a reporting period.
 ///
@@ -158,15 +159,33 @@ class SalesReportExport {
     final doc = pw.Document();
     final rows = _finalized(bills);
 
+    // Marathi customer / item / business names: the pdf package cannot shape
+    // Devanagari (it printed boxes), so pre-shape them into images — see
+    // ShapedText. maxWidth ≈ each column's width on A4 less cell padding.
+    final shaped = ShapedText();
+    await shaped.add(businessName, fontSize: 11, maxWidth: 540);
+    for (final t in summary.topItems) {
+      await shaped.add(t.itemName, fontSize: 8.5, maxWidth: 300);
+    }
+    for (final r in rows) {
+      await shaped.add((r['customer_name'] ?? '').toString(),
+          fontSize: 8.5, maxWidth: 100);
+    }
+
     final head = pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9);
     const cell = pw.TextStyle(fontSize: 8.5);
 
     pw.Widget cellText(String t, {bool bold = false, bool right = false}) =>
         pw.Padding(
           padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-          child: pw.Text(t,
-              style: bold ? head : cell,
-              textAlign: right ? pw.TextAlign.right : pw.TextAlign.left),
+          child: bold
+              ? pw.Text(t,
+                  style: head,
+                  textAlign: right ? pw.TextAlign.right : pw.TextAlign.left)
+              : shaped.widget(t,
+                  fontSize: 8.5,
+                  style: cell,
+                  align: right ? pw.TextAlign.right : pw.TextAlign.left),
         );
 
     pw.TableRow headerRow(List<String> cols, Set<int> rightCols) => pw.TableRow(
@@ -199,8 +218,8 @@ class SalesReportExport {
           ),
           pw.SizedBox(height: 4),
           pw.Center(
-              child: pw.Text(businessName,
-                  style: const pw.TextStyle(fontSize: 11))),
+              child: shaped.widget(businessName,
+                  fontSize: 11, style: const pw.TextStyle(fontSize: 11))),
           pw.Center(
             child: pw.Text(
                 'Period: ${_fmtDay(summary.from)}  to  ${_fmtDay(summary.to)}',

@@ -93,7 +93,13 @@ function validateExtraData(extraData) {
   return null;
 }
 
+/// Indian mobile number: 10 digits starting 6–9. Login/OTP routes keep the
+/// looser /^\d{10}$/ so an account created before this rule still signs in.
+/// Mirrors isIndianMobile() in frontend/lib/utils/text_formatters.dart.
+const isIndianMobile = (v) => /^[6-9]\d{9}$/.test(String(v ?? ''));
+
 module.exports = {
+  isIndianMobile,
   MAX_DECIMAL_10_2,
   MAX_DECIMAL_12_4,
   validateNumber,

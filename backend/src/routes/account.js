@@ -30,7 +30,9 @@ const { pool, poolConnect, sql } = require('../db');
 const logger    = require('../logger');
 const audit     = require('../audit');
 const whatsapp  = require('../whatsapp');
-const { deletionLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
+const { deletionLimiter, otpSendLimiter, otpPhoneDailyLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
+const { requireAuth } = require('../auth');
+const { TERMS_VERSION } = require('../legal');
 
 const router = express.Router();
 
@@ -44,7 +46,7 @@ const OTP_PURPOSE = 'delete_account';
 // attackers from enumerating which phones have Vittam accounts.
 // ─────────────────────────────────────────────────────────────────────────────
 
-router.post('/deletion/request', deletionLimiter, otpSendLimiter, async (req, res) => {
+router.post('/deletion/request', deletionLimiter, otpSendLimiter, otpPhoneDailyLimiter, async (req, res) => {
   const { phone } = req.body;
 
   if (!phone || !/^\d{10}$/.test(phone)) {
@@ -183,7 +185,7 @@ router.post('/deletion/confirm', deletionLimiter, otpVerifyLimiter, async (req, 
 // someone other than the owner from cancelling the request.
 // ─────────────────────────────────────────────────────────────────────────────
 
-router.post('/deletion/cancel', deletionLimiter, async (req, res) => {
+router.post('/deletion/cancel', deletionLimiter, otpVerifyLimiter, async (req, res) => {
   const { phone, otp } = req.body;
 
   if (!phone || !/^\d{10}$/.test(phone)) {
@@ -250,6 +252,76 @@ router.post('/deletion/cancel', deletionLimiter, async (req, res) => {
   } catch (err) {
     logger.error({ err }, '[account-deletion] cancel error');
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/account/accept-terms   (app JWT required — unlike the routes above)
+// Body: { terms_version }
+// The "Agree" on the updated-terms screen an existing owner sees while
+// GET /license says terms_required. The body's version must equal the server's
+// (src/legal.js): it proves the screen showed the current version, and a
+// client can never record a version of its own choosing. The acceptance is
+// always for the token's own user — there is no user id in the body.
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/accept-terms', requireAuth, async (req, res) => {
+  if (!TERMS_VERSION || req.body?.terms_version !== TERMS_VERSION) {
+    return res.status(409).json({
+      // `error` is the readable text (the app shows it); `code` is for logic.
+      error: 'These terms have changed. Please reopen the app to see the current version.',
+      code: 'terms_version_mismatch',
+      terms_version: TERMS_VERSION,
+    });
+  }
+
+  const { user_id, business_id } = req.user;
+  try {
+    await poolConnect;
+
+    // Role from the DB, not the token: only the OWNER agrees for the business.
+    const userResult = await pool.request()
+      .input('user_id', sql.UniqueIdentifier, user_id)
+      .input('business_id', sql.UniqueIdentifier, business_id)
+      .query(`
+        SELECT name, role FROM users
+        WHERE id = @user_id AND business_id = @business_id AND is_active = 1
+      `);
+    const user = userResult.recordset[0];
+    if (!user || user.role !== 'owner') {
+      return res.status(403).json({ error: 'Only the business owner can accept the terms.' });
+    }
+
+    // Insert-if-absent: accepting the same version twice (double tap, two
+    // devices) is a success that writes nothing new.
+    let inserted = 0;
+    try {
+      const result = await pool.request()
+        .input('user_id', sql.UniqueIdentifier, user_id)
+        .input('business_id', sql.UniqueIdentifier, business_id)
+        .input('terms_version', sql.NVarChar(20), TERMS_VERSION)
+        .input('ip_address', sql.NVarChar(45), req.ip || null)
+        .query(`
+          INSERT INTO terms_acceptances (user_id, business_id, terms_version, source, ip_address)
+          SELECT @user_id, @business_id, @terms_version, 'reaccept', @ip_address
+          WHERE NOT EXISTS (
+            SELECT 1 FROM terms_acceptances
+            WHERE user_id = @user_id AND terms_version = @terms_version
+          )
+        `);
+      inserted = result.rowsAffected?.[0] ?? 0;
+    } catch (err) {
+      // 2627/2601 = the unique index lost a race with a parallel request that
+      // already recorded this exact acceptance — same outcome as NOT EXISTS.
+      if (err.number !== 2627 && err.number !== 2601) throw err;
+    }
+
+    if (inserted > 0) {
+      await audit.logTermsAccepted(business_id, user_id, user.name, TERMS_VERSION, 'reaccept');
+    }
+    return res.json({ success: true, terms_version: TERMS_VERSION });
+  } catch (err) {
+    logger.error({ err }, '[terms] accept error');
+    return res.status(500).json({ error: 'Could not save your acceptance. Please try again.' });
   }
 });
 

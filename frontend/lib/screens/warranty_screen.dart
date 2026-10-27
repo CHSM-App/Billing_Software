@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../api.dart' as api;
@@ -10,6 +11,7 @@ import '../models/models.dart';
 import '../providers.dart';
 import '../storage.dart';
 import '../theme/app_theme.dart';
+import '../utils/text_formatters.dart' show isIndianMobile;
 import '../widgets/app_widgets.dart';
 import '../widgets/bottom_nav_bar.dart' show AppBottomNavBar, HidesWithNavBar;
 import '../widgets/shell_app_bar.dart';
@@ -879,7 +881,10 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
     final w = widget.existing;
     if (w != null) {
       _nameCtrl.text = w.customerName ?? '';
-      _phoneCtrl.text = w.customerPhone;
+      // QR-order phones are stored "91XXXXXXXXXX"; edit the local 10 digits.
+      final p = w.customerPhone.replaceAll(RegExp(r'\D'), '');
+      _phoneCtrl.text =
+          p.length == 12 && p.startsWith('91') ? p.substring(2) : p;
       _productCtrl.text = w.itemName;
       _monthsCtrl.text = '${w.warrantyMonths}';
       _notesCtrl.text = w.notes ?? '';
@@ -1071,9 +1076,13 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
               label: l10n.warrantyCustomerPhone,
               controller: _phoneCtrl,
               keyboardType: TextInputType.phone,
+              maxLength: 10,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               validator: (v) => (v == null || v.trim().isEmpty)
                   ? l10n.warrantyCustomerPhoneRequired
-                  : null,
+                  : !isIndianMobile(v)
+                      ? l10n.billingPhoneInvalid
+                      : null,
             ),
             const SizedBox(height: AppSpacing.space16),
             Row(children: [

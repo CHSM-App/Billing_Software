@@ -346,6 +346,16 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
         if (i >= 0 && _tabController!.index != i) _tabController!.animateTo(i);
       });
     }
+    // ...and a table-order tap asked for that table's running order.
+    if (ref.watch(openTableOrdersRequestProvider)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(openTableOrdersRequestProvider.notifier).state = false;
+        final t = _tabs.indexOf(_OrdersTab.tables);
+        final i = t >= 0 ? t : _tabs.indexOf(_OrdersTab.openOrders);
+        if (i >= 0 && _tabController!.index != i) _tabController!.animateTo(i);
+      });
+    }
 
     final onTablesTab = _tabs[_tabController!.index] == _OrdersTab.tables;
     // Folded on a phone, then widened (where it never folds): open it back up.

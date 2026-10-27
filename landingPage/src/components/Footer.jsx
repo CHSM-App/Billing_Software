@@ -14,6 +14,9 @@ const LINKS = {
     { label: 'FAQ',         href: '/#faq' },
   ],
   Legal: [
+    { label: 'Terms of Service', href: '/terms' },
+    { label: 'Acceptable Use', href: '/acceptable-use' },
+    { label: 'Ordering Terms', href: '/ordering-terms' },
     { label: 'Privacy Policy', href: '/privacy' },
     { label: 'Delete Account', href: '/delete-account' },
   ],

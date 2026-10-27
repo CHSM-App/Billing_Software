@@ -5,6 +5,8 @@ const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { broadcast } = require('../realtime');
 const audit = require('../audit');
+const authState = require('../authState');
+const { isIndianMobile } = require('../validate');
 
 const router = express.Router();
 
@@ -41,22 +43,20 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
   if (!/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
   }
-  if (!/^\d{10}$/.test(phone)) {
+  if (!isIndianMobile(phone)) {
     return res.status(400).json({ error: 'Phone must be a 10-digit number' });
   }
 
   try {
     await poolConnect;
 
-    // Reject a phone that already belongs to another user (staff or owner) in
-    // this business — phone is the login identity, so it must be unique.
+    // Reject a phone that already belongs to ANY user, in any business. Phone
+    // is the login identity: login looks a user up by phone alone, so a second
+    // row let one owner register someone else's number as "staff" and lock
+    // the real person out of their own account (migration 071 enforces it).
     const existing = await pool.request()
-      .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .input('phone', sql.NVarChar(20), phone)
-      .query(`
-        SELECT TOP 1 id FROM users
-        WHERE business_id = @business_id AND phone = @phone
-      `);
+      .query(`SELECT TOP 1 id FROM users WHERE phone = @phone`);
     if (existing.recordset.length > 0) {
       return res.status(409).json({ error: 'This phone number is already registered.' });
     }
@@ -186,6 +186,8 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
       try { await transaction.rollback(); } catch (_) {}
       throw inner;
     }
+    // A deleted user's access token dies on its next request, not in 8 hours.
+    authState.forgetUser(req.params.id);
 
     audit.logStaffDeleted(
       { business_id: req.user.business_id, user_id: req.user.user_id, user_name: req.user.name || null },
@@ -212,7 +214,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   if (pin && !/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
   }
-  if (phone && !/^\d{10}$/.test(phone)) {
+  if (phone && !isIndianMobile(phone)) {
     return res.status(400).json({ error: 'Phone must be a 10-digit number' });
   }
 
@@ -230,6 +232,17 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
 
     if (check.recordset.length === 0) {
       return res.status(404).json({ error: 'Staff member not found' });
+    }
+
+    // A new phone must not belong to anyone else, in any business (see POST).
+    if (phone) {
+      const taken = await pool.request()
+        .input('id', sql.UniqueIdentifier, req.params.id)
+        .input('phone', sql.NVarChar(20), phone)
+        .query(`SELECT TOP 1 id FROM users WHERE phone = @phone AND id <> @id`);
+      if (taken.recordset.length > 0) {
+        return res.status(409).json({ error: 'This phone number is already registered.' });
+      }
     }
 
     // Build SET clause dynamically from provided fields
@@ -271,6 +284,8 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     `);
 
     const updated = result.recordset[0];
+    // Re-read on the next request: a role change or disable applies at once.
+    if (updated) authState.forgetUser(updated.id);
 
     // A role lives inside the access token, which is valid for 8 hours and is
     // never re-checked against the database. Demoting a kitchen user to captain

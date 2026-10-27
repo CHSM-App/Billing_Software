@@ -989,7 +989,8 @@ class AppLocalizationsMr extends AppLocalizations {
   String get loginNoAccountFound => 'या मोबाइल नंबरचे खाते सापडले नाही.';
 
   @override
-  String get loginIncorrectPin => 'चुकीचा पिन. पुन्हा प्रयत्न करा.';
+  String get loginIncorrectPin =>
+      'चुकीचा मोबाइल नंबर किंवा पिन. पुन्हा प्रयत्न करा.';
 
   @override
   String get loginAccountLocked =>
@@ -1679,7 +1680,13 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billSetupAltPhone => 'पर्यायी मोबाइल नंबर (ऐच्छिक)';
 
   @override
-  String get billSetupAltPhoneInvalid => 'योग्य फोन नंबर टाका';
+  String get billSetupAltPhoneInvalid => 'योग्य 10 अंकी मोबाइल नंबर टाका';
+
+  @override
+  String get billSetupAltPhoneLabel => 'लेबल (ऐच्छिक)';
+
+  @override
+  String get billSetupAltPhoneLabelHint => 'उदा. GPay, WhatsApp';
 
   @override
   String get billSetupGstin => 'दुकानाचा GSTIN';
@@ -1943,6 +1950,11 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String billingPayExtra(String amount) {
     return '$amount जास्त';
+  }
+
+  @override
+  String billingPaidOnline(String paid, String balance) {
+    return 'ऑनलाइन भरले $paid · बाकी $balance';
   }
 
   @override
@@ -2560,7 +2572,7 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get historySearchBillOrPhone =>
-      'बिल क्रमांक किंवा मोबाइल नंबरने शोधा…';
+      'बिल क्रमांक, नाव किंवा मोबाइल नंबरने शोधा…';
 
   @override
   String get historyNoBillsForPeriod => 'या कालावधीत कोणतेही बिल नाही.';
@@ -4207,4 +4219,44 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get priceListBadNumber => 'योग्य संख्या टाका';
+
+  @override
+  String get termsConsentTos => 'Terms of Service';
+
+  @override
+  String get termsConsentAup => 'Acceptable Use Policy';
+
+  @override
+  String get termsConsentPrivacy => 'Privacy Policy';
+
+  @override
+  String get termsConsentLead => 'I have read and agree to the';
+
+  @override
+  String get termsConsentAnd => 'and';
+
+  @override
+  String get termsUpdatedTitle => 'We\'ve updated our Terms';
+
+  @override
+  String get termsUpdatedBody =>
+      'Please review the documents below. To keep using Vittam, tick the box at the bottom and tap Agree.';
+
+  @override
+  String termsUpdatedVersion(String version) {
+    return 'Version $version';
+  }
+
+  @override
+  String get termsAgree => 'Agree';
+
+  @override
+  String get termsSaveFailed =>
+      'Could not save your acceptance. Check your connection and try again.';
+
+  @override
+  String get settingsTermsSubtitle => 'The agreement for using Vittam';
+
+  @override
+  String get settingsAupSubtitle => 'What is not allowed on Vittam';
 }

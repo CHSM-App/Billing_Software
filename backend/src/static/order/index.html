@@ -37,7 +37,12 @@
     var LS_PHONE = 'order_phone_' + qrToken;
 
     var orderToken = localStorage.getItem(LS_TOKEN) || null;
-    var ml = MenuList({ actionLabel: 'Place Order', onAction: placeOrder });
+    var ml = MenuList({
+      actionLabel: 'Place Order',
+      onAction: placeOrder,
+      actionNote: 'By placing this order, you agree to the shop’s applicable ordering policies and Vittam’s ' +
+        '<a href="/ordering-terms" target="_blank" rel="noopener">Customer Ordering Terms</a>.',
+    });
     var esc = ml.esc;
 
     var $ = function (id) { return document.getElementById(id); };

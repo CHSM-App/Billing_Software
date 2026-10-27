@@ -484,7 +484,69 @@ async function sendTableOrderNotification(pool, sql, businessId, order = {}) {
   }
 }
 
+/**
+ * Tell every owner that a bill was voided, and by whom. A cashier can void
+ * today's bills without asking (routes/bills.js DELETE), so this is what keeps
+ * "take the cash, void the bill" visible to the person whose money it is.
+ * Never awaited by the caller; never throws.
+ *
+ * @param {{ billNumber: string, total: number, voidedByUserId: string }} info
+ */
+async function sendBillVoidedNotification(pool, sql, businessId, info = {}) {
+  const messaging = getMessaging();
+  if (!messaging) return;
+
+  let tokens;
+  let byName = '';
+  try {
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .input('user_id', sql.UniqueIdentifier, info.voidedByUserId || null)
+      .query(`
+        SELECT ft.token,
+               (SELECT name FROM users WHERE id = @user_id) AS by_name
+        FROM fcm_tokens ft
+        JOIN users u ON u.id = ft.user_id
+        WHERE ft.business_id = @business_id AND u.role = 'owner'
+          AND ft.user_id <> ISNULL(@user_id, '00000000-0000-0000-0000-000000000000')
+      `);
+    tokens = result.recordset.map((r) => r.token);
+    byName = result.recordset[0]?.by_name || '';
+  } catch (err) {
+    console.error('[FCM] Failed to fetch tokens:', err.message);
+    return;
+  }
+  if (tokens.length === 0) return;
+
+  const amount = Number(info.total || 0).toFixed(2);
+  const message = {
+    notification: {
+      title: `Bill ${info.billNumber || ''} voided`.replace(/\s+/g, ' ').trim(),
+      body: `Rs.${amount}${byName ? ` · by ${byName}` : ''}`,
+    },
+    data: { type: 'bill_voided' },
+    tokens,
+  };
+
+  try {
+    const response = await messaging.sendEachForMulticast(message);
+    for (let i = 0; i < response.responses.length; i++) {
+      const code = response.responses[i].error?.errorInfo?.code;
+      if (code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token') {
+        await pool.request()
+          .input('token', sql.NVarChar(500), tokens[i])
+          .query(`DELETE FROM fcm_tokens WHERE token = @token`)
+          .catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.error('[FCM] sendEachForMulticast error:', err.message);
+  }
+}
+
 module.exports = {
+  sendBillVoidedNotification,
   sendLowStockNotification,
   lowStockText,
   sendKitchenNotification,

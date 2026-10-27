@@ -11,9 +11,9 @@ import '../widgets/app_widgets.dart';
 /// [phone]   — the number the OTP was sent to (display only)
 /// [purpose] — 'register' or 'forgot_pin'
 ///
-/// On success:
-/// - purpose='register'   → pops with `null` (caller proceeds to submit registration)
-/// - purpose='forgot_pin' → pops with the `verified_token` String (caller opens reset-PIN dialog)
+/// On success it pops with the `verified_token` String:
+/// - purpose='register'   → caller sends it with the registration
+/// - purpose='forgot_pin' → caller opens the reset-PIN dialog with it
 class OtpScreen extends StatelessWidget {
   final String phone;
   final String purpose;
@@ -100,11 +100,9 @@ class _OtpScreenState extends State<_OtpView> {
     try {
       final result = await verifyOtp(widget.phone, otp, widget.purpose);
       if (!mounted) return;
-      if (widget.purpose == 'forgot_pin') {
-        Navigator.pop(context, result['verified_token'] as String);
-      } else {
-        Navigator.pop(context, true); // register flow — confirmed
-      }
+      // Both flows hand the verified_token back: reset-PIN needs it, and so
+      // does /register — it is the server's proof this phone passed the OTP.
+      Navigator.pop(context, result['verified_token'] as String);
     } on ApiException catch (e) {
       setState(() =>
           _error = sanitizeUiErrorMessage(e, fallback: l10n.otpVerifyFailed));

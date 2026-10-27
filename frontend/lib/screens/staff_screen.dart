@@ -4,6 +4,7 @@ import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
+import '../utils/text_formatters.dart' show isIndianMobile;
 import '../widgets/app_widgets.dart';
 
 class StaffScreen extends ConsumerStatefulWidget {
@@ -556,7 +557,7 @@ class _StaffFormDialogState extends State<_StaffFormDialog> {
                 maxLength: 10,
                 validator: (v) {
                   if (v == null || v.isEmpty) return l10n.commonRequired;
-                  if (!RegExp(r'^\d{10}$').hasMatch(v)) {
+                  if (!isIndianMobile(v)) {
                     return l10n.staffPhoneInvalid;
                   }
                   return null;

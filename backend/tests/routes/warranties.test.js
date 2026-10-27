@@ -104,6 +104,16 @@ describe('POST /api/warranties', () => {
     expect(res.body.extra_data).toEqual([]);
   });
 
+  test('a month-end purchase expires at the end of the target month', async () => {
+    mockRequest.query.mockResolvedValueOnce({ recordset: [{ id: WARRANTY_ID }] });
+    await create({
+      customer_phone: '9876543210', item_name: 'Exide Battery 35Ah',
+      purchase_date: '2026-01-31', warranty_months: 1,
+    });
+    // Not 3 March (setUTCMonth overflow).
+    expect(mockRequest.inputs.expiry_date.toISOString().slice(0, 10)).toBe('2026-02-28');
+  });
+
   test('rejects a missing customer phone', async () => {
     const res = await create({
       item_name: 'Exide Battery 35Ah',

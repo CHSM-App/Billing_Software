@@ -1,5 +1,7 @@
 'use strict';
 
+const { isIndianMobile } = require('./validate');
+
 /**
  * What prints on a bill — businesses.bill_settings (migration 061), JSON text.
  * The only place that knows the shape; frontend/lib/services/bill_settings.dart
@@ -44,13 +46,13 @@ const BANK_MAX = {
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const ACCOUNT_NO_RE = /^[0-9]{6,20}$/;
-// Alternate shop number: mobile or landline with STD code ("02366-262626").
-const ALT_PHONE_RE = /^\+?[0-9][0-9 -]{5,18}$/;
+// What prints before the alternate number ("GPay", "WhatsApp"); empty = none.
+const ALT_PHONE_LABEL_MAX = 20;
 
 function defaults() {
   const bank = {};
   for (const k of Object.keys(BANK_MAX)) bank[k] = '';
-  return { ...FLAGS, alt_phone: '', note: '', bank };
+  return { ...FLAGS, alt_phone: '', alt_phone_label: '', note: '', bank };
 }
 
 /** Column text → full settings object. Never throws; bad JSON = defaults. */
@@ -63,6 +65,7 @@ function parse(text) {
     if (typeof raw[k] === 'boolean') out[k] = raw[k];
   }
   if (typeof raw.alt_phone === 'string') out.alt_phone = raw.alt_phone;
+  if (typeof raw.alt_phone_label === 'string') out.alt_phone_label = raw.alt_phone_label;
   if (typeof raw.note === 'string') out.note = raw.note;
   const bank = raw.bank && typeof raw.bank === 'object' ? raw.bank : {};
   for (const k of Object.keys(BANK_MAX)) {
@@ -88,8 +91,17 @@ function normalize(input) {
   if (input.alt_phone != null) {
     if (typeof input.alt_phone !== 'string') return { error: 'bill_settings.alt_phone must be text' };
     out.alt_phone = input.alt_phone.trim();
-    if (out.alt_phone && !ALT_PHONE_RE.test(out.alt_phone)) {
+    if (out.alt_phone && !isIndianMobile(out.alt_phone)) {
       return { error: 'Invalid alternate mobile number' };
+    }
+  }
+  if (input.alt_phone_label != null) {
+    if (typeof input.alt_phone_label !== 'string') {
+      return { error: 'bill_settings.alt_phone_label must be text' };
+    }
+    out.alt_phone_label = input.alt_phone_label.trim();
+    if (out.alt_phone_label.length > ALT_PHONE_LABEL_MAX) {
+      return { error: `Alternate number label must be ${ALT_PHONE_LABEL_MAX} characters or less` };
     }
   }
   if (input.note != null) {
@@ -137,9 +149,15 @@ function bankLines(s) {
   ].filter(Boolean);
 }
 
-/** The shop's number(s) as printed: "9876500000, 9822012345". */
+/**
+ * The shop's number(s) as printed: "9876500000, 9822012345", or with a label
+ * on the alternate one: "9876500000, GPay: 9822012345".
+ */
 function shopPhones(phone, s) {
-  return [String(phone || '').trim(), s.alt_phone].filter(Boolean).join(', ');
+  const alt = String(s.alt_phone || '').trim();
+  const label = String(s.alt_phone_label || '').trim();
+  return [String(phone || '').trim(), alt && label ? `${label}: ${alt}` : alt]
+    .filter(Boolean).join(', ');
 }
 
 /** The shop-wide note to print, or '' when off or empty. */

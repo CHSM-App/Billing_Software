@@ -38,7 +38,7 @@ const { broadcast } = require('../realtime');
 const { sendOtp, verifyOtp, normalisePhone } = require('../whatsapp');
 const { cleanLines, priceLines, taxOnLines, netOfLines, grossUnitPrice } = require('../menuPricing');
 const { publicTokenSecret } = require('../auth');
-const { otpSendLimiter, otpVerifyLimiter, publicPageLimiter: storeLimiter } = require('../middleware/rateLimiter');
+const { otpSendLimiter, otpPhoneDailyLimiter, otpVerifyLimiter, publicPageLimiter: storeLimiter } = require('../middleware/rateLimiter');
 const { sendOnlineOrderNotification } = require('../fcm');
 
 const router = express.Router();
@@ -299,7 +299,7 @@ router.get('/:token/orders', storeLimiter, async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /store/:token/send-otp  — { phone }
 // ---------------------------------------------------------------------------
-router.post('/:token/send-otp', storeLimiter, otpSendLimiter, async (req, res) => {
+router.post('/:token/send-otp', storeLimiter, otpSendLimiter, otpPhoneDailyLimiter, async (req, res) => {
   const { phone } = req.body || {};
   if (!phone) return res.status(400).json({ error: 'phone is required' });
   try {

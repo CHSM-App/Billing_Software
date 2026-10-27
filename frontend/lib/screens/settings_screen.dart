@@ -42,6 +42,7 @@ import 'store_settings_screen.dart';
 import '../services/notification_service.dart';
 import '../services/offline_service.dart';
 import '../services/realtime_service.dart';
+import '../widgets/terms_consent.dart' show termsUrl, acceptableUseUrl;
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -608,6 +609,24 @@ class _SettingsContentState extends State<_SettingsContent>
                       subtitle: l10n.settingsPrivacyPolicySubtitle,
                       onTap: () => _openUrl(
                           context, 'https://vittam.vengurlatech.com/privacy'),
+                    ),
+                    const SizedBox(height: AppSpacing.space8),
+                    _buildNavCard(
+                      context,
+                      icon: Icons.description_outlined,
+                      iconColor: const Color(0xFF4F46E5),
+                      title: l10n.termsConsentTos,
+                      subtitle: l10n.settingsTermsSubtitle,
+                      onTap: () => _openUrl(context, termsUrl),
+                    ),
+                    const SizedBox(height: AppSpacing.space8),
+                    _buildNavCard(
+                      context,
+                      icon: Icons.gavel_outlined,
+                      iconColor: const Color(0xFF64748B),
+                      title: l10n.termsConsentAup,
+                      subtitle: l10n.settingsAupSubtitle,
+                      onTap: () => _openUrl(context, acceptableUseUrl),
                     ),
 
                     const SizedBox(height: AppSpacing.space32),
