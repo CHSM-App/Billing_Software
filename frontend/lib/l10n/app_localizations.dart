@@ -7509,6 +7509,120 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'What is not allowed on Vittam'**
   String get settingsAupSubtitle;
+
+  /// No description provided for @settingsBarcodeScanner.
+  ///
+  /// In en, this message translates to:
+  /// **'Barcode Scanner'**
+  String get settingsBarcodeScanner;
+
+  /// No description provided for @settingsBarcodeScannerSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect a Bluetooth or USB scanner'**
+  String get settingsBarcodeScannerSubtitle;
+
+  /// No description provided for @scannerSteps.
+  ///
+  /// In en, this message translates to:
+  /// **'1. Put the scanner in HID (keyboard) mode. Most scanners do this by scanning a setup barcode from their manual.\n2. Open Bluetooth settings and pair the scanner like a keyboard. A USB scanner just needs plugging in.\n3. Come back here and scan any barcode to test it.'**
+  String get scannerSteps;
+
+  /// No description provided for @scannerOpenBluetooth.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Bluetooth settings'**
+  String get scannerOpenBluetooth;
+
+  /// No description provided for @scannerOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open Bluetooth settings. Open them from your device settings.'**
+  String get scannerOpenFailed;
+
+  /// No description provided for @scannerTestTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Test scan'**
+  String get scannerTestTitle;
+
+  /// No description provided for @scannerTestHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap here, then scan a barcode'**
+  String get scannerTestHint;
+
+  /// No description provided for @scannerTestMatched.
+  ///
+  /// In en, this message translates to:
+  /// **'Scanner works: {name}'**
+  String scannerTestMatched(String name);
+
+  /// No description provided for @scannerTestUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Scanner works, read {code}, but no item has this barcode'**
+  String scannerTestUnknown(String code);
+
+  /// No description provided for @itemsDownloadBarcodes.
+  ///
+  /// In en, this message translates to:
+  /// **'Download all barcodes'**
+  String get itemsDownloadBarcodes;
+
+  /// No description provided for @barcodesPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing…'**
+  String get barcodesPreparing;
+
+  /// No description provided for @barcodesSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving barcodes {done}/{total}'**
+  String barcodesSaving(int done, int total);
+
+  /// No description provided for @barcodesMakingImages.
+  ///
+  /// In en, this message translates to:
+  /// **'Making barcode images…'**
+  String get barcodesMakingImages;
+
+  /// No description provided for @barcodesFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} barcodes could not be saved'**
+  String barcodesFailed(int count);
+
+  /// No description provided for @barcodesPickFields.
+  ///
+  /// In en, this message translates to:
+  /// **'Show on each barcode image'**
+  String get barcodesPickFields;
+
+  /// No description provided for @barcodesFieldName.
+  ///
+  /// In en, this message translates to:
+  /// **'Item name'**
+  String get barcodesFieldName;
+
+  /// No description provided for @barcodesFieldSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Variant'**
+  String get barcodesFieldSize;
+
+  /// No description provided for @barcodesFieldPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get barcodesFieldPrice;
+
+  /// No description provided for @barcodesFieldCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Barcode number'**
+  String get barcodesFieldCode;
 }
 
 class _AppLocalizationsDelegate

@@ -333,6 +333,32 @@ class Item {
       stockQuantity! <= lowStockThreshold!;
 }
 
+/// Strip spaces, dashes and dots the same way the server's barcode lookup does,
+/// so scanner formatting differences never cause a miss.
+String _normaliseBarcode(String code) => code.replaceAll(RegExp(r'[\s\-\.]'), '');
+
+/// Resolve a scanned [code] against the loaded [items]. A size (variant)
+/// barcode wins over an item barcode: it is the more specific match, and a
+/// sized item may still carry a stale item-level code from before it had sizes.
+/// Returns null when nothing matches.
+({Item item, ItemVariant? variant})? matchBarcode(List<Item> items, String code) {
+  final target = _normaliseBarcode(code);
+  if (target.isEmpty) return null;
+  for (final i in items) {
+    for (final v in i.variants) {
+      if (v.barcode != null && _normaliseBarcode(v.barcode!) == target) {
+        return (item: i, variant: v);
+      }
+    }
+  }
+  for (final i in items) {
+    if (i.barcode != null && _normaliseBarcode(i.barcode!) == target) {
+      return (item: i, variant: null);
+    }
+  }
+  return null;
+}
+
 /// A stock-tracked ingredient (bun, patty, cheese) that is consumed by a dish's
 /// recipe. Raw materials never appear on the billing page — only sellable items
 /// are billed; selling a dish deducts its recipe's raw materials behind the scenes.

@@ -676,60 +676,6 @@ class OfflineService {
     return m > 0 ? '${h}h ${m}m ago' : '${h}h ago';
   }
 
-  /// Looks up a single item by barcode. Returns null if not found.
-  /// Normalise a barcode the same way the backend does: strip spaces, dashes,
-  /// dots so scanner formatting differences never cause a miss.
-  static String _normaliseBarcode(String barcode) =>
-      barcode.replaceAll(RegExp(r'[\s\-\.]'), '');
-
-  /// Resolves a scanned barcode against the cache. The code may belong to an
-  /// item OR to one of its sizes (variants); returns the item plus the matched
-  /// variant (null when the item itself matched). Returns null if nothing
-  /// matched. Filtering happens in Dart because SQLite has no regex replace.
-  Future<({Item item, ItemVariant? variant})?> getBarcodeMatch(
-      String barcode, String businessId) async {
-    final normalised = _normaliseBarcode(barcode);
-
-    // 1) Try the item-level barcode first.
-    final itemRows = await _database.query(
-      'cached_items',
-      where: 'business_id = ? AND is_active = 1 AND barcode IS NOT NULL',
-      whereArgs: [businessId],
-    );
-    final itemMatch = itemRows.where((r) {
-      final stored = r['barcode'] as String?;
-      return stored != null && _normaliseBarcode(stored) == normalised;
-    }).firstOrNull;
-    if (itemMatch != null) {
-      return (item: await _rowToItemWithVariants(itemMatch), variant: null);
-    }
-
-    // 2) Fall back to a size (variant) barcode.
-    final variantRows = await _database.query(
-      'cached_variants',
-      where: 'business_id = ? AND is_active = 1 AND barcode IS NOT NULL',
-      whereArgs: [businessId],
-    );
-    final variantMatch = variantRows.where((r) {
-      final stored = r['barcode'] as String?;
-      return stored != null && _normaliseBarcode(stored) == normalised;
-    }).firstOrNull;
-    if (variantMatch == null) return null;
-
-    final parentRows = await _database.query(
-      'cached_items',
-      where: 'id = ? AND is_active = 1',
-      whereArgs: [variantMatch['item_id']],
-      limit: 1,
-    );
-    if (parentRows.isEmpty) return null;
-    final item = await _rowToItemWithVariants(parentRows.first);
-    final variant = item.variants
-        .where((v) => v.id == variantMatch['id'])
-        .firstOrNull;
-    return (item: item, variant: variant);
-  }
-
   Item _rowToItem(Map<String, dynamic> row) {
     return Item(
       id: row['id'] as String,
@@ -773,26 +719,6 @@ class OfflineService {
       sortOrder: (row['sort_order'] as int?) ?? 0,
       isActive: (row['is_active'] as int) == 1,
     );
-  }
-
-  /// Load the cached variants (sizes) for a single item, ordered like the API.
-  Future<List<ItemVariant>> _variantsForItem(String itemId) async {
-    final rows = await _database.query(
-      'cached_variants',
-      where: 'item_id = ? AND is_active = 1',
-      whereArgs: [itemId],
-      orderBy: 'sort_order ASC, label ASC',
-    );
-    return rows.map(_rowToVariant).toList();
-  }
-
-  Future<Item> _rowToItemWithVariants(Map<String, dynamic> row) async {
-    final base = _rowToItem(row);
-    final variants = await _variantsForItem(base.id);
-    if (variants.isEmpty) return base;
-    // copyWithVariants carries every field across, so a new item field can't be
-    // silently dropped here the way an inline Item(...) rebuild would drop it.
-    return base.copyWithVariants(variants);
   }
 
   // ── Offline bill queue ────────────────────────────────────────────────────

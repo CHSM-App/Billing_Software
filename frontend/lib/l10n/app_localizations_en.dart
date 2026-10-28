@@ -4257,4 +4257,72 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAupSubtitle => 'What is not allowed on Vittam';
+
+  @override
+  String get settingsBarcodeScanner => 'Barcode Scanner';
+
+  @override
+  String get settingsBarcodeScannerSubtitle =>
+      'Connect a Bluetooth or USB scanner';
+
+  @override
+  String get scannerSteps =>
+      '1. Put the scanner in HID (keyboard) mode. Most scanners do this by scanning a setup barcode from their manual.\n2. Open Bluetooth settings and pair the scanner like a keyboard. A USB scanner just needs plugging in.\n3. Come back here and scan any barcode to test it.';
+
+  @override
+  String get scannerOpenBluetooth => 'Open Bluetooth settings';
+
+  @override
+  String get scannerOpenFailed =>
+      'Could not open Bluetooth settings. Open them from your device settings.';
+
+  @override
+  String get scannerTestTitle => 'Test scan';
+
+  @override
+  String get scannerTestHint => 'Tap here, then scan a barcode';
+
+  @override
+  String scannerTestMatched(String name) {
+    return 'Scanner works: $name';
+  }
+
+  @override
+  String scannerTestUnknown(String code) {
+    return 'Scanner works, read $code, but no item has this barcode';
+  }
+
+  @override
+  String get itemsDownloadBarcodes => 'Download all barcodes';
+
+  @override
+  String get barcodesPreparing => 'Preparing…';
+
+  @override
+  String barcodesSaving(int done, int total) {
+    return 'Saving barcodes $done/$total';
+  }
+
+  @override
+  String get barcodesMakingImages => 'Making barcode images…';
+
+  @override
+  String barcodesFailed(int count) {
+    return '$count barcodes could not be saved';
+  }
+
+  @override
+  String get barcodesPickFields => 'Show on each barcode image';
+
+  @override
+  String get barcodesFieldName => 'Item name';
+
+  @override
+  String get barcodesFieldSize => 'Variant';
+
+  @override
+  String get barcodesFieldPrice => 'Price';
+
+  @override
+  String get barcodesFieldCode => 'Barcode number';
 }

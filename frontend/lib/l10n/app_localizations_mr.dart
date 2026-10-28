@@ -4260,4 +4260,71 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get settingsAupSubtitle => 'What is not allowed on Vittam';
+
+  @override
+  String get settingsBarcodeScanner => 'बारकोड स्कॅनर';
+
+  @override
+  String get settingsBarcodeScannerSubtitle => 'ब्लूटूथ किंवा USB स्कॅनर जोडा';
+
+  @override
+  String get scannerSteps =>
+      '1. स्कॅनर HID (कीबोर्ड) मोडमध्ये ठेवा. बहुतेक स्कॅनरमध्ये हे त्यांच्या मॅन्युअलमधील सेटअप बारकोड स्कॅन करून होते.\n2. ब्लूटूथ सेटिंग्ज उघडा आणि स्कॅनर कीबोर्डप्रमाणे पेअर करा. USB स्कॅनर फक्त जोडा.\n3. इथे परत या आणि चाचणीसाठी कोणताही बारकोड स्कॅन करा.';
+
+  @override
+  String get scannerOpenBluetooth => 'ब्लूटूथ सेटिंग्ज उघडा';
+
+  @override
+  String get scannerOpenFailed =>
+      'ब्लूटूथ सेटिंग्ज उघडता आल्या नाहीत. डिव्हाइसच्या सेटिंग्जमधून उघडा.';
+
+  @override
+  String get scannerTestTitle => 'चाचणी स्कॅन';
+
+  @override
+  String get scannerTestHint => 'इथे टॅप करा, मग बारकोड स्कॅन करा';
+
+  @override
+  String scannerTestMatched(String name) {
+    return 'स्कॅनर चालू आहे: $name';
+  }
+
+  @override
+  String scannerTestUnknown(String code) {
+    return 'स्कॅनर चालू आहे, $code वाचला, पण या बारकोडचा आयटम नाही';
+  }
+
+  @override
+  String get itemsDownloadBarcodes => 'सर्व बारकोड डाउनलोड करा';
+
+  @override
+  String get barcodesPreparing => 'तयारी करत आहे…';
+
+  @override
+  String barcodesSaving(int done, int total) {
+    return 'बारकोड सेव्ह करत आहे $done/$total';
+  }
+
+  @override
+  String get barcodesMakingImages => 'बारकोड इमेज तयार करत आहे…';
+
+  @override
+  String barcodesFailed(int count) {
+    return '$count बारकोड सेव्ह करता आले नाहीत';
+  }
+
+  @override
+  String get barcodesPickFields => 'प्रत्येक बारकोड इमेजवर दाखवा';
+
+  @override
+  String get barcodesFieldName => 'आयटमचे नाव';
+
+  @override
+  String get barcodesFieldSize => 'प्रकार';
+
+  @override
+  String get barcodesFieldPrice => 'किंमत';
+
+  @override
+  String get barcodesFieldCode => 'बारकोड नंबर';
 }

@@ -26,6 +26,7 @@ import 'printer_test_screen.dart'
     if (dart.library.html) 'printer_test_screen_web.dart';
 import 'printer_test_windows_screen.dart'
     if (dart.library.html) 'printer_test_windows_screen_web.dart';
+import 'barcode_scanner_screen.dart';
 import 'staff_screen.dart';
 import 'price_lists_screen.dart';
 import 'billing_setup_screen.dart';
@@ -421,19 +422,6 @@ class _SettingsContentState extends State<_SettingsContent>
                               builder: (_) => const _TogglesScreen()),
                         ),
                       ),
-                      // Warranty tracking — any business type. Also on the
-                      // Toggles screen; repeated here because it decides
-                      // whether the Warranty tab exists at all. Keyed on the
-                      // session flag so a change made on Toggles reloads this
-                      // copy.
-                      const SizedBox(height: AppSpacing.space8),
-                      _BusinessFlagToggle(
-                        key: ValueKey(widget.session.warrantyEnabled),
-                        field: 'warranty_enabled',
-                        icon: Icons.verified_user_outlined,
-                        title: l10n.settingsWarranty,
-                        subtitle: l10n.settingsWarrantySubtitle,
-                      ),
                       // What prints on a bill: header lines, cashier,
                       // customer, terms, bank details.
                       const SizedBox(height: AppSpacing.space8),
@@ -525,6 +513,19 @@ class _SettingsContentState extends State<_SettingsContent>
                           context,
                           MaterialPageRoute(
                               builder: (_) => const PrinterSetupScreen()),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.space8),
+                      _buildNavCard(
+                        context,
+                        icon: Icons.qr_code_scanner,
+                        iconColor: AppColors.accent,
+                        title: l10n.settingsBarcodeScanner,
+                        subtitle: l10n.settingsBarcodeScannerSubtitle,
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const BarcodeScannerScreen()),
                         ),
                       ),
                       // Kitchen printing deliberately does NOT appear here. The
@@ -1084,7 +1085,6 @@ class _BusinessFlagToggle extends ConsumerStatefulWidget {
   final String subtitle;
 
   const _BusinessFlagToggle({
-    super.key,
     required this.field,
     required this.icon,
     required this.title,

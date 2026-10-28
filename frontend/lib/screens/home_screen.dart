@@ -303,6 +303,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   final _barcodeBuffer = StringBuffer();
   DateTime? _lastKeyTime;
+  // Longest pause between two keys of one scan. Bluetooth HID scanners
+  // deliver keys in bursts, so 100 ms cut their codes short.
+  // ponytail: fixed gap; raise it if a slow scanner still truncates codes.
+  static const _scanKeyGapMs = 300;
 
   // Wide layout: the cart panel's width, dragged by the divider and kept per
   // device. Its own notifier so dragging relayouts the row, not the screen.
@@ -444,7 +448,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   bool _globalKeyHandler(KeyEvent event) {
-    if (event is! KeyDownEvent) return false;
+    // Repeats count too: a scanner types so fast that the second "8" of "88"
+    // goes down before the first is released, and Flutter reports it as a
+    // REPEAT. Reading downs only dropped it, so every code with a doubled
+    // digit arrived one short and came back "not found".
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
     final hasBarcodeScanner = ref.read(hasBarcodeProvider);
     if (!hasBarcodeScanner) return false;
 
@@ -463,15 +471,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final now = DateTime.now();
     if (_lastKeyTime != null &&
-        now.difference(_lastKeyTime!).inMilliseconds > 100) {
+        now.difference(_lastKeyTime!).inMilliseconds > _scanKeyGapMs) {
       _barcodeBuffer.clear();
     }
     _lastKeyTime = now;
 
     // Many USB HID scanners send Numpad Enter (not the main Enter) as the
-    // suffix character, so accept both.
+    // suffix character, so accept both. Some are set to send Tab instead.
     if (event.logicalKey == LogicalKeyboardKey.enter ||
-        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+        (event.logicalKey == LogicalKeyboardKey.tab &&
+            _barcodeBuffer.isNotEmpty)) {
       final code = _barcodeBuffer.toString().trim();
       _barcodeBuffer.clear();
       _lastKeyTime = null;
@@ -798,39 +808,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } finally {
       _jumpingToCategory = false;
     }
-  }
-
-  /// A scan resolved to a variant item but not to a size: open its category
-  /// and unfold its sizes right in the list, then scroll it under the header
-  /// so the cashier can pick the plate.
-  Future<void> _revealVariantItem(Item item) async {
-    final cat = item.category?.trim() ?? '';
-    // The section only exists once its major is spread open, so open that too.
-    // Null major = flat menu, where there is no major level to open.
-    final major = _tree.first.major == null
-        ? null
-        : (item.majorCategory?.trim() ?? '');
-    final key = _CategorySection.sectionKey(major, cat);
-    setState(() {
-      // Make sure the scanned item's major is not folded shut. Only this one —
-      // the others are left however the cashier had them.
-      if (major != null) _collapsedMajors.remove(major);
-      _collapsedCategories.remove(key);
-      _expandedCategories
-        ..clear()
-        ..add(key);
-      _expandedVariantItems
-        ..clear()
-        ..add(item.id);
-    });
-    // Keep the capsule pointing at the major the list just jumped into.
-    if (major != null) _activeMajor.value = major;
-    await _nextFrame();
-    if (!mounted) return;
-    final offset = _ExcelItemTable.itemOffset(_tree, item.id, _twoColumns);
-    if (offset == null) return; // filtered out by the search box
-    _setActiveCategory(key);
-    await _animateListTo(offset);
   }
 
   /// Which section the chip strip should point at for scroll [offset] with
@@ -1743,11 +1720,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (barcode.isEmpty) return;
     final l10n = context.l10n;
     try {
-      final businessId = await getBusinessId();
-      final cached = await OfflineService.instance
-          .getBarcodeMatch(barcode, businessId ?? '');
-      if (cached != null) {
-        _addScannedItem(cached.item, cached.variant);
+      // The loaded list is what billing shows and is always current (offline
+      // it is loaded from the item cache). The server only covers items added
+      // elsewhere since it was fetched.
+      final local = matchBarcode(ref.read(itemsProvider).valueOrNull ?? const [], barcode);
+      if (local != null) {
+        _addScannedItem(local.item, local.variant);
         return;
       }
       final data = await getItemByBarcode(barcode);
@@ -1763,7 +1741,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _addScannedItem(item, variant);
       // _animateCartBadge();
     } on ApiException catch (e) {
-      _showSnack(e.message, isError: true);
+      // Name the code on a miss: comparing it with the text under the bars is
+      // how a mis-read or never-saved label gets spotted.
+      _showSnack(
+          e.statusCode == 404 ? l10n.billingItemNotFoundBarcode(barcode) : e.message,
+          isError: true);
     } catch (_) {
       _showSnack(l10n.billingItemNotFoundBarcode(barcode), isError: true);
     }
@@ -1777,14 +1759,55 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// 65", not which plate — so the size picker must open instead of silently
   /// adding the base price. Without this a scan billed Chicken 65 at its 230
   /// base price when the real sizes are half 180 / Full 280.
-  void _addScannedItem(Item item, ItemVariant? variant) {
+  Future<void> _addScannedItem(Item item, ItemVariant? variant) async {
     if (variant == null && item.hasVariants) {
-      _revealVariantItem(item);
-      return;
+      // One size can only mean that size. Several: ask which, right here, so
+      // the scan still ends in a cart line. Labels printed with the item's own
+      // code (before sizes had codes) land here.
+      variant = item.variants.length == 1
+          ? item.variants.first
+          : await _pickScannedSize(item);
+      if (variant == null || !mounted) return;
     }
     _cartChange(
       CartNotifier.keyFor(item.id, variant?.id),
       () => ref.read(cartProvider.notifier).addItem(item, variant: variant),
+    );
+  }
+
+  /// Size chooser for a scan that named a sized item but not a size. A tap
+  /// returns that size; dismissing returns null and adds nothing.
+  Future<ItemVariant?> _pickScannedSize(Item item) {
+    final list = ref.read(selectedPriceListProvider);
+    return showDialog<ItemVariant>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(item.name),
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        content: SizedBox(
+          width: 320,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final v in item.variants)
+                ListTile(
+                  title: Text(v.label),
+                  trailing: Text(
+                    '₹${(list?.priceFor(item, v) ?? v.price ?? item.price ?? 0).toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  onTap: () => Navigator.pop(ctx, v),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(context.l10n.commonCancel),
+          ),
+        ],
+      ),
     );
   }
 
@@ -4210,6 +4233,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       controller: _searchController,
                       focusNode: _searchFocus,
                       autofocus: false,
+                      // A scanner fires into the focused search box; when the
+                      // text is a known barcode, bill it instead of searching.
+                      onSubmitted: (q) {
+                        final hit = matchBarcode(
+                            ref.read(itemsProvider).valueOrNull ?? const [], q);
+                        if (hit == null) return;
+                        _searchController.clear();
+                        _addScannedItem(hit.item, hit.variant);
+                      },
                       decoration: InputDecoration(
                         hintText: l10n.billingSearchItems,
                         isDense: true,
@@ -6821,27 +6853,6 @@ class _ExcelItemTable extends StatefulWidget {
       }
     }
     return h;
-  }
-
-  /// List-local offset that puts [itemId]'s row under the pinned header, or
-  /// null when the item isn't in the (filtered, unfolded) list.
-  static double? itemOffset(
-      List<_MajorSection> tree, String itemId, bool twoColumns) {
-    var offset = 0.0;
-    for (final m in tree) {
-      if (m.major != null) offset += majorHeaderExtent;
-      if (!m.expanded) continue;
-      for (final s in m.subs) {
-        offset += _headerOf(s);
-        for (final e in _sectionEntries(s, twoColumns, 0).$1) {
-          if (e.cells.any((c) => c != null && c.item?.id == itemId)) {
-            return offset;
-          }
-          offset += rowExtent;
-        }
-      }
-    }
-    return null;
   }
 
   /// The list's maxScrollExtent once every fold animation has settled. Right

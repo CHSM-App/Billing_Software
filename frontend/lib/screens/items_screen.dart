@@ -19,6 +19,8 @@ import '../widgets/skeletons.dart';
 import '../widgets/warranty_extra_fields_editor.dart'
     show WarrantyLabelField, allTemplateLabels;
 import '../api.dart';
+import '../services/barcode_export.dart';
+import '../services/file_export.dart';
 import '../services/printer_service.dart';
 import 'menu_photos_screen.dart';
 import 'major_category_order_screen.dart';
@@ -266,6 +268,115 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   /// be printed per size. Printing the parent produced a label reading
   /// "Rs. 0.00" and saved a barcode onto the priceless parent, giving a
   /// scannable code that resolves to nothing sellable. Ask which size first.
+  /// Top bar → "Download all barcodes": save a generated code on every item
+  /// and size that has none, then hand the owner a zip of label images to
+  /// print whenever it suits them.
+  Future<void> _downloadAllBarcodes() async {
+    final l10n = context.l10n;
+    final fields = await _pickLabelFields();
+    if (fields == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context, rootNavigator: true);
+    final status = ValueNotifier<String>(l10n.barcodesPreparing);
+    var open = true;
+    void close() {
+      if (open) nav.pop();
+      open = false;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(children: [
+            const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2.5)),
+            const SizedBox(width: AppSpacing.space16),
+            Expanded(
+              child: ValueListenableBuilder<String>(
+                  valueListenable: status, builder: (_, s, __) => Text(s)),
+            ),
+          ]),
+        ),
+      ),
+    );
+    try {
+      final notifier = ref.read(itemsProvider.notifier);
+      final failed =
+          await assignMissingBarcodes(await ref.read(itemsProvider.future),
+              (done, total) => status.value = l10n.barcodesSaving(done, total));
+      status.value = l10n.barcodesMakingImages;
+      // Re-fetch so the list, the offline cache and the zip all carry the codes
+      // just saved.
+      await notifier.reload();
+      final zip =
+          await buildBarcodeZip(await ref.read(itemsProvider.future), fields);
+      close();
+      await shareFile(zip, 'Barcodes.zip', 'application/zip');
+      if (failed > 0) {
+        messenger.showSnackBar(SnackBar(
+            content: Text(l10n.barcodesFailed(failed)),
+            backgroundColor: AppColors.error));
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(sanitizeUiErrorMessage(e)),
+          backgroundColor: AppColors.error));
+    } finally {
+      close();
+      status.dispose();
+    }
+  }
+
+  /// What goes on each exported label, picked before anything is generated.
+  /// All ticked to start; null = cancelled. The bars are always on the label.
+  Future<LabelFields?> _pickLabelFields() {
+    final l10n = context.l10n;
+    var f = (name: true, size: true, price: true, code: true);
+    return showDialog<LabelFields>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          Widget box(String title, bool value, LabelFields Function(bool) set) =>
+              CheckboxListTile(
+                dense: true,
+                title: Text(title),
+                value: value,
+                onChanged: (v) => setLocal(() => f = set(v ?? false)),
+              );
+          return AlertDialog(
+            title: Text(l10n.barcodesPickFields),
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              box(l10n.barcodesFieldName, f.name,
+                  (v) => (name: v, size: f.size, price: f.price, code: f.code)),
+              box(l10n.barcodesFieldSize, f.size,
+                  (v) => (name: f.name, size: v, price: f.price, code: f.code)),
+              box(l10n.barcodesFieldPrice, f.price,
+                  (v) => (name: f.name, size: f.size, price: v, code: f.code)),
+              box(l10n.barcodesFieldCode, f.code,
+                  (v) => (name: f.name, size: f.size, price: f.price, code: v)),
+            ]),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, f),
+                child: Text(l10n.itemsDownloadBarcodes),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _showBarcodePrint(Item item) async {
     if (!item.hasVariants) {
       _showBarcodePrintFor(item, null);
@@ -614,6 +725,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                                 builder: (_) => const MenuPhotosScreen()),
                           ),
                         ),
+                      IconButton(
+                        icon: const Icon(Icons.download_outlined),
+                        color: AppColors.textPrimary,
+                        tooltip: l10n.itemsDownloadBarcodes,
+                        onPressed: _downloadAllBarcodes,
+                      ),
                       const SizedBox(width: 4),
                     ]
                   : null),
@@ -1095,7 +1212,10 @@ class _ItemSheetRow extends StatelessWidget {
                   children: [
                     _RowIcon(
                       icon: Icons.qr_code_outlined,
-                      color: item.barcode != null
+                      // Green = scannable: a sized item scans by its sizes.
+                      color: (item.hasVariants
+                              ? item.variants.every((v) => v.barcode != null)
+                              : item.barcode != null)
                           ? AppColors.accent
                           : AppColors.textSecondary,
                       onTap: onBarcode,
@@ -2902,10 +3022,15 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   late final TextEditingController _barcodeCtrl;
   final _copiesCtrl = TextEditingController(text: '1');
   bool _printing = false;
-  bool _saved = false;
+  // The code the server holds for the target, as far as this dialog knows.
+  late String? _stored = _existingBarcode;
 
   // Effective target — a size (variant) if one was passed, else the whole item.
-  String? get _existingBarcode => widget.variant?.barcode ?? widget.item.barcode;
+  // A size never borrows the parent's code: that printed the item's barcode on
+  // the size label, so the scan resolved to the item and only opened its sizes.
+  String? get _existingBarcode => widget.variant != null
+      ? widget.variant!.barcode
+      : widget.item.barcode;
   String get _targetId => widget.variant?.id ?? widget.item.id;
   // 0 when neither is priced — a barcode label for a sized item is printed per
   // size, so the parent's own (null) price is never the one shown.
@@ -2917,7 +3042,7 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   void initState() {
     super.initState();
     // Use existing barcode or auto-generate one from the target's id
-    _barcodeValue = _existingBarcode ?? _generateBarcode(_targetId);
+    _barcodeValue = _existingBarcode ?? generateBarcode(_targetId);
     _barcodeCtrl = TextEditingController(text: _barcodeValue);
     _barcodeCtrl.addListener(() {
       final v = _barcodeCtrl.text.trim();
@@ -2925,6 +3050,17 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
         setState(() => _barcodeValue = v);
       }
     });
+    // Save a generated code the moment it is shown. It used to be saved only
+    // on Print, so every item SHOWED a barcode here while the server held
+    // none — scanning it (off a label or the screen) said "not found".
+    if (_stored == null) {
+      _save(_barcodeValue).catchError((_) {}); // Print retries and reports it.
+    }
+  }
+
+  Future<void> _save(String code) async {
+    await widget.onBarcodeGenerated(code);
+    _stored = code;
   }
 
   @override
@@ -2934,18 +3070,6 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
     super.dispose();
   }
 
-  /// Generate a numeric barcode from the item's UUID (12 digits, EAN-13 compatible)
-  static String _generateBarcode(String id) {
-    // Take first 12 hex chars of the id and convert to digits
-    final hex = id.replaceAll('-', '');
-    final digits = hex.substring(0, 12).split('').map((c) {
-      final code = c.codeUnitAt(0);
-      // 0-9 → same digit; a-f → 0-5
-      return code >= 48 && code <= 57 ? c : (code - 97).toString();
-    }).join();
-    return digits.padLeft(12, '0');
-  }
-
   Future<void> _print() async {
     final copies = int.tryParse(_copiesCtrl.text.trim()) ?? 1;
     if (copies < 1) return;
@@ -2953,11 +3077,9 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
     final sentMessage = context.l10n.itemsBarcodeSentToPrinter;
     setState(() => _printing = true);
     try {
-      // If the target had no barcode, save the generated one first
-      if (_existingBarcode == null && !_saved) {
-        await widget.onBarcodeGenerated(_barcodeValue);
-        _saved = true;
-      }
+      // Save the code first unless it is already the stored one — a generated
+      // or edited code that is printed but not saved can never scan.
+      if (_barcodeValue != _stored) await _save(_barcodeValue);
       await PrinterService.instance.printBarcodeLabel(
         barcodeValue: _barcodeValue,
         itemName: widget.item.name,
