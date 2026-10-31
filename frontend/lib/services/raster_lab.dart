@@ -587,8 +587,12 @@ class RasterLab {
         // tall, aspect kept. ponytail: printed via the plain 1-bit threshold
         // in _pack, no dithering — flat logos print clean, photo-like ones
         // don't; add Floyd–Steinberg here if shops complain.
+        // A payment QR (r.qr) gets more room so its modules stay scannable.
         final img = r.image!;
-        final k = [contentW * 0.5 / img.width, 160 * ss / img.height]
+        final k = [
+          contentW * (r.qr ? 0.6 : 0.5) / img.width,
+          (r.qr ? 260 : 160) * ss / img.height
+        ]
             .reduce((a, b) => a < b ? a : b);
         final w = img.width * k, h = img.height * k;
         measured.add(_MRow.image(img, w, h));
@@ -1187,12 +1191,15 @@ class ReceiptRow {
       this.isRule = false,
       this.verticalRules = false,
       this.light = false,
-      this.image});
+      this.image,
+      this.qr = false});
 
-  /// A centred picture (the shop logo), scaled to fit — see _renderRows.
+  /// A centred picture (the shop logo, or a payment QR when [qr]), scaled to
+  /// fit — see _renderRows.
   final ui.Image? image;
-  factory ReceiptRow.image(ui.Image image) =>
-      ReceiptRow._(const [], image: image);
+  final bool qr;
+  factory ReceiptRow.image(ui.Image image, {bool qr = false}) =>
+      ReceiptRow._(const [], image: image, qr: qr);
 
   factory ReceiptRow.center(String t,
           {double size = 24, bool bold = false, bool italic = false}) =>

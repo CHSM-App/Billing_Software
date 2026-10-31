@@ -50,6 +50,14 @@ describe('billSettings', () => {
     expect(parse(r.value).show_warranty_details).toBe(false);
   });
 
+  test('UPI QR: off by default, needs a valid UPI ID to turn on', () => {
+    expect(parse(null)).toMatchObject({ show_upi_qr: false, upi_id: '' });
+    expect(parse(normalize({ show_upi_qr: true, upi_id: ' shop@okhdfcbank ' }).value))
+      .toMatchObject({ show_upi_qr: true, upi_id: 'shop@okhdfcbank' });
+    expect(normalize({ show_upi_qr: true }).error).toMatch(/UPI/);
+    expect(normalize({ upi_id: 'not a upi' }).error).toMatch(/UPI/);
+  });
+
   test('alternate number is saved and printed after the main one', () => {
     const s = parse(normalize({ alt_phone: ' 9822012345 ' }).value);
     expect(s.alt_phone).toBe('9822012345');

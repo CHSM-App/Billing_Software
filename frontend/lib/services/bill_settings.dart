@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/models.dart';
+
 /// What prints on a bill — the owner's Billing Setup page. Mirrors
 /// backend/src/billSettings.js (same keys, same defaults).
 ///
@@ -24,6 +26,11 @@ class BillSettings {
   /// Warranty details captured at billing time (a tyre's vehicle KM reading,
   /// etc. — see WarrantyExtraFieldsEditor), printed on the receipt.
   final bool showWarrantyDetails;
+  /// A UPI QR for [upiId] with the bill amount filled in — see [upiLink].
+  final bool showUpiQr;
+  final String upiId;
+  /// The item's unit after the quantity on a printed bill — see [qty].
+  final bool showUnits;
   final String note;
   /// Second shop number, printed after the main one ("Ph: 98…, 98…").
   final String altPhone;
@@ -47,6 +54,9 @@ class BillSettings {
     this.showBank = false,
     this.showNote = false,
     this.showWarrantyDetails = true,
+    this.showUpiQr = false,
+    this.upiId = '',
+    this.showUnits = false,
     this.note = '',
     this.altPhone = '',
     this.altPhoneLabel = '',
@@ -69,6 +79,9 @@ class BillSettings {
       showBank: f('show_bank', false),
       showNote: f('show_note', false),
       showWarrantyDetails: f('show_warranty_details', true),
+      showUpiQr: f('show_upi_qr', false),
+      upiId: j?['upi_id'] is String ? j!['upi_id'] as String : '',
+      showUnits: f('show_units', false),
       note: j?['note'] is String ? j!['note'] as String : '',
       altPhone: j?['alt_phone'] is String ? j!['alt_phone'] as String : '',
       altPhoneLabel: j?['alt_phone_label'] is String
@@ -91,6 +104,9 @@ class BillSettings {
         'show_bank': showBank,
         'show_note': showNote,
         'show_warranty_details': showWarrantyDetails,
+        'show_upi_qr': showUpiQr,
+        'upi_id': upiId,
+        'show_units': showUnits,
         'note': note,
         'alt_phone': altPhone,
         'alt_phone_label': altPhoneLabel,
@@ -124,6 +140,26 @@ class BillSettings {
       alt.isNotEmpty && label.isNotEmpty ? '$label: $alt' : alt,
     ].where((p) => p.isNotEmpty);
     return all.isEmpty ? null : all.join('\n');
+  }
+
+  /// A printed bill line's quantity: "2 kg" with [showUnits], else just "2".
+  String qty(BillItem item, String qty) =>
+      showUnits ? receiptQty(item, qty) : qty;
+
+  /// The UPI payment link [bill]'s QR encodes, or null when the QR is off.
+  /// The amount is what is still owed on a credit bill, else the printed
+  /// total ([grandTotal] as the renderer computed it, plus old dues collected).
+  /// No `tn` (note) param: every extra character makes the QR denser, and on
+  /// a 2-inch roll it has to stay scannable.
+  String? upiLink(Bill bill, String payee, double grandTotal) {
+    final id = upiId.trim();
+    if (!showUpiQr || id.isEmpty || bill.status == 'quotation') return null;
+    final amount = bill.isUnpaidCredit
+        ? bill.amountDue
+        : grandTotal + bill.collectedTotal;
+    if (amount <= 0) return null;
+    return 'upi://pay?pa=$id&pn=${Uri.encodeComponent(payee)}'
+        '&am=${amount.toStringAsFixed(2)}&cu=INR';
   }
 
   /// The note to print, or '' when off or empty. Same as noteText() in billSettings.js.

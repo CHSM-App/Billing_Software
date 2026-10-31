@@ -18,6 +18,7 @@ class TableQrImage {
     int pixelSize = 600,
     Color foreground = Colors.black,
     Color background = Colors.white,
+    BarcodeQRCorrectionLevel ecc = BarcodeQRCorrectionLevel.high,
   }) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
@@ -31,9 +32,7 @@ class TableQrImage {
     final margin = size * 0.06;
     final qrSize = size - margin * 2;
 
-    final barcode = Barcode.qrCode(
-      errorCorrectLevel: BarcodeQRCorrectionLevel.high,
-    );
+    final barcode = Barcode.qrCode(errorCorrectLevel: ecc);
     final fgPaint = Paint()..color = foreground;
     for (final element in barcode.make(data, width: qrSize, height: qrSize)) {
       if (element is BarcodeBar && element.black) {

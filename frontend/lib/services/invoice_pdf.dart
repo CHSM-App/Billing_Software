@@ -240,7 +240,8 @@ class InvoicePdf {
                     ? 'Quotation No.'
                     : 'Invoice No.',
                 billedBy: settings.showCashier ? bill.billedByName : null,
-                logo: logo),
+                logo: logo,
+                payQr: settings.upiLink(bill, businessName, grandTotal)),
             _billToBox(bill, shaped,
                 showCustomer: settings.showCustomer,
                 warrantyDetails: settings.showWarrantyDetails
@@ -249,7 +250,10 @@ class InvoicePdf {
                           '${e.label}: ${e.value}',
                       ]
                     : const []),
-            _itemsTable(bill, showGst, codeOf, lineTaxOf, money, shaped),
+            // Plain figures in the item grid; "Rs." stays on the totals.
+            _itemsTable(bill, showGst, codeOf, lineTaxOf,
+                (v) => v.toStringAsFixed(2), shaped,
+                (i) => settings.qty(i, formatQty(i.quantity))),
             pw.SizedBox(height: 10),
             _summary(bill, grandTotal, showGst, money),
             if (showGst && settings.showTaxSummary) ...[
@@ -422,10 +426,15 @@ class InvoicePdf {
   }
 
   // --- Header box: [logo] business (left) | Invoice No/Date (right) -------
+  // With a payment QR: [logo] business | QR on top, and Invoice No | Date |
+  // Cashier in a row of their own underneath.
   static pw.Widget _headerBox(String name, String? address, String? phone,
       String? gstin, String? fssai, String billNumber, String dateStr,
       ShapedText shaped,
-      {String numberLabel = 'Invoice No.', String? billedBy, Uint8List? logo}) {
+      {String numberLabel = 'Invoice No.',
+      String? billedBy,
+      Uint8List? logo,
+      String? payQr}) {
     final left = <pw.Widget>[
       shaped.widget(name,
           fontSize: 15,
@@ -452,6 +461,73 @@ class InvoicePdf {
     if (fssai != null && fssai.isNotEmpty) {
       left.add(pw.Text('FSSAI: $fssai',
           style: const pw.TextStyle(fontSize: 9)));
+    }
+
+    final cashier = billedBy == null
+        ? null
+        : _kvCell('Cashier', billedBy,
+            value: shaped.widget(billedBy,
+                fontSize: 11,
+                bold: true,
+                style:
+                    pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)));
+
+    if (payQr != null) {
+      // Flex widths throughout: the default intrinsic width can't hold the
+      // Expanded business column.
+      return pw.Table(
+        border: pw.TableBorder.all(width: 0.8),
+        columnWidths: const {0: pw.FlexColumnWidth()},
+        children: [
+          pw.TableRow(children: [
+            pw.Padding(
+              padding: const pw.EdgeInsets.all(8),
+              child: pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  if (logo != null) ...[
+                    pw.Image(pw.MemoryImage(logo), width: 60, height: 60),
+                    pw.SizedBox(width: 8),
+                  ],
+                  pw.Expanded(
+                    child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: left),
+                  ),
+                  pw.SizedBox(width: 8),
+                  // Medium correction, not high: a sparser QR scans better
+                  // from a phone held over the page.
+                  pw.BarcodeWidget(
+                      barcode: pw.Barcode.qrCode(
+                          errorCorrectLevel: pw.BarcodeQRCorrectionLevel.medium),
+                      data: payQr,
+                      width: 80,
+                      height: 80),
+                ],
+              ),
+            ),
+          ]),
+          // A nested Table, not a Row: same zero-height pitfall as below.
+          pw.TableRow(children: [
+            pw.Table(
+              border: const pw.TableBorder(
+                  verticalInside: pw.BorderSide(width: 0.8)),
+              columnWidths: const {
+                0: pw.FlexColumnWidth(),
+                1: pw.FlexColumnWidth(),
+                2: pw.FlexColumnWidth(),
+              },
+              children: [
+                pw.TableRow(children: [
+                  _kvCell(numberLabel, billNumber),
+                  _kvCell('Date', dateStr),
+                  if (cashier != null) cashier,
+                ]),
+              ],
+            ),
+          ]),
+        ],
+      );
     }
 
     // Use a Table for the header box. A Row with `crossAxisAlignment.stretch`
@@ -501,16 +577,8 @@ class InvoicePdf {
               child: _kvCell('Date', dateStr),
             ),
             // Who settled it. Shaped, since a staff name may be in Marathi.
-            if (billedBy != null)
-              pw.Container(
-                width: double.infinity,
-                child: _kvCell('Cashier', billedBy,
-                    value: shaped.widget(billedBy,
-                        fontSize: 11,
-                        bold: true,
-                        style: pw.TextStyle(
-                            fontSize: 11, fontWeight: pw.FontWeight.bold))),
-              ),
+            if (cashier != null)
+              pw.Container(width: double.infinity, child: cashier),
           ]),
         ]),
       ],
@@ -595,7 +663,8 @@ class InvoicePdf {
       String Function(BillItem) codeOf,
       double Function(BillItem) lineTaxOf,
       String Function(num) money,
-      ShapedText shaped) {
+      ShapedText shaped,
+      String Function(BillItem) qtyOf) {
     final headStyle = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
     final cellStyle = const pw.TextStyle(fontSize: 9);
     final anyHsn = showGst && bill.items.any((i) => codeOf(i).isNotEmpty);
@@ -646,7 +715,7 @@ class InvoicePdf {
         ),
       ];
       if (anyHsn) cells.add(cell(codeOf(i), align: pw.Alignment.center));
-      cells.add(cell(receiptQty(i, formatQty(i.quantity)), align: pw.Alignment.centerRight));
+      cells.add(cell(qtyOf(i), align: pw.Alignment.centerRight));
       cells.add(cell(money(i.receiptPrice), align: pw.Alignment.centerRight));
       if (showGst) {
         final rate = i.taxRate ?? 0;

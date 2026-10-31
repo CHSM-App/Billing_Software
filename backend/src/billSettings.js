@@ -30,6 +30,12 @@ const FLAGS = {
   // effect on any other business type since bills.warranty_extra_data is
   // only ever filled for a warranty-eligible sale.
   show_warranty_details: true,
+  // A UPI QR for upi_id, with the bill's amount filled in: under a thermal
+  // bill, in the header of an A4/A5 invoice.
+  show_upi_qr: false,
+  // The item's unit after the quantity ("2 kg"). Off: most shops sell by
+  // the piece, and the wider Qty column squeezes item names on 2-inch paper.
+  show_units: false,
 };
 
 // The shop-wide note printed on every bill ("Free delivery above Rs.500").
@@ -48,11 +54,13 @@ const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const ACCOUNT_NO_RE = /^[0-9]{6,20}$/;
 // What prints before the alternate number ("GPay", "WhatsApp"); empty = none.
 const ALT_PHONE_LABEL_MAX = 20;
+// Same rule as store_upi_id in routes/businesses.js.
+const UPI_RE = /^[a-zA-Z0-9._-]{2,64}@[a-zA-Z][a-zA-Z0-9.]{1,30}$/;
 
 function defaults() {
   const bank = {};
   for (const k of Object.keys(BANK_MAX)) bank[k] = '';
-  return { ...FLAGS, alt_phone: '', alt_phone_label: '', note: '', bank };
+  return { ...FLAGS, alt_phone: '', alt_phone_label: '', note: '', upi_id: '', bank };
 }
 
 /** Column text → full settings object. Never throws; bad JSON = defaults. */
@@ -67,6 +75,7 @@ function parse(text) {
   if (typeof raw.alt_phone === 'string') out.alt_phone = raw.alt_phone;
   if (typeof raw.alt_phone_label === 'string') out.alt_phone_label = raw.alt_phone_label;
   if (typeof raw.note === 'string') out.note = raw.note;
+  if (typeof raw.upi_id === 'string') out.upi_id = raw.upi_id;
   const bank = raw.bank && typeof raw.bank === 'object' ? raw.bank : {};
   for (const k of Object.keys(BANK_MAX)) {
     if (typeof bank[k] === 'string') out.bank[k] = bank[k];
@@ -109,6 +118,12 @@ function normalize(input) {
     out.note = input.note.trim();
     if (out.note.length > NOTE_MAX) return { error: `Note must be ${NOTE_MAX} characters or less` };
   }
+  if (input.upi_id != null) {
+    if (typeof input.upi_id !== 'string') return { error: 'bill_settings.upi_id must be text' };
+    out.upi_id = input.upi_id.trim();
+    if (out.upi_id && !UPI_RE.test(out.upi_id)) return { error: 'Invalid UPI ID (e.g. shopname@okhdfcbank)' };
+  }
+  if (out.show_upi_qr && !out.upi_id) return { error: 'Enter a UPI ID to print the payment QR' };
   const bank = input.bank ?? {};
   if (typeof bank !== 'object' || Array.isArray(bank)) {
     return { error: 'bill_settings.bank must be an object' };

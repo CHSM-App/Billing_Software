@@ -37,6 +37,8 @@ import 'bill_settings.dart';
 import 'kitchen_ticket.dart';
 import 'raster_lab.dart';
 import 'barcode_image.dart';
+import 'table_qr_image.dart';
+import 'package:barcode/barcode.dart' show BarcodeQRCorrectionLevel;
 
 // ---------------------------------------------------------------------------
 // Unified Printer model — wraps both BluetoothInfo and ftp.Printer
@@ -392,7 +394,8 @@ class PrinterService {
   /// separator per gap == [_ColProfile.cols], so rows still end exactly on the
   /// paper edge.
   static _ColProfile _fitProfile(
-      _ColProfile base, Bill bill, bool gstEnabled, ReceiptLabels? labels) {
+      _ColProfile base, Bill bill, bool gstEnabled, ReceiptLabels? labels,
+      BillSettings settings) {
     if (bill.items.isEmpty) return base;
     // The GST% column prints only when the paper has room for it AND GST is
     // actually in use. Sizing it on paper width alone left an empty column on
@@ -411,7 +414,7 @@ class PrinterService {
     var total = (labels?.colTotal ?? 'Total').length;
 
     for (final item in bill.items) {
-      final q = receiptQty(
+      final q = settings.qty(
           item,
           item.quantity % 1 == 0
               ? item.quantity.toInt().toString()
@@ -579,7 +582,7 @@ class PrinterService {
       BillSettings settings = const BillSettings()}) {
     // Size the item columns to this bill's actual values, giving the slack to
     // the name column. Falls back to the static profile when it can't improve.
-    final p = _fitProfile(basep, bill, gstEnabled, labels);
+    final p = _fitProfile(basep, bill, gstEnabled, labels, settings);
     // GSTIN is passed only when GST is enabled — its presence gates the
     // GSTIN line + the CGST/SGST split. Without it the receipt is as before.
     final gst = businessGstin != null && businessGstin.isNotEmpty;
@@ -671,7 +674,7 @@ class PrinterService {
     // Items
     for (var i = 0; i < bill.items.length; i++) {
       final item = bill.items[i];
-      final qty = receiptQty(
+      final qty = settings.qty(
           item,
           item.quantity % 1 == 0
               ? item.quantity.toInt().toString()
@@ -772,10 +775,11 @@ class PrinterService {
       bool gstEnabled = true,
       ReceiptLabels? labels,
       ui.Image? logo,
+      ui.Image? payQr,
       BillSettings settings = const BillSettings()}) {
     // Same content-fitted columns as the ASCII path, so both renderings of a
     // given bill divide the paper identically.
-    final p = _fitProfile(basep, bill, gstEnabled, labels);
+    final p = _fitProfile(basep, bill, gstEnabled, labels, settings);
     final gst = businessGstin != null && businessGstin.isNotEmpty;
     // GST off → tax ignored entirely: no tax line, and the stored tax is
     // stripped from the payable (see _buildReceiptLines for the rationale).
@@ -913,7 +917,7 @@ class PrinterService {
 
     for (var i = 0; i < bill.items.length; i++) {
       final item = bill.items[i];
-      final qty = receiptQty(
+      final qty = settings.qty(
           item,
           item.quantity % 1 == 0
               ? item.quantity.toInt().toString()
@@ -1012,6 +1016,8 @@ class PrinterService {
         bank.isNotEmpty) {
       rows.add(ReceiptRow.rule());
     }
+    // Billing Setup's UPI payment QR, see [_payQrImage].
+    if (payQr != null) rows.add(ReceiptRow.image(payQr, qr: true));
     rows.add(ReceiptRow.center(
         labels?.thankYou ?? 'Thank you, visit again!', size: sizeBody));
     // Small italic brand line under the thank-you note.
@@ -1259,8 +1265,24 @@ class PrinterService {
         gstEnabled: gstEnabled,
         labels: labels,
         logo: logo,
+        payQr: await _payQrImage(bill, businessName, gstEnabled, settings),
         settings: settings);
     return RasterLab.receiptPreviewPng(rows, width: paperDots);
+  }
+
+  /// The bill's UPI payment QR (Billing Setup), or null when it is off.
+  /// Medium correction, not the table QR's high: the link is ~80 characters
+  /// and high correction makes it too dense to scan off a 2-inch roll.
+  static Future<ui.Image?> _payQrImage(Bill bill, String? businessName,
+      bool gstEnabled, BillSettings settings) async {
+    final link = settings.upiLink(bill, businessName ?? '',
+        bill.grandTotal - (gstEnabled ? 0.0 : bill.taxAmount));
+    if (link == null) return null;
+    return TableQrImage.render(
+        data: link,
+        label: '',
+        pixelSize: 520,
+        ecc: BarcodeQRCorrectionLevel.medium);
   }
 
   /// Print one Credit-tab payment as a single Payment Receipt (raster, like a
@@ -1356,6 +1378,7 @@ class PrinterService {
         gstEnabled: gstEnabled,
         labels: labels,
         logo: logo,
+        payQr: await _payQrImage(bill, businessName, gstEnabled, settings),
         settings: settings);
     final raster = await RasterLab.rowsToReceiptRaster(rows, width: paperDots);
     await _printBytes(printer, raster, chunkSize: 0);

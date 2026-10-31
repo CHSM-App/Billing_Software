@@ -885,6 +885,13 @@ class AppLocalizationsMr extends AppLocalizations {
       'पैसे घेण्यापूर्वी एकदा खात्री करा';
 
   @override
+  String get settingsBillDiscount => 'संपूर्ण बिलावर सूट';
+
+  @override
+  String get settingsBillDiscountSubtitle =>
+      'बिलिंगवर बिलाची सूट (% / ₹) दाखवा. वस्तूवरील सूट तशीच राहील.';
+
+  @override
   String get settingsLanguageSubtitle => 'तुमची अ‍ॅप भाषा निवडा';
 
   @override
@@ -1735,6 +1742,19 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billSetupTermsHint => 'उदा. विकलेला माल परत घेतला जाणार नाही';
 
   @override
+  String get billSetupUnits => 'नगासोबत एकक';
+
+  @override
+  String get billSetupUnitsSubtitle => 'फक्त 2, 1.5 ऐवजी 2 kg, 1.5 L असे छापेल';
+
+  @override
+  String get billSetupUpiQr => 'पेमेंट QR (UPI)';
+
+  @override
+  String get billSetupUpiQrSubtitle =>
+      'ग्राहक स्कॅन करून बिलाची रक्कम भरतील. थर्मल बिलाच्या खाली, A4/A5 बिलाच्या वरती.';
+
+  @override
   String get billSetupBank => 'बँक तपशील';
 
   @override
@@ -1789,6 +1809,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get cartItemDiscAmt => 'सूट ₹';
+
+  @override
+  String get cartItemDiscTotal => 'वस्तूंवरील सूट';
 
   @override
   String get billingTotalAmount => 'एकूण रक्कम';

@@ -1,0 +1,26 @@
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -310,8 +310,12 @@
+ 
+   // Wide layout: the cart panel's width, dragged by the divider and kept per
+   // device. Its own notifier so dragging relayouts the row, not the screen.
+-  static const _cartWidthKey = 'billing_cart_width';
+-  static const _cartWidthDefault = 360.0;
++  // Windows defaults wide enough for the one-row grid (_cartRowOneLine + the
++  // grid box's margins). Its own key, so a width saved for the old narrow
++  // card doesn't hide the new default; dragging still saves as before.
++  static final _cartWidthKey =
++      isWindows ? 'billing_cart_width_win' : 'billing_cart_width';
++  static final _cartWidthDefault = isWindows ? 640.0 : 360.0;
+   final _cartWidth = ValueNotifier<double>(_cartWidthDefault);
+   final _resizingCart = ValueNotifier<bool>(false);
+ 
+@@ -6156,6 +6160,8 @@
+       onTap: canEdit ? () => _toggleCartRow(entry.key) : null,
+       borderRadius: BorderRadius.circular(AppRadius.small),
+       child: Column(
++        // Min, so the name centres vertically like the other cells.
++        mainAxisSize: MainAxisSize.min,
+         crossAxisAlignment: CrossAxisAlignment.start,
+         children: [
+           // Two lines, so a long name still reads in a squeezed column.

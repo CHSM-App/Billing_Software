@@ -15,6 +15,10 @@ class CartEntry {
   final double? discountPct;
   final double discountAmt;
 
+  /// The price list this line is priced with (null = Default). Display only —
+  /// the price itself travels as [priceOverride].
+  final PriceList? priceList;
+
   const CartEntry({
     required this.item,
     this.variant,
@@ -22,6 +26,7 @@ class CartEntry {
     this.priceOverride,
     this.discountPct,
     this.discountAmt = 0,
+    this.priceList,
   });
 
   /// Stable key identifying this line: item + optional variant. Two sizes of
@@ -140,9 +145,11 @@ class CartEntry {
     double? priceOverride,
     double? discountPct,
     double? discountAmt,
+    PriceList? priceList,
     bool clearOverrides = false,
   }) {
     return CartEntry(
+      priceList: clearOverrides ? priceList : (priceList ?? this.priceList),
       item: item ?? this.item,
       variant: variant ?? this.variant,
       quantity: quantity ?? this.quantity,

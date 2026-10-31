@@ -68,7 +68,13 @@ class CartNotifier extends Notifier<List<CartEntry>> {
         priceOverride:
             p == null || (p - e.catalogPrice).abs() < 0.005 ? null : p,
         discountPct: e.discountPct,
-        discountAmt: e.discountAmt);
+        discountAmt: e.discountAmt,
+        priceList: list);
+  }
+
+  /// Price one line with [list] (null = default prices) — the line's badge.
+  void applyLineList(String key, PriceList? list) {
+    state = [for (final e in state) e.key == key ? _priced(e, list) : e];
   }
 
   /// Bill with [list] (null = default prices). Re-prices EVERY line, so a
@@ -141,10 +147,22 @@ class CartNotifier extends Notifier<List<CartEntry>> {
                 clearOverrides: true,
                 priceOverride: price,
                 discountPct: pct,
-                discountAmt: pct == null ? amt : 0)
+                discountAmt: pct == null ? amt : 0,
+                // The line keeps its list only while it still bills at that
+                // list's price; a hand-typed price drops it back to Default.
+                priceList: _billsAt(e, e.priceList, price ?? e.catalogPrice)
+                    ? e.priceList
+                    : null)
             : e
     ];
   }
+
+  /// Whether [list] prices [e]'s item at [price] (a list without its own
+  /// price for the item bills it at catalog). False when there is no list.
+  static bool _billsAt(CartEntry e, PriceList? list, double price) =>
+      list != null &&
+      ((list.priceFor(e.item, e.variant) ?? e.catalogPrice) - price).abs() <
+          0.005;
 
   /// Empty the cart. The price list is per bill, so it goes back to default.
   void clear() {
@@ -177,17 +195,23 @@ class CartNotifier extends Notifier<List<CartEntry>> {
     // added them) take the list price; repriced lines keep what they carry.
     // ponytail: a list not loaded yet (or deleted since) reopens as Default;
     // the lines keep their prices either way.
+    final lists = ref.read(priceListsProvider).valueOrNull ?? const <PriceList>[];
     final list = bill.priceListId == null
         ? null
-        : ref
-            .read(priceListsProvider)
-            .valueOrNull
-            ?.where((l) => l.id == bill.priceListId)
-            .firstOrNull;
+        : lists.where((l) => l.id == bill.priceListId).firstOrNull;
     ref.read(selectedPriceListProvider.notifier).set(list);
+    // ponytail: a line's own list isn't saved on the bill, so a repriced line
+    // gets back the first list that bills it at its price — the bill's list
+    // first; two lists at the same price may swap. Save a per-line
+    // price_list_id if that ever matters.
     state = grouped([
       for (final e in merged.values)
-        e.priceOverride == null ? _priced(e, list) : e,
+        e.priceOverride == null
+            ? _priced(e, list)
+            : e.copyWith(
+                priceList: [if (list != null) list, ...lists]
+                    .where((l) => _billsAt(e, l, e.priceOverride!))
+                    .firstOrNull),
     ]);
   }
 

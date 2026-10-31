@@ -35,3 +35,8 @@ undoing it now breaks the build there. Before undoing, switch those back to the 
 
 Store the unit on `bill_items` on the server, so reprints and other devices don't rely on
 the catalog, then drop `catalogUnits`.
+
+**Since 2026-10-30 it is a Billing Setup toggle, "Unit with quantity" (`show_units`, off by
+default).** Printed bills go through `BillSettings.qty()`; on-screen lists (history, credit
+bills) still always show the unit. The patch predates the toggle, so undoing it now also means
+removing `show_units` from `billSettings.js`, `bill_settings.dart` and Billing Setup.

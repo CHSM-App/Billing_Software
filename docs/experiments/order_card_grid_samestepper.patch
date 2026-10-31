@@ -1,0 +1,79 @@
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -6012,7 +6012,12 @@
+     }
+     // Stepper: two 28px − / + buttons, the qty field and a 1px border each
+     // side; then 4px and the unit.
+-    return (rate: rate, qty: 56 + field + 2 + 4 + unit, total: total);
++    return (
++      rate: rate,
++      qty: 56 + field + 2 + 4 + unit,
++      total: total,
++      field: field,
++    );
+   }
+ 
+   Widget _buildCartRow(CartEntry entry, {_CartCols? cols}) {
+@@ -6148,8 +6153,8 @@
+     );
+   }
+ 
+-  /// − qty + for a cart line.
+-  Widget _qtyStepper(CartEntry entry) {
++  /// − qty + for a cart line. [fieldWidth] overrides the qty box's own width.
++  Widget _qtyStepper(CartEntry entry, {double? fieldWidth}) {
+     return Container(
+       decoration: BoxDecoration(
+         color: AppColors.surfaceVariant,
+@@ -6166,6 +6171,7 @@
+             key: ValueKey('qty-${entry.key}'),
+             quantity: entry.quantity,
+             allowDecimal: entry.item.isMeasured,
++            width: fieldWidth,
+             onSubmitted: (q) => _cartChange(entry.key,
+                 () => ref.read(cartProvider.notifier).setQty(entry.key, q)),
+           ),
+@@ -6238,7 +6244,7 @@
+       width: cols.qty,
+       child: Row(
+         children: [
+-          _qtyStepper(entry),
++          _qtyStepper(entry, fieldWidth: cols.field),
+           Flexible(
+             child: Padding(
+               padding: const EdgeInsets.only(left: 4),
+@@ -6342,7 +6348,8 @@
+ }
+ 
+ /// Content widths of the Windows order-card grid's columns (see _cartCols).
+-typedef _CartCols = ({double rate, double qty, double total});
++/// [field] is the qty box width every row uses, so the steppers match.
++typedef _CartCols = ({double rate, double qty, double total, double field});
+ 
+ /// "1 Box + 2 Bottle" for a cart line holding at least one full pack, else
+ /// null. Display only — the line still bills its quantity in base units.
+@@ -6507,11 +6514,15 @@
+   final bool allowDecimal;
+   final void Function(double) onSubmitted;
+ 
++  /// Box width; null = 48 for a decimal quantity, else 36.
++  final double? width;
++
+   const _CartQtyField({
+     super.key,
+     required this.quantity,
+     required this.allowDecimal,
+     required this.onSubmitted,
++    this.width,
+   });
+ 
+   @override
+@@ -6566,7 +6577,7 @@
+   @override
+   Widget build(BuildContext context) {
+     return SizedBox(
+-      width: widget.allowDecimal ? 48 : 36,
++      width: widget.width ?? (widget.allowDecimal ? 48 : 36),
+       height: 30,
+       // Center is load-bearing: a single-line field lays out at its natural
+       // height (~20px) at the TOP of a taller box, and textAlignVertical can't

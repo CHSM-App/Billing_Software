@@ -895,3 +895,81 @@ describe('item packs', () => {
     expect(sqls.some((s) => /pack_unit = NULL, pack_size = NULL/.test(s))).toBe(true);
   });
 });
+
+// ------------------------------------------------------------------
+// Auto barcode on manual add/edit (fillMissingBarcode)
+//
+// Every manual save leaves a scannable code: a row saved without one gets the
+// code the app derives from its id. The expected value is the one the Dart
+// generateBarcode produces for the same id (frontend/test/barcode_export_test).
+// ------------------------------------------------------------------
+describe('auto barcode on manual saves', () => {
+  const NEW_ID = '3907C843-EE51-4A2B-9F00-123456789ABC';
+  const fillSql = () => mockRequest.query.mock.calls
+    .map((c) => c[0]).find((q) => /SET barcode = @barcode WHERE id = @id AND barcode IS NULL/.test(q));
+
+  test('a plain item created without a barcode gets the app-matching code', async () => {
+    nameIsFree();
+    mockRequest.recordset = [{ ...sampleItem, id: NEW_ID, barcode: null }];
+    const res = await request(app)
+      .post('/api/items')
+      .set(authHeader({ role: 'owner' }))
+      .send({ name: 'Tea', price: 10 });
+    expect(res.status).toBe(201);
+    expect(res.body.barcode).toBe('390728434451');
+    expect(fillSql()).toMatch(/UPDATE items/);
+  });
+
+  test('a typed barcode is kept, and a sized item gets none of its own', async () => {
+    nameIsFree();
+    mockRequest.recordset = [{ ...sampleItem, id: NEW_ID }];
+    let res = await request(app).post('/api/items').set(authHeader({ role: 'owner' }))
+      .send({ name: 'Rice', price: 50, barcode: '123456' });
+    expect(res.body.barcode).toBe('123456');
+    expect(fillSql()).toBeUndefined();
+
+    mockRequest.reset();
+    nameIsFree();
+    mockRequest.recordset = [{ ...sampleItem, id: NEW_ID, barcode: null, price: null }];
+    res = await request(app).post('/api/items').set(authHeader({ role: 'owner' }))
+      .send({ name: 'Chicken 65', has_variants: true });
+    expect(res.status).toBe(201);
+    expect(res.body.barcode).toBeNull();
+    expect(fillSql()).toBeUndefined();
+  });
+
+  test('a size added or edited without a barcode gets one', async () => {
+    const size = { id: NEW_ID, item_id: ITEM_ID, label: 'Full', price: 280, barcode: null, sort_order: 0, is_active: true };
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] }) // loadOwnedItem
+      .mockResolvedValueOnce({ recordset: [size], rowsAffected: [1] });      // INSERT variant
+    let res = await request(app).post(`/api/items/${ITEM_ID}/variants`)
+      .set(authHeader({ role: 'owner' })).send({ label: 'Full', price: 280 });
+    expect(res.status).toBe(201);
+    expect(res.body.barcode).toBe('390728434451');
+    expect(fillSql()).toMatch(/UPDATE item_variants/);
+
+    mockRequest.reset();
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] }) // loadOwnedItem
+      .mockResolvedValueOnce({ recordset: [{ ...size }], rowsAffected: [1] }); // UPDATE variant
+    res = await request(app).put(`/api/items/${ITEM_ID}/variants/${NEW_ID}`)
+      .set(authHeader({ role: 'owner' })).send({ price: 300 });
+    expect(res.status).toBe(200);
+    expect(res.body.barcode).toBe('390728434451');
+  });
+
+  test('a clash on the unique barcode index leaves it empty instead of failing', async () => {
+    const dup = Object.assign(new Error('dup'), { number: 2601 });
+    const size = { id: NEW_ID, item_id: ITEM_ID, label: 'Full', price: 280, barcode: null };
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [size], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] }) // parent stock reset
+      .mockRejectedValueOnce(dup);                                 // fill UPDATE clashes
+    const res = await request(app).post(`/api/items/${ITEM_ID}/variants`)
+      .set(authHeader({ role: 'owner' })).send({ label: 'Full', price: 280 });
+    expect(res.status).toBe(201);
+    expect(res.body.barcode).toBeNull();
+  });
+});

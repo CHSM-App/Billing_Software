@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:Vittam/models/models.dart';
 import 'package:Vittam/services/bill_settings.dart';
 
 void main() {
@@ -27,6 +28,31 @@ void main() {
   test('shop note prints only when switched on', () {
     expect(const BillSettings(note: 'Free delivery').noteText, '');
     expect(BillSettings.fromJson({'show_note': true, 'note': ' Free delivery '}).noteText, 'Free delivery');
+  });
+
+  test('UPI QR link: amount owed, nothing for a quotation or when off', () {
+    Bill bill({String status = 'finalized', String pay = 'paid'}) => Bill(
+        id: 'b', businessId: 'z', billNumber: 'INV-16', subtotal: 1250,
+        taxAmount: 0, discountAmount: 0, total: 1250, paymentMode: 'cash',
+        status: status, paymentStatus: pay, createdByUserId: 'u',
+        createdAt: DateTime(2026, 10, 28), items: const []);
+    const on = BillSettings(showUpiQr: true, upiId: 'teli@okhdfcbank');
+    expect(on.upiLink(bill(), 'M/S Teli', 1250),
+        'upi://pay?pa=teli@okhdfcbank&pn=M%2FS%20Teli&am=1250.00&cu=INR');
+    expect(on.upiLink(bill(status: 'quotation'), 'Teli', 1250), isNull);
+    expect(const BillSettings(upiId: 'teli@okhdfcbank')
+        .upiLink(bill(), 'Teli', 1250), isNull);
+    expect(BillSettings.fromJson(on.toJson()).upiId, 'teli@okhdfcbank');
+  });
+
+  test('unit after the quantity only when show_units is on', () {
+    catalogUnits = {'rice': 'kg'};
+    final item = BillItem(
+        id: 'i', billId: 'b', itemId: 'rice', itemName: 'Rice',
+        quantity: 2, unitPrice: 50, lineTotal: 100);
+    expect(const BillSettings().qty(item, '2'), '2');
+    expect(BillSettings.fromJson({'show_units': true}).qty(item, '2'), '2 kg');
+    catalogUnits = const {};
   });
 
   test('alternate number prints after the main one', () {

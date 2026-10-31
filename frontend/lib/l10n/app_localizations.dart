@@ -1634,6 +1634,18 @@ abstract class AppLocalizations {
   /// **'Ask once more before a bill is settled'**
   String get settingsConfirmSettleSubtitle;
 
+  /// No description provided for @settingsBillDiscount.
+  ///
+  /// In en, this message translates to:
+  /// **'Discount on whole bill'**
+  String get settingsBillDiscount;
+
+  /// No description provided for @settingsBillDiscountSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the bill discount (% / ₹) on billing. Item discounts stay either way.'**
+  String get settingsBillDiscountSubtitle;
+
   /// No description provided for @settingsLanguageSubtitle.
   ///
   /// In en, this message translates to:
@@ -3176,6 +3188,30 @@ abstract class AppLocalizations {
   /// **'e.g. Goods once sold will not be taken back'**
   String get billSetupTermsHint;
 
+  /// No description provided for @billSetupUnits.
+  ///
+  /// In en, this message translates to:
+  /// **'Unit with quantity'**
+  String get billSetupUnits;
+
+  /// No description provided for @billSetupUnitsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Prints 2 kg, 1.5 L instead of just 2, 1.5'**
+  String get billSetupUnitsSubtitle;
+
+  /// No description provided for @billSetupUpiQr.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment QR (UPI)'**
+  String get billSetupUpiQr;
+
+  /// No description provided for @billSetupUpiQrSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Customers scan it to pay the bill amount. Below thermal bills, at the top of A4/A5 invoices.'**
+  String get billSetupUpiQrSubtitle;
+
   /// No description provided for @billSetupBank.
   ///
   /// In en, this message translates to:
@@ -3283,6 +3319,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Disc ₹'**
   String get cartItemDiscAmt;
+
+  /// No description provided for @cartItemDiscTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Item discounts'**
+  String get cartItemDiscTotal;
 
   /// No description provided for @billingTotalAmount.
   ///

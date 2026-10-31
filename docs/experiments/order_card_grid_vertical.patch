@@ -1,0 +1,108 @@
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -6185,14 +6185,23 @@
+         ],
+       ),
+     );
+-    final qty = [
+-      const SizedBox(width: 8),
+-      _qtyStepper(entry),
+-      Padding(
+-        padding: const EdgeInsets.only(left: 4),
+-        child: Text('/ ${unitShort(entry.item.unit)}', style: muted),
++    // Fixed width so the grid's vertical lines line up from row to row.
++    final qty = SizedBox(
++      width: 150,
++      child: Row(
++        mainAxisAlignment: MainAxisAlignment.center,
++        children: [
++          _qtyStepper(entry),
++          Flexible(
++            child: Padding(
++              padding: const EdgeInsets.only(left: 4),
++              child: Text('/ ${unitShort(entry.item.unit)}',
++                  maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
++            ),
++          ),
++        ],
+       ),
+-    ];
++    );
+     // Total — net line amount; tax is shown in the totals below.
+     final total = Text('₹${entry.lineNet(gst).toStringAsFixed(2)}',
+         textAlign: TextAlign.right,
+@@ -6215,32 +6224,50 @@
+             ),
+           )
+         : const SizedBox.shrink();
+-    return Padding(
+-      // Inside the grid box, so less side padding than the other platforms.
+-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6.0),
+-      child: LayoutBuilder(
+-        builder: (context, box) => box.maxWidth >= _cartRowOneLine
+-            ? Row(children: [
+-                badge,
+-                Expanded(child: name),
+-                rate,
+-                ...qty,
++    // One grid cell: its own padding, so the vertical lines between cells run
++    // the full height of the row.
++    Widget cell(Widget child) => Padding(
++        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
++        child: Center(child: child));
++    const vline = VerticalDivider(width: 1, thickness: 1, color: AppColors.border);
++    // IntrinsicHeight makes the row as tall as its tallest cell, so the
++    // stretched lines get a finite height.
++    Widget gridRow(List<Widget> cells) => IntrinsicHeight(
++        child: Row(
++            crossAxisAlignment: CrossAxisAlignment.stretch, children: cells));
++    return LayoutBuilder(
++      builder: (context, box) => box.maxWidth >= _cartRowOneLine
++          ? gridRow([
++              Expanded(
++                  child: Padding(
++                      padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
++                      child: Row(children: [badge, Expanded(child: name)]))),
++              vline,
++              cell(rate),
++              vline,
++              cell(qty),
++              vline,
++              cell(Row(children: [
+                 SizedBox(width: 72, child: total),
+                 chevron,
+-              ])
+-            : Column(
+-                crossAxisAlignment: CrossAxisAlignment.stretch,
+-                children: [
+-                  Row(children: [badge, Expanded(child: name), chevron]),
+-                  const SizedBox(height: 4),
+-                  Row(children: [
+-                    rate,
+-                    ...qty,
+-                    Expanded(child: total),
+-                  ]),
+-                ],
+-              ),
+-      ),
++              ])),
++            ])
++          : Column(
++              crossAxisAlignment: CrossAxisAlignment.stretch,
++              children: [
++                Padding(
++                  padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
++                  child: Row(children: [badge, Expanded(child: name), chevron]),
++                ),
++                gridRow([
++                  cell(rate),
++                  vline,
++                  cell(qty),
++                  vline,
++                  Expanded(child: cell(SizedBox(width: double.infinity, child: total))),
++                ]),
++              ],
++            ),
+     );
+   }
+ 

@@ -84,6 +84,32 @@ function isDuplicateKeyError(err) {
   return err && (err.number === 2627 || err.number === 2601);
 }
 
+// The code the app derives from a row's id (generateBarcode in
+// frontend/lib/services/barcode_export.dart): first 12 hex chars, a-f → 0-5.
+// Keep the two identical, or a label printed from the app stops matching.
+function generateBarcode(id) {
+  return String(id).replace(/-/g, '').toLowerCase().slice(0, 12)
+    .replace(/[a-f]/g, (c) => String(c.charCodeAt(0) - 97));
+}
+
+// Manual adds and edits (these routes) always leave a scannable code: a saved
+// row that still has none gets its generated one. Excel import and sign-up
+// sample items have their own INSERTs and are deliberately not covered. A clash
+// on the unique barcode index just leaves it empty rather than failing the save.
+async function fillMissingBarcode(table, row) {
+  if (!row || row.barcode) return;
+  const code = generateBarcode(row.id);
+  try {
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, row.id)
+      .input('barcode', sql.NVarChar(100), code)
+      .query(`UPDATE ${table} SET barcode = @barcode WHERE id = @id AND barcode IS NULL`);
+    row.barcode = code;
+  } catch (err) {
+    if (!isDuplicateKeyError(err)) throw err;
+  }
+}
+
 /// Whether this business already has an active item called [name].
 ///
 /// Two items with the same name are indistinguishable everywhere it matters —
@@ -431,6 +457,8 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       `);
 
     const created = result.recordset[0];
+    // A sized item's sizes are what get scanned; they get theirs as they're added.
+    if (!sizedItem) await fillMissingBarcode('items', created);
 
     audit.logItemCreated(
       { user_id: req.user.user_id, user_name: req.user.name || null },
@@ -619,6 +647,9 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     `);
 
     const updated = result.recordset[0];
+    // An edit counts as a manual save too, so an old item without a code gets
+    // one — and clearing the field resets it to the generated code.
+    if (!sizedItem) await fillMissingBarcode('items', updated);
     // Attach the item's sizes. Without this the response has NO `variants` key,
     // so the client's Item.fromJson defaults it to [] and the updated item lands
     // in the billing list looking like a plain item — tapping it then bills the
@@ -810,7 +841,9 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .query('UPDATE items SET stock_quantity = NULL, low_stock_threshold = NULL, pack_unit = NULL, pack_size = NULL WHERE id = @id');
 
-    return res.status(201).json(result.recordset[0]);
+    const created = result.recordset[0];
+    await fillMissingBarcode('item_variants', created);
+    return res.status(201).json(created);
   } catch (err) {
     if (isDuplicateKeyError(err)) {
       return res.status(409).json({
@@ -896,7 +929,9 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: 'Variant not found' });
     }
-    return res.json(result.recordset[0]);
+    const updated = result.recordset[0];
+    await fillMissingBarcode('item_variants', updated);
+    return res.json(updated);
   } catch (err) {
     if (isDuplicateKeyError(err)) {
       return res.status(409).json({

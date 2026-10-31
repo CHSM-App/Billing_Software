@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/pdf.dart';
 
 import 'package:Vittam/models/models.dart';
+import 'package:Vittam/services/bill_settings.dart';
 import 'package:Vittam/services/devanagari_raster.dart';
 import 'package:Vittam/services/invoice_pdf.dart';
 
@@ -92,6 +93,24 @@ void main() {
       'Tax', 'GOVIND', 'GSTIN', 'FSSAI', '119',
       '8418', 'Sagar', 'GST', 'Grand', 'Rupees',
     ]) {
+      expect(text.contains(needle), true, reason: 'PDF missing "$needle"');
+    }
+  });
+
+  test('payment QR moves Invoice No / Date / Cashier into a row under it',
+      () async {
+    final bytes = await InvoicePdf.buildMany(
+      bills: [_sampleBill(withTax: true)],
+      pageFormat: PdfPageFormat.a4,
+      businessName: 'M/S Sudhir Rajaram Teli',
+      address: 'Kudalleshwer Prasad Complex, Near Post Office,\n'
+          'Market Road, Kudal, Sindhudurg - 416520',
+      phone: '9763535333',
+      gstEnabled: true,
+      settings: const BillSettings(showUpiQr: true, upiId: 'teli@okhdfcbank'),
+    );
+    final text = _renderedText(bytes);
+    for (final needle in ['Sudhir', 'Invoice', 'Date', 'Grand']) {
       expect(text.contains(needle), true, reason: 'PDF missing "$needle"');
     }
   });

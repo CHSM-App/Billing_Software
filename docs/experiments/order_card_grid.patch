@@ -1,0 +1,49 @@
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -5129,10 +5129,31 @@
+           ],
+           items: cart.isEmpty
+               ? _emptyCartPlaceholder(l10n)
+-              : Column(
+-                  mainAxisSize: MainAxisSize.min,
+-                  children: cart.map((e) => _buildCartRow(e)).toList(),
+-                ),
++              : isWindows
++                  // Windows: lines sit in a light-grey ruled box, one cell each.
++                  ? Container(
++                      margin: const EdgeInsets.symmetric(
++                          horizontal: AppSpacing.space16, vertical: AppSpacing.space8),
++                      clipBehavior: Clip.antiAlias,
++                      decoration: BoxDecoration(
++                        border: Border.all(color: AppColors.border),
++                        borderRadius: BorderRadius.circular(AppRadius.small),
++                      ),
++                      child: Column(
++                        mainAxisSize: MainAxisSize.min,
++                        children: [
++                          for (final (i, e) in cart.indexed) ...[
++                            if (i > 0)
++                              const Divider(height: 1, color: AppColors.border),
++                            _buildCartRow(e),
++                          ],
++                        ],
++                      ),
++                    )
++                  : Column(
++                      mainAxisSize: MainAxisSize.min,
++                      children: cart.map((e) => _buildCartRow(e)).toList(),
++                    ),
+           // Footer (previous dues, discount, charges, totals, actions).
+           footer: [
+             const Divider(height: 1),
+@@ -6195,8 +6216,8 @@
+           )
+         : const SizedBox.shrink();
+     return Padding(
+-      padding: const EdgeInsets.symmetric(
+-          horizontal: AppSpacing.space16, vertical: 6.0),
++      // Inside the grid box, so less side padding than the other platforms.
++      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6.0),
+       child: LayoutBuilder(
+         builder: (context, box) => box.maxWidth >= _cartRowOneLine
+             ? Row(children: [

@@ -1,0 +1,48 @@
+--- a/frontend/lib/screens/home_screen.dart
++++ b/frontend/lib/screens/home_screen.dart
+@@ -6142,7 +6142,7 @@
+   /// A narrow card (under [_cartRowOneLine] px) can't fit the name beside the
+   /// columns, so the name takes its own line with the columns below it.
+   /// A line discount strikes the rate through above the discounted rate.
+-  static const _cartRowOneLine = 520.0;
++  static const _cartRowOneLine = 600.0;
+ 
+   Widget _windowsCartRow(CartEntry entry,
+       {required bool canEdit, required bool expanded}) {
+@@ -6158,11 +6158,12 @@
+       child: Column(
+         crossAxisAlignment: CrossAxisAlignment.start,
+         children: [
++          // Two lines, so a long name still reads in a squeezed column.
+           Text(entry.billingDisplayName(ref.watch(showItemNoProvider)),
+               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                     fontWeight: FontWeight.w500,
+                   ),
+-              maxLines: 1,
++              maxLines: 2,
+               overflow: TextOverflow.ellipsis),
+           // 17 bottles with a box of 15 → "1 Box + 2 Bottle".
+           if (packLabel != null)
+@@ -6175,6 +6176,8 @@
+     final rate = SizedBox(
+       width: 64,
+       child: Column(
++        // Min, so the cell's Center can centre it vertically.
++        mainAxisSize: MainAxisSize.min,
+         crossAxisAlignment: CrossAxisAlignment.end,
+         children: [
+           if (discounted)
+@@ -6186,10 +6189,11 @@
+       ),
+     );
+     // Fixed width so the grid's vertical lines line up from row to row.
++    // Left-aligned: the unit text varies in width, and centring made the
++    // steppers sit a few px apart from row to row.
+     final qty = SizedBox(
+-      width: 150,
++      width: 140,
+       child: Row(
+-        mainAxisAlignment: MainAxisAlignment.center,
+         children: [
+           _qtyStepper(entry),
+           Flexible(

@@ -891,6 +891,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Ask once more before a bill is settled';
 
   @override
+  String get settingsBillDiscount => 'Discount on whole bill';
+
+  @override
+  String get settingsBillDiscountSubtitle =>
+      'Show the bill discount (% / ₹) on billing. Item discounts stay either way.';
+
+  @override
   String get settingsLanguageSubtitle => 'Choose your app language';
 
   @override
@@ -1740,6 +1747,20 @@ class AppLocalizationsEn extends AppLocalizations {
       'e.g. Goods once sold will not be taken back';
 
   @override
+  String get billSetupUnits => 'Unit with quantity';
+
+  @override
+  String get billSetupUnitsSubtitle =>
+      'Prints 2 kg, 1.5 L instead of just 2, 1.5';
+
+  @override
+  String get billSetupUpiQr => 'Payment QR (UPI)';
+
+  @override
+  String get billSetupUpiQrSubtitle =>
+      'Customers scan it to pay the bill amount. Below thermal bills, at the top of A4/A5 invoices.';
+
+  @override
   String get billSetupBank => 'Bank details';
 
   @override
@@ -1794,6 +1815,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cartItemDiscAmt => 'Disc ₹';
+
+  @override
+  String get cartItemDiscTotal => 'Item discounts';
 
   @override
   String get billingTotalAmount => 'Total Amount';

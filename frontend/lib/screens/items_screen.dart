@@ -538,8 +538,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
         },
         onVariantsCreated: (itemId, variants) =>
             ref.read(itemsProvider.notifier).setItemVariants(itemId, variants),
-        onManageSizes:
-            item != null ? () => _showVariantManager(item) : null,
+        // Only for per-size recipes now; sizes are edited in the form.
+        onManageSizes: item != null &&
+                item.hasVariants &&
+                isRestaurant &&
+                inventoryEnabled
+            ? () => _showVariantManager(item)
+            : null,
         onManageRecipe: showRecipe
             ? () => showDialog(
                   context: context,
@@ -560,27 +565,36 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
     );
   }
 
-  /// Writes [prices] (list id → this item's price, null = drop it) into the
-  /// price lists. A list is saved whole, so each is merged into a FRESH copy —
-  /// the cached one could be missing prices another device just set.
+  /// Writes [prices] (list id → variant id, null for the item itself → price,
+  /// null = drop it) into the price lists. A list is saved whole, so each is
+  /// merged into a FRESH copy — the cached one could be missing prices another
+  /// device just set.
   Future<void> _savePriceListPrices(
-      String itemId, Map<String, double?> prices) async {
+      String itemId, Map<String, Map<String?, double?>> prices) async {
     final id = itemId.toLowerCase();
     for (final list in (await getPriceLists()).whereType<Map>()) {
-      if (!prices.containsKey(list['id'])) continue;
-      final price = prices[list['id']];
+      final mine = prices[list['id']];
+      if (mine == null) continue;
+      final touched = {for (final v in mine.keys) v?.toLowerCase()};
       await updatePriceList(list['id'], {
         'name': list['name'],
         'adjust_pct': list['adjust_pct'],
         'items': [
           for (final e in (list['items'] as List? ?? const []).whereType<Map>())
-            if ('${e['item_id']}'.toLowerCase() != id || e['variant_id'] != null)
+            if ('${e['item_id']}'.toLowerCase() != id ||
+                !touched.contains(e['variant_id']?.toString().toLowerCase()))
               {
                 'item_id': e['item_id'],
                 if (e['variant_id'] != null) 'variant_id': e['variant_id'],
                 'price': e['price'],
               },
-          if (price != null) {'item_id': itemId, 'price': price},
+          for (final p in mine.entries)
+            if (p.value != null)
+              {
+                'item_id': itemId,
+                if (p.key != null) 'variant_id': p.key,
+                'price': p.value,
+              },
         ],
       });
     }
@@ -1086,7 +1100,8 @@ class _ItemSheetRow extends StatelessWidget {
     required this.onDelete,
   });
 
-  static const double indexWidth = 24;
+  // Three digits at 11px; a longer number shrinks to fit (see build).
+  static const double indexWidth = 28;
   static const double priceWidth = 72;
   static const double _iconTap = 26;
 
@@ -1123,13 +1138,17 @@ class _ItemSheetRow extends StatelessWidget {
             children: [
               SizedBox(
                 width: indexWidth,
-                child: Text(
-                  '$index',
-                  textAlign: TextAlign.right,
-                  style: AppFont.style(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textSecondary,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    '$index',
+                    maxLines: 1,
+                    style: AppFont.style(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textSecondary,
+                    ),
                   ),
                 ),
               ),
@@ -1513,9 +1532,24 @@ class _VariantDraft {
   final packSize = TextEditingController();
   String? packUnit;
 
-  /// A row the user added and then left completely untouched. Dropped silently
-  /// on save — a trailing blank row is a change of mind, not an error.
+  /// This size's list prices, as typed (list id → text), as they were when
+  /// the form opened, and the list the row's dropdown is on.
+  final listPrices = <String, String>{};
+  final listOriginal = <String, String>{};
+  String? plId;
+  final plCtrl = TextEditingController();
+
+  /// The size as stored on the server: set when editing an existing size, or
+  /// once a new one is created. Null = not saved yet.
+  ItemVariant? saved;
+
+  _VariantDraft([this.plId]);
+
+  /// A new row the user added and then left completely untouched. Dropped
+  /// silently on save — a trailing blank row is a change of mind, not an
+  /// error. An existing size is never blank: clearing it is removing it.
   bool get isBlank =>
+      saved == null &&
       label.text.trim().isEmpty &&
       price.text.trim().isEmpty &&
       barcode.text.trim().isEmpty &&
@@ -1530,6 +1564,7 @@ class _VariantDraft {
     stock.dispose();
     lowStock.dispose();
     packSize.dispose();
+    plCtrl.dispose();
   }
 }
 
@@ -1570,9 +1605,11 @@ class _ItemFormDialog extends StatefulWidget {
   /// price can be set right here. Empty → the row is hidden.
   final List<PriceList> priceLists;
 
-  /// Saves the list prices changed in this form (list id → price, null =
-  /// back to the list's default) once the item has an id.
-  final Future<void> Function(String itemId, Map<String, double?> prices)?
+  /// Saves the list prices changed in this form (list id → variant id, null
+  /// for the item itself → price, null = back to the list's default) once
+  /// the item and its sizes have ids.
+  final Future<void> Function(
+          String itemId, Map<String, Map<String?, double?>> prices)?
       onSavePriceListPrices;
 
   const _ItemFormDialog(
@@ -1626,11 +1663,13 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// is set; billing back-calculates the net rate from an inclusive price.
   bool _priceInclusiveTax = false;
 
-  /// Whether the user ticked "this item has variants" while CREATING. Editing an
-  /// existing item still routes to the dedicated size manager, which already
-  /// handles update/delete of persisted sizes safely.
+  /// Whether "this item has variants" is ticked. Editing a sized item opens
+  /// with it ticked and one card per existing size, the same cards as create.
   bool _hasVariants = false;
   final List<_VariantDraft> _variantDrafts = [];
+
+  /// Existing sizes whose card was removed — deleted on save.
+  final List<ItemVariant> _removedVariants = [];
 
   /// "Retail & Warranty" shops only: whether selling this item auto-creates a
   /// warranty record, and the period (months) seeded onto it.
@@ -1641,9 +1680,6 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// through its variants. Held so a retry adds only the MISSING variants
   /// instead of creating a second item.
   Item? _savedItem;
-
-  /// Indexes (into the non-blank draft list) whose variant was already created.
-  final Set<int> _createdDraftIndexes = {};
 
   /// Anything that went wrong with this form, shown as a banner above the first
   /// field: a validation failure, a rejected save (a duplicate name or barcode),
@@ -1675,7 +1711,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
           : _fmtPrice(l.prices[widget.item!.id]!),
   };
   late final Map<String, String> _plPrices = {..._plOriginal};
-  late String? _plId =
+  late String? _plId = _firstPl;
+  String? get _firstPl =>
       widget.priceLists.isEmpty ? null : widget.priceLists.first.id;
   late final _plCtrl = TextEditingController(text: _plPrices[_plId] ?? '');
 
@@ -1730,6 +1767,30 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
           item.packSize != null ? formatQty(item.packSize!) : '';
       _warrantyEligible = item.warrantyEligible;
       _warrantyMonthsCtrl.text = item.defaultWarrantyMonths?.toString() ?? '';
+      if (item.hasVariants) {
+        _hasVariants = true;
+        for (final v in item.variants) {
+          final d = _VariantDraft(_firstPl)
+            ..saved = v
+            ..packUnit = v.packUnit;
+          d.label.text = v.label;
+          d.price.text = v.price == null ? '' : _fmtPrice(v.price!);
+          d.barcode.text = v.barcode ?? '';
+          d.stock.text =
+              v.stockQuantity == null ? '' : formatQty(v.stockQuantity!);
+          d.lowStock.text = v.lowStockThreshold == null
+              ? ''
+              : formatQty(v.lowStockThreshold!);
+          d.packSize.text = v.packSize == null ? '' : formatQty(v.packSize!);
+          for (final l in widget.priceLists) {
+            final p = l.prices['${item.id}:${v.id}'];
+            d.listOriginal[l.id] = p == null ? '' : _fmtPrice(p);
+          }
+          d.listPrices.addAll(d.listOriginal);
+          d.plCtrl.text = d.listPrices[d.plId] ?? '';
+          _variantDrafts.add(d);
+        }
+      }
       // The items list never carries image_url, so look this one up.
       getItemImageUrl(item.id).then((url) {
         if (mounted) setState(() => _photoUrl = url);
@@ -1971,15 +2032,23 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// Each list remembers its own figure while switching, and the dropdown
   /// shows the ones already set. A blank box bills at the list's % rule on
   /// the price above (shown as the hint), or at that price itself.
-  Widget _buildPriceListRow(AppLocalizations l10n) {
-    final list = widget.priceLists.firstWhere((l) => l.id == _plId);
+  /// Used for the item ([_plPrices]) and for each new size (its draft).
+  Widget _buildPriceListRow(
+    AppLocalizations l10n, {
+    required Map<String, String> prices,
+    required String? listId,
+    required ValueChanged<String?> onPick,
+    required TextEditingController ctrl,
+    required TextEditingController base,
+  }) {
+    final list = widget.priceLists.firstWhere((l) => l.id == listId);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
           flex: 5,
           child: DropdownButtonFormField<String>(
-            initialValue: _plId,
+            initialValue: listId,
             isExpanded: true,
             decoration: InputDecoration(
               labelText: l10n.priceListPick,
@@ -1991,16 +2060,16 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 DropdownMenuItem(
                   value: l.id,
                   child: Text(
-                      (_plPrices[l.id] ?? '').trim().isEmpty
+                      (prices[l.id] ?? '').trim().isEmpty
                           ? l.name
-                          : '${l.name} · ₹${_plPrices[l.id]!.trim()}',
+                          : '${l.name} · ₹${prices[l.id]!.trim()}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                 ),
             ],
             onChanged: (v) => setState(() {
-              _plId = v;
-              _plCtrl.text = _plPrices[v] ?? '';
+              onPick(v);
+              ctrl.text = prices[v] ?? '';
             }),
           ),
         ),
@@ -2008,15 +2077,15 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         Expanded(
           flex: 4,
           child: ListenableBuilder(
-            listenable: _priceCtrl,
+            listenable: base,
             builder: (context, _) {
-              final base = double.tryParse(_priceCtrl.text.trim());
+              final basePrice = double.tryParse(base.text.trim());
               final pct = list.adjustPct;
-              final ruled = base == null || pct == null || pct == 0
-                  ? base
-                  : base * (1 + pct / 100);
+              final ruled = basePrice == null || pct == null || pct == 0
+                  ? basePrice
+                  : basePrice * (1 + pct / 100);
               return TextFormField(
-                controller: _plCtrl,
+                controller: ctrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 inputFormatters: [
@@ -2028,7 +2097,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   prefixText: '₹ ',
                   hintText: ruled?.toStringAsFixed(2),
                 ),
-                onChanged: (v) => setState(() => _plPrices[_plId!] = v),
+                onChanged: (v) => setState(() => prices[listId!] = v),
               );
             },
           ),
@@ -2233,18 +2302,56 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         'sort_order': sortOrder,
       };
 
+  /// What an existing size's card changed, as an update body; empty = nothing.
+  /// A cleared field is sent as null so the clear is saved.
+  Map<String, dynamic> _variantChanges(_VariantDraft d, int sortOrder) {
+    final o = d.saved!;
+    double? n(TextEditingController c) =>
+        c.text.trim().isEmpty ? null : double.parse(c.text.trim());
+    final barcode = d.barcode.text.trim();
+    final pack = _packPayload(d.packUnit, d.packSize);
+    return {
+      if (d.label.text.trim() != o.label) 'label': d.label.text.trim(),
+      if (n(d.price) != o.price) 'price': n(d.price),
+      if (barcode != (o.barcode ?? ''))
+        'barcode': barcode.isEmpty ? null : barcode,
+      if (widget.inventoryEnabled && n(d.stock) != o.stockQuantity)
+        'stock_quantity': n(d.stock),
+      if (widget.inventoryEnabled && n(d.lowStock) != o.lowStockThreshold)
+        'low_stock_threshold': n(d.lowStock),
+      if (pack['pack_unit'] != o.packUnit || pack['pack_size'] != o.packSize)
+        ...pack,
+      if (o.sortOrder != sortOrder) 'sort_order': sortOrder,
+    };
+  }
+
+  /// Editing a plain item and ticking "has variants" — its first sizes.
+  bool get _addingFirstSizes =>
+      _hasVariants && widget.item != null && !widget.item!.hasVariants;
+
+  /// Typed list prices that differ from [original]: list id → price, null =
+  /// cleared. Null when one isn't a valid price.
+  static Map<String, double?>? _changedListPrices(Map<String, String> typed,
+      [Map<String, String> original = const {}]) {
+    final out = <String, double?>{};
+    for (final e in typed.entries) {
+      final text = e.value.trim();
+      if (text == (original[e.key] ?? '')) continue;
+      final p = text.isEmpty ? null : double.tryParse(text);
+      if (text.isNotEmpty && (p == null || p < 0)) return null;
+      out[e.key] = p;
+    }
+    return out;
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Auto-generate a 12-digit barcode for new items that have no barcode.
-    // Use current timestamp so it's unique and scannable immediately. A sized
-    // item gets none — its sizes are what get scanned.
+    // A blank barcode is sent as null: the server saves the generated code
+    // (fillMissingBarcode in routes/items.js), the same one the print dialog
+    // shows. A sized item gets none — its sizes are what get scanned.
     final barcodeInput = _sizedItem ? '' : _barcodeCtrl.text.trim();
-    final autoBarcode =
-        (widget.item == null && !_sizedItem && barcodeInput.isEmpty)
-            ? DateTime.now().millisecondsSinceEpoch.toString().substring(1, 13)
-            : null;
-    final effectiveBarcode = barcodeInput.isNotEmpty ? barcodeInput : autoBarcode;
+    final effectiveBarcode = barcodeInput.isNotEmpty ? barcodeInput : null;
 
     if (_hasVariants) {
       final err = _validateVariants(context.l10n, effectiveBarcode);
@@ -2254,20 +2361,23 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       }
     }
 
+    final drafts = _variantDrafts.where((d) => !d.isBlank).toList();
+
     // Changed list prices only; blank = drop this item's price from the list.
-    // A sized item prices its lists per size (Price Lists screen), so none.
-    final listPrices = <String, double?>{};
-    if (!_sizedItem) {
-      for (final e in _plPrices.entries) {
-        final text = e.value.trim();
-        if (text == _plOriginal[e.key]) continue;
-        final p = text.isEmpty ? null : double.tryParse(text);
-        if (text.isNotEmpty && (p == null || p < 0)) {
-          _showError(context.l10n.priceListBadNumber);
-          return;
-        }
-        listPrices[e.key] = p;
-      }
+    // A sized item prices its lists per size: new sizes here, existing ones
+    // on the Price Lists screen.
+    final itemListPrices = _sizedItem
+        ? const <String, double?>{}
+        : _changedListPrices(_plPrices, _plOriginal);
+    final draftListPrices = [
+      for (final d in drafts)
+        _hasVariants
+            ? _changedListPrices(d.listPrices, d.listOriginal)
+            : const <String, double?>{},
+    ];
+    if (itemListPrices == null || draftListPrices.contains(null)) {
+      _showError(context.l10n.priceListBadNumber);
+      return;
     }
 
     setState(() {
@@ -2290,7 +2400,12 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       // A sized item has no price of its own — the sizes carry it. The server
       // only accepts a null price when has_variants says so.
       if (_hasVariants) 'has_variants': true,
-      'price': sizedItem ? null : double.parse(_priceCtrl.text.trim()),
+      // A plain item getting its first sizes keeps its price until they exist:
+      // the server only takes a null price on an item that already has sizes.
+      if (!sizedItem)
+        'price': double.parse(_priceCtrl.text.trim())
+      else if (!_addingFirstSizes)
+        'price': null,
       // Sent as null when blank so clearing the rate is persisted. Only when GST
       // is on — otherwise the field is hidden and we'd wipe a rate never shown.
       if (widget.gstEnabled)
@@ -2323,8 +2438,6 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
             : null,
     };
 
-    final drafts = _variantDrafts.where((d) => !d.isBlank).toList();
-
     try {
       // On a retry after a partial failure the item already exists — creating it
       // again would leave a duplicate behind.
@@ -2347,25 +2460,43 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         return;
       }
 
-      if (_hasVariants && drafts.isNotEmpty) {
-        final created = <ItemVariant>[];
+      if (_hasVariants) {
+        // Removed sizes go first, so a re-added "M" doesn't clash with the
+        // one being deleted. Then each card: new → create, existing → send
+        // only what changed. A retry repeats only what is still unsaved.
         final failed = <String>[];
-        for (var i = 0; i < drafts.length; i++) {
-          if (_createdDraftIndexes.contains(i)) continue;
+        for (final v in [..._removedVariants]) {
           try {
-            final res = await createVariant(saved.id, _draftPayload(drafts[i], i));
-            created.add(ItemVariant.fromJson(res));
-            _createdDraftIndexes.add(i);
+            await deleteVariant(saved.id, v.id);
+            _removedVariants.remove(v);
           } catch (_) {
-            failed.add(drafts[i].label.text.trim());
+            failed.add(v.label);
+          }
+        }
+        for (var i = 0; i < drafts.length; i++) {
+          final d = drafts[i];
+          try {
+            if (d.saved == null) {
+              d.saved = ItemVariant.fromJson(
+                  await createVariant(saved.id, _draftPayload(d, i)));
+            } else {
+              final changes = _variantChanges(d, i);
+              if (changes.isNotEmpty) {
+                d.saved = ItemVariant.fromJson(
+                    await updateVariant(saved.id, d.saved!.id, changes));
+              }
+            }
+          } catch (_) {
+            failed.add(d.label.text.trim());
           }
         }
         // Patch local state even on partial success: without this the item sits
-        // in the list with variants: [], so tapping it while billing would
-        // charge the base price instead of opening the size picker.
-        if (created.isNotEmpty) {
-          widget.onVariantsCreated?.call(saved.id, created);
-        }
+        // in the list with stale sizes (or none), so billing would charge the
+        // wrong price or skip the size picker.
+        widget.onVariantsCreated?.call(saved.id, [
+          for (final d in drafts)
+            if (d.saved != null) d.saved!,
+        ]);
         if (failed.isNotEmpty) {
           if (!mounted) return;
           setState(() => _formError = context.l10n
@@ -2374,7 +2505,14 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         }
       }
 
-      // Needs the item's id too. Safe to repeat on a retry: it sets, not adds.
+      // Needs the item's and sizes' ids too. Safe to repeat on a retry: it
+      // sets, not adds. List id → variant id (null = the item) → price.
+      final listPrices = <String, Map<String?, double?>>{};
+      itemListPrices.forEach((l, p) => (listPrices[l] ??= {})[null] = p);
+      for (var i = 0; i < drafts.length; i++) {
+        draftListPrices[i]!
+            .forEach((l, p) => (listPrices[l] ??= {})[drafts[i].saved?.id] = p);
+      }
       if (listPrices.isNotEmpty && widget.onSavePriceListPrices != null) {
         try {
           await widget.onSavePriceListPrices!(saved.id, listPrices);
@@ -2402,17 +2540,43 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       // straight away. Drafts are kept on untick so an accidental toggle
       // doesn't wipe typed data.
       if (_hasVariants && _variantDrafts.isEmpty) {
-        _variantDrafts.add(_VariantDraft());
+        _variantDrafts.add(_VariantDraft(_firstPl));
       }
     });
   }
 
-  void _removeVariantRow(int index) {
+  Future<void> _removeVariantRow(int index) async {
+    final existing = _variantDrafts[index].saved;
+    if (existing != null) {
+      final l10n = context.l10n;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          content: Text(l10n.itemsSizeDeleteConfirm(existing.label)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(l10n.commonCancel)),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(l10n.commonDelete,
+                  style: const TextStyle(color: AppColors.error)),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
     setState(() {
+      // Deleted on save, so Cancel still keeps it.
+      if (existing != null) _removedVariants.add(existing);
       _variantDrafts.removeAt(index).dispose();
       // An empty section with only an "add" button reads as broken — untick
-      // instead once the last row is gone.
-      if (_variantDrafts.isEmpty) _hasVariants = false;
+      // instead once the last row is gone. An item that already has sizes
+      // stays sized; save then asks for at least one.
+      if (_variantDrafts.isEmpty && !(widget.item?.hasVariants ?? false)) {
+        _hasVariants = false;
+      }
     });
   }
 
@@ -2429,7 +2593,11 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         children: [
           CheckboxListTile(
             value: _hasVariants,
-            onChanged: _saving ? null : (v) => _toggleHasVariants(v ?? false),
+            // Locked on for an item that already has sizes: turning it back
+            // into a plain item isn't supported — remove sizes one by one.
+            onChanged: _saving || (widget.item?.hasVariants ?? false)
+                ? null
+                : (v) => _toggleHasVariants(v ?? false),
             title: Text(l10n.itemsHasVariants),
             subtitle: Text(
               l10n.itemsHasVariantsSubtitle,
@@ -2473,7 +2641,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
               child: OutlinedButton.icon(
                 onPressed: _saving
                     ? null
-                    : () => setState(() => _variantDrafts.add(_VariantDraft())),
+                    : () => setState(() => _variantDrafts.add(_VariantDraft(_firstPl))),
                 icon: const Icon(Icons.add, size: 18),
                 label: Text(l10n.itemsAddAnotherVariant,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -2503,6 +2671,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     }
 
     return Container(
+      // Keyed so deleting a middle row doesn't hand its dropdown state on.
+      key: ObjectKey(d),
       margin: const EdgeInsets.only(bottom: AppSpacing.space8),
       padding: const EdgeInsets.all(AppSpacing.space8),
       decoration: BoxDecoration(
@@ -2570,6 +2740,15 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
               ),
             ],
           ),
+          if (widget.priceLists.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.space8),
+            _buildPriceListRow(l10n,
+                prices: d.listPrices,
+                listId: d.plId,
+                onPick: (v) => d.plId = v,
+                ctrl: d.plCtrl,
+                base: d.price),
+          ],
           const SizedBox(height: AppSpacing.space8),
           Row(
             children: [
@@ -2711,11 +2890,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 ),
                 // The variants toggle sits here, before price/barcode/stock,
                 // because it decides whether those fields apply at all: a sized
-                // item owns none of them — each size carries its own.
-                if (widget.item == null) ...[
-                  const SizedBox(height: AppSpacing.space12),
-                  _buildVariantsSection(l10n),
-                ],
+                // item owns none of them — each size carries its own. Same
+                // section on create and edit.
+                const SizedBox(height: AppSpacing.space12),
+                _buildVariantsSection(l10n),
                 // Price belongs to the item only when it has no sizes.
                 if (!_sizedItem) ...[
                   const SizedBox(height: AppSpacing.space12),
@@ -2737,7 +2915,12 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   ),
                   if (widget.priceLists.isNotEmpty) ...[
                     const SizedBox(height: AppSpacing.space12),
-                    _buildPriceListRow(l10n),
+                    _buildPriceListRow(l10n,
+                        prices: _plPrices,
+                        listId: _plId,
+                        onPick: (v) => _plId = v,
+                        ctrl: _plCtrl,
+                        base: _priceCtrl),
                   ],
                 ],
                 const SizedBox(height: AppSpacing.space12),
@@ -2766,26 +2949,6 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     size: _packSizeCtrl,
                     baseUnit: _unit,
                     onUnitChanged: (v) => setState(() => _packUnit = v),
-                  ),
-                ] else if (widget.item?.hasVariants ?? false) ...[
-                  // A sized item's packs live on its sizes — point there, or
-                  // the option just looks missing.
-                  const SizedBox(height: AppSpacing.space8),
-                  Row(
-                    children: [
-                      const Icon(Icons.info_outline,
-                          size: 14, color: AppColors.textSecondary),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          l10n.itemsPackPerSizeHint,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: AppColors.textSecondary),
-                        ),
-                      ),
-                    ],
                   ),
                 ],
                 // Tax rate + HSN/SAC only appear when GST is enabled for the
@@ -2900,47 +3063,19 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                       return n < 0 ? l10n.commonEnterValidNumber : null;
                     },
                   ),
-                ] else if (widget.inventoryEnabled &&
-                    (widget.item?.hasVariants ?? false)) ...[
-                  const SizedBox(height: AppSpacing.space12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceVariant,
-                      borderRadius: BorderRadius.circular(AppRadius.small),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.info_outline,
-                            size: 16, color: AppColors.textSecondary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            l10n.itemsStockPerSizeHint,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: AppColors.textSecondary),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ],
-                if (widget.onManageSizes != null && !_hasVariants) ...[
+                // Restaurant sized dishes: each size's recipe lives in the
+                // size list (sizes themselves are edited above).
+                if (widget.onManageSizes != null) ...[
                   const SizedBox(height: AppSpacing.space12),
                   OutlinedButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
                       widget.onManageSizes!();
                     },
-                    icon: const Icon(Icons.straighten_outlined, size: 18),
+                    icon: const Icon(Icons.receipt_long_outlined, size: 18),
                     label: Text(
-                      widget.item != null && widget.item!.hasVariants
-                          ? l10n.itemsManageSizesCount(
-                              widget.item!.variants.length)
-                          : l10n.itemsManageSizes,
+                      l10n.itemsManageRecipe,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),

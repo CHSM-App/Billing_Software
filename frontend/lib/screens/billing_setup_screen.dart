@@ -37,10 +37,20 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
   final _altPhone = TextEditingController();
   final _altPhoneLabel = TextEditingController();
   final _note = TextEditingController();
+  final _upiId = TextEditingController();
   final _bank = {for (final k in BillSettings.bankKeys) k: TextEditingController()};
 
   static final _ifscRe = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
   static final _accountRe = RegExp(r'^[0-9]{6,20}$');
+  // Same rule as billSettings.js.
+  static final _upiRe = RegExp(r'^[a-zA-Z0-9._-]{2,64}@[a-zA-Z][a-zA-Z0-9.]{1,30}$');
+
+  /// Needed only while the QR is ticked; when filled it must be valid.
+  String? get _upiError {
+    final v = _upiId.text.trim();
+    if (v.isEmpty && !_s!.showUpiQr) return null;
+    return _upiRe.hasMatch(v) ? null : context.l10n.storeUpiIdInvalid;
+  }
 
   // Indian mobile, same rule as billSettings.js.
   String? get _altPhoneError {
@@ -62,6 +72,7 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
     _altPhone.dispose();
     _altPhoneLabel.dispose();
     _note.dispose();
+    _upiId.dispose();
     for (final c in _bank.values) {
       c.dispose();
     }
@@ -82,6 +93,10 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
         _altPhone.text = s.altPhone;
         _altPhoneLabel.text = s.altPhoneLabel;
         _note.text = s.note;
+        // The online store's UPI ID, if the shop already set one there.
+        _upiId.text = s.upiId.isNotEmpty
+            ? s.upiId
+            : (p['store_upi_id'] as String?) ?? '';
         for (final k in BillSettings.bankKeys) {
           _bank[k]!.text = s.bank[k] ?? '';
         }
@@ -104,7 +119,7 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
   Future<void> _save() async {
     final s = _s!;
     final l10n = context.l10n;
-    if (_altPhoneError != null) {
+    if (_altPhoneError != null || _upiError != null) {
       setState(() {});
       return;
     }
@@ -124,6 +139,7 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
         ..['alt_phone'] = _altPhone.text.trim()
         ..['alt_phone_label'] = _altPhoneLabel.text.trim()
         ..['note'] = _note.text.trim()
+        ..['upi_id'] = _upiId.text.trim()
         ..['bank'] = {
           for (final k in BillSettings.bankKeys) k: _bank[k]!.text.trim(),
         };
@@ -270,6 +286,8 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
                 l10n.billSetupCustomer, l10n.billSetupCustomerSubtitle),
             _check('show_tax_summary', s.showTaxSummary, Icons.table_chart_outlined,
                 l10n.billSetupTaxSummary, l10n.billSetupTaxSummarySubtitle),
+            _check('show_units', s.showUnits, Icons.straighten_outlined,
+                l10n.billSetupUnits, l10n.billSetupUnitsSubtitle),
           ]),
           _card([
             _check('show_note', s.showNote, Icons.sticky_note_2_outlined,
@@ -312,6 +330,23 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
           _card([
             _check('show_warranty_details', s.showWarrantyDetails,
                 Icons.verified_outlined, l10n.billSetupWarrantyDetails),
+          ]),
+          _card([
+            _check('show_upi_qr', s.showUpiQr, Icons.qr_code_2,
+                l10n.billSetupUpiQr, l10n.billSetupUpiQrSubtitle),
+            if (s.showUpiQr)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.space16, 0,
+                    AppSpacing.space16, AppSpacing.space12),
+                child: AppTextField(
+                  label: l10n.storeUpiId,
+                  hint: 'shopname@okhdfcbank',
+                  controller: _upiId,
+                  keyboardType: TextInputType.emailAddress,
+                  maxLength: 95,
+                  errorText: _upiError,
+                ),
+              ),
           ]),
           _card([
             _check('show_bank', s.showBank, Icons.account_balance_outlined,

@@ -1,14 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Whether Settle asks "are you sure?" first. Per device, on by default.
-/// Logout wipes prefs, so it falls back to on — the safe side.
-class SettleConfirmNotifier extends StateNotifier<bool> {
-  SettleConfirmNotifier() : super(true) {
+/// A per-device on/off billing preference, on by default. Logout wipes prefs,
+/// so it falls back to on.
+class PrefFlagNotifier extends StateNotifier<bool> {
+  PrefFlagNotifier(this._key) : super(true) {
     _load();
   }
 
-  static const _key = 'confirm_settle';
+  final String _key;
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -22,5 +22,11 @@ class SettleConfirmNotifier extends StateNotifier<bool> {
   }
 }
 
-final settleConfirmProvider =
-    StateNotifierProvider<SettleConfirmNotifier, bool>((ref) => SettleConfirmNotifier());
+/// Whether Settle asks "are you sure?" first.
+final settleConfirmProvider = StateNotifierProvider<PrefFlagNotifier, bool>(
+    (ref) => PrefFlagNotifier('confirm_settle'));
+
+/// Whether billing shows the whole-bill discount (% / ₹). Per-item discounts
+/// are unaffected.
+final billDiscountProvider = StateNotifierProvider<PrefFlagNotifier, bool>(
+    (ref) => PrefFlagNotifier('bill_discount'));

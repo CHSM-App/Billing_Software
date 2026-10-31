@@ -1433,6 +1433,32 @@ class _TogglesScreen extends ConsumerWidget {
                   subtitle: Text(l10n.settingsConfirmSettleSubtitle),
                 ),
               ),
+              // Whole-bill discount on the billing page — per device, on by
+              // default. Per-item discounts stay either way.
+              const SizedBox(height: AppSpacing.space8),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.medium),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: SwitchListTile(
+                  value: ref.watch(billDiscountProvider),
+                  onChanged: (v) => ref.read(billDiscountProvider.notifier).set(v),
+                  secondary: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
+                    child: const Icon(Icons.percent,
+                        color: AppColors.primary, size: 20),
+                  ),
+                  title: Text(l10n.settingsBillDiscount),
+                  subtitle: Text(l10n.settingsBillDiscountSubtitle),
+                ),
+              ),
 
               const SizedBox(height: AppSpacing.space24),
               _sectionLabel(context, l10n.settingsGroupStock),

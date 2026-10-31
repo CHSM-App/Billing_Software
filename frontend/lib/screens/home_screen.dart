@@ -310,8 +310,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   // Wide layout: the cart panel's width, dragged by the divider and kept per
   // device. Its own notifier so dragging relayouts the row, not the screen.
-  static const _cartWidthKey = 'billing_cart_width';
-  static const _cartWidthDefault = 360.0;
+  // Windows defaults wide enough for the one-row grid (columns + _cartNameMin + the
+  // grid box's margins). Its own key, so a width saved for the old narrow
+  // card doesn't hide the new default; dragging still saves as before.
+  static final _cartWidthKey =
+      isWindows ? 'billing_cart_width_win' : 'billing_cart_width';
+  static final _cartWidthDefault = isWindows ? 640.0 : 360.0;
   final _cartWidth = ValueNotifier<double>(_cartWidthDefault);
   final _resizingCart = ValueNotifier<bool>(false);
 
@@ -2653,22 +2657,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       ),
                       const SizedBox(height: AppSpacing.space16),
                       // Confirm on the right, over the Settle button.
+                      // Cancel sized to its word (a flex share wrapped it on
+                      // a narrow panel); Confirm takes the rest.
                       Row(children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size.fromHeight(48),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius:
-                                      BorderRadius.circular(AppRadius.medium)),
-                            ),
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: Text(l10n.commonCancel),
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(0, 48),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.space16),
+                            shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.medium)),
                           ),
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: Text(l10n.commonCancel,
+                              maxLines: 1, softWrap: false),
                         ),
                         const SizedBox(width: AppSpacing.space8),
                         Expanded(
-                          flex: 2,
                           child: FilledButton.icon(
                             style: FilledButton.styleFrom(
                               backgroundColor: color,
@@ -4161,6 +4167,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// A scanner fires into the focused search box; when the text is a known
+  /// barcode, bill it instead of searching.
+  void _onSearchSubmitted(String q) {
+    final hit = matchBarcode(ref.read(itemsProvider).valueOrNull ?? const [], q);
+    if (hit == null) return;
+    _searchController.clear();
+    _addScannedItem(hit.item, hit.variant);
+  }
+
+  /// Windows: the item search, always open beside the business name, as a
+  /// capsule. Other platforms slide it open from the search icon instead.
+  Widget _capsuleSearch(AppLocalizations l10n) {
+    final capsule = BorderRadius.circular(999);
+    return SizedBox(
+      height: 40,
+      child: TextField(
+        controller: _searchController,
+        focusNode: _searchFocus,
+        onSubmitted: _onSearchSubmitted,
+        style: const TextStyle(fontSize: 14),
+        decoration: InputDecoration(
+          hintText: l10n.billingSearchItems,
+          isDense: true,
+          filled: true,
+          fillColor: AppColors.surfaceVariant,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          prefixIcon: const Icon(Icons.search, size: 18),
+          prefixIconConstraints: const BoxConstraints(minWidth: 40),
+          border: OutlineInputBorder(
+            borderRadius: capsule,
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: capsule,
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: capsule,
+            borderSide: const BorderSide(color: AppColors.primary),
+          ),
+          suffixIcon: _searchController.text.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear, size: 16),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  onPressed: () => _searchController.clear(),
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+
   ShellAppBar _buildAppBar(
       String businessName, String userName, double barWidth) {
     final l10n = context.l10n;
@@ -4171,9 +4230,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final isPushed = widget.tableId != null ||
         widget.activeBillId != null ||
         widget.onBillDone != null;
-    return ShellAppBar(
-      automaticallyImplyLeading: isPushed,
-      title: AnimatedOpacity(
+    final title = AnimatedOpacity(
         opacity: _searchExpanded ? 0.0 : 1.0,
         duration: const Duration(milliseconds: 200),
         child: Column(
@@ -4205,8 +4262,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
           ],
         ),
-      ),
+      );
+    return ShellAppBar(
+      automaticallyImplyLeading: isPushed,
+      // Windows: name, then the always-open capsule search (up to 420px).
+      title: !isWindows
+          ? title
+          : Row(children: [
+              ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 240), child: title),
+              const SizedBox(width: AppSpacing.space16),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: _capsuleSearch(l10n),
+                  ),
+                ),
+              ),
+            ]),
       actions: [
+        if (!isWindows)
         Row(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -4233,15 +4310,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       controller: _searchController,
                       focusNode: _searchFocus,
                       autofocus: false,
-                      // A scanner fires into the focused search box; when the
-                      // text is a known barcode, bill it instead of searching.
-                      onSubmitted: (q) {
-                        final hit = matchBarcode(
-                            ref.read(itemsProvider).valueOrNull ?? const [], q);
-                        if (hit == null) return;
-                        _searchController.clear();
-                        _addScannedItem(hit.item, hit.variant);
-                      },
+                      onSubmitted: _onSearchSubmitted,
                       decoration: InputDecoration(
                         hintText: l10n.billingSearchItems,
                         isDense: true,
@@ -5127,10 +5196,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ],
           items: cart.isEmpty
               ? _emptyCartPlaceholder(l10n)
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: cart.map((e) => _buildCartRow(e)).toList(),
-                ),
+              : isWindows
+                  ? _windowsCartGrid(cart)
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: cart.map((e) => _buildCartRow(e)).toList(),
+                    ),
           // Footer (previous dues, discount, charges, totals, actions).
           footer: [
             const Divider(height: 1),
@@ -5182,8 +5253,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
 
             // Discount row — also cashier/owner only; servers don't apply
-            // discounts when building an order.
-            if (canFinalize)
+            // discounts when building an order. Settings can hide it; a bill
+            // that already carries a discount still shows it, so it is never
+            // applied invisibly.
+            if (canFinalize &&
+                (ref.watch(billDiscountProvider) ||
+                    _discountAmtController.text.isNotEmpty))
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                   AppSpacing.space12, AppSpacing.space16, 0),
@@ -5947,7 +6022,96 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _sheetSetState?.call(() {});
   }
 
-  Widget _buildCartRow(CartEntry entry) {
+  /// Windows: the order-card lines in a light-grey ruled box, one cell each.
+  /// Under it, the sum of the line discounts once any line has one.
+  Widget _windowsCartGrid(List<CartEntry> cart) {
+    final cols = _cartCols(cart);
+    final gst = ref.read(gstEnabledProvider);
+    final lineDisc = cart.fold(0.0, (s, e) => s + e.lineDiscount(gst));
+    final grid = Container(
+      margin: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.space16, vertical: AppSpacing.space8),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppRadius.small),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (i, e) in cart.indexed) ...[
+            if (i > 0) const Divider(height: 1, color: AppColors.border),
+            _buildCartRow(e, cols: cols),
+          ],
+        ],
+      ),
+    );
+    if (lineDisc < 0.005) return grid;
+    final small = Theme.of(context).textTheme.bodySmall;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        grid,
+        // Lined up with the total column inside the box above.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.space16 + 11, 0, AppSpacing.space16 + 9, AppSpacing.space8),
+          child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            Text(context.l10n.cartItemDiscTotal,
+                style: small?.copyWith(color: AppColors.textSecondary)),
+            const SizedBox(width: AppSpacing.space8),
+            // Same green as the bill discount row in the totals.
+            Text('− ₹${lineDisc.toStringAsFixed(2)}',
+                style: small?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF16A34A),
+                )),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  /// Widths of the Windows grid's rate, qty and total columns: the widest
+  /// content of each across [cart], so the columns fit their figures and every
+  /// row's lines still fall in the same place.
+  _CartCols _cartCols(List<CartEntry> cart) {
+    final gst = ref.read(gstEnabledProvider);
+    final small = Theme.of(context).textTheme.bodySmall;
+    final bold = small?.copyWith(fontWeight: FontWeight.w600);
+    final scaler = MediaQuery.textScalerOf(context);
+    double w(String s, TextStyle? style) {
+      final p = TextPainter(
+          text: TextSpan(text: s, style: style),
+          textDirection: TextDirection.ltr,
+          textScaler: scaler)
+        ..layout();
+      final width = p.width.ceilToDouble();
+      p.dispose();
+      return width;
+    }
+
+    double rate = 0, unit = 0, total = 0, field = 36;
+    for (final e in cart) {
+      rate = math.max(rate, w('₹${e.netPrice(gst).toStringAsFixed(2)}', small));
+      rate = math.max(
+          rate, w('₹${e.discountedNetPrice(gst).toStringAsFixed(2)}', small));
+      unit = math.max(unit, w('/ ${unitShort(e.item.unit)}', small));
+      total = math.max(total, w('₹${e.lineNet(gst).toStringAsFixed(2)}', bold));
+      if (e.item.isMeasured) field = 48; // _CartQtyField's decimal width
+    }
+    // Stepper: two 28px − / + buttons, the qty field and a 1px border each
+    // side; then 4px and the unit.
+    return (
+      rate: rate,
+      qty: 56 + field + 2 + 4 + unit,
+      total: total,
+      field: field,
+    );
+  }
+
+  Widget _buildCartRow(CartEntry entry, {_CartCols? cols}) {
     final gstEnabled = ref.read(gstEnabledProvider);
     // Repricing is a cashier/owner call, like the bill discount; the server
     // ignores a waiter's overrides anyway (applyLineOverrides in bills.js).
@@ -5964,14 +6128,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           color: AppColors.primary,
           fontWeight: FontWeight.w600,
         );
-    // Windows also shows the unit under a full pack ("1 pcs").
-    final packLabel = cartPackLabel(context, entry) ??
-        (isWindows
-            ? '${formatQty(entry.quantity)} ${unitShort(entry.item.unit)}'
-            : null);
+    final packLabel = cartPackLabel(context, entry);
     final packUnit = entry.packUnit;
     final packSize = entry.packSize;
-    final row = Padding(
+    final row = isWindows
+        ? _windowsCartRow(entry, canEdit: canEdit, cols: cols!)
+        : Padding(
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.space16, vertical: 6.0),
       child: Row(
@@ -6028,13 +6190,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
           ),
-          // "−Box" (Windows): takes a whole pack back off, once there is one.
-          if (isWindows &&
-              packUnit != null &&
-              packSize != null &&
-              entry.quantity >= packSize)
-            _packButton('−${unitShort(packUnit)}',
-                () => ref.read(cartProvider.notifier).changeQty(entry.key, -packSize)),
           // "+Box": a whole pack in one tap.
           if (packUnit != null && packSize != null)
             _packButton(
@@ -6044,37 +6199,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     () => ref
                         .read(cartProvider.notifier)
                         .changeQty(entry.key, packSize))),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(AppRadius.small),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _qtyButton(Icons.remove, () {
-                  ref
-                      .read(cartProvider.notifier)
-                      .changeQty(entry.key, -1);
-                }),
-                _CartQtyField(
-                  key: ValueKey('qty-${entry.key}'),
-                  quantity: entry.quantity,
-                  allowDecimal: entry.item.isMeasured,
-                  onSubmitted: (q) => _cartChange(entry.key,
-                      () => ref.read(cartProvider.notifier).setQty(entry.key, q)),
-                ),
-                _qtyButton(Icons.add, () {
-                  _cartChange(
-                      entry.key,
-                      () => ref
-                          .read(cartProvider.notifier)
-                          .changeQty(entry.key, 1));
-                }),
-              ],
-            ),
-          ),
+          _qtyStepper(entry),
         ],
       ),
     );
@@ -6119,6 +6244,164 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// − qty + for a cart line. [fieldWidth] overrides the qty box's own width.
+  Widget _qtyStepper(CartEntry entry, {double? fieldWidth}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _qtyButton(Icons.remove, () {
+            ref.read(cartProvider.notifier).changeQty(entry.key, -1);
+          }),
+          _CartQtyField(
+            key: ValueKey('qty-${entry.key}'),
+            quantity: entry.quantity,
+            allowDecimal: entry.item.isMeasured,
+            width: fieldWidth,
+            onSubmitted: (q) => _cartChange(entry.key,
+                () => ref.read(cartProvider.notifier).setQty(entry.key, q)),
+          ),
+          _qtyButton(Icons.add, () {
+            _cartChange(entry.key,
+                () => ref.read(cartProvider.notifier).changeQty(entry.key, 1));
+          }),
+        ],
+      ),
+    );
+  }
+
+  /// Windows order-card line, one row of columns:
+  /// [list badge] Name | Rate | − qty + / unit | Total.
+  /// The rate, qty and total columns are as wide as their content ([cols]).
+  /// When they leave the name less than [_cartNameMin] px, the name takes its
+  /// own line with the columns below it. Tap the name to edit price/discount.
+  /// A line discount strikes the rate through above the discounted rate.
+  static const _cartNameMin = 160.0;
+
+  Widget _windowsCartRow(CartEntry entry,
+      {required bool canEdit, required _CartCols cols}) {
+    final gst = ref.read(gstEnabledProvider);
+    final small = Theme.of(context).textTheme.bodySmall;
+    final muted = small?.copyWith(color: AppColors.textSecondary);
+    final discounted = entry.lineDiscount(gst) > 0;
+    final packLabel = cartPackLabel(context, entry);
+    final badge = _LineListBadge(entry: entry, enabled: canEdit);
+    final name = InkWell(
+      onTap: canEdit ? () => _toggleCartRow(entry.key) : null,
+      borderRadius: BorderRadius.circular(AppRadius.small),
+      child: Column(
+        // Min, so the name centres vertically like the other cells.
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Two lines, so a long name still reads in a squeezed column.
+          Text(entry.billingDisplayName(ref.watch(showItemNoProvider)),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                  ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
+          // 17 bottles with a box of 15 → "1 Box + 2 Bottle".
+          if (packLabel != null)
+            Text(packLabel,
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
+        ],
+      ),
+    );
+    // Rate — net (pre-tax), so rate × qty = total.
+    final rate = SizedBox(
+      width: cols.rate,
+      child: Column(
+        // Min, so the cell's Center can centre it vertically.
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (discounted)
+            Text('₹${entry.netPrice(gst).toStringAsFixed(2)}',
+                style: muted?.copyWith(decoration: TextDecoration.lineThrough)),
+          Text('₹${entry.discountedNetPrice(gst).toStringAsFixed(2)}',
+              style: small),
+        ],
+      ),
+    );
+    // Left-aligned: the unit text varies in width, and centring made the
+    // steppers sit a few px apart from row to row.
+    final qty = SizedBox(
+      width: cols.qty,
+      child: Row(
+        children: [
+          _qtyStepper(entry, fieldWidth: cols.field),
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Text('/ ${unitShort(entry.item.unit)}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
+            ),
+          ),
+        ],
+      ),
+    );
+    // Total — net line amount; tax is shown in the totals below.
+    final total = Text('₹${entry.lineNet(gst).toStringAsFixed(2)}',
+        textAlign: TextAlign.right,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: small?.copyWith(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w600,
+        ));
+    // One grid cell: its own padding, so the vertical lines between cells run
+    // the full height of the row.
+    Widget cell(Widget child) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Center(child: child));
+    const vline = VerticalDivider(width: 1, thickness: 1, color: AppColors.border);
+    // IntrinsicHeight makes the row as tall as its tallest cell, so the
+    // stretched lines get a finite height.
+    Widget gridRow(List<Widget> cells) => IntrinsicHeight(
+        child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch, children: cells));
+    // Room the three column cells take: content + 16px cell padding each, the
+    // three lines, the name cell's 18px padding and the 30px badge.
+    final columns = cols.rate + cols.qty + cols.total + 3 * 16 + 3 + 18 + 30;
+    return LayoutBuilder(
+      builder: (context, box) => box.maxWidth - columns >= _cartNameMin
+          ? gridRow([
+              Expanded(
+                  child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
+                      child: Row(children: [badge, Expanded(child: name)]))),
+              vline,
+              cell(rate),
+              vline,
+              cell(qty),
+              vline,
+              cell(SizedBox(width: cols.total, child: total)),
+            ])
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
+                  child: Row(children: [badge, Expanded(child: name)]),
+                ),
+                gridRow([
+                  cell(rate),
+                  vline,
+                  cell(qty),
+                  vline,
+                  Expanded(child: cell(SizedBox(width: double.infinity, child: total))),
+                ]),
+              ],
+            ),
+    );
+  }
+
   /// Outlined "+Box" / "−Box" chip beside a cart line's stepper.
   Widget _packButton(String label, VoidCallback onTap) {
     return Padding(
@@ -6154,6 +6437,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
 }
+
+/// Content widths of the Windows order-card grid's columns (see _cartCols).
+/// [field] is the qty box width every row uses, so the steppers match.
+typedef _CartCols = ({double rate, double qty, double total, double field});
 
 /// "1 Box + 2 Bottle" for a cart line holding at least one full pack, else
 /// null. Display only — the line still bills its quantity in base units.
@@ -6318,11 +6605,15 @@ class _CartQtyField extends StatefulWidget {
   final bool allowDecimal;
   final void Function(double) onSubmitted;
 
+  /// Box width; null = 48 for a decimal quantity, else 36.
+  final double? width;
+
   const _CartQtyField({
     super.key,
     required this.quantity,
     required this.allowDecimal,
     required this.onSubmitted,
+    this.width,
   });
 
   @override
@@ -6377,7 +6668,7 @@ class _CartQtyFieldState extends State<_CartQtyField> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: widget.allowDecimal ? 48 : 36,
+      width: widget.width ?? (widget.allowDecimal ? 48 : 36),
       height: 30,
       // Center is load-bearing: a single-line field lays out at its natural
       // height (~20px) at the TOP of a taller box, and textAlignVertical can't
@@ -7356,6 +7647,62 @@ class _PriceListChip extends ConsumerWidget {
           ]),
         ),
       ),
+    );
+  }
+}
+
+/// Round letter in front of a Windows order-card line: the first letter of
+/// the price list the line is priced with ("D" for Default). Tap to pick that
+/// line's list. Hidden until the owner has made at least one list.
+class _LineListBadge extends ConsumerWidget {
+  final CartEntry entry;
+  final bool enabled;
+
+  const _LineListBadge({required this.entry, required this.enabled});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final lists = ref.watch(priceListsProvider).valueOrNull ?? const [];
+    if (lists.isEmpty) return const SizedBox.shrink();
+    final l10n = context.l10n;
+    final selected = entry.priceList;
+    final name = (selected?.name ?? l10n.priceListDefault).trim();
+    final color = selected == null ? AppColors.textSecondary : AppColors.primary;
+    final badge = Container(
+      width: 22,
+      height: 22,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Text(name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color, fontWeight: FontWeight.w700)),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: !enabled
+          ? Tooltip(message: name, child: badge)
+          : PopupMenuButton<String>(
+              tooltip: name,
+              // '' = default prices; a PopupMenuItem can't carry a null value.
+              onSelected: (id) => ref.read(cartProvider.notifier).applyLineList(
+                  entry.key, lists.where((l) => l.id == id).firstOrNull),
+              itemBuilder: (_) => [
+                CheckedPopupMenuItem(
+                    value: '',
+                    checked: selected == null,
+                    child: Text(l10n.priceListDefault)),
+                for (final l in lists)
+                  CheckedPopupMenuItem(
+                      value: l.id,
+                      checked: selected?.id == l.id,
+                      child: Text(l.name)),
+              ],
+              child: badge,
+            ),
     );
   }
 }

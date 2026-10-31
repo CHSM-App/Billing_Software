@@ -125,6 +125,64 @@ void main() {
       expect(c.read(selectedPriceListProvider)?.id, 'party');
       expect(lines['rice']!.effectivePrice, 70);
       expect(lines['dal']!.effectivePrice, 44);
+      expect(lines['rice']!.priceList?.id, 'party');
+      expect(lines['dal']!.priceList?.id, 'party');
+    });
+  });
+
+  group('per-line price list', () {
+    test('applyLineList re-prices only that line and keeps its discount', () {
+      final c = container();
+      final cart = c.read(cartProvider.notifier)
+        ..addItem(rice)
+        ..addItem(dal)
+        ..setLineOverride('rice', amt: 3);
+      cart.applyLineList('rice', party);
+      final lines = {for (final e in c.read(cartProvider)) e.key: e};
+      expect(lines['rice']!.effectivePrice, 70);
+      expect(lines['rice']!.priceList, party);
+      expect(lines['rice']!.discountAmt, 3);
+      expect(lines['dal']!.effectivePrice, 40);
+      expect(lines['dal']!.priceList, isNull);
+      expect(c.read(selectedPriceListProvider), isNull,
+          reason: 'the bill default is untouched');
+
+      cart.applyLineList('rice', null);
+      final back = c.read(cartProvider).firstWhere((e) => e.key == 'rice');
+      expect(back.priceOverride, isNull);
+      expect(back.priceList, isNull);
+    });
+
+    test('a discount keeps the line\'s list; a typed price drops it', () {
+      final c = container();
+      final cart = c.read(cartProvider.notifier)
+        ..addItem(rice)
+        ..applyLineList('rice', party)
+        // The editor re-sends the list price along with the discount.
+        ..setLineOverride('rice', price: 70, pct: 10);
+      expect(c.read(cartProvider).single.priceList, party);
+      cart.setLineOverride('rice', price: 65);
+      expect(c.read(cartProvider).single.priceList, isNull);
+    });
+
+    test('loadFromBill finds a repriced line\'s list on a Default bill', () async {
+      final c = container();
+      await c.read(priceListsProvider.future);
+      final bill = Bill(
+        id: 'b1', businessId: 'b', billNumber: 'INV-1', subtotal: 0, taxAmount: 0,
+        total: 0, paymentMode: 'cash', status: 'draft', createdByUserId: 'u',
+        createdAt: DateTime(2026),
+        items: [
+          BillItem(id: '1', billId: 'b1', itemId: 'rice', itemName: 'rice',
+              quantity: 1, unitPrice: 70, lineTotal: 70),
+          BillItem(id: '2', billId: 'b1', itemId: 'dal', itemName: 'dal',
+              quantity: 1, unitPrice: 33, lineTotal: 33),
+        ],
+      );
+      c.read(cartProvider.notifier).loadFromBill(bill, [rice, dal]);
+      final lines = {for (final e in c.read(cartProvider)) e.key: e};
+      expect(lines['rice']!.priceList?.id, 'party');
+      expect(lines['dal']!.priceList, isNull, reason: 'hand-typed price');
     });
   });
 }
