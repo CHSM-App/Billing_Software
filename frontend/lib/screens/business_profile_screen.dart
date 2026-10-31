@@ -287,12 +287,13 @@ class _BusinessProfileScreenState extends ConsumerState<BusinessProfileScreen> {
                                 label: l10n.businessProfilePhone,
                                 hint: l10n.businessProfilePhoneHint,
                                 keyboardType: TextInputType.phone,
-                                maxLength: 10,
+                                // 13 fits a spaced landline: 022 2345 6789.
+                                maxLength: 13,
                                 validator: (v) {
                                   if (v == null || v.trim().isEmpty) {
                                     return l10n.commonRequired;
                                   }
-                                  if (!RegExp(r'^\d{10}$').hasMatch(v.trim())) {
+                                  if (!isBusinessPhone(v)) {
                                     return l10n.businessProfilePhoneInvalid;
                                   }
                                   return null;

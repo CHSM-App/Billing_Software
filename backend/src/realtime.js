@@ -14,6 +14,7 @@
 
 const { WebSocketServer } = require('ws');
 const { verifyAccessToken } = require('./auth');
+const authState = require('./authState');
 const logger = require('./logger');
 
 // business_id -> Set<WebSocket>
@@ -50,11 +51,29 @@ function attach(server) {
       return;
     }
 
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.businessId = user.business_id;
-      register(ws);
-      wss.emit('connection', ws, req);
-    });
+    // Same token rules as requireAuth: no public (typed) tokens, and the
+    // account must still be active with the token issued after any cut-off.
+    if (user.typ) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const cachedState = authState.cached(user.user_id);
+    Promise.resolve(cachedState !== undefined
+      ? cachedState
+      : authState.load(user.user_id, user.business_id))
+      .then((state) => {
+        if (state && (!state.active || (user.iat && user.iat < state.validAfterS))) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          ws.businessId = user.business_id;
+          register(ws);
+          wss.emit('connection', ws, req);
+        });
+      });
   });
 
   // Heartbeat: drop dead sockets so the client set doesn't leak.

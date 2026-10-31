@@ -62,15 +62,16 @@ describe('POST /api/register', () => {
     phone: '9876543210',
     owner_name: 'Test Owner',
     owner_phone: '9876543211',
-    pin: '1234',
+    pin: '4831',
     inventory_enabled: true,
     has_barcode_scanner: false,
   };
 
   test('returns 200 on valid registration', async () => {
-    // Queries: 1) store-token slug collision lookup (nothing taken),
+    // Queries: 0) owner phone free, 1) store-token slug collision lookup (nothing taken),
     // 2) insert business and return id, 3) insert user.
     mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // owner phone not taken
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ id: BUSINESS_ID }], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
@@ -87,9 +88,10 @@ describe('POST /api/register', () => {
   });
 
   test('accepts optional GSTIN/PAN/FSSAI and enables GST when a GSTIN is given', async () => {
-    // Queries: 1) GSTIN duplicate check (none), 2) store-token slug collision
+    // Queries: 0) owner phone free, 1) GSTIN duplicate check (none), 2) store-token slug collision
     // lookup (nothing taken), 3) insert business, 4) insert user.
     mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // owner phone not taken
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ id: BUSINESS_ID }], rowsAffected: [1] })
@@ -135,6 +137,7 @@ describe('POST /api/register', () => {
 
   test('folds the retired restaurant_no_tables (sent by app <= v1.1.10) into restaurant_with_tables', async () => {
     mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // owner phone not taken
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
       .mockResolvedValueOnce({ recordset: [{ id: BUSINESS_ID }], rowsAffected: [1] });
 
@@ -159,6 +162,23 @@ describe('POST /api/register', () => {
       .send({ ...validBody, phone: '12345' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Phone/i);
+  });
+
+  test('records no terms acceptance while the flow is off (TERMS_VERSION = null)', async () => {
+    // Even with the enforcement flag on: there is no version to agree to yet.
+    process.env.REQUIRE_TERMS_ACCEPT = 'true';
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // owner phone not taken
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] })
+      .mockResolvedValueOnce({ recordset: [{ id: BUSINESS_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ id: USER_ID }], rowsAffected: [1] });
+    try {
+      const res = await request(app).post('/api/register').send({ ...validBody, accept_terms: true });
+      expect(res.status).toBe(200);
+      expect(mockRequest.query.mock.calls.filter(c => /terms_acceptances/.test(c[0]))).toHaveLength(0);
+    } finally {
+      delete process.env.REQUIRE_TERMS_ACCEPT;
+    }
   });
 });
 
@@ -211,15 +231,15 @@ describe('POST /api/login', () => {
     expect(res.status).toBe(400);
   });
 
-  test('returns 404 phone_not_found for an unknown phone', async () => {
-    // Distinct from a wrong PIN (401) so the login screen can offer to register
-    // this number instead of showing a generic "invalid credentials" error.
+  test('an unknown phone gets the same 401 as a wrong PIN', async () => {
+    // A distinct 404 let anyone list which numbers have accounts and then
+    // spray common PINs at each (Security_Review.pdf #1).
     mockRequest.query.mockResolvedValueOnce({ recordset: [], rowsAffected: [0] });
     const res = await request(app)
       .post('/api/login')
       .send({ phone: '0000000000', pin: '1234' });
-    expect(res.status).toBe(404);
-    expect(res.body.error).toBe('phone_not_found');
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: 'Invalid credentials' });
   });
 
   test('returns 403 for unverified account', async () => {
@@ -262,7 +282,7 @@ describe('POST /api/login', () => {
     expect(res.body).toHaveProperty('retry_after_seconds');
   });
 
-  test('returns 401 and attempts_remaining for wrong PIN', async () => {
+  test('returns 401 for wrong PIN without revealing attempts left', async () => {
     const userRow = await makeUserRow();
     // Query 1: user lookup; Query 2: increment failed_attempts
     mockRequest.query
@@ -273,7 +293,46 @@ describe('POST /api/login', () => {
       .post('/api/login')
       .send({ phone: OWNER_PHONE, pin: '9999' });
     expect(res.status).toBe(401);
-    expect(res.body).toHaveProperty('attempts_remaining');
+    expect(res.body).not.toHaveProperty('attempts_remaining');
+  });
+
+  test.each([
+    [4, null], [5, 15], [10, 30], [15, 60], [40, 1440], [100, 1440],
+  ])('after %p consecutive failures the lock is %p minutes', async (attempts, minutes) => {
+    const userRow = await makeUserRow();
+    userRow.failed_attempts = attempts - 1;
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [userRow], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
+
+    const res = await request(app)
+      .post('/api/login')
+      .send({ phone: OWNER_PHONE, pin: '9999' });
+    if (minutes === null) {
+      expect(res.status).toBe(401);
+    } else {
+      expect(res.status).toBe(423);
+      expect(res.body.retry_after_seconds).toBe(minutes * 60);
+    }
+  });
+
+  test('a disabled account learns it is disabled only with the right PIN', async () => {
+    const userRow = await makeUserRow();
+    userRow.is_active = false;
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [userRow], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
+    const wrong = await request(app)
+      .post('/api/login')
+      .send({ phone: OWNER_PHONE, pin: '9999' });
+    expect(wrong.status).toBe(401);
+
+    mockRequest.query.mockResolvedValueOnce({ recordset: [userRow], rowsAffected: [1] });
+    const right = await request(app)
+      .post('/api/login')
+      .send({ phone: OWNER_PHONE, pin: VALID_PIN });
+    expect(right.status).toBe(403);
+    expect(right.body.error).toBe('account_disabled');
   });
 });
 

@@ -215,7 +215,7 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
       <div>
       <div class="name">${esc(bill.shop_name)}</div>
       ${cfg.show_address && bill.address ? `<div>${esc(bill.address).replace(/\r?\n/g, '<br/>')}</div>` : ''}
-      ${cfg.show_phone && phones ? `<div>Ph: ${esc(phones)}</div>` : ''}
+      ${cfg.show_phone && phones ? `<div>Ph: ${esc(phones).replace(/\n/g, '<br/>')}</div>` : ''}
       ${cfg.show_gstin && bill.gst_enabled && bill.gst_number ? `<div>GSTIN: ${esc(bill.gst_number)}</div>` : ''}
       ${cfg.show_fssai && bill.fssai_number ? `<div>FSSAI: ${esc(bill.fssai_number)}</div>` : ''}
       </div>
@@ -227,12 +227,15 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
     </td>
   </tr></table>
 
-  ${(cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin)) || bill.table_number ? `<div class="to">
+  ${(cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin)) ||
+    bill.table_number || (cfg.show_warranty_details && (bill.warranty_extra_data || []).length) ? `<div class="to">
     <div class="k">Bill To</div>
     ${cust && bill.customer_name ? `<div class="v">${esc(bill.customer_name)}</div>` : ''}
     ${cust && bill.customer_address ? `<div>Address: ${esc(bill.customer_address).replace(/\r?\n/g, '<br/>')}</div>` : ''}
     ${cust && bill.customer_phone ? `<div>Contact No.: ${esc(bill.customer_phone)}</div>` : ''}
     ${cust && bill.customer_gstin ? `<div>GSTIN: ${esc(bill.customer_gstin)}</div>` : ''}
+    ${cfg.show_warranty_details ? (bill.warranty_extra_data || []).map((e) =>
+        `<div>${esc(e.label)}: ${esc(e.value)}</div>`).join('') : ''}
     ${bill.table_number ? `<div>Table: ${esc(String(bill.table_number))}</div>` : ''}
   </div>` : '<div style="height:8pt"></div>'}
 

@@ -226,16 +226,29 @@ class InvoicePdf {
               // tax breakdown a buyer can claim input credit against. With GST
               // off there are no GST columns and no CGST/SGST box, so calling
               // it that would misrepresent a plain sale bill.
-              child: pw.Text(showGst ? 'Tax Invoice' : 'Invoice',
+              child: pw.Text(
+                  bill.status == 'quotation'
+                      ? 'Quotation'
+                      : (showGst ? 'Tax Invoice' : 'Invoice'),
                   style: pw.TextStyle(
                       fontSize: 16, fontWeight: pw.FontWeight.bold)),
             ),
             pw.SizedBox(height: 8),
             _headerBox(businessName, address, phone, gstin, fssai,
                 bill.displayNumber, dateStr, shaped,
+                numberLabel: bill.status == 'quotation'
+                    ? 'Quotation No.'
+                    : 'Invoice No.',
                 billedBy: settings.showCashier ? bill.billedByName : null,
                 logo: logo),
-            _billToBox(bill, shaped, showCustomer: settings.showCustomer),
+            _billToBox(bill, shaped,
+                showCustomer: settings.showCustomer,
+                warrantyDetails: settings.showWarrantyDetails
+                    ? [
+                        for (final e in bill.warrantyExtraData)
+                          '${e.label}: ${e.value}',
+                      ]
+                    : const []),
             _itemsTable(bill, showGst, codeOf, lineTaxOf, money, shaped),
             pw.SizedBox(height: 10),
             _summary(bill, grandTotal, showGst, money),
@@ -523,12 +536,17 @@ class InvoicePdf {
 
   // --- Bill To --------------------------------------------------------------
   static pw.Widget _billToBox(Bill bill, ShapedText shaped,
-      {bool showCustomer = true}) {
+      {bool showCustomer = true,
+      // Warranty details captured at billing time (migration 065) — a
+      // tyre's vehicle KM reading, etc. — printed as plain lines alongside
+      // the rest of the customer info, not a separate section. Already
+      // empty when the owner's Billing Setup toggle is off.
+      List<String> warrantyDetails = const []}) {
     bool has(String? v) => v != null && v.isNotEmpty;
     final cust = showCustomer &&
         (has(bill.customerName) || has(bill.customerPhone) ||
             has(bill.customerAddress) || has(bill.customerGstin));
-    if (!cust && !has(bill.tableNumber)) {
+    if (!cust && !has(bill.tableNumber) && warrantyDetails.isEmpty) {
       return pw.SizedBox(height: 8);
     }
     return pw.Container(
@@ -560,6 +578,8 @@ class InvoicePdf {
           if (cust && has(bill.customerGstin))
             pw.Text('GSTIN: ${bill.customerGstin}',
                 style: const pw.TextStyle(fontSize: 9)),
+          for (final l in warrantyDetails)
+            pw.Text(l, style: const pw.TextStyle(fontSize: 9)),
           if (bill.tableNumber != null && bill.tableNumber!.isNotEmpty)
             pw.Text('Table: ${bill.tableNumber}',
                 style: const pw.TextStyle(fontSize: 9)),
@@ -626,7 +646,7 @@ class InvoicePdf {
         ),
       ];
       if (anyHsn) cells.add(cell(codeOf(i), align: pw.Alignment.center));
-      cells.add(cell(formatQty(i.quantity), align: pw.Alignment.centerRight));
+      cells.add(cell(receiptQty(i, formatQty(i.quantity)), align: pw.Alignment.centerRight));
       cells.add(cell(money(i.receiptPrice), align: pw.Alignment.centerRight));
       if (showGst) {
         final rate = i.taxRate ?? 0;
@@ -686,18 +706,24 @@ class InvoicePdf {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text('Invoice Amount in Words',
+              pw.Text(
+                  bill.status == 'quotation'
+                      ? 'Amount in Words'
+                      : 'Invoice Amount in Words',
                   style: const pw.TextStyle(fontSize: 9)),
               pw.SizedBox(height: 2),
               pw.Text(amountToWords(grandTotal),
                   style: pw.TextStyle(
                       fontSize: 10, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 10),
+              // A quotation takes no money, so it has no payment mode.
+              if (bill.status != 'quotation')
               pw.Text('Payment mode',
                   style: const pw.TextStyle(fontSize: 9)),
               // A split bill: "Cash Rs.300.00 + Credit Rs.200.00" (Rs., not
               // ₹ — the base PDF font has no ₹ glyph). With old dues collected
               // it is everything handed over, not just this bill's share.
+              if (bill.status != 'quotation')
               pw.Text(
                   bill.tendered.length > 1 || bill.collected.isNotEmpty
                       ? bill.tendered

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:image_picker/image_picker.dart';
@@ -7,6 +8,7 @@ import '../utils/jpeg_compress.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
+import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/category_tree_list.dart';
@@ -14,7 +16,11 @@ import '../widgets/bottom_nav_bar.dart';
 import '../widgets/floating_bar_physics.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
+import '../widgets/warranty_extra_fields_editor.dart'
+    show WarrantyLabelField, allTemplateLabels;
 import '../api.dart';
+import '../services/barcode_export.dart';
+import '../services/file_export.dart';
 import '../services/printer_service.dart';
 import 'menu_photos_screen.dart';
 import 'major_category_order_screen.dart';
@@ -132,7 +138,7 @@ class _PackRow extends StatelessWidget {
               controller: size,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              suffixIcon: UnitSuffix(itemUnitLabel(context, baseUnit)),
+              suffixIcon: UnitSuffix(unitShort(baseUnit)),
               validator: (v) => (double.tryParse(v?.trim() ?? '') ?? 0) > 1
                   ? null
                   : l10n.itemsPackSizeInvalid,
@@ -262,6 +268,115 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
   /// be printed per size. Printing the parent produced a label reading
   /// "Rs. 0.00" and saved a barcode onto the priceless parent, giving a
   /// scannable code that resolves to nothing sellable. Ask which size first.
+  /// Top bar → "Download all barcodes": save a generated code on every item
+  /// and size that has none, then hand the owner a zip of label images to
+  /// print whenever it suits them.
+  Future<void> _downloadAllBarcodes() async {
+    final l10n = context.l10n;
+    final fields = await _pickLabelFields();
+    if (fields == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context, rootNavigator: true);
+    final status = ValueNotifier<String>(l10n.barcodesPreparing);
+    var open = true;
+    void close() {
+      if (open) nav.pop();
+      open = false;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(children: [
+            const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2.5)),
+            const SizedBox(width: AppSpacing.space16),
+            Expanded(
+              child: ValueListenableBuilder<String>(
+                  valueListenable: status, builder: (_, s, __) => Text(s)),
+            ),
+          ]),
+        ),
+      ),
+    );
+    try {
+      final notifier = ref.read(itemsProvider.notifier);
+      final failed =
+          await assignMissingBarcodes(await ref.read(itemsProvider.future),
+              (done, total) => status.value = l10n.barcodesSaving(done, total));
+      status.value = l10n.barcodesMakingImages;
+      // Re-fetch so the list, the offline cache and the zip all carry the codes
+      // just saved.
+      await notifier.reload();
+      final zip =
+          await buildBarcodeZip(await ref.read(itemsProvider.future), fields);
+      close();
+      await shareFile(zip, 'Barcodes.zip', 'application/zip');
+      if (failed > 0) {
+        messenger.showSnackBar(SnackBar(
+            content: Text(l10n.barcodesFailed(failed)),
+            backgroundColor: AppColors.error));
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(
+          content: Text(sanitizeUiErrorMessage(e)),
+          backgroundColor: AppColors.error));
+    } finally {
+      close();
+      status.dispose();
+    }
+  }
+
+  /// What goes on each exported label, picked before anything is generated.
+  /// All ticked to start; null = cancelled. The bars are always on the label.
+  Future<LabelFields?> _pickLabelFields() {
+    final l10n = context.l10n;
+    var f = (name: true, size: true, price: true, code: true);
+    return showDialog<LabelFields>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          Widget box(String title, bool value, LabelFields Function(bool) set) =>
+              CheckboxListTile(
+                dense: true,
+                title: Text(title),
+                value: value,
+                onChanged: (v) => setLocal(() => f = set(v ?? false)),
+              );
+          return AlertDialog(
+            title: Text(l10n.barcodesPickFields),
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              box(l10n.barcodesFieldName, f.name,
+                  (v) => (name: v, size: f.size, price: f.price, code: f.code)),
+              box(l10n.barcodesFieldSize, f.size,
+                  (v) => (name: f.name, size: v, price: f.price, code: f.code)),
+              box(l10n.barcodesFieldPrice, f.price,
+                  (v) => (name: f.name, size: f.size, price: v, code: f.code)),
+              box(l10n.barcodesFieldCode, f.code,
+                  (v) => (name: f.name, size: f.size, price: f.price, code: v)),
+            ]),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, f),
+                child: Text(l10n.itemsDownloadBarcodes),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _showBarcodePrint(Item item) async {
     if (!item.hasVariants) {
       _showBarcodePrintFor(item, null);
@@ -432,7 +547,52 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                       itemId: item.id, itemName: item.name),
                 )
             : null,
+        isWarrantyShop: ref.read(warrantyEnabledProvider),
+        onManageWarrantyFields: ref.read(warrantyEnabledProvider)
+            ? (category) => _showWarrantyFieldTemplateEditor(category)
+            : null,
+        // Only the owner may write price lists (routes/price_lists.js).
+        priceLists: ref.read(userRoleProvider) == 'owner'
+            ? ref.read(priceListsProvider).valueOrNull ?? const []
+            : const [],
+        onSavePriceListPrices: _savePriceListPrices,
       ),
+    );
+  }
+
+  /// Writes [prices] (list id → this item's price, null = drop it) into the
+  /// price lists. A list is saved whole, so each is merged into a FRESH copy —
+  /// the cached one could be missing prices another device just set.
+  Future<void> _savePriceListPrices(
+      String itemId, Map<String, double?> prices) async {
+    final id = itemId.toLowerCase();
+    for (final list in (await getPriceLists()).whereType<Map>()) {
+      if (!prices.containsKey(list['id'])) continue;
+      final price = prices[list['id']];
+      await updatePriceList(list['id'], {
+        'name': list['name'],
+        'adjust_pct': list['adjust_pct'],
+        'items': [
+          for (final e in (list['items'] as List? ?? const []).whereType<Map>())
+            if ('${e['item_id']}'.toLowerCase() != id || e['variant_id'] != null)
+              {
+                'item_id': e['item_id'],
+                if (e['variant_id'] != null) 'variant_id': e['variant_id'],
+                'price': e['price'],
+              },
+          if (price != null) {'item_id': itemId, 'price': price},
+        ],
+      });
+    }
+    await ref.read(priceListsProvider.notifier).reload();
+  }
+
+  /// Opens the editor for [category]'s custom warranty fields (e.g. "KM
+  /// Reading"/"Vehicle Number" for Tyres) — see warranty_field_templates.js.
+  void _showWarrantyFieldTemplateEditor(String category) {
+    showDialog(
+      context: context,
+      builder: (_) => _WarrantyFieldTemplateDialog(category: category),
     );
   }
 
@@ -565,6 +725,12 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                                 builder: (_) => const MenuPhotosScreen()),
                           ),
                         ),
+                      IconButton(
+                        icon: const Icon(Icons.download_outlined),
+                        color: AppColors.textPrimary,
+                        tooltip: l10n.itemsDownloadBarcodes,
+                        onPressed: _downloadAllBarcodes,
+                      ),
                       const SizedBox(width: 4),
                     ]
                   : null),
@@ -739,10 +905,13 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
           );
         } else if (stockMode) {
           final isWide = MediaQuery.of(context).size.width >= 720;
+          // Low-stock items (or any low-stock size) first, order kept otherwise.
+          bool low(Item i) => i.isLowStock || i.variants.any((v) => v.isLowStock);
+          final sorted = [...items.where(low), ...items.where((i) => !low(i))];
           list = CustomScrollView(
             physics: _header.physics,
             slivers: [
-              _buildStockSliver(items, crossAxisCount: isWide ? 3 : 1),
+              _buildStockSliver(sorted, crossAxisCount: isWide ? 3 : 1),
             ],
           );
         } else {
@@ -873,7 +1042,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
             StockOverviewRow(
               name: v.label,
               stockQuantity: v.stockQuantity,
-              unitLabel: itemUnitLabel(context, item.unit),
+              unitLabel: unitShort(item.unit),
               isLowStock: v.isLowStock,
             ),
         ],
@@ -884,7 +1053,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
       StockOverviewRow(
         name: item.name,
         stockQuantity: item.stockQuantity,
-        unitLabel: itemUnitLabel(context, item.unit),
+        unitLabel: unitShort(item.unit),
         isLowStock: item.isLowStock,
       ),
     );
@@ -1043,7 +1212,10 @@ class _ItemSheetRow extends StatelessWidget {
                   children: [
                     _RowIcon(
                       icon: Icons.qr_code_outlined,
-                      color: item.barcode != null
+                      // Green = scannable: a sized item scans by its sizes.
+                      color: (item.hasVariants
+                              ? item.variants.every((v) => v.barcode != null)
+                              : item.barcode != null)
                           ? AppColors.accent
                           : AppColors.textSecondary,
                       onTap: onBarcode,
@@ -1222,7 +1394,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '${formatQty(_current)} ${itemUnitLabel(context, widget.item.unit)}',
+                    '${formatQty(_current)} ${unitShort(widget.item.unit)}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -1283,7 +1455,7 @@ class _StockPopupDialogState extends State<_StockPopupDialog> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      '${formatQty(_total)} ${itemUnitLabel(context, widget.item.unit)}',
+                      '${formatQty(_total)} ${unitShort(widget.item.unit)}',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                             color: hasInput
@@ -1386,6 +1558,23 @@ class _ItemFormDialog extends StatefulWidget {
   final VoidCallback? onManageSizes;
   final VoidCallback? onManageRecipe;
 
+  /// "Retail & Warranty" shops only: shows the "Carries warranty" toggle.
+  final bool isWarrantyShop;
+
+  /// Opens the category's custom warranty-field editor. Only offered once
+  /// warranty is on and a category is entered — there must be something to
+  /// key the template by.
+  final void Function(String category)? onManageWarrantyFields;
+
+  /// The shop's price lists, offered under the price so this item's list
+  /// price can be set right here. Empty → the row is hidden.
+  final List<PriceList> priceLists;
+
+  /// Saves the list prices changed in this form (list id → price, null =
+  /// back to the list's default) once the item has an id.
+  final Future<void> Function(String itemId, Map<String, double?> prices)?
+      onSavePriceListPrices;
+
   const _ItemFormDialog(
       {this.item,
       required this.inventoryEnabled,
@@ -1395,7 +1584,11 @@ class _ItemFormDialog extends StatefulWidget {
       required this.onSaved,
       this.onVariantsCreated,
       this.onManageSizes,
-      this.onManageRecipe});
+      this.onManageRecipe,
+      this.isWarrantyShop = false,
+      this.onManageWarrantyFields,
+      this.priceLists = const [],
+      this.onSavePriceListPrices});
 
   @override
   State<_ItemFormDialog> createState() => _ItemFormDialogState();
@@ -1439,6 +1632,11 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   bool _hasVariants = false;
   final List<_VariantDraft> _variantDrafts = [];
 
+  /// "Retail & Warranty" shops only: whether selling this item auto-creates a
+  /// warranty record, and the period (months) seeded onto it.
+  bool _warrantyEligible = false;
+  final _warrantyMonthsCtrl = TextEditingController();
+
   /// The item created by a previous save attempt that then failed part-way
   /// through its variants. Held so a retry adds only the MISSING variants
   /// instead of creating a second item.
@@ -1467,6 +1665,21 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// to fall through to the plain-item branch and demand a price the item does
   /// not have.
   bool get _sizedItem => _hasVariants || (widget.item?.hasVariants ?? false);
+
+  /// List price per price list id, as typed, and as it was when the form
+  /// opened — only lists whose text changed are written on save.
+  late final Map<String, String> _plOriginal = {
+    for (final l in widget.priceLists)
+      l.id: widget.item == null || l.prices[widget.item!.id] == null
+          ? ''
+          : _fmtPrice(l.prices[widget.item!.id]!),
+  };
+  late final Map<String, String> _plPrices = {..._plOriginal};
+  late String? _plId =
+      widget.priceLists.isEmpty ? null : widget.priceLists.first.id;
+  late final _plCtrl = TextEditingController(text: _plPrices[_plId] ?? '');
+
+  static String _fmtPrice(double v) => v.toStringAsFixed(v % 1 == 0 ? 0 : 2);
 
   static const _units = [
     'piece',
@@ -1515,6 +1728,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _packUnit = item.packUnit;
       _packSizeCtrl.text =
           item.packSize != null ? formatQty(item.packSize!) : '';
+      _warrantyEligible = item.warrantyEligible;
+      _warrantyMonthsCtrl.text = item.defaultWarrantyMonths?.toString() ?? '';
       // The items list never carries image_url, so look this one up.
       getItemImageUrl(item.id).then((url) {
         if (mounted) setState(() => _photoUrl = url);
@@ -1752,6 +1967,76 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         : l10n.itemsFieldPriceExclusive;
   }
 
+  /// [price list ▾][₹ list price]: pick a list, type this item's price on it.
+  /// Each list remembers its own figure while switching, and the dropdown
+  /// shows the ones already set. A blank box bills at the list's % rule on
+  /// the price above (shown as the hint), or at that price itself.
+  Widget _buildPriceListRow(AppLocalizations l10n) {
+    final list = widget.priceLists.firstWhere((l) => l.id == _plId);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 5,
+          child: DropdownButtonFormField<String>(
+            initialValue: _plId,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: l10n.priceListPick,
+              prefixIcon: const Icon(Icons.sell_outlined,
+                  size: 18, color: AppColors.textSecondary),
+            ),
+            items: [
+              for (final l in widget.priceLists)
+                DropdownMenuItem(
+                  value: l.id,
+                  child: Text(
+                      (_plPrices[l.id] ?? '').trim().isEmpty
+                          ? l.name
+                          : '${l.name} · ₹${_plPrices[l.id]!.trim()}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (v) => setState(() {
+              _plId = v;
+              _plCtrl.text = _plPrices[v] ?? '';
+            }),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.space8),
+        Expanded(
+          flex: 4,
+          child: ListenableBuilder(
+            listenable: _priceCtrl,
+            builder: (context, _) {
+              final base = double.tryParse(_priceCtrl.text.trim());
+              final pct = list.adjustPct;
+              final ruled = base == null || pct == null || pct == 0
+                  ? base
+                  : base * (1 + pct / 100);
+              return TextFormField(
+                controller: _plCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                ],
+                textAlign: TextAlign.right,
+                decoration: InputDecoration(
+                  labelText: l10n.itemsListPrice,
+                  prefixText: '₹ ',
+                  hintText: ruled?.toStringAsFixed(2),
+                ),
+                onChanged: (v) => setState(() => _plPrices[_plId!] = v),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Tax rate for display: "5" not "5.0", but "2.5" kept intact.
   String _trimRate(double rate) => rate == rate.roundToDouble()
       ? rate.toStringAsFixed(0)
@@ -1773,6 +2058,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _stockCtrl.dispose();
     _lowStockCtrl.dispose();
     _packSizeCtrl.dispose();
+    _warrantyMonthsCtrl.dispose();
+    _plCtrl.dispose();
     for (final d in _variantDrafts) {
       d.dispose();
     }
@@ -1967,6 +2254,22 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       }
     }
 
+    // Changed list prices only; blank = drop this item's price from the list.
+    // A sized item prices its lists per size (Price Lists screen), so none.
+    final listPrices = <String, double?>{};
+    if (!_sizedItem) {
+      for (final e in _plPrices.entries) {
+        final text = e.value.trim();
+        if (text == _plOriginal[e.key]) continue;
+        final p = text.isEmpty ? null : double.tryParse(text);
+        if (text.isNotEmpty && (p == null || p < 0)) {
+          _showError(context.l10n.priceListBadNumber);
+          return;
+        }
+        listPrices[e.key] = p;
+      }
+    }
+
     setState(() {
       _saving = true;
       _formError = null;
@@ -2011,6 +2314,13 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         'stock_quantity': double.parse(_stockCtrl.text.trim()),
       if (widget.inventoryEnabled && !sizedItem && _lowStockCtrl.text.trim().isNotEmpty)
         'low_stock_threshold': double.parse(_lowStockCtrl.text.trim()),
+      // Always sent (not conditional on the months field) so turning the
+      // toggle off clears the period server-side too.
+      if (widget.isWarrantyShop) 'warranty_eligible': _warrantyEligible,
+      if (widget.isWarrantyShop)
+        'default_warranty_months': _warrantyEligible
+            ? int.parse(_warrantyMonthsCtrl.text.trim())
+            : null,
     };
 
     final drafts = _variantDrafts.where((d) => !d.isBlank).toList();
@@ -2060,6 +2370,18 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
           if (!mounted) return;
           setState(() => _formError = context.l10n
               .itemsVariantsPartialFail(failed.length, drafts.length));
+          return;
+        }
+      }
+
+      // Needs the item's id too. Safe to repeat on a retry: it sets, not adds.
+      if (listPrices.isNotEmpty && widget.onSavePriceListPrices != null) {
+        try {
+          await widget.onSavePriceListPrices!(saved.id, listPrices);
+          _plOriginal.addAll(_plPrices);
+        } catch (_) {
+          if (!mounted) return;
+          setState(() => _formError = context.l10n.itemsPriceListSaveFailed);
           return;
         }
       }
@@ -2413,6 +2735,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                       return null;
                     },
                   ),
+                  if (widget.priceLists.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.space12),
+                    _buildPriceListRow(l10n),
+                  ],
                 ],
                 const SizedBox(height: AppSpacing.space12),
                 DropdownButtonFormField<String>(
@@ -2489,6 +2815,50 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     hint: l10n.itemsFieldHsnHint,
                   ),
                 ],
+                // "Retail & Warranty" shops only — selling this item can
+                // auto-create a warranty record (routes/bills.js hook).
+                if (widget.isWarrantyShop) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  SwitchListTile(
+                    value: _warrantyEligible,
+                    onChanged: _saving
+                        ? null
+                        : (v) => setState(() => _warrantyEligible = v),
+                    title: Text(l10n.itemsWarrantyEligible,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  if (_warrantyEligible) ...[
+                    const SizedBox(height: AppSpacing.space12),
+                    AppTextField(
+                      label: l10n.itemsWarrantyDefaultMonths,
+                      controller: _warrantyMonthsCtrl,
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        final n = int.tryParse((v ?? '').trim());
+                        return (n == null || n <= 0)
+                            ? l10n.commonEnterValidNumber
+                            : null;
+                      },
+                    ),
+                    if (widget.onManageWarrantyFields != null &&
+                        _categoryCtrl.text.trim().isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.space8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () => widget.onManageWarrantyFields!(
+                              _categoryCtrl.text.trim()),
+                          icon: const Icon(Icons.tune, size: 16),
+                          label: Text(l10n.itemsManageWarrantyFields),
+                        ),
+                      ),
+                    ],
+                  ],
+                ],
                 // A sized item is never scanned directly — each size has its own
                 // barcode, so the item-level one would be ambiguous.
                 if (!_sizedItem) ...[
@@ -2511,7 +2881,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                         const TextInputType.numberWithOptions(decimal: true),
                     // Echoes the unit picked above, so "12" is unambiguously
                     // 12 kg and not 12 pieces.
-                    suffixIcon: UnitSuffix(itemUnitLabel(context, _unit)),
+                    suffixIcon: UnitSuffix(unitShort(_unit)),
                   ),
                   const SizedBox(height: AppSpacing.space12),
                   // Low-stock alert level. Until now this was hardcoded to 50
@@ -2522,7 +2892,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                     controller: _lowStockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
-                    suffixIcon: UnitSuffix(itemUnitLabel(context, _unit)),
+                    suffixIcon: UnitSuffix(unitShort(_unit)),
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return null;
                       final n = double.tryParse(v.trim());
@@ -2652,10 +3022,15 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   late final TextEditingController _barcodeCtrl;
   final _copiesCtrl = TextEditingController(text: '1');
   bool _printing = false;
-  bool _saved = false;
+  // The code the server holds for the target, as far as this dialog knows.
+  late String? _stored = _existingBarcode;
 
   // Effective target — a size (variant) if one was passed, else the whole item.
-  String? get _existingBarcode => widget.variant?.barcode ?? widget.item.barcode;
+  // A size never borrows the parent's code: that printed the item's barcode on
+  // the size label, so the scan resolved to the item and only opened its sizes.
+  String? get _existingBarcode => widget.variant != null
+      ? widget.variant!.barcode
+      : widget.item.barcode;
   String get _targetId => widget.variant?.id ?? widget.item.id;
   // 0 when neither is priced — a barcode label for a sized item is printed per
   // size, so the parent's own (null) price is never the one shown.
@@ -2667,7 +3042,7 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
   void initState() {
     super.initState();
     // Use existing barcode or auto-generate one from the target's id
-    _barcodeValue = _existingBarcode ?? _generateBarcode(_targetId);
+    _barcodeValue = _existingBarcode ?? generateBarcode(_targetId);
     _barcodeCtrl = TextEditingController(text: _barcodeValue);
     _barcodeCtrl.addListener(() {
       final v = _barcodeCtrl.text.trim();
@@ -2675,6 +3050,17 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
         setState(() => _barcodeValue = v);
       }
     });
+    // Save a generated code the moment it is shown. It used to be saved only
+    // on Print, so every item SHOWED a barcode here while the server held
+    // none — scanning it (off a label or the screen) said "not found".
+    if (_stored == null) {
+      _save(_barcodeValue).catchError((_) {}); // Print retries and reports it.
+    }
+  }
+
+  Future<void> _save(String code) async {
+    await widget.onBarcodeGenerated(code);
+    _stored = code;
   }
 
   @override
@@ -2684,18 +3070,6 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
     super.dispose();
   }
 
-  /// Generate a numeric barcode from the item's UUID (12 digits, EAN-13 compatible)
-  static String _generateBarcode(String id) {
-    // Take first 12 hex chars of the id and convert to digits
-    final hex = id.replaceAll('-', '');
-    final digits = hex.substring(0, 12).split('').map((c) {
-      final code = c.codeUnitAt(0);
-      // 0-9 → same digit; a-f → 0-5
-      return code >= 48 && code <= 57 ? c : (code - 97).toString();
-    }).join();
-    return digits.padLeft(12, '0');
-  }
-
   Future<void> _print() async {
     final copies = int.tryParse(_copiesCtrl.text.trim()) ?? 1;
     if (copies < 1) return;
@@ -2703,11 +3077,9 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
     final sentMessage = context.l10n.itemsBarcodeSentToPrinter;
     setState(() => _printing = true);
     try {
-      // If the target had no barcode, save the generated one first
-      if (_existingBarcode == null && !_saved) {
-        await widget.onBarcodeGenerated(_barcodeValue);
-        _saved = true;
-      }
+      // Save the code first unless it is already the stored one — a generated
+      // or edited code that is printed but not saved can never scan.
+      if (_barcodeValue != _stored) await _save(_barcodeValue);
       await PrinterService.instance.printBarcodeLabel(
         barcodeValue: _barcodeValue,
         itemName: widget.item.name,
@@ -2838,6 +3210,177 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Warranty field template editor — the custom fields ("KM Reading", "Serial
+// Number", ...) every warranty record in one item category asks for. See
+// migration 063 / routes/warranty_field_templates.js.
+// ---------------------------------------------------------------------------
+class _WarrantyFieldTemplateDialog extends ConsumerStatefulWidget {
+  final String category;
+  const _WarrantyFieldTemplateDialog({required this.category});
+
+  @override
+  ConsumerState<_WarrantyFieldTemplateDialog> createState() =>
+      _WarrantyFieldTemplateDialogState();
+}
+
+class _FieldDraft {
+  final TextEditingController labelCtrl;
+  String type;
+  final String? originalKey;
+
+  _FieldDraft({required this.labelCtrl, required this.type, this.originalKey});
+}
+
+class _WarrantyFieldTemplateDialogState
+    extends ConsumerState<_WarrantyFieldTemplateDialog> {
+  final List<_FieldDraft> _fields = [];
+  bool _saving = false;
+  bool _loaded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loaded) return;
+    final templates = ref.read(warrantyFieldTemplatesProvider).valueOrNull;
+    final existing = templates?[widget.category];
+    if (existing != null) {
+      for (final f in existing.fields) {
+        _fields.add(_FieldDraft(
+          labelCtrl: TextEditingController(text: f.label),
+          type: f.type,
+          originalKey: f.key,
+        ));
+      }
+    }
+    _loaded = true;
+  }
+
+  @override
+  void dispose() {
+    for (final f in _fields) {
+      f.labelCtrl.dispose();
+    }
+    super.dispose();
+  }
+
+  void _addField() {
+    setState(() => _fields
+        .add(_FieldDraft(labelCtrl: TextEditingController(), type: 'text')));
+  }
+
+  void _removeField(_FieldDraft f) {
+    setState(() => _fields.remove(f));
+    f.labelCtrl.dispose();
+  }
+
+  /// Derives a stable field key from its label (e.g. "KM Reading" →
+  /// "km_reading"), reusing the original key on an edit so renaming a label
+  /// doesn't orphan values already saved under the old key.
+  String _keyFor(_FieldDraft f) =>
+      f.originalKey ??
+      f.labelCtrl.text
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+          .replaceAll(RegExp(r'^_+|_+$'), '');
+
+  Future<void> _save() async {
+    final nonBlank = _fields.where((f) => f.labelCtrl.text.trim().isNotEmpty).toList();
+    setState(() => _saving = true);
+    try {
+      final notifier = ref.read(warrantyFieldTemplatesProvider.notifier);
+      if (nonBlank.isEmpty) {
+        await notifier.remove(widget.category);
+      } else {
+        await notifier.save(
+          widget.category,
+          [
+            for (final f in nonBlank)
+              WarrantyTemplateField(
+                  key: _keyFor(f), label: f.labelCtrl.text.trim(), type: f.type),
+          ],
+        );
+      }
+      rememberWarrantyLabels(
+          [for (final f in nonBlank) f.labelCtrl.text.trim()]);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(sanitizeUiErrorMessage(e)),
+          backgroundColor: AppColors.error,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    // Other categories' already-defined field labels (e.g. another item's
+    // "Vehicle" or "IMEI"), suggested here too so a label predefined for one
+    // item is reused instead of retyped.
+    final otherLabels = allTemplateLabels(
+        ref.watch(warrantyFieldTemplatesProvider).valueOrNull);
+    return AlertDialog(
+      title: Text(l10n.itemsWarrantyFieldsFor(widget.category)),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final f in _fields)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.space8),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(
+                    child: WarrantyLabelField(
+                        label: l10n.warrantyDetailLabel,
+                        controller: f.labelCtrl,
+                        extraSuggestions: otherLabels),
+                  ),
+                  const SizedBox(width: AppSpacing.space8),
+                  DropdownButton<String>(
+                    value: f.type,
+                    items: const [
+                      DropdownMenuItem(value: 'text', child: Text('Text')),
+                      DropdownMenuItem(value: 'number', child: Text('Number')),
+                      DropdownMenuItem(value: 'date', child: Text('Date')),
+                    ],
+                    onChanged: (v) => setState(() => f.type = v ?? 'text'),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    onPressed: () => _removeField(f),
+                  ),
+                ]),
+              ),
+            TextButton.icon(
+              onPressed: _addField,
+              icon: const Icon(Icons.add, size: 18),
+              label: Text(l10n.warrantyAddDetail),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.pop(context),
+          child: Text(l10n.commonCancel),
+        ),
+        ElevatedButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? l10n.commonSaving : l10n.commonSave),
         ),
       ],
     );
@@ -3140,9 +3683,9 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                     if (widget.inventoryEnabled && v.stockQuantity != null)
                       l10n.itemsStockLabel(formatQty(v.stockQuantity!)),
                     if (v.packUnit != null && v.packSize != null)
-                      '1 ${itemUnitLabel(context, v.packUnit!)} = '
+                      '1 ${unitShort(v.packUnit!)} = '
                           '${formatQty(v.packSize!)} '
-                          '${itemUnitLabel(context, widget.item.unit)}',
+                          '${unitShort(widget.item.unit)}',
                   ].join('  ·  ');
                   return ListTile(
                     dense: true,
@@ -3224,7 +3767,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                   // A size has no unit of its own — it is counted in the parent
                   // item's unit, which is what the stock rows below display.
                   suffixIcon:
-                      UnitSuffix(itemUnitLabel(context, widget.item.unit)),
+                      UnitSuffix(unitShort(widget.item.unit)),
                 ),
                 const SizedBox(height: AppSpacing.space8),
                 // Same per-size alert as the create form's size rows — the
@@ -3235,7 +3778,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   suffixIcon:
-                      UnitSuffix(itemUnitLabel(context, widget.item.unit)),
+                      UnitSuffix(unitShort(widget.item.unit)),
                 ),
               ],
               const SizedBox(height: AppSpacing.space8),
@@ -3512,7 +4055,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600)),
                             Text(
-                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? '${formatQty(v.stockQuantity!)} ${itemUnitLabel(context, widget.item.unit)}' : '—'}',
+                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? '${formatQty(v.stockQuantity!)} ${unitShort(widget.item.unit)}' : '—'}',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -3521,7 +4064,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                             // Live preview of the resulting stock after the adjustment.
                             if (_entered(v) > 0)
                               Text(
-                                '${_removing ? l10n.itemsTotalAfterRemoving : l10n.itemsTotalAfterAdding}: ${formatQty(((v.stockQuantity ?? 0) + _adding(v)).clamp(0, double.infinity))} ${itemUnitLabel(context, widget.item.unit)}',
+                                '${_removing ? l10n.itemsTotalAfterRemoving : l10n.itemsTotalAfterAdding}: ${formatQty(((v.stockQuantity ?? 0) + _adding(v)).clamp(0, double.infinity))} ${unitShort(widget.item.unit)}',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall

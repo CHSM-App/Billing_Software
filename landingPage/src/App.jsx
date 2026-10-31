@@ -13,6 +13,7 @@ import CTA          from './sections/CTA'
 import HelpCenter    from './components/helpcenter'
 import PrivacyPolicy  from './components/privacyPolicy'
 import DeleteAccount  from './components/DeleteAccount'
+import LegalPage      from './components/LegalPage'
 import NotFound       from './components/NotFound'
 
 function Landing() {
@@ -40,6 +41,9 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/help" element={<HelpCenter />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
+      <Route path="/terms" element={<LegalPage doc="terms" />} />
+      <Route path="/acceptable-use" element={<LegalPage doc="acceptable-use" />} />
+      <Route path="/ordering-terms" element={<LegalPage doc="ordering-terms" />} />
       <Route path="/delete-account" element={<DeleteAccount />} />
       <Route path="*" element={<NotFound />} />
     </Routes>

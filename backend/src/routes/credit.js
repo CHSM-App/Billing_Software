@@ -70,7 +70,9 @@ function settlementPayload(id, receiptToken, mode, bills, paidNow) {
 // be one debtor, not two. customer_phone is returned in that 10-digit form;
 // the bills/summary routes below accept it (or any format) and match every
 // stored variant.
-router.get('/customers', requireAuth, async (req, res) => {
+// The whole ledger (every debtor's name, phone and dues) is for whoever collects
+// money. Waiters and the kitchen only need /summary for the phone being billed.
+router.get('/customers', requireAuth, cashierOrOwner, async (req, res) => {
   try {
     await poolConnect;
     const result = await pool.request()
@@ -106,7 +108,7 @@ router.get('/customers', requireAuth, async (req, res) => {
 // GET /api/credit/customers/:phone/bills
 // All unpaid credit bills for one customer (by phone), newest first, each with
 // its line items so the client can preview/merge them.
-router.get('/customers/:phone/bills', requireAuth, async (req, res) => {
+router.get('/customers/:phone/bills', requireAuth, cashierOrOwner, async (req, res) => {
   const phone = canonicalPhone(req.params.phone);
   if (!phone) return res.status(400).json({ error: 'phone is required' });
 

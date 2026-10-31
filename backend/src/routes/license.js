@@ -3,6 +3,7 @@ const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const billSettings = require('../billSettings');
+const { TERMS_VERSION } = require('../legal');
 
 const router = Router();
 
@@ -53,6 +54,7 @@ router.get('/', requireAuth, async (req, res) => {
         s.is_trial,
         s.updated_at,
         b.store_enabled,
+        b.quotations_enabled,
         b.logo_url,
         b.print_logo,
         b.bill_footer_note,
@@ -96,6 +98,22 @@ router.get('/', requireAuth, async (req, res) => {
       sub.status = 'expired';
     }
 
+    // Has this OWNER accepted the current legal terms (src/legal.js)? Staff
+    // never are asked — the agreement is with the business, through its owner.
+    // A separate query, run only once TERMS_VERSION is set, so this endpoint
+    // never touches terms_acceptances (migration 072) while the flow is off.
+    let termsRequired = false;
+    if (TERMS_VERSION && sub.current_role === 'owner') {
+      const accepted = await pool.request()
+        .input('user_id', sql.UniqueIdentifier, req.user.user_id)
+        .input('terms_version', sql.NVarChar(20), TERMS_VERSION)
+        .query(`
+          SELECT COUNT(*) AS n FROM terms_acceptances
+          WHERE user_id = @user_id AND terms_version = @terms_version
+        `);
+      termsRequired = !(accepted.recordset[0]?.n > 0);
+    }
+
     return res.json({
       status: sub.status,
       expires_at: sub.expires_at,
@@ -121,6 +139,8 @@ router.get('/', requireAuth, async (req, res) => {
       // this is how an owner's logo change reaches their devices.
       logo_url: sub.logo_url ?? null,
       print_logo: !!sub.print_logo,
+      // Quotations switch — how an owner turning it on reaches staff devices.
+      quotations_enabled: !!sub.quotations_enabled,
       // Billing Setup — reaches staff devices the same way.
       bill_footer_note: sub.bill_footer_note ?? null,
       bill_settings: billSettings.parse(sub.bill_settings),
@@ -131,6 +151,10 @@ router.get('/', requireAuth, async (req, res) => {
       // holding a valid access token has no other way to learn it was cut off.
       account_active: sub.user_ok > 0,
       is_trial: !!sub.is_trial,
+      // Legal terms: the app shows the full-page consent screen while
+      // terms_required is true, and echoes terms_version back on accept.
+      terms_version: TERMS_VERSION,
+      terms_required: termsRequired,
       verified_at: new Date().toISOString()
     });
   } catch (err) {
@@ -139,86 +163,8 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/admin/license/activate
-// Admin-only endpoint (protected by ADMIN_SECRET env variable).
-// Used by you to activate or update a business subscription.
-//
-// Body: { business_id, expires_at, max_offline_days, grace_period_days, status }
-// ---------------------------------------------------------------------------
-router.post('/admin/activate', async (req, res) => {
-  const adminSecret = req.headers['x-admin-secret'];
-  if (!adminSecret || adminSecret !== process.env.ADMIN_SECRET) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
-
-  const {
-    business_id,
-    expires_at,
-    max_offline_days = 30,
-    grace_period_days = 5,
-    status = 'active',
-    max_staff = 10,
-    allow_mobile = true,
-    allow_desktop = true
-  } = req.body;
-
-  if (!business_id || !expires_at) {
-    return res.status(400).json({ error: 'business_id and expires_at are required' });
-  }
-
-  const validStatuses = ['pending', 'active', 'suspended', 'expired'];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({ error: `status must be one of: ${validStatuses.join(', ')}` });
-  }
-
-  try {
-    await poolConnect;
-    const request = pool.request();
-    request.input('business_id', sql.UniqueIdentifier, business_id);
-    request.input('status', sql.NVarChar(20), status);
-    request.input('expires_at', sql.DateTime2, new Date(expires_at));
-    request.input('max_offline_days', sql.Int, max_offline_days);
-    request.input('grace_period_days', sql.Int, grace_period_days);
-    request.input('max_staff', sql.Int, max_staff);
-    request.input('allow_mobile', sql.Bit, allow_mobile ? 1 : 0);
-    request.input('allow_desktop', sql.Bit, allow_desktop ? 1 : 0);
-
-    // Upsert subscription — insert if not exists, update if exists
-    await request.query(`
-      MERGE subscriptions AS target
-      USING (SELECT @business_id AS business_id) AS source
-        ON target.business_id = source.business_id
-      WHEN MATCHED THEN
-        UPDATE SET
-          status            = @status,
-          expires_at        = @expires_at,
-          max_offline_days  = @max_offline_days,
-          grace_period_days = @grace_period_days,
-          max_staff         = @max_staff,
-          allow_mobile      = @allow_mobile,
-          allow_desktop     = @allow_desktop,
-          updated_at        = GETUTCDATE()
-      WHEN NOT MATCHED THEN
-        INSERT (business_id, status, expires_at, max_offline_days, grace_period_days,
-                max_staff, allow_mobile, allow_desktop)
-        VALUES (@business_id, @status, @expires_at, @max_offline_days, @grace_period_days,
-                @max_staff, @allow_mobile, @allow_desktop);
-    `);
-
-    // Auto-verify the business when activating subscription
-    if (status === 'active') {
-      const verifyReq = pool.request();
-      verifyReq.input('business_id', sql.UniqueIdentifier, business_id);
-      await verifyReq.query(`
-        UPDATE businesses SET is_verified = 1 WHERE id = @business_id
-      `);
-    }
-
-    return res.json({ ok: true, business_id, status, expires_at });
-  } catch (err) {
-    return res.status(500).json({ error: 'Server error', detail: err.message });
-  }
-});
+// Subscriptions are changed from the admin dashboard (PUT /admin/api/businesses/:id).
+// The old POST /api/license/admin/activate, guarded by a static ADMIN_SECRET
+// header, was removed — it duplicated that path with a weaker lock.
 
 module.exports = router;

@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'invoice_pdf.dart' show ShapedText;
+
 /// Builds the downloadable artefacts for the GSTR-3B summary return.
 ///
 /// Mirrors [Gstr1Export] in shape and money rules — the figures come straight
@@ -125,6 +127,12 @@ class Gstr3bExport {
     final viaItc = _map(t61['paid_through_itc']);
     final cash = _map(t61['payable_in_cash']);
 
+    // A Marathi business name: pre-shaped, the pdf package cannot shape
+    // Devanagari (see ShapedText).
+    final shaped = ShapedText();
+    await shaped.add((business['name'] ?? '').toString(),
+        bold: true, maxWidth: 420);
+
     final head = pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9);
     const cell = pw.TextStyle(fontSize: 9);
 
@@ -134,7 +142,7 @@ class Gstr3bExport {
             pw.SizedBox(
                 width: 110,
                 child: pw.Text(k, style: const pw.TextStyle(fontSize: 9))),
-            pw.Text(v, style: head),
+            shaped.widget(v, bold: true, style: head),
           ]),
         );
 

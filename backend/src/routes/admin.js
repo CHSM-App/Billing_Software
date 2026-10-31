@@ -28,7 +28,9 @@ const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
 const { validateNumber, validateText, validateEnum } = require('../validate');
 const { forgetCustomersAccess } = require('../customers');
+const authState = require('../authState');
 const { VALID_UNITS } = require('./items');
+const { adminLoginLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
@@ -82,6 +84,25 @@ function requireAdmin(req, res, next) {
 }
 
 // ---------------------------------------------------------------------------
+// GET /admin/static/xlsx.full.min.js — SheetJS for the item import, served
+// from our own code instead of cdn.sheetjs.com. The dashboard holds a
+// platform-admin token, so a script from a third-party host was a way to take
+// it over. Two path segments, so the /:slug route below never sees it.
+// ---------------------------------------------------------------------------
+const XLSX_PATH = path.join(__dirname, '..', 'static', 'admin', 'xlsx.full.min.js');
+router.get('/static/xlsx.full.min.js', (req, res) => {
+  fs.readFile(XLSX_PATH, (err, buf) => {
+    if (err) {
+      logger.error({ err, path: XLSX_PATH }, 'xlsx.full.min.js read failed');
+      return res.status(500).end();
+    }
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=86400');
+    return res.send(buf);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /admin/:slug — serve the dashboard HTML if the slug matches.
 // A wrong/missing slug returns 404 (indistinguishable from any other bad path)
 // so the dashboard's existence isn't advertised.
@@ -110,7 +131,7 @@ router.get('/:slug', (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /admin/api/login — { username, password } -> { token }
 // ---------------------------------------------------------------------------
-router.post('/api/login', express.json(), (req, res) => {
+router.post('/api/login', adminLoginLimiter, express.json(), (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'username and password are required' });
@@ -238,7 +259,7 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
 //   max_staff, allow_mobile, allow_desktop, allow_online_store, allow_customers
 //                                              (-> subscriptions, upserted)
 //   whatsapp_mode, is_verified                  (-> businesses)
-// Only the provided fields are changed. Mirrors the /api/license/admin/activate
+// Only the provided fields are changed. Upserts with a
 // MERGE so a business with no subscription row still gets one created.
 // ---------------------------------------------------------------------------
 router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res) => {
@@ -364,9 +385,11 @@ router.put('/api/businesses/:id', requireAdmin, express.json(), async (req, res)
       // The Customers routes cache this switch for a minute; make the admin's
       // change bite immediately.
       if (allow_customers !== undefined) forgetCustomersAccess(businessId);
+      // Subscription changes (suspend, renew, expiry) reach requireAuth at once.
+      authState.forgetBusiness(businessId);
 
       // Activating a paid subscription should also verify the business, matching
-      // /api/license/admin/activate's behaviour — unless the admin explicitly
+      // the old activate endpoint's behaviour — unless the admin explicitly
       // sent is_verified in this same request.
       if (status === 'active' && is_verified === undefined) {
         await pool.request()

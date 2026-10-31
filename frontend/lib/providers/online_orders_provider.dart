@@ -71,6 +71,10 @@ final pendingOnlineOrderCountProvider = Provider<int>((ref) =>
 /// change the user made themselves.
 final openOnlineOrdersRequestProvider = StateProvider<bool>((ref) => false);
 
+/// Same one-shot request for the Tables sub-tab (Open Orders where the shop
+/// has no tables) — tapping a QR table-order notification.
+final openTableOrdersRequestProvider = StateProvider<bool>((ref) => false);
+
 // No hasOpenOnlineOrders provider: the Online tab now follows the store toggle,
 // not the queue's contents, so nothing needs to ask "are any still open?".
 // OnlineOrder.isOpen still drives the Waiting / Accepted / Decided grouping

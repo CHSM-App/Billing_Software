@@ -209,3 +209,18 @@ describe('dateRange', () => {
     expect(diffDays).toBe(7);
   });
 });
+
+describe('addMonths (warranty expiry)', () => {
+  const { addMonths } = require('../../src/dateUtils');
+  const ymd = (d) => d.toISOString().slice(0, 10);
+  test.each([
+    ['2026-03-15', 24, '2028-03-15'],
+    ['2026-01-31', 1, '2026-02-28'],
+    ['2028-01-31', 1, '2028-02-29'], // leap year
+    ['2028-02-29', 12, '2029-02-28'],
+    ['2026-08-31', 1, '2026-09-30'],
+    ['2026-12-15', 1, '2027-01-15'],
+  ])('%s + %i months → %s', (from, m, want) => {
+    expect(ymd(addMonths(from, m))).toBe(want);
+  });
+});

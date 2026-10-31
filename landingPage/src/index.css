@@ -151,3 +151,19 @@ body {
 .delay-400 { animation-delay: 0.5s; }
 
 .anim-init { opacity: 0; }
+
+/* Legal documents rendered from Markdown (components/LegalPage.jsx). Plain
+   element selectors under .legal, matching the Privacy Policy page's look. */
+.legal { color: #475569; font-size: 0.875rem; line-height: 1.7; }
+.legal h2 { font-family: theme('fontFamily.display'); font-size: 1.25rem; font-weight: 700; color: #0f172a;
+  margin: 2.5rem 0 1rem; padding-bottom: 0.75rem; border-bottom: 2px solid rgba(0, 229, 192, 0.25); }
+.legal h3 { font-weight: 700; color: #0f172a; margin: 1.5rem 0 0.5rem; }
+.legal p, .legal ul, .legal ol, .legal blockquote, .legal table { margin: 0 0 1rem; }
+.legal ul { list-style: disc; padding-left: 1.25rem; }
+.legal ol { list-style: decimal; padding-left: 1.25rem; }
+.legal li { margin-bottom: 0.35rem; }
+.legal a { color: #143b9f; text-decoration: underline; overflow-wrap: anywhere; }
+.legal strong { color: #0f172a; }
+.legal blockquote { border-left: 3px solid #f59e0b; background: #fffbeb; padding: 0.75rem 1rem; border-radius: 0.5rem; }
+.legal table { display: block; overflow-x: auto; border-collapse: collapse; }
+.legal th, .legal td { border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }

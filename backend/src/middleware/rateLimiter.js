@@ -140,6 +140,23 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true, // only count failures toward the limit
 });
 
+// POST /api/login — 30 failed attempts per IP per hour, across ALL phones.
+//
+// loginLimiter above is keyed on IP + phone, so every new phone handed one
+// attacker a fresh budget: try the ten commonest PINs on each of a thousand
+// numbers. This caps the spray itself. A shop's staff behind one NAT mistyping
+// their PIN never get near 30 failures an hour; successes are not counted.
+const loginIpFailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
+  message: 'Too many failed logins from this network. Please try again in an hour.',
+  handler: onLimitReached,
+  skipSuccessfulRequests: true,
+});
+
 // POST /api/register — 10 registrations per IP per hour
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
@@ -149,6 +166,20 @@ const registerLimiter = rateLimit({
   message: 'Too many registration attempts. Please try again in 1 hour.',
   handler: onLimitReached,
   skipSuccessfulRequests: true,
+});
+
+// POST /api/register — 5 accounts per IP per day, successes INCLUDED.
+//
+// registerLimiter above only counts failures, so one IP could create unlimited
+// free trials — each a fresh WhatsApp sender. A real shop signs up once; five
+// leaves room for a reseller onboarding a few shops from one office.
+const registerAccountLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many accounts created from this network today. Please try again tomorrow.',
+  handler: onLimitReached,
 });
 
 // POST /api/refresh — 60 requests per IP per 15 minutes.
@@ -190,6 +221,32 @@ const publicPageLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please slow down.' },
+  handler: onLimitReached,
+});
+
+// POST /admin/api/login — 5 failed attempts per IP per 15 minutes.
+//
+// The admin password unlocks every business on the platform, and it is the
+// only factor. The global limiter's 1000/15min allowed ~100k guesses a day.
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many login attempts. Please try again in 15 minutes.',
+  handler: onLimitReached,
+  skipSuccessfulRequests: true,
+});
+
+// GET /receipt/:token/pdf — 5 per IP per minute. Each one starts a headless
+// browser, so it gets a far tighter budget than an ordinary public page. A
+// customer downloads their receipt once or twice.
+const pdfLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many PDF downloads. Please wait a minute.',
   handler: onLimitReached,
 });
 
@@ -238,6 +295,28 @@ const otpSendLimiter = rateLimit({
   handler: onLimitReached,
 });
 
+// Requesting an OTP — 10 per phone per DAY, whatever the IP.
+//
+// otpSendLimiter is phone + IP so an attacker cannot lock a victim out, but
+// that also lets anyone with many IPs flood one number with codes. This is the
+// ceiling on the flood: no real person needs more than ten codes in a day
+// across register, forgot-PIN, deletion, the store and table ordering.
+// ponytail: in-memory store — exact for the single iisnode process; a restart
+// resets the count. Move to a shared store if the process count is raised.
+function phoneOnlyKey(req) {
+  const digits = String(req.body?.phone ?? '').replace(/\D/g, '').slice(-10);
+  return digits ? `otp-phone:${digits}` : `otp-ip:${ipKeyGenerator(req.ip)}`;
+}
+const otpPhoneDailyLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: phoneOnlyKey,
+  message: { error: 'Too many codes sent to this number today. Please try again tomorrow.' },
+  handler: onLimitReached,
+});
+
 // POST /api/demo/request — 10 per IP per hour.
 //
 // Public and unauthenticated, and each accepted request sends a WhatsApp
@@ -253,4 +332,4 @@ const demoLimiter = rateLimit({
   handler: onLimitReached,
 });
 
-module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, registerLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter, publicPageLimiter };
+module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, loginIpFailLimiter, otpPhoneDailyLimiter, registerLimiter, registerAccountLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter, publicPageLimiter, pdfLimiter, adminLoginLimiter };

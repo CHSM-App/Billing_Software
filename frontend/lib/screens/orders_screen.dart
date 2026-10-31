@@ -12,6 +12,7 @@ import 'open_drafts_screen.dart';
 import 'credit_screen.dart';
 import 'kitchen_screen.dart';
 import 'online_orders_screen.dart';
+import 'quotations_screen.dart';
 
 /// The "Orders" bottom-nav tab: one screen hosting everything with work still
 /// outstanding — **Tables** (the floor plan), **Open Orders** (table-less draft
@@ -36,7 +37,7 @@ class OrdersScreen extends ConsumerStatefulWidget {
 
 /// Identifies a sub-tab regardless of how many are shown, so refresh and the
 /// FAB stay correct as the tab set changes with content.
-enum _OrdersTab { tables, openOrders, credit, online }
+enum _OrdersTab { tables, openOrders, quotations, credit, online }
 
 class _OrdersScreenState extends ConsumerState<OrdersScreen>
     with TickerProviderStateMixin {
@@ -68,11 +69,13 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
         CurvedAnimation(parent: _searchAnimCtrl, curve: Curves.easeInOut);
     _searchController.addListener(() {
       setState(() {});
-      // The search filters Open Orders, so typing brings that list forward.
+      // The search filters Open Orders, so typing brings that list forward —
+      // unless it is filtering Quotations, which it searches too.
       final i = _tabs.indexOf(_OrdersTab.openOrders);
       if (_searchController.text.isNotEmpty &&
           i >= 0 &&
-          _tabController!.index != i) {
+          _tabController!.index != i &&
+          _tabs[_tabController!.index] != _OrdersTab.quotations) {
         _tabController!.animateTo(i);
       }
     });
@@ -227,6 +230,9 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
       case _OrdersTab.openOrders:
         ref.invalidate(openDraftsProvider);
         break;
+      case _OrdersTab.quotations:
+        ref.invalidate(quotationsProvider);
+        break;
       case _OrdersTab.credit:
         ref.invalidate(creditCustomersProvider);
         break;
@@ -240,7 +246,10 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
   /// hidden at 0. Credit carries no count. Tables counts occupied tables;
   /// Online counts orders awaiting a decision.
   Widget _tabLabel(AppLocalizations l10n, _OrdersTab tab,
-      {required int tables, required int open, required int online}) {
+      {required int tables,
+      required int open,
+      required int online,
+      required int quotes}) {
     Widget withCount(String label, int n) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -256,6 +265,8 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
         return withCount(l10n.ordersTabTables, tables);
       case _OrdersTab.openOrders:
         return withCount(l10n.ordersTabOpenOrders, open);
+      case _OrdersTab.quotations:
+        return withCount(l10n.ordersTabQuotations, quotes);
       case _OrdersTab.credit:
         return Text(l10n.ordersTabCredit);
       case _OrdersTab.online:
@@ -272,6 +283,8 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
             embedded: true,
             query: _searchController.text,
             readyOnly: _readyOnly);
+      case _OrdersTab.quotations:
+        return QuotationsScreen(query: _searchController.text);
       case _OrdersTab.credit:
         return const CreditScreen(embedded: true);
       case _OrdersTab.online:
@@ -294,6 +307,14 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
         : 0;
     final int openCount = ref.watch(openDraftsProvider).valueOrNull?.length ?? 0;
     final int onlineCount = ref.watch(pendingOnlineOrderCountProvider);
+    // Quotations: owner/cashier only (the server refuses the rest), and only
+    // once the shop has switched the feature on.
+    final showQuotes = ref.watch(quotationsEnabledProvider) &&
+        userRole != 'server' &&
+        userRole != 'kitchen';
+    final int quoteCount = showQuotes
+        ? ref.watch(quotationsProvider).valueOrNull?.length ?? 0
+        : 0;
 
     final storeEnabled =
         ref.watch(sessionProvider).valueOrNull?.storeEnabled ?? false;
@@ -308,6 +329,7 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
       // feature. An empty one says no one owes money.
       _OrdersTab.openOrders,
       if (widget.showTables) _OrdersTab.tables,
+      if (showQuotes) _OrdersTab.quotations,
       // Online only while the shop runs its online store.
       if (storeEnabled) _OrdersTab.online,
       _OrdersTab.credit,
@@ -321,6 +343,16 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
         if (!mounted) return;
         ref.read(openOnlineOrdersRequestProvider.notifier).state = false;
         final i = _tabs.indexOf(_OrdersTab.online);
+        if (i >= 0 && _tabController!.index != i) _tabController!.animateTo(i);
+      });
+    }
+    // ...and a table-order tap asked for that table's running order.
+    if (ref.watch(openTableOrdersRequestProvider)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(openTableOrdersRequestProvider.notifier).state = false;
+        final t = _tabs.indexOf(_OrdersTab.tables);
+        final i = t >= 0 ? t : _tabs.indexOf(_OrdersTab.openOrders);
         if (i >= 0 && _tabController!.index != i) _tabController!.animateTo(i);
       });
     }
@@ -404,7 +436,8 @@ class _OrdersScreenState extends ConsumerState<OrdersScreen>
                       child: _tabLabel(l10n, t,
                           tables: occupiedTables,
                           open: openCount,
-                          online: onlineCount))
+                          online: onlineCount,
+                          quotes: quoteCount))
               ],
             ),
           )),

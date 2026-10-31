@@ -38,6 +38,11 @@ final itemCacheInfoProvider = StateProvider<ItemCacheInfo>(
 class ItemsNotifier extends AsyncNotifier<List<Item>> {
   @override
   Future<List<Item>> build() async {
+    // EXPERIMENT (receipt_units): keep the receipt unit lookup current.
+    listenSelf((_, next) {
+      final items = next.valueOrNull;
+      if (items != null) catalogUnits = {for (final i in items) i.id: i.unit};
+    });
     return _fetch();
   }
 
@@ -159,7 +164,7 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     final result = await api.createItem(data);
     final newItem = Item.fromJson(result);
     final current = state.valueOrNull ?? [];
-    state = AsyncData([...current, newItem]);
+    _setAndCache([...current, newItem]);
     return newItem;
   }
 
@@ -178,16 +183,14 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
         updated = updated.copyWithVariants(existing.variants);
       }
     }
-    state = AsyncData(
-      current.map((i) => i.id == id ? updated : i).toList(),
-    );
+    _setAndCache(current.map((i) => i.id == id ? updated : i).toList());
     return updated;
   }
 
   Future<void> removeItem(String id) async {
     await api.deleteItem(id);
     final current = state.valueOrNull ?? [];
-    state = AsyncData(current.where((i) => i.id != id).toList());
+    _setAndCache(current.where((i) => i.id != id).toList());
   }
 
   /// Replace the variant list of a single item in place — no network refetch,
@@ -198,14 +201,17 @@ class ItemsNotifier extends AsyncNotifier<List<Item>> {
     // copyWithVariants copies EVERY field. The previous hand-rolled Item(...)
     // silently omitted hsnCode and imageUrl, so patching an item's sizes wiped
     // its HSN code (and photo) from local state until the next server refetch.
-    final updated =
-        current.map((i) => i.id == itemId ? i.copyWithVariants(variants) : i).toList();
-    state = AsyncData(updated);
+    _setAndCache(
+        current.map((i) => i.id == itemId ? i.copyWithVariants(variants) : i).toList());
+  }
 
-    // Keep the offline cache consistent — fire and forget.
+  /// Show [items] and mirror them into the offline cache (fire and forget), so
+  /// an edit — a new barcode above all — still holds after an offline restart.
+  void _setAndCache(List<Item> items) {
+    state = AsyncData(items);
     getBusinessId().then((businessId) {
       if (businessId != null) {
-        unawaited(_cacheItems(updated, businessId));
+        unawaited(_cacheItems(items, businessId));
       }
     });
   }

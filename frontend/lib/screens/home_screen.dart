@@ -1,6 +1,9 @@
 import 'dart:async' show Completer, Timer, unawaited;
 import 'dart:convert';
+import 'dart:math' as math;
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,7 +12,9 @@ import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../models/cart_entry.dart';
 import '../utils/money.dart';
-import '../utils/text_formatters.dart' show UpperCaseTextFormatter;
+import '../utils/text_formatters.dart'
+    show UpperCaseTextFormatter, isIndianMobile;
+import '../utils/platform_utils.dart' show isWindows;
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
 import '../theme/app_theme.dart';
@@ -20,6 +25,7 @@ import '../widgets/floating_bar_physics.dart';
 import '../widgets/whatsapp_mark.dart';
 import '../widgets/stock_target_picker.dart' show isRestaurantBusiness;
 import '../widgets/skeletons.dart';
+import '../widgets/warranty_extra_fields_editor.dart';
 import '../services/printer_service.dart';
 import '../services/receipt_output.dart';
 import '../services/receipt_labels.dart';
@@ -30,7 +36,6 @@ import '../storage.dart';
 import '../main.dart' show rootMessengerKey;
 import 'bill_preview_screen.dart';
 import 'customers_screen.dart' show CustomerBillsScreen;
-import 'items_screen.dart' show itemUnitLabel;
 import 'login_screen.dart';
 import 'printer_setup_screen.dart';
 import '../widgets/category_sheet.dart'
@@ -74,10 +79,15 @@ class HomeScreen extends ConsumerStatefulWidget {
   /// order is opened from the Orders page, so staff land on the cart, not the
   /// item list. Phones only; wide layouts already show the cart beside items.
   final bool openCart;
+  /// Opened from the Quotations tab: the quote's cart loads like a held bill,
+  /// Quote saves changes back to it, and settling bills it as a NEW bill that
+  /// closes the quotation (POST /bills quotation_id).
+  final Quotation? quotation;
 
   const HomeScreen(
       {super.key, this.tableId, this.tableNumber, this.activeBillId,
-      this.activeBillFuture, this.onBillDone, this.openCart = false});
+      this.activeBillFuture, this.onBillDone, this.openCart = false,
+      this.quotation});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -141,15 +151,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   // customer section is open; opens on tap or when a draft / picked customer
   // already has them.
   bool _showMoreCustomerFields = false;
+  // Rows for the ad-hoc "extra details" section under the customer fields —
+  // e.g. a tyre's vehicle KM reading, available on every bill. Pre-filled
+  // from the category's warranty template whenever the cart holds a
+  // warranty-eligible item.
+  final List<WarrantyExtraRow> _warrantyRows = [];
   // How the bill is paid: rows of [mode][amount] at the bottom of the cart.
   // One row is an ordinary single-mode bill; "+" adds a row and splits it.
   // The last row always takes whatever the others leave of the payable (see
   // _syncPayRows), so a single row simply IS the total.
   final List<_PayRow> _payRows = [];
+  // Pins the settle confirm box to the action row, so it stays right above
+  // the buttons even while the closing keyboard moves the row.
+  final _settleRowLink = LayerLink();
+  // The action row while its confirm box is open. Content that lands late
+  // (the previous-credit banner) would push the row — and the box hanging off
+  // it — out of view, so _trackCartScroll keeps scrolling it back.
+  BuildContext? _confirmRow;
   // The payable the rows were last filled against. When the cart, discount,
   // charges or round-off move it, the last row is refilled.
   double? _payRowsBase;
   bool _payRefillPending = false;
+  // What the customer already paid online (UPI) for a reopened online-store
+  // order, and their reference — prefilled as its own UPI row so the counter
+  // only collects the balance. Zero for every other bill.
+  double _onlinePaid = 0;
+  String? _onlinePaidRef;
   // Bills this device settled per mode — "+" offers the most-used one.
   Map<String, int> _modeUse = const {};
   // Inline error shown inside the billing card when a credit bill is missing
@@ -186,6 +213,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _announceSave = true;
   bool _generatingBill = false;
   bool _savingDraft = false;
+  bool _savingQuote = false;
   bool _draftLoaded = false;
 
   // Search bar expand state
@@ -275,10 +303,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   final _barcodeBuffer = StringBuffer();
   DateTime? _lastKeyTime;
+  // Longest pause between two keys of one scan. Bluetooth HID scanners
+  // deliver keys in bursts, so 100 ms cut their codes short.
+  // ponytail: fixed gap; raise it if a slow scanner still truncates codes.
+  static const _scanKeyGapMs = 300;
+
+  // Wide layout: the cart panel's width, dragged by the divider and kept per
+  // device. Its own notifier so dragging relayouts the row, not the screen.
+  static const _cartWidthKey = 'billing_cart_width';
+  static const _cartWidthDefault = 360.0;
+  final _cartWidth = ValueNotifier<double>(_cartWidthDefault);
+  final _resizingCart = ValueNotifier<bool>(false);
 
   @override
   void initState() {
     super.initState();
+    SharedPreferences.getInstance().then((p) {
+      final w = p.getDouble(_cartWidthKey);
+      if (w != null && mounted) _cartWidth.value = w;
+    });
     // Observe app lifecycle so we can re-check printer reachability on resume —
     // the user may have toggled Bluetooth or powered the printer off/on while
     // the app was backgrounded. See didChangeAppLifecycleState.
@@ -317,7 +360,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _discountAmtFocus.addListener(() {
       if (_discountAmtFocus.hasFocus) _ensureVisible(_discountAmtKey);
     });
-    if (widget.activeBillId != null) {
+    if (widget.activeBillId != null || widget.quotation != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _tryLoadDraft());
     }
     // Silently refresh item prices/stock on open so the cache never goes stale
@@ -367,6 +410,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _searchController.dispose();
     _cartScrollCtrl.dispose();
     _cartAtBottom.dispose();
+    _cartWidth.dispose();
+    _resizingCart.dispose();
     _sheetScrollCtrl.dispose();
     _sheetAtBottom.dispose();
     _itemsScrollCtrl.dispose();
@@ -380,6 +425,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _customerPhoneController.dispose();
     _customerAddressController.dispose();
     _customerGstinController.dispose();
+    for (final r in _warrantyRows) {
+      r.dispose();
+    }
     _discountPctController.dispose();
     _discountAmtController.dispose();
     _customerNameFocus.dispose();
@@ -400,7 +448,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   bool _globalKeyHandler(KeyEvent event) {
-    if (event is! KeyDownEvent) return false;
+    // Repeats count too: a scanner types so fast that the second "8" of "88"
+    // goes down before the first is released, and Flutter reports it as a
+    // REPEAT. Reading downs only dropped it, so every code with a doubled
+    // digit arrived one short and came back "not found".
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
     final hasBarcodeScanner = ref.read(hasBarcodeProvider);
     if (!hasBarcodeScanner) return false;
 
@@ -419,15 +471,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
     final now = DateTime.now();
     if (_lastKeyTime != null &&
-        now.difference(_lastKeyTime!).inMilliseconds > 100) {
+        now.difference(_lastKeyTime!).inMilliseconds > _scanKeyGapMs) {
       _barcodeBuffer.clear();
     }
     _lastKeyTime = now;
 
     // Many USB HID scanners send Numpad Enter (not the main Enter) as the
-    // suffix character, so accept both.
+    // suffix character, so accept both. Some are set to send Tab instead.
     if (event.logicalKey == LogicalKeyboardKey.enter ||
-        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+        (event.logicalKey == LogicalKeyboardKey.tab &&
+            _barcodeBuffer.isNotEmpty)) {
       final code = _barcodeBuffer.toString().trim();
       _barcodeBuffer.clear();
       _lastKeyTime = null;
@@ -452,7 +506,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _tryLoadDraft() async {
-    if (_draftLoaded || widget.activeBillId == null) return;
+    if (_draftLoaded ||
+        (widget.activeBillId == null && widget.quotation == null)) {
+      return;
+    }
     final itemsAsync = ref.read(itemsProvider);
     if (!itemsAsync.hasValue) {
       ref.listenManual(itemsProvider, (_, next) {
@@ -464,7 +521,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     try {
       // Await the in-flight fetch (started before navigation) or fall back to
       // a fresh network call if no future was provided.
-      final bill = (widget.activeBillFuture != null
+      final bill = widget.quotation?.bill ??
+          (widget.activeBillFuture != null
               ? await widget.activeBillFuture
               : null) ??
           Bill.fromJson(await getBill(widget.activeBillId!));
@@ -473,7 +531,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       if (mounted) {
         setState(() {
           // A draft is never split — its parts are chosen when it is settled.
-          _resetPayRows(bill.paymentMode);
+          _resetPayRows(bill.hasOnlinePrepayment ? 'upi' : bill.paymentMode);
+          if (bill.hasOnlinePrepayment) _prefillOnlinePayment(bill);
           if (bill.customerName != null) {
             _customerNameController.text = bill.customerName!;
             _showCustomerFields = true;
@@ -584,6 +643,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   List<_MajorSection> _groupByMajor(
       List<Item> items, List<String> cats, List<String> majors) {
     if (majors.isEmpty) {
+      // No major and no minor category anywhere in the menu: a plain list.
+      // An "Other" bar over every item would be the only group there is.
+      if (!cats.any((c) => c.trim().isNotEmpty)) {
+        return [
+          _MajorSection.flat([
+            _CategorySection('', items,
+                expanded: true,
+                headerless: true,
+                openItems: {
+                  for (final it in items)
+                    if (it.hasVariants && _expandedVariantItems.contains(it.id))
+                      it.id,
+                }),
+          ])
+        ];
+      }
       return [_MajorSection.flat(_groupByCategory(items, cats, null))];
     }
     final searching = _searchController.text.trim().isNotEmpty;
@@ -733,39 +808,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     } finally {
       _jumpingToCategory = false;
     }
-  }
-
-  /// A scan resolved to a variant item but not to a size: open its category
-  /// and unfold its sizes right in the list, then scroll it under the header
-  /// so the cashier can pick the plate.
-  Future<void> _revealVariantItem(Item item) async {
-    final cat = item.category?.trim() ?? '';
-    // The section only exists once its major is spread open, so open that too.
-    // Null major = flat menu, where there is no major level to open.
-    final major = _tree.first.major == null
-        ? null
-        : (item.majorCategory?.trim() ?? '');
-    final key = _CategorySection.sectionKey(major, cat);
-    setState(() {
-      // Make sure the scanned item's major is not folded shut. Only this one —
-      // the others are left however the cashier had them.
-      if (major != null) _collapsedMajors.remove(major);
-      _collapsedCategories.remove(key);
-      _expandedCategories
-        ..clear()
-        ..add(key);
-      _expandedVariantItems
-        ..clear()
-        ..add(item.id);
-    });
-    // Keep the capsule pointing at the major the list just jumped into.
-    if (major != null) _activeMajor.value = major;
-    await _nextFrame();
-    if (!mounted) return;
-    final offset = _ExcelItemTable.itemOffset(_tree, item.id, _twoColumns);
-    if (offset == null) return; // filtered out by the search box
-    _setActiveCategory(key);
-    await _animateListTo(offset);
   }
 
   /// Which section the chip strip should point at for scroll [offset] with
@@ -1058,11 +1100,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       ..clear()
       ..add(_newPayRow(_payModes.contains(mode) ? mode : 'cash'));
     _payRowsBase = null;
+    _onlinePaid = 0;
+    _onlinePaidRef = null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       for (final r in old) {
         r.dispose();
       }
     });
+  }
+
+  /// A reopened online-store order the customer already paid (part of) by UPI:
+  /// the first row (already UPI, see [_resetPayRows]) is that payment, and a
+  /// cash row takes the balance. Paid in full → the single UPI row stays and
+  /// fills itself with the whole payable.
+  void _prefillOnlinePayment(Bill bill) {
+    _onlinePaid = bill.onlinePaidAmount;
+    _onlinePaidRef = bill.onlinePaymentTxnId;
+    if (_onlinePaid >= bill.total - bill.discountAmount - 0.004) return;
+    _payRows.first.amountController.text = _fmtPayAmount(_onlinePaid);
+    _payRows.add(_newPayRow('cash'));
+  }
+
+  /// What is still to collect at the counter: the payable less any advance
+  /// already paid online. Shown on the Settle button.
+  double get _toCollect {
+    final v = _netPayable() - _onlinePaid;
+    return v < 0 ? 0 : v;
   }
 
   /// The most-used mode on this device that no row has yet. Ties keep the
@@ -1159,6 +1222,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_onlinePaid > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.space4),
+              child: Text(
+                l10n.billingPaidOnline(
+                        '₹${_onlinePaid.toStringAsFixed(2)}',
+                        '₹${_toCollect.toStringAsFixed(2)}') +
+                    (_onlinePaidRef?.isNotEmpty == true
+                        ? ' · $_onlinePaidRef'
+                        : ''),
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.success),
+              ),
+            ),
           for (final (i, row) in _payRows.indexed) _buildPayRow(l10n, i, row),
           if (!_payRefillPending && remaining.abs() >= 0.005)
             Padding(
@@ -1641,11 +1720,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (barcode.isEmpty) return;
     final l10n = context.l10n;
     try {
-      final businessId = await getBusinessId();
-      final cached = await OfflineService.instance
-          .getBarcodeMatch(barcode, businessId ?? '');
-      if (cached != null) {
-        _addScannedItem(cached.item, cached.variant);
+      // The loaded list is what billing shows and is always current (offline
+      // it is loaded from the item cache). The server only covers items added
+      // elsewhere since it was fetched.
+      final local = matchBarcode(ref.read(itemsProvider).valueOrNull ?? const [], barcode);
+      if (local != null) {
+        _addScannedItem(local.item, local.variant);
         return;
       }
       final data = await getItemByBarcode(barcode);
@@ -1661,7 +1741,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _addScannedItem(item, variant);
       // _animateCartBadge();
     } on ApiException catch (e) {
-      _showSnack(e.message, isError: true);
+      // Name the code on a miss: comparing it with the text under the bars is
+      // how a mis-read or never-saved label gets spotted.
+      _showSnack(
+          e.statusCode == 404 ? l10n.billingItemNotFoundBarcode(barcode) : e.message,
+          isError: true);
     } catch (_) {
       _showSnack(l10n.billingItemNotFoundBarcode(barcode), isError: true);
     }
@@ -1675,14 +1759,55 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// 65", not which plate — so the size picker must open instead of silently
   /// adding the base price. Without this a scan billed Chicken 65 at its 230
   /// base price when the real sizes are half 180 / Full 280.
-  void _addScannedItem(Item item, ItemVariant? variant) {
+  Future<void> _addScannedItem(Item item, ItemVariant? variant) async {
     if (variant == null && item.hasVariants) {
-      _revealVariantItem(item);
-      return;
+      // One size can only mean that size. Several: ask which, right here, so
+      // the scan still ends in a cart line. Labels printed with the item's own
+      // code (before sizes had codes) land here.
+      variant = item.variants.length == 1
+          ? item.variants.first
+          : await _pickScannedSize(item);
+      if (variant == null || !mounted) return;
     }
     _cartChange(
       CartNotifier.keyFor(item.id, variant?.id),
       () => ref.read(cartProvider.notifier).addItem(item, variant: variant),
+    );
+  }
+
+  /// Size chooser for a scan that named a sized item but not a size. A tap
+  /// returns that size; dismissing returns null and adds nothing.
+  Future<ItemVariant?> _pickScannedSize(Item item) {
+    final list = ref.read(selectedPriceListProvider);
+    return showDialog<ItemVariant>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(item.name),
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        content: SizedBox(
+          width: 320,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final v in item.variants)
+                ListTile(
+                  title: Text(v.label),
+                  trailing: Text(
+                    '₹${(list?.priceFor(item, v) ?? v.price ?? item.price ?? 0).toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  onTap: () => Navigator.pop(ctx, v),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(context.l10n.commonCancel),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2130,6 +2255,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return;
     }
     if (!_validateCustomerPhone()) return;
+    if (!_ensureCustomerPhoneForWarranty(cart)) return;
     if (!_validateCharges()) return;
     // Remember these descriptions for next time's suggestions (best-effort).
     unawaited(_rememberUsedCharges());
@@ -2163,6 +2289,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (widget.activeBillId != null || widget.tableId != null) {
       // Table / synced-draft billing — always online
       await _generateBillOnline(cart, onBillReady: onBillReady);
+      return;
+    }
+    // Converting a quotation: it closes with its bill on the server, in the
+    // bill's own transaction. The offline queue can't carry that link, and a
+    // bill made without it would leave the quote open to be billed twice — so
+    // this one sale needs the network, with no offline fallback.
+    if (widget.quotation != null) {
+      final needsNet = context.l10n.quotationConvertNeedsInternet;
+      if (!ref.read(connectivityProvider)) {
+        _showSnack(needsNet, isError: true);
+        return;
+      }
+      try {
+        await _generateBillOnline(cart, onBillReady: onBillReady);
+      } on NetworkException {
+        _showSnack(needsNet, isError: true);
+      } on ApiException catch (e) {
+        _showSnack(e.serverMessage ?? e.message, isError: true);
+      }
       return;
     }
     // Retail billing — online when connected, offline when not.
@@ -2300,14 +2445,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _saveDraft();
   }
 
+  /// Saves the cart as a quotation: a priced quote, not a sale — nothing is
+  /// finalized, no stock moves and no invoice number is used. Opened from the
+  /// Quotations tab, it saves the changes back to that quote instead. Needs
+  /// the network (the server numbers it QT-0001…).
+  Future<void> _saveQuotation({required bool inSheet}) async {
+    final l10n = context.l10n;
+    final cart = ref.read(cartProvider);
+    if (cart.isEmpty) {
+      _showSnack(l10n.billingAddAtLeastOneItem, isError: true);
+      return;
+    }
+    if (!_validateCustomerPhone() || !_validateCharges()) return;
+    final bill = _buildBillFromCart(cart);
+    final body = {
+      'customer_name': bill.customerName,
+      'customer_phone': bill.customerPhone,
+      'total': bill.grandTotal,
+      'snapshot': {
+        ...bill.toSnapshotJson(),
+        // No payment is taken on a quote; it reopens as a plain cash bill.
+        'payment_mode': 'cash',
+        'status': 'quotation',
+        'price_list_id': _priceListId,
+      },
+    };
+    setState(() => _savingQuote = true);
+    try {
+      final saved = Quotation.fromJson(widget.quotation == null
+          ? await createQuotation(body)
+          : await updateQuotation(widget.quotation!.id, body));
+      unawaited(ref.read(quotationsProvider.notifier).reload());
+      if (!mounted) return;
+      if (inSheet) Navigator.pop(context);
+      _showSnack(l10n.quotationSaved(saved.number));
+      ref.read(cartProvider.notifier).clear();
+      _customerNameController.clear();
+      _customerPhoneController.clear();
+      _clearCustomerExtras();
+      _discountPctController.clear();
+      _discountAmtController.clear();
+      _clearCharges();
+      setState(() => _resetPayRows());
+      _navigateAfterBill();
+      // Prints like a settle does — same printer gate, same receipt path.
+      if (ref.read(printReadyProvider)) _autoPrint(saved.bill);
+    } on NetworkException {
+      _showSnack(l10n.quotationNeedsInternet, isError: true);
+    } on ApiException catch (e) {
+      _showSnack(e.serverMessage ?? e.message, isError: true);
+    } finally {
+      if (mounted) setState(() => _savingQuote = false);
+    }
+  }
+
   /// Settle the bill. [print] defaults to whatever the printer can do; passing
   /// false is the long-press escape hatch — settle deliberately without a slip
   /// even though a printer is connected.
   ///
   /// Every settle path runs the credit guard first, so no finish can bypass the
   /// name/phone a credit bill requires.
-  void _settle({required bool inSheet, bool? withReceipt}) {
+  Future<void> _settle(BuildContext anchor,
+      {required bool inSheet, bool? withReceipt}) async {
     if (!_validatePayment()) return;
+    if (!await _confirmSettle(anchor,
+        confirmLabel: context.l10n.billingConfirmSettle,
+        icon: const Icon(Icons.check_rounded, size: 20),
+        color: AppColors.primary)) {
+      return;
+    }
+    if (!mounted) return;
     final canPrint = ref.read(printReadyProvider);
     final wantsPrint = (withReceipt ?? true) && canPrint;
     if (inSheet) Navigator.pop(context);
@@ -2328,13 +2535,168 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Settle, then hand the bill to WhatsApp. Not a share — this finalizes the
   /// sale exactly as [_settle] does, which is why its tile is captioned and
   /// coloured as a money action rather than as a share icon.
-  void _settleWhatsApp({required bool inSheet}) {
+  Future<void> _settleWhatsApp(BuildContext anchor, {required bool inSheet}) async {
     // Both guards run BEFORE anything is finalized: a missing phone must not
     // leave a settled bill with nowhere to send it.
     if (!_validatePayment()) return;
     if (!_ensureCustomerPhoneForWhatsApp()) return;
+    if (!await _confirmSettle(anchor,
+        confirmLabel: context.l10n.billingConfirmWhatsapp,
+        icon: const WhatsAppMark(size: 18, color: Colors.white),
+        color: whatsAppGreen)) {
+      return;
+    }
+    if (!mounted) return;
     if (inSheet) Navigator.pop(context);
     _generateBillAndWhatsApp();
+  }
+
+  /// The "are you sure?" before a settle: a card sitting just above the action
+  /// row (pinned via [_settleRowLink]) instead of a centred dialog, so the
+  /// thumb barely moves. Shows the total and how it is being paid, so a wrong
+  /// mode is caught before the bill is final. Tapping outside — including a
+  /// double-tap on the button — cancels. Off in Settings → true straight away.
+  Future<bool> _confirmSettle(BuildContext actionRow,
+      {required String confirmLabel,
+      required Widget icon,
+      required Color color}) async {
+    if (!ref.read(settleConfirmProvider)) return true;
+    final l10n = context.l10n;
+    final width = (actionRow.findRenderObject() as RenderBox).size.width;
+    final total = _netPayable();
+    final parts = _payRows.length == 1
+        ? [(_payRows.first.mode, total)]
+        : [for (final r in _payRows) (r.mode, r.amount)];
+    String money(double v) => '₹${v.toStringAsFixed(2)}';
+    IconData modeIcon(String m) => switch (m) {
+          'cash' => Icons.payments_outlined,
+          'upi' => Icons.qr_code_2,
+          'card' => Icons.credit_card,
+          'credit' => Icons.schedule,
+          _ => Icons.account_balance_wallet_outlined,
+        };
+    const figures = [FontFeature.tabularFigures()];
+
+    _confirmRow = actionRow;
+    Scrollable.ensureVisible(actionRow,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+    final ok = await showGeneralDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: l10n.commonCancel,
+      barrierColor: Colors.black26,
+      transitionDuration: const Duration(milliseconds: 160),
+      pageBuilder: (ctx, anim, _) => Align(
+        alignment: Alignment.topLeft,
+        child: CompositedTransformFollower(
+          link: _settleRowLink,
+          showWhenUnlinked: false,
+          targetAnchor: Alignment.topCenter,
+          followerAnchor: Alignment.bottomCenter,
+          offset: const Offset(0, -AppSpacing.space8),
+          child: SlideTransition(
+            position: Tween(begin: const Offset(0, 0.06), end: Offset.zero)
+                .animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+            child: SizedBox(
+              width: width,
+              child: Material(
+                color: AppColors.surface,
+                elevation: 12,
+                shadowColor: Colors.black45,
+                borderRadius: BorderRadius.circular(AppRadius.large),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.space16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(l10n.billingNetPayable,
+                          style: Theme.of(ctx).textTheme.labelLarge?.copyWith(
+                              color: AppColors.textSecondary)),
+                      Text(money(total),
+                          style: Theme.of(ctx).textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                              fontFeatures: figures)),
+                      const SizedBox(height: AppSpacing.space12),
+                      // How it is being paid — one line per part.
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.space12,
+                            vertical: AppSpacing.space4),
+                        decoration: BoxDecoration(
+                          color: AppColors.background,
+                          borderRadius: BorderRadius.circular(AppRadius.medium),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Column(children: [
+                          for (final (mode, amount) in parts)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: AppSpacing.space8),
+                              child: Row(children: [
+                                Icon(modeIcon(mode),
+                                    size: 20, color: AppColors.textSecondary),
+                                const SizedBox(width: AppSpacing.space8),
+                                Expanded(
+                                  child: Text(paymentModeLabel(l10n, mode),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                                Text(money(amount),
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontFeatures: figures)),
+                              ]),
+                            ),
+                        ]),
+                      ),
+                      const SizedBox(height: AppSpacing.space16),
+                      // Confirm on the right, over the Settle button.
+                      Row(children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(48),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(AppRadius.medium)),
+                            ),
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: Text(l10n.commonCancel),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.space8),
+                        Expanded(
+                          flex: 2,
+                          child: FilledButton.icon(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: color,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size.fromHeight(48),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(AppRadius.medium)),
+                              textStyle: const TextStyle(
+                                  fontWeight: FontWeight.w700, fontSize: 16),
+                            ),
+                            onPressed: () => Navigator.pop(ctx, true),
+                            icon: icon,
+                            label: Text(confirmLabel,
+                                maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ).whenComplete(() => _confirmRow = null);
+    return ok == true;
   }
 
 
@@ -2354,13 +2716,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return false;
   }
 
+  /// True unless the cart holds a warranty-eligible item with no customer
+  /// phone entered. Selling one with no phone silently skips the auto-create
+  /// hook server-side (routes/bills.js) — nothing to look the warranty up by
+  /// later — so this must stop the sale here rather than let it finalize
+  /// into a warranty nobody can ever find. Reveals/focuses the phone field
+  /// and warns, same shape as [_ensureCustomerPhoneForWhatsApp].
+  bool _ensureCustomerPhoneForWarranty(List<CartEntry> cart) {
+    if (_customerPhoneController.text.trim().isNotEmpty) return true;
+    if (!cart.any((e) => e.item.warrantyEligible)) return true;
+    setState(() => _showCustomerFields = true);
+    _showSnack(context.l10n.billingWarrantyNeedsPhone, isError: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _ensureVisible(_customerPhoneKey);
+      _customerPhoneFocus.requestFocus();
+    });
+    return false;
+  }
+
   /// Validates the customer phone: it may be empty (optional), but if entered it
   /// must be exactly 10 digits. On failure it reveals/focuses the field, warns,
   /// and returns false so callers abort the save/generate.
   bool _validateCustomerPhone() {
     final phone = _customerPhoneController.text.trim();
     if (phone.isEmpty) return true;
-    if (RegExp(r'^\d{10}$').hasMatch(phone)) return true;
+    if (isIndianMobile(phone)) return true;
     setState(() => _showCustomerFields = true);
     _showSnack(context.l10n.billingPhoneInvalid, isError: true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2447,11 +2828,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _customerAddressController.text.trim().nullIfEmpty;
   String? get _customerGstin => _customerGstinController.text.trim().nullIfEmpty;
 
+  /// The "Warranty Details" rows as the API's extra_data shape — empty when
+  /// nothing was entered (the server/receipt simply omit the section then).
+  List<Map<String, String>> get _warrantyExtraDataPayload =>
+      warrantyRowsPayload(_warrantyRows);
+
   /// Address + GSTIN go with the customer: cleared and folded with them.
+  /// Warranty details go with the sale: cleared the same moment, so the next
+  /// customer's bill doesn't inherit this one's KM reading etc.
   void _clearCustomerExtras() {
     _customerAddressController.clear();
     _customerGstinController.clear();
     _showMoreCustomerFields = false;
+    final newLabels = adHocWarrantyLabels(_warrantyRows);
+    if (newLabels.isNotEmpty) rememberWarrantyLabels(newLabels);
+    for (final r in _warrantyRows) {
+      r.dispose();
+    }
+    _warrantyRows.clear();
   }
 
   /// Fill BOTH fields from a picked suggestion, whichever field was typed in.
@@ -2523,10 +2917,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   static final _gstinRe =
       RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$');
 
-  /// "More details" under the phone field: the customer's address and GSTIN,
-  /// folded until tapped. [setLocal] repaints the host (panel or sheet).
-  Widget _moreCustomerFields(
-      AppLocalizations l10n, void Function(VoidCallback) setLocal) {
+  /// Ad-hoc "label: value" extra details under the phone field — e.g. a
+  /// tyre's vehicle KM reading, or any other free-text note a shop wants on
+  /// the bill. Available to every shop, not just ones with warranty tracking
+  /// on; printed on the receipt and, when the cart holds a warranty-eligible
+  /// item, also copied onto the auto-created warranty record. [setLocal]
+  /// repaints the host (panel or sheet).
+  Widget _warrantyDetailsSection(
+      List<CartEntry> cart, void Function(VoidCallback) setLocal) {
+    final warrantyItem = cart.where((e) => e.item.warrantyEligible).firstOrNull;
+    final templates = ref.watch(warrantyFieldTemplatesProvider).valueOrNull;
+    // Template auto-fill is category-specific, so it only applies when the
+    // cart actually has a warranty-eligible item; otherwise rows just start
+    // empty with the generic "+ Add detail" affordance.
+    if (warrantyItem != null) {
+      // Fills in this category's template fields the first time they're
+      // needed (or when switching to a different category) — mutating
+      // _warrantyRows here, before building the editor below, so this same
+      // build already shows them; no separate setState round-trip required.
+      applyWarrantyFieldTemplate(_warrantyRows, warrantyItem.item.category, templates);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.space8),
+      child: WarrantyExtraFieldsEditor(
+        // No title here: this sits right under "More details (address,
+        // GSTIN)" — a second "…details" heading next to that one reads as
+        // the same thing twice. The "+ Add detail" action alone is enough;
+        // the Warranty tab's own form (no such neighbour) still shows one.
+        rows: _warrantyRows,
+        extraSuggestions: allTemplateLabels(templates),
+        onAddRow: () => setLocal(() => _warrantyRows.add(WarrantyExtraRow(
+              labelCtrl: TextEditingController(),
+              valueCtrl: TextEditingController(),
+            ))),
+        onRemoveRow: (row) {
+          setLocal(() => _warrantyRows.remove(row));
+          row.dispose();
+        },
+      ),
+    );
+  }
+
+  /// "More details" under the phone field: the customer's address, GSTIN and
+  /// ad-hoc extra-detail rows, folded until tapped. [setLocal] repaints the
+  /// host (panel or sheet).
+  Widget _moreCustomerFields(AppLocalizations l10n, List<CartEntry> cart,
+      void Function(VoidCallback) setLocal) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -2586,6 +3022,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             size: 16, color: AppColors.textSecondary),
                       ),
                     ),
+                    _warrantyDetailsSection(cart, setLocal),
                   ],
                 ),
         ),
@@ -2926,7 +3363,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         result = await finalizeBill(widget.activeBillId!,
             paymentMode: _paymentMode,
             payments: _splitPaymentsJson,
-            collect: _collectMap);
+            collect: _collectMap,
+            warrantyExtraData: _warrantyExtraDataPayload);
       } else {
         final draft = await createBill({
           'items': _cartPayload,
@@ -2944,11 +3382,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             'discount_amount': double.tryParse(_discountAmtController.text.trim()) ?? 0.0,
           if (additionalCharges.isNotEmpty)
             'additional_charges': additionalCharges,
+          // Closes the quotation this cart came from (409 if already billed).
+          if (widget.quotation != null) 'quotation_id': widget.quotation!.id,
         });
         result = await finalizeBill(draft['id'],
             paymentMode: _paymentMode,
             payments: _splitPaymentsJson,
-            collect: _collectMap);
+            collect: _collectMap,
+            warrantyExtraData: _warrantyExtraDataPayload);
       }
       // Old dues ticked for collection were paid off by the server in the
       // same transaction, and this bill carries them as "Prev. due" lines —
@@ -2971,6 +3412,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               billId: widget.activeBillId ?? bill.id,
             );
       }
+      // Lets the Warranty tab (alive but off-screen in the shell's
+      // IndexedStack) refresh itself immediately instead of waiting for a
+      // manual pull-to-refresh — only when this bill could actually have
+      // produced a new record, so an ordinary sale doesn't trigger a
+      // pointless re-fetch over there.
+      if (cart.any((e) => e.item.warrantyEligible)) {
+        ref.read(warrantyRefreshSignalProvider.notifier).state++;
+      }
       ref.read(cartProvider.notifier).clear();
       _customerNameController.clear();
       _customerPhoneController.clear();
@@ -2987,6 +3436,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // A just-finalized draft (table or not) leaves the Open Orders queue —
       // refresh it so the completed order drops off the list.
       unawaited(ref.read(openDraftsProvider.notifier).refreshSilently());
+      // A converted quotation leaves the Quotations tab.
+      if (widget.quotation != null) {
+        unawaited(ref.read(quotationsProvider.notifier).reload());
+      }
       // A finalized order is no longer a draft, so it leaves the kitchen queue —
       // ping so the Kitchen screen drops it immediately.
       NotificationService.instance.pingKitchen();
@@ -3780,6 +4233,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       controller: _searchController,
                       focusNode: _searchFocus,
                       autofocus: false,
+                      // A scanner fires into the focused search box; when the
+                      // text is a known barcode, bill it instead of searching.
+                      onSubmitted: (q) {
+                        final hit = matchBarcode(
+                            ref.read(itemsProvider).valueOrNull ?? const [], q);
+                        if (hit == null) return;
+                        _searchController.clear();
+                        _addScannedItem(hit.item, hit.variant);
+                      },
                       decoration: InputDecoration(
                         hintText: l10n.billingSearchItems,
                         isDense: true,
@@ -3843,14 +4305,76 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Widget _buildWideLayout() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(flex: 6, child: _buildItemsPanel()),
-        Container(width: 1, color: AppColors.border),
-        SizedBox(width: 360, child: _buildCartPanel()),
-      ],
-    );
+    // Built once per screen build, not per drag frame: the builder below
+    // reuses these instances, so dragging only relayouts the two panels.
+    final items = _buildItemsPanel();
+    final cart = _buildCartPanel();
+    return LayoutBuilder(builder: (context, box) {
+      // Cart at least 300 px; the items grid keeps at least 360 px.
+      final max = math.max(300.0, box.maxWidth - 360);
+      double fit(double w) => w.clamp(300.0, max);
+      void save() => SharedPreferences.getInstance()
+          .then((p) => p.setDouble(_cartWidthKey, _cartWidth.value));
+      // Width and pointer x when the drag began. The new width comes from the
+      // pointer's total travel, so it tracks the mouse exactly however many
+      // move events land between frames.
+      var startWidth = 0.0;
+      var startX = 0.0;
+      return ValueListenableBuilder<double>(
+        valueListenable: _cartWidth,
+        builder: (context, width, _) {
+          final w = fit(width);
+          return Stack(children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: items),
+                // Drag to resize the cart; double-click resets it.
+                MouseRegion(
+                  cursor: SystemMouseCursors.resizeColumn,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    dragStartBehavior: DragStartBehavior.down,
+                    onHorizontalDragStart: (d) {
+                      startWidth = w;
+                      startX = d.globalPosition.dx;
+                      _resizingCart.value = true;
+                    },
+                    onHorizontalDragUpdate: (d) => _cartWidth.value =
+                        fit(startWidth - (d.globalPosition.dx - startX)),
+                    onHorizontalDragEnd: (_) {
+                      _resizingCart.value = false;
+                      save();
+                    },
+                    onHorizontalDragCancel: () => _resizingCart.value = false,
+                    onDoubleTap: () {
+                      _cartWidth.value = _cartWidthDefault;
+                      save();
+                    },
+                    child: SizedBox(
+                      width: 12,
+                      child: Center(
+                          child: Container(width: 1, color: AppColors.border)),
+                    ),
+                  ),
+                ),
+                SizedBox(width: w, child: cart),
+              ],
+            ),
+            // While dragging, keep the resize cursor wherever the mouse goes
+            // (buttons and fields underneath would otherwise swap it).
+            ValueListenableBuilder<bool>(
+              valueListenable: _resizingCart,
+              builder: (_, resizing, __) => resizing
+                  ? const Positioned.fill(
+                      child: MouseRegion(
+                          cursor: SystemMouseCursors.resizeColumn))
+                  : const SizedBox.shrink(),
+            ),
+          ]);
+        },
+      );
+    });
   }
 
   Widget _buildNarrowLayout() {
@@ -4108,7 +4632,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               Iterable.generate(treeKeys.length)
                   .any((k) => treeKeys[k] != oldKeys[k]);
           _tree = tree;
-          _twoColumns = MediaQuery.of(context).size.width >= 1200;
           if (sectionsChanged) {
             WidgetsBinding.instance
                 .addPostFrameCallback((_) => _syncActiveCategoryToScroll());
@@ -4132,7 +4655,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             final stripCats = flatSubs.isNotEmpty
                 ? [for (final s in flatSubs) s.category]
                 : cats;
-            strip = stripCats.isEmpty ? null : _buildCategoryStrip(stripCats);
+            // A menu with no categories at all has nothing to jump between.
+            final plain = flatSubs.length == 1 && flatSubs.first.headerless;
+            strip = stripCats.isEmpty || plain
+                ? null
+                : _buildCategoryStrip(stripCats);
           }
 
           Future<void> refresh() async {
@@ -4166,6 +4693,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ));
           }
 
+          // Columns follow the panel's own width, not the window's — dragging
+          // the cart wider shrinks this panel and must drop it to one column.
+          return LayoutBuilder(builder: (context, box) {
+          _twoColumns = box.maxWidth >= 720;
           return withStrip(RefreshIndicator(
             onRefresh: refresh,
             child: _ExcelItemTable(
@@ -4231,6 +4762,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       .setQty(CartNotifier.keyFor(item.id, v.id), qty)),
             ),
           ));
+          });
         },
       );
     });
@@ -4322,6 +4854,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // Still watched so the settle menu's print row reflects a printer that
       // connects or drops while the cart is open.
       ref.watch(printReadyProvider);
+      // An open retail order whose lines are all ticked off ('delivered').
+      // Read from the Open Orders list, so a tick on another device shows here.
+      final openBill = widget.activeBillId == null ||
+              ref.watch(sessionProvider).valueOrNull?.businessType != 'retail'
+          ? null
+          : ref
+              .watch(openDraftsProvider)
+              .valueOrNull
+              ?.where((b) => b.id == widget.activeBillId)
+              .firstOrNull;
+      final allTicked = openBill != null &&
+          openBill.items.isNotEmpty &&
+          openBill.items.every((it) => it.kitchenStatus == 'delivered');
 
       return Container(
         color: AppColors.surface,
@@ -4341,9 +4886,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                 ),
               ),
-            // Header — always visible. Same 16px gutter as the payment mode,
-            // customer and discount fields below, so the trailing icons line up
-            // with the right edge of those inputs rather than floating past it.
+            // Header. Same 16px gutter as the payment mode, customer and
+            // discount fields below, so the trailing icons line up with the
+            // right edge of those inputs rather than floating past it. Left
+            // out on an empty cart with no price list to pick — every control
+            // in it would be hidden, leaving a blank band over the customer.
+            if (cart.isNotEmpty ||
+                (canFinalize &&
+                    (ref.watch(priceListsProvider).valueOrNull?.isNotEmpty ??
+                        false)))
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
                   AppSpacing.space16, AppSpacing.space16, AppSpacing.space8),
@@ -4384,6 +4935,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                   ),
                             ),
                           ),
+                          // Retail: every line of this open order was ticked
+                          // off on the Open Orders page — same green tick.
+                          if (allTicked) ...[
+                            const SizedBox(width: 6),
+                            Tooltip(
+                              message: l10n.billingAllItemsTicked,
+                              child: Container(
+                                width: 20,
+                                height: 20,
+                                decoration: const BoxDecoration(
+                                    color: AppColors.success,
+                                    shape: BoxShape.circle),
+                                child: const Icon(Icons.check,
+                                    size: 14, color: Colors.white),
+                              ),
+                            ),
+                          ],
                         ],
                       ],
                     ),
@@ -4545,7 +5113,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       color: AppColors.textSecondary),
                                 ),
                                 _customerSuggestionList('phone'),
-                                _moreCustomerFields(l10n, setLocal),
+                                _moreCustomerFields(l10n, cart, setLocal),
                               ],
                             ),
                           )
@@ -5132,7 +5700,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
+                  // The settle confirm box hangs off this row (see
+                  // _confirmSettle), so it opens right above the buttons.
+                  CompositedTransformTarget(
+                  link: _settleRowLink,
+                  child: Builder(builder: (actionRow) => Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (canFinalize) ...[
@@ -5146,6 +5718,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                               ? null
                               : () => _park(inSheet: inSheet),
                         ),
+                        // A quote, not a sale — like Hold, it takes no money.
+                        if (ref.watch(quotationsEnabledProvider)) ...[
+                          const SizedBox(width: AppSpacing.space8),
+                          IconAction(
+                            icon: Icons.request_quote_outlined,
+                            caption: l10n.quotationQuoteShort,
+                            color: AppColors.info,
+                            tooltip: l10n.quotationSave,
+                            onPressed: (cart.isEmpty || _savingQuote)
+                                ? null
+                                : () => _saveQuotation(inSheet: inSheet),
+                          ),
+                        ],
                         const SizedBox(width: AppSpacing.space8),
                         IconAction(
                           // The real mark, so the destination is unmistakable —
@@ -5159,7 +5744,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           tooltip: l10n.billingSettleWhatsapp,
                           onPressed: (cart.isEmpty || _generatingBill)
                               ? null
-                              : () => _settleWhatsApp(inSheet: inSheet),
+                              : () => _settleWhatsApp(actionRow, inSheet: inSheet),
                         ),
                         const SizedBox(width: AppSpacing.space8),
                         Expanded(
@@ -5167,7 +5752,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             // The amount IS the label: the cashier reads the
                             // figure at the instant of committing to it.
                             amountLabel: l10n.billingSettleAmount(
-                                '₹${_netPayable().toStringAsFixed(2)}'),
+                                '₹${_toCollect.toStringAsFixed(2)}'),
                             // ...and the second line says how it ends, so a
                             // printer that dropped is visible BEFORE the tap.
                             outcomeLabel: ref.watch(printReadyProvider)
@@ -5177,12 +5762,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             longPressHint: l10n.billingSettleOnlyHint,
                             onPressed: (cart.isEmpty || _generatingBill)
                                 ? null
-                                : () => _settle(inSheet: inSheet),
+                                : () => _settle(actionRow, inSheet: inSheet),
                             // The deliberate skip, for when a printer is
                             // connected but this one sale needs no slip.
                             onLongPress: (cart.isEmpty || _generatingBill)
                                 ? null
-                                : () => _settle(inSheet: inSheet, withReceipt: false),
+                                : () => _settle(actionRow, inSheet: inSheet, withReceipt: false),
                           ),
                         ),
                       ] else
@@ -5200,7 +5785,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                         ),
                     ],
-                  ),
+                  ))),
                   if (canFinalize)
                     _PrinterStatusLine(onConnect: _openPrinterSetup),
                 ],
@@ -5348,6 +5933,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         m.axis == Axis.vertical &&
         (n as ViewportNotificationMixin).depth == 0) {
       (into ?? _cartAtBottom).value = m.extentAfter < 120;
+      final row = _confirmRow;
+      if (n is ScrollMetricsNotification && row != null && row.mounted) {
+        Scrollable.ensureVisible(row,
+            alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+      }
     }
     return false;
   }
@@ -5374,7 +5964,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           color: AppColors.primary,
           fontWeight: FontWeight.w600,
         );
-    final packLabel = cartPackLabel(context, entry);
+    // Windows also shows the unit under a full pack ("1 pcs").
+    final packLabel = cartPackLabel(context, entry) ??
+        (isWindows
+            ? '${formatQty(entry.quantity)} ${unitShort(entry.item.unit)}'
+            : null);
     final packUnit = entry.packUnit;
     final packSize = entry.packSize;
     final row = Padding(
@@ -5434,32 +6028,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ),
           ),
+          // "−Box" (Windows): takes a whole pack back off, once there is one.
+          if (isWindows &&
+              packUnit != null &&
+              packSize != null &&
+              entry.quantity >= packSize)
+            _packButton('−${unitShort(packUnit)}',
+                () => ref.read(cartProvider.notifier).changeQty(entry.key, -packSize)),
           // "+Box": a whole pack in one tap.
           if (packUnit != null && packSize != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: InkWell(
-                onTap: () => _cartChange(
+            _packButton(
+                '+${unitShort(packUnit)}',
+                () => _cartChange(
                     entry.key,
                     () => ref
                         .read(cartProvider.notifier)
-                        .changeQty(entry.key, packSize)),
-                borderRadius: BorderRadius.circular(AppRadius.small),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(AppRadius.small),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Text('+${itemUnitLabel(context, packUnit)}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w600,
-                          )),
-                ),
-              ),
-            ),
+                        .changeQty(entry.key, packSize))),
           Container(
             decoration: BoxDecoration(
               color: AppColors.surfaceVariant,
@@ -5535,6 +6119,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
   }
 
+  /// Outlined "+Box" / "−Box" chip beside a cart line's stepper.
+  Widget _packButton(String label, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.small),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.small),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Text(label,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  )),
+        ),
+      ),
+    );
+  }
+
   Widget _qtyButton(IconData icon, VoidCallback onTap) {
     return InkWell(
       onTap: onTap,
@@ -5554,9 +6161,9 @@ String? cartPackLabel(BuildContext context, CartEntry e) {
   final p = e.packs;
   final unit = e.packUnit;
   if (p == null || unit == null) return null;
-  final packs = '${p.packs} ${itemUnitLabel(context, unit)}';
+  final packs = '${p.packs} ${unitShort(unit)}';
   return p.loose > 0
-      ? '$packs + ${formatQty(p.loose)} ${itemUnitLabel(context, e.item.unit)}'
+      ? '$packs + ${formatQty(p.loose)} ${unitShort(e.item.unit)}'
       : packs;
 }
 
@@ -5919,11 +6526,15 @@ class _CategorySection {
   /// the section (rather than looked up per widget) so the bar, its rail and
   /// its item rows are all guaranteed to be tinted the same.
   final Color accent;
+  /// The whole menu when the business uses no categories at all: no bar and
+  /// no box, just the item rows. Always open — there is nothing to fold.
+  final bool headerless;
   const _CategorySection(this.category, this.items,
       {required this.expanded,
       this.major,
       this.openItems = const {},
-      this.accent = AppColors.primary});
+      this.accent = AppColors.primary,
+      this.headerless = false});
 
   String get key => sectionKey(major, category);
 
@@ -6011,18 +6622,25 @@ class _ListEntry {
   /// matches the card that opened it. See [CategoryAccents].
   final Color accent;
 
+  /// False for the rows of a headerless section: plain list rows, no box.
+  final bool framed;
+
   const _ListEntry.majorHeader(this.majorSection)
       : section = null,
         cells = const [],
         isLastRowOfSection = false,
-        accent = AppColors.primary;
+        accent = AppColors.primary,
+        framed = true;
   const _ListEntry.header(this.section)
       : majorSection = null,
         cells = const [],
         isLastRowOfSection = false,
-        accent = AppColors.primary;
+        accent = AppColors.primary,
+        framed = true;
   const _ListEntry.row(this.cells,
-      {this.isLastRowOfSection = false, this.accent = AppColors.primary})
+      {this.isLastRowOfSection = false,
+      this.accent = AppColors.primary,
+      this.framed = true})
       : section = null,
         majorSection = null;
   bool get isHeader => section != null;
@@ -6150,10 +6768,15 @@ class _ExcelItemTable extends StatefulWidget {
         isLastRowOfSection: r == rows - 1,
         // Inherited from the section, which got it from its major.
         accent: s.accent,
+        framed: !s.headerless,
       ));
     }
     return (out, index);
   }
+
+  /// A section's bar height — none for a headerless (no-categories) list.
+  static double _headerOf(_CategorySection s) =>
+      s.headerless ? 0 : sectionHeaderExtent;
 
   /// Rows a section contributes to the list — none while collapsed.
   static int _rowsIn(_CategorySection s, bool twoColumns) =>
@@ -6172,7 +6795,7 @@ class _ExcelItemTable extends StatefulWidget {
       if (!m.expanded) continue;
       for (final s in m.subs) {
         final start = offset;
-        offset += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        offset += _headerOf(s) + _rowsIn(s, twoColumns) * rowExtent;
         out.add(_SectionSpan(s.key, start, offset, s.expanded));
       }
     }
@@ -6197,7 +6820,7 @@ class _ExcelItemTable extends StatefulWidget {
       y += majorHeaderExtent;
       if (!m.expanded) continue;
       for (final s in m.subs) {
-        y += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        y += _headerOf(s) + _rowsIn(s, twoColumns) * rowExtent;
       }
     }
     return current;
@@ -6213,7 +6836,7 @@ class _ExcelItemTable extends StatefulWidget {
       if (m.major != null) offset += majorHeaderExtent;
       if (!m.expanded) continue;
       for (final s in m.subs) {
-        offset += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        offset += _headerOf(s) + _rowsIn(s, twoColumns) * rowExtent;
       }
     }
     return null;
@@ -6226,31 +6849,10 @@ class _ExcelItemTable extends StatefulWidget {
       if (m.major != null) h += majorHeaderExtent;
       if (!m.expanded) continue;
       for (final s in m.subs) {
-        h += sectionHeaderExtent + _rowsIn(s, twoColumns) * rowExtent;
+        h += _headerOf(s) + _rowsIn(s, twoColumns) * rowExtent;
       }
     }
     return h;
-  }
-
-  /// List-local offset that puts [itemId]'s row under the pinned header, or
-  /// null when the item isn't in the (filtered, unfolded) list.
-  static double? itemOffset(
-      List<_MajorSection> tree, String itemId, bool twoColumns) {
-    var offset = 0.0;
-    for (final m in tree) {
-      if (m.major != null) offset += majorHeaderExtent;
-      if (!m.expanded) continue;
-      for (final s in m.subs) {
-        offset += sectionHeaderExtent;
-        for (final e in _sectionEntries(s, twoColumns, 0).$1) {
-          if (e.cells.any((c) => c != null && c.item?.id == itemId)) {
-            return offset;
-          }
-          offset += rowExtent;
-        }
-      }
-    }
-    return null;
   }
 
   /// The list's maxScrollExtent once every fold animation has settled. Right
@@ -6410,8 +7012,10 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
       for (final s in m.subs) {
         // The sub bar squashes with its major, so folding a major takes its
         // whole subtree — bars and rows alike — down together.
-        entries.add(
-            (_ListEntry.header(s), _ExcelItemTable.sectionHeaderExtent * mp));
+        if (!s.headerless) {
+          entries.add(
+              (_ListEntry.header(s), _ExcelItemTable.sectionHeaderExtent * mp));
+        }
         final sp = mp * _progress(_sectionFold, s.key, s.expanded);
         if (sp <= 0) {
           index += s.items.length;
@@ -6426,6 +7030,7 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
             major: s.major,
             expanded: true,
             accent: s.accent,
+            headerless: s.headerless,
             openItems: {
               for (final it in s.items)
                 if (it.hasVariants &&
@@ -6591,6 +7196,23 @@ class _ExcelItemTableState extends State<_ExcelItemTable>
     // nothing. Everything else — the box round an open group, its inset, its
     // cell rules — is the same either way, so a shop that never adopted major
     // categories gets the same billing list, minus the tree line.
+    // No categories at all: plain rows, a rule under each, no box.
+    if (!e.framed) {
+      return _folded(
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: ColoredBox(
+            color: AppColors.surface,
+            child: Column(children: [
+              Expanded(child: row),
+              const Divider(height: 1, thickness: 1, color: AppColors.border),
+            ]),
+          ),
+        ),
+        extent,
+        _ExcelItemTable.rowExtent,
+      );
+    }
     final railed = widget.tree.isNotEmpty && widget.tree.first.major != null;
     final rowBody = Column(
       children: [
@@ -6909,7 +7531,7 @@ class _ExcelItemRow extends ConsumerStatefulWidget {
     if (treatAsVariantItem) return '';
     final p = rowPrice(list);
     if (p == null) return '';
-    final suffix = item.isMeasured && !isVariantRow ? '/${item.unit}' : '';
+    final suffix = item.isMeasured && !isVariantRow ? '/${unitShort(item.unit)}' : '';
     return '₹${p.toStringAsFixed(2)}$suffix';
   }
 
@@ -7036,6 +7658,9 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
             (widget.variant != null || !widget.item.hasVariants)
         ? stockAlertColor(widget.item, widget.variant)
         : null;
+    // Out of stock greys the whole row instead of drawing the red stripe.
+    final outOfStock = stockColor == stockOutColor;
+    final stripeColor = outOfStock ? null : stockColor;
 
     return ClipRect(
       child: Stack(
@@ -7096,6 +7721,8 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                 decoration: BoxDecoration(
                   color: inCart
                       ? const Color(0xFFEEF2FF) // solid indigo-50
+                      : outOfStock
+                          ? const Color(0xFFD1D5DB) // gray-300: greyed out
                       : widget.expanded || widget.nested
                           ? const Color(0xFFFAFBFF) // faint tint: open group
                           : AppColors.surface,
@@ -7103,10 +7730,10 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                 // Stock alert stripe on the row's left edge. Painted over the
                 // row, so it shifts nothing. A size row shows it on its own
                 // rail below instead.
-                foregroundDecoration: stockColor != null && !widget.nested
+                foregroundDecoration: stripeColor != null && !widget.nested
                     ? BoxDecoration(
                         border: Border(
-                            left: BorderSide(color: stockColor, width: 3)))
+                            left: BorderSide(color: stripeColor, width: 3)))
                     : null,
                 // The accent rail marks SIZE rows only — the category bar has
                 // its own, and the parent dish is an ordinary item that happens
@@ -7122,7 +7749,9 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                       ? BoxDecoration(
                           border: Border(
                               left: BorderSide(
-                                  color: stockColor ?? widget.accent,
+                                  color: outOfStock
+                                      ? const Color(0xFF9CA3AF) // gray-400
+                                      : stripeColor ?? widget.accent,
                                   width: 3)))
                       : null,
                   padding: EdgeInsets.only(
@@ -7143,12 +7772,25 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                               inCart ? FontWeight.w600 : FontWeight.w400,
                           color: inCart
                               ? AppColors.primaryDark
-                              : AppColors.textPrimary,
+                              : outOfStock
+                                  ? AppColors.textSecondary
+                                  : AppColors.textPrimary,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    if (outOfStock) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        context.l10n.billingOutOfStock,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
                     // Price (with /unit suffix for measured items). FittedBox
                     // shrinks the text to fit rather than wrapping "₹200.00/
                     // glass" onto a second line — the row has no room to grow
@@ -7182,6 +7824,7 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                           _GridBtn(
                             icon: Icons.remove,
                             enabled: inCart,
+                            muted: outOfStock,
                             onTap: widget.onDecrement,
                           ),
                           // Editable qty field (read-only for a parent variant item)
@@ -7248,6 +7891,7 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                                         ),
                                         decoration: InputDecoration(
                                           isDense: true,
+                                          filled: !outOfStock,
                                           contentPadding:
                                               const EdgeInsets.symmetric(
                                                   vertical: 4),
@@ -7285,6 +7929,7 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                           _GridBtn(
                             icon: Icons.add,
                             enabled: true,
+                            muted: outOfStock,
                             onTap: inCart ? widget.onIncrement : widget.onAdd,
                           ),
                         ],
@@ -7307,11 +7952,13 @@ class _GridBtn extends StatelessWidget {
   final IconData icon;
   final bool enabled;
   final VoidCallback onTap;
+  final bool muted;
 
   const _GridBtn({
     required this.icon,
     required this.enabled,
     required this.onTap,
+    this.muted = false,
   });
 
   @override
@@ -7323,15 +7970,17 @@ class _GridBtn extends StatelessWidget {
         width: 28,
         height: 28,
         decoration: BoxDecoration(
-          color: enabled
-              ? AppColors.primary
-              : AppColors.surfaceVariant,
+          color: muted
+              ? const Color(0xFF9CA3AF) // gray-400: out-of-stock row
+              : enabled
+                  ? AppColors.primary
+                  : AppColors.surfaceVariant,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
           icon,
           size: 16,
-          color: enabled ? Colors.white : AppColors.textSecondary,
+          color: enabled || muted ? Colors.white : AppColors.textSecondary,
         ),
       ),
     );

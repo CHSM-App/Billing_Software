@@ -8,7 +8,8 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-const String baseUrl = 'https://sophisticated-cdna-laboratory-myspace.trycloudflare.com/api';
+// const String baseUrl = 'http://192.168.1.11:8000/api';
+const String baseUrl = 'https://vittam.vengurlatech.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
 
@@ -460,6 +461,8 @@ Future<Map<String, dynamic>> register({
   String? gstNumber,
   String? panNumber,
   String? fssaiNumber,
+  String? verifiedToken,
+  bool acceptTerms = false,
 }) async {
   final response = await _post(
     Uri.parse('$baseUrl/register'),
@@ -480,9 +483,24 @@ Future<Map<String, dynamic>> register({
       if (panNumber != null && panNumber.isNotEmpty) 'pan_number': panNumber,
       if (fssaiNumber != null && fssaiNumber.isNotEmpty)
         'fssai_number': fssaiNumber,
+      // Proof from /verify-otp that this owner phone passed the OTP; the
+      // server requires it once REQUIRE_REGISTER_OTP is switched on.
+      if (verifiedToken != null) 'verified_token': verifiedToken,
+      // The sign-up consent box was ticked. The server records
+      // its own current terms version against it.
+      if (acceptTerms) 'accept_terms': true,
     }),
   );
   return _parse(response);
+}
+
+/// The owner agreed on the updated-terms screen. [termsVersion] must be the
+/// one GET /license sent; the server answers 409 if the terms changed since.
+Future<void> acceptTerms(String termsVersion) async {
+  _parse(await _authPost(
+    Uri.parse('$baseUrl/account/accept-terms'),
+    body: jsonEncode({'terms_version': termsVersion}),
+  ));
 }
 
 // ---------------------------------------------------------------------------
@@ -748,6 +766,25 @@ Future<void> deletePriceList(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/price-lists/$id')));
 }
 
+// Quotations (routes/quotations.js). Body: { customer_name, customer_phone,
+// total, snapshot } where snapshot is a Bill-shaped map (Bill.toSnapshotJson).
+// Converted by createBill with 'quotation_id'.
+Future<List<dynamic>> getQuotations() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/quotations')));
+}
+
+Future<Map<String, dynamic>> createQuotation(Map<String, dynamic> data) async {
+  return _parse(await _authPost(Uri.parse('$baseUrl/quotations'), body: jsonEncode(data)));
+}
+
+Future<Map<String, dynamic>> updateQuotation(String id, Map<String, dynamic> data) async {
+  return _parse(await _authPut(Uri.parse('$baseUrl/quotations/$id'), body: jsonEncode(data)));
+}
+
+Future<void> deleteQuotation(String id) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/quotations/$id')));
+}
+
 /// Regenerate a table's QR token, invalidating the old sticker. Owner-only.
 Future<Map<String, dynamic>> rotateTableQr(String id) async {
   return _parse(
@@ -987,6 +1024,69 @@ Future<Map<String, dynamic>> sendCustomerMessage(
   return Map<String, dynamic>.from(data as Map);
 }
 
+// ---------------------------------------------------------------------------
+// Warranties ("Retail & Warranty" shops — cashier/owner for records, owner
+// only for field templates and delete)
+// ---------------------------------------------------------------------------
+
+/// One page of warranty records matching [params] (q, status, limit, offset).
+/// Returns { items, total, offset, limit }.
+Future<Map<String, dynamic>> getWarranties(Map<String, String> params) async {
+  final data = _parse(await _authGet(
+      Uri.parse('$baseUrl/warranties').replace(queryParameters: params)));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+Future<Map<String, dynamic>> getWarranty(String id) async {
+  final data = _parse(await _authGet(Uri.parse('$baseUrl/warranties/$id')));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+/// Creates a warranty record. [body] matches routes/warranties.js' POST shape
+/// (customer_name, customer_phone, item_id, item_name, category,
+/// serial_number, purchase_date, warranty_months, extra_data, notes).
+Future<Map<String, dynamic>> createWarranty(Map<String, dynamic> body) async {
+  final data = _parse(await _authPost(
+    Uri.parse('$baseUrl/warranties'),
+    body: jsonEncode(body),
+  ));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+Future<Map<String, dynamic>> updateWarranty(
+    String id, Map<String, dynamic> body) async {
+  final data = _parse(await _authPut(
+    Uri.parse('$baseUrl/warranties/$id'),
+    body: jsonEncode(body),
+  ));
+  return Map<String, dynamic>.from(data as Map);
+}
+
+Future<void> deleteWarranty(String id) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/warranties/$id')));
+}
+
+/// Every category's custom warranty fields for this business.
+Future<List<dynamic>> getWarrantyFieldTemplates() async {
+  final data = _parse(await _authGet(Uri.parse('$baseUrl/warranty-field-templates')));
+  return data as List;
+}
+
+/// Replaces the field list for [category] wholesale. [fields] is
+/// `[{key, label, type}]`.
+Future<void> putWarrantyFieldTemplate(
+    String category, List<Map<String, String>> fields) async {
+  _parse(await _authPut(
+    Uri.parse('$baseUrl/warranty-field-templates/${Uri.encodeComponent(category)}'),
+    body: jsonEncode({'fields': fields}),
+  ));
+}
+
+Future<void> deleteWarrantyFieldTemplate(String category) async {
+  _parse(await _authDelete(
+      Uri.parse('$baseUrl/warranty-field-templates/${Uri.encodeComponent(category)}')));
+}
+
 /// Marks the given credit bills paid in one settlement with [paymentMode].
 /// Returns the settled bills (with items) for building a merged receipt.
 /// Pays credit bills from the Credit tab, all in [paymentMode]. [amounts] is
@@ -1030,20 +1130,25 @@ Future<Map<String, dynamic>> whatsAppSettlement(String settlementId) async {
 Future<Map<String, dynamic>> finalizeBill(String id,
     {String? paymentMode,
     List<Map<String, dynamic>>? payments,
-    Map<String, double>? collect}) async {
+    Map<String, double>? collect,
+    // Warranty details captured at billing time (migration 065) — e.g. a
+    // tyre's vehicle KM reading. Covers settling a draft that was held
+    // before these were typed in.
+    List<Map<String, String>>? warrantyExtraData}) async {
+  final body = <String, dynamic>{
+    if (paymentMode != null) 'payment_mode': paymentMode,
+    if (payments != null) 'payments': payments,
+    if (collect != null && collect.isNotEmpty)
+      'collect': [
+        for (final e in collect.entries)
+          {'bill_id': e.key, 'amount': e.value},
+      ],
+    if (warrantyExtraData != null && warrantyExtraData.isNotEmpty)
+      'warranty_extra_data': warrantyExtraData,
+  };
   return _parse(await _authPut(
     Uri.parse('$baseUrl/bills/$id/finalize'),
-    body: paymentMode != null
-        ? jsonEncode({
-            'payment_mode': paymentMode,
-            if (payments != null) 'payments': payments,
-            if (collect != null && collect.isNotEmpty)
-              'collect': [
-                for (final e in collect.entries)
-                  {'bill_id': e.key, 'amount': e.value},
-              ],
-          })
-        : null,
+    body: body.isEmpty ? null : jsonEncode(body),
   ));
 }
 
@@ -1339,5 +1444,18 @@ Future<void> deleteFcmToken(String token) async {
   _parse(await _authPost(
     Uri.parse('$baseUrl/fcm/token/remove'),
     body: jsonEncode({'token': token}),
+  ));
+}
+
+/// This user's own notification switches:
+/// `{notify_low_stock: bool, notify_online_orders: bool}`.
+Future<Map<String, dynamic>> getNotifyPrefs() async {
+  return _parse(await _authGet(Uri.parse('$baseUrl/fcm/prefs')));
+}
+
+Future<void> updateNotifyPrefs(Map<String, bool> prefs) async {
+  _parse(await _authPut(
+    Uri.parse('$baseUrl/fcm/prefs'),
+    body: jsonEncode(prefs),
   ));
 }

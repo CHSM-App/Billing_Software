@@ -82,3 +82,14 @@ describe('GET /api/license — app version (?v=)', () => {
     expect(versionWrites()).toHaveLength(0);
   });
 });
+
+describe('GET /api/license — legal terms, flow OFF (src/legal.js TERMS_VERSION = null)', () => {
+  it('never asks, and never touches terms_acceptances (migration 072 may not exist yet)', async () => {
+    mockRequest.recordset = [row({ current_role: 'owner' })];
+    const res = await getLicense();
+    expect(res.status).toBe(200);
+    expect(res.body.terms_required).toBe(false);
+    expect(res.body.terms_version).toBeNull();
+    expect(mockRequest.query.mock.calls.filter(c => /terms_acceptances/.test(c[0]))).toHaveLength(0);
+  });
+});

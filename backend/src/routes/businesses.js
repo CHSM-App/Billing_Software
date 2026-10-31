@@ -6,6 +6,7 @@ const { requireAuth } = require('../auth');
 const audit = require('../audit');
 const logger = require('../logger');
 const billSettings = require('../billSettings');
+const { isBusinessPhone } = require('../validate');
 const {
   uniqueStoreToken, validateSlug, isSlugAvailable, looksAutoDerived,
 } = require('../storeToken');
@@ -16,12 +17,12 @@ const router = express.Router();
  *  profile row back after a write, so they can never drift apart. */
 const PROFILE_COLUMNS = `
   id, name, business_type, address, phone,
-  inventory_enabled, has_barcode_scanner,
+  inventory_enabled, warranty_enabled, has_barcode_scanner,
   self_order_enabled,
   gst_number, pan_number, fssai_number, email, website,
   city, state, pincode, logo_url, print_logo,
   bill_prefix, bill_footer_note, bill_settings,
-  gst_enabled, default_sac_code, round_off_enabled, show_item_no,
+  gst_enabled, default_sac_code, round_off_enabled, show_item_no, quotations_enabled,
   store_enabled, store_token, store_delivery_enabled,
   store_delivery_charge, store_payment_qr_url, store_upi_id,
   store_advance_percent, store_payment_required,
@@ -63,13 +64,13 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
       .query(`
         SELECT
           b.id, b.name, b.business_type, b.address, b.phone,
-          b.inventory_enabled, b.has_barcode_scanner,
+          b.inventory_enabled, b.warranty_enabled, b.has_barcode_scanner,
           b.self_order_enabled,
           b.gst_number, b.pan_number, b.fssai_number, b.email, b.website,
           b.city, b.state, b.pincode, b.logo_url, b.print_logo,
           b.bill_prefix, b.bill_footer_note, b.bill_settings,
           b.gst_enabled, b.default_sac_code,
-          b.round_off_enabled, b.show_item_no,
+          b.round_off_enabled, b.show_item_no, b.quotations_enabled,
           b.store_enabled, b.store_token,
           b.store_delivery_enabled, b.store_delivery_charge,
           b.store_payment_qr_url, b.store_upi_id,
@@ -150,11 +151,13 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     bill_settings,
     self_order_enabled,
     inventory_enabled,
+    warranty_enabled,
     has_barcode_scanner,
     gst_enabled,
     default_sac_code,
     round_off_enabled,
     show_item_no,
+    quotations_enabled,
     store_enabled,
     store_delivery_enabled,
     store_delivery_charge,
@@ -169,8 +172,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
   if (name !== undefined && (!name || name.trim().length === 0)) {
     return res.status(400).json({ error: 'Business name cannot be empty' });
   }
-  if (phone !== undefined && !/^\d{10}$/.test(phone)) {
-    return res.status(400).json({ error: 'Phone must be a 10-digit number' });
+  if (phone !== undefined && !isBusinessPhone(phone)) {
+    return res.status(400).json({ error: 'Enter a 10-digit mobile number, or a landline with its STD code' });
   }
   if (email !== undefined && email !== null && email !== '') {
     // Simple RFC-ish check: local@domain.tld
@@ -265,11 +268,13 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     bill_settings: billSettingsText,
     self_order_enabled,
     inventory_enabled,
+    warranty_enabled,
     has_barcode_scanner,
     gst_enabled,
     default_sac_code,
     round_off_enabled,
     show_item_no,
+    quotations_enabled,
     store_enabled,
     store_delivery_enabled,
     store_delivery_charge,
@@ -298,7 +303,7 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           name, address, phone, email, website,
           city, state, pincode, gst_number, pan_number, fssai_number,
           logo_url, print_logo, bill_prefix, bill_footer_note, bill_settings,
-          gst_enabled, default_sac_code, round_off_enabled, show_item_no,
+          gst_enabled, default_sac_code, round_off_enabled, show_item_no, quotations_enabled,
           store_enabled, store_delivery_enabled,
           store_delivery_charge, store_advance_percent, store_payment_required,
           store_upi_id,
@@ -405,9 +410,9 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       const sqlType = _sqlTypeFor(key);
       // BIT columns take a normalised 0/1; text columns treat '' as NULL.
       const isBit = key === 'self_order_enabled' ||
-          key === 'inventory_enabled' || key === 'has_barcode_scanner' ||
+          key === 'inventory_enabled' || key === 'warranty_enabled' || key === 'has_barcode_scanner' ||
           key === 'gst_enabled' || key === 'round_off_enabled' ||
-          key === 'show_item_no' ||
+          key === 'show_item_no' || key === 'quotations_enabled' ||
           key === 'store_enabled' || key === 'store_delivery_enabled' ||
           key === 'store_payment_required';
       const normalised = isBit
@@ -569,6 +574,7 @@ function _formatBusiness(row) {
     address:             row.address ?? null,
     phone:               row.phone,
     inventory_enabled:   !!row.inventory_enabled,
+    warranty_enabled:    !!row.warranty_enabled,
     has_barcode_scanner: !!row.has_barcode_scanner,
     self_order_enabled:  !!row.self_order_enabled,
     gst_number:          row.gst_number ?? null,
@@ -588,6 +594,7 @@ function _formatBusiness(row) {
     default_sac_code:    row.default_sac_code ?? null,
     round_off_enabled:   !!row.round_off_enabled,
     show_item_no:        !!row.show_item_no,
+    quotations_enabled:  !!row.quotations_enabled,
     // Online store. store_token is never settable from the profile payload —
     // the server derives it from the business name (see src/storeToken.js) at
     // sign-up and again whenever the name changes.
@@ -624,11 +631,13 @@ function _sqlTypeFor(key) {
     bill_settings:    sql.NVarChar(2000),
     self_order_enabled: sql.Bit,
     inventory_enabled: sql.Bit,
+    warranty_enabled: sql.Bit,
     has_barcode_scanner: sql.Bit,
     gst_enabled:       sql.Bit,
     default_sac_code:  sql.NVarChar(10),
     round_off_enabled: sql.Bit,
     show_item_no:      sql.Bit,
+    quotations_enabled: sql.Bit,
     store_enabled:          sql.Bit,
     store_delivery_enabled: sql.Bit,
     store_delivery_charge:  sql.Decimal(10, 2),

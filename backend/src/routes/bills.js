@@ -4,13 +4,78 @@ const { requireAuth } = require('../auth');
 const { whatsappLimiter } = require('../middleware/rateLimiter');
 const logger = require('../logger');
 const audit = require('../audit');
-const { isValidDateString, todayUtc, dayRange, dateRange } = require('../dateUtils');
+const { isValidDateString, todayUtc, dayRange, dateRange, addMonths } = require('../dateUtils');
 const { sendBillLink, normalisePhone, sendReceiptLink } = require('../whatsapp');
 const { generateReceiptToken, RECEIPT_BASE } = require('../receiptToken');
-const { sendLowStockNotification } = require('../fcm');
+const { sendLowStockNotification, sendBillVoidedNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
 const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
+const { validateExtraData, isIndianMobile } = require('../validate');
+
+// "Retail & Warranty" shops: a finalized bill line sold against a
+// warranty-eligible item becomes a warranty record automatically (manual
+// entries are also possible — see routes/warranties.js). Never awaited by a
+// caller and never throws past this function — same resilience pattern as
+// upsertCustomer (../customers.js): a warranty row is a convenience, not
+// something that may ever block or fail a sale.
+async function autoCreateWarranties(businessId, billId, userId) {
+  try {
+    await poolConnect;
+    const result = await pool.request()
+      .input('business_id', sql.UniqueIdentifier, businessId)
+      .input('bill_id', sql.UniqueIdentifier, billId)
+      .query(`
+        SELECT bi.id AS bill_item_id, bi.item_id, bi.item_name, i.category, i.default_warranty_months,
+               b.customer_name, b.customer_phone, b.warranty_extra_data,
+               CAST(ISNULL(b.finalized_at, b.created_at) AS DATE) AS purchase_date
+        FROM bill_items bi
+        JOIN bills b ON b.id = bi.bill_id
+        JOIN items i ON i.id = bi.item_id
+        JOIN businesses bz ON bz.id = b.business_id
+        WHERE bi.bill_id = @bill_id AND b.business_id = @business_id
+          -- Shop switched warranty tracking off (Settings): items keep their
+          -- flag for when it comes back on, but no new records are made.
+          AND bz.warranty_enabled = 1
+          AND i.warranty_eligible = 1
+          AND NOT EXISTS (SELECT 1 FROM warranties w WHERE w.bill_item_id = bi.id)
+      `);
+
+    for (const row of result.recordset) {
+      // Nothing to look the warranty up by later — skip rather than create an
+      // orphaned record staff could never find again.
+      if (!row.customer_phone) continue;
+      const months = row.default_warranty_months || 12;
+      const expiry = addMonths(row.purchase_date, months);
+
+      await pool.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .input('customer_name', sql.NVarChar(200), row.customer_name || null)
+        .input('customer_phone', sql.NVarChar(20), row.customer_phone)
+        .input('item_id', sql.UniqueIdentifier, row.item_id)
+        .input('item_name', sql.NVarChar(200), row.item_name)
+        .input('category', sql.NVarChar(100), row.category || null)
+        .input('bill_id', sql.UniqueIdentifier, billId)
+        .input('bill_item_id', sql.UniqueIdentifier, row.bill_item_id)
+        .input('purchase_date', sql.Date, row.purchase_date)
+        .input('warranty_months', sql.Int, months)
+        .input('expiry_date', sql.Date, expiry)
+        // Captured at billing time (migration 065), e.g. a tyre's vehicle KM
+        // reading — copied verbatim, same JSON text, onto every warranty row
+        // this bill creates. Null when nothing was entered.
+        .input('extra_data', sql.NVarChar(sql.MAX), row.warranty_extra_data || null)
+        .input('created_by_user_id', sql.UniqueIdentifier, userId)
+        .query(`
+          INSERT INTO warranties (business_id, customer_name, customer_phone, item_id, item_name,
+            category, bill_id, bill_item_id, purchase_date, warranty_months, expiry_date, extra_data, created_by_user_id)
+          VALUES (@business_id, @customer_name, @customer_phone, @item_id, @item_name,
+            @category, @bill_id, @bill_item_id, @purchase_date, @warranty_months, @expiry_date, @extra_data, @created_by_user_id)
+        `);
+    }
+  } catch (err) {
+    logger.warn({ err, bill_id: billId }, 'auto-create warranty failed');
+  }
+}
 
 // Shared by create and finalize so a mode accepted when a bill is parked is
 // still accepted when it is settled. 'split' = paid in several parts, listed
@@ -182,6 +247,22 @@ function cashierOrOwner(req, res, next) {
     return res.status(403).json({ error: 'Only a cashier or owner can finalize a bill or take payment' });
   }
   next();
+}
+
+// Largest quantity one staff line may carry. Far above any real sale (a
+// wholesale 5000 kg line fits) and well inside Decimal(10,2).
+const STAFF_MAX_LINE_QTY = 99999;
+
+// Every line's quantity must be a positive, sane number. Without this a
+// negative line lowered the bill total and ADDED stock (stock - (-qty) passes
+// the `stock >= @qty` guard), and NaN reached the database. There is no
+// returns flow that sends negatives. Returns an error message, or null.
+function badQuantity(items) {
+  const bad = items.find((i) => {
+    const qty = Number(i && i.quantity);
+    return !Number.isFinite(qty) || qty <= 0 || qty > STAFF_MAX_LINE_QTY;
+  });
+  return bad ? `Each item needs a quantity between 0 and ${STAFF_MAX_LINE_QTY}` : null;
 }
 
 // Load the variants referenced by a set of request line items, scoped to the
@@ -562,6 +643,7 @@ async function fetchBill(billId, businessId) {
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
              b.customer_address, b.customer_gstin,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+             b.warranty_extra_data,
              b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
              b.payment_status, b.settled_at, b.settled_payment_mode, b.credit_amount,
              b.credit_collected,
@@ -611,11 +693,13 @@ async function fetchBill(billId, businessId) {
 
 // POST /api/bills
 router.post('/', requireAuth, async (req, res) => {
-  const { items, table_id, customer_name, customer_phone, customer_address, customer_gstin, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at } = req.body;
+  const { items, table_id, customer_name, customer_phone, customer_address, customer_gstin, payment_mode, status, client_bill_id, discount_amount, bill_number, round_off, additional_charges, payments, finalized_at, warranty_extra_data, quotation_id } = req.body;
 
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required and must not be empty' });
   }
+  const qtyError = badQuantity(items);
+  if (qtyError) return res.status(400).json({ error: qtyError });
   if (!payment_mode) {
     return res.status(400).json({ error: 'payment_mode is required' });
   }
@@ -658,6 +742,11 @@ router.post('/', requireAuth, async (req, res) => {
   if (client_bill_id !== undefined && (typeof client_bill_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(client_bill_id))) {
     return res.status(400).json({ error: 'client_bill_id must be a valid UUID' });
   }
+  // quotation_id: this bill converts that quotation (routes/quotations.js) —
+  // marked converted inside the same transaction below.
+  if (quotation_id !== undefined && quotation_id !== null && (typeof quotation_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(quotation_id))) {
+    return res.status(400).json({ error: 'quotation_id must be a valid UUID' });
+  }
   // bill_number, when supplied (offline sync), preserves the number already
   // printed on the customer's receipt. Constrain it to a safe invoice-number
   // shape and length so it can't inject arbitrary data.
@@ -680,6 +769,15 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ error: parsedCharges.error });
   }
   const { charges: chargeList, chargesAmount } = parsedCharges;
+  // Warranty details captured at billing time (migration 065) — e.g. a
+  // tyre's vehicle KM reading — copied verbatim into every warranty record
+  // autoCreateWarranties creates for this bill, and printed on the receipt
+  // (gated on the owner's Billing Setup toggle). Optional: never blocks the
+  // sale, unlike the customer-phone requirement.
+  const warrantyExtraDataInvalid = validateExtraData(warranty_extra_data);
+  if (warrantyExtraDataInvalid) {
+    return res.status(400).json({ error: warrantyExtraDataInvalid });
+  }
   // Offline sync sends when the sale actually happened; without it the bill
   // would be dated when the device came back online.
   const saleTime = billStatus === 'finalized' ? clientSaleTime(finalized_at) : null;
@@ -884,6 +982,9 @@ router.post('/', requireAuth, async (req, res) => {
         .input('discount_amount', sql.Decimal(10, 2),   discountAmount)
         .input('charges_amount',  sql.Decimal(10, 2),   chargesAmount)
         .input('additional_charges', sql.NVarChar(sql.MAX), serializeCharges(chargeList))
+        .input('warranty_extra_data', sql.NVarChar(sql.MAX),
+          Array.isArray(warranty_extra_data) && warranty_extra_data.length > 0
+            ? JSON.stringify(warranty_extra_data) : null)
         .input('total',           sql.Decimal(10, 2),   total)
         .input('round_off',       sql.Decimal(10, 2),   roundOff)
         .input('payment_mode',    sql.NVarChar(20),     payment_mode)
@@ -901,6 +1002,7 @@ router.post('/', requireAuth, async (req, res) => {
           INSERT INTO bills (business_id, bill_number, table_id, customer_name, customer_phone,
                              customer_address, customer_gstin,
                              subtotal, tax_amount, discount_amount, charges_amount, additional_charges,
+                             warranty_extra_data,
                              total, round_off, payment_mode, payment_status, credit_amount, status,
                              created_by_user_id, client_bill_id, receipt_token, price_list_id,
                              created_at, finalized_at, finalized_by_user_id)
@@ -908,6 +1010,7 @@ router.post('/', requireAuth, async (req, res) => {
           VALUES (@business_id, @bill_number, @table_id, @customer_name, @customer_phone,
                   @customer_address, @customer_gstin,
                   @subtotal, @tax_amount, @discount_amount, @charges_amount, @additional_charges,
+                  @warranty_extra_data,
                   @total, @round_off, @payment_mode, @payment_status, @credit_amount, @status,
                   @created_by_user_id, @client_bill_id, @receipt_token, @price_list_id,
                   COALESCE(@sale_time, SYSUTCDATETIME()),
@@ -919,6 +1022,24 @@ router.post('/', requireAuth, async (req, res) => {
       const billId = billResult.recordset[0].id;
 
       if (split) await insertPayments(transaction.request(), billId, split.rows);
+
+      // Converting a quotation: it closes with this bill or not at all, so a
+      // second device converting the same quote gets a 409, not a twin bill.
+      if (quotation_id) {
+        const conv = await transaction.request()
+          .input('quotation_id', sql.UniqueIdentifier, quotation_id)
+          .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+          .input('bill_id', sql.UniqueIdentifier, billId)
+          .query(`
+            UPDATE quotations
+            SET status = 'converted', bill_id = @bill_id, converted_at = SYSUTCDATETIME()
+            WHERE id = @quotation_id AND business_id = @business_id AND status = 'open'
+          `);
+        if (!conv.rowsAffected[0]) {
+          await transaction.rollback();
+          return res.status(409).json({ error: 'Quotation already converted' });
+        }
+      }
 
       // Insert bill_items — one multi-row INSERT instead of one network round
       // trip per line (a 15-item bill was 15 sequential awaits in series; this
@@ -988,10 +1109,19 @@ router.post('/', requireAuth, async (req, res) => {
       }
 
       await transaction.commit();
+      // Real-time: stock moved — billing screens re-read their item list.
+      if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
 
       // The bill is saved — keep the customers table in step. Not awaited and
       // never throws (customers.js), so it cannot affect this sale.
       upsertCustomer(req.user.business_id, customer_phone, customer_name, customer_address, customer_gstin);
+
+      // A bill created already-finalized (the common offline-queue shape: order
+      // and settle in one moment) may contain warranty-eligible items. Not
+      // awaited — see autoCreateWarranties above.
+      if (billStatus === 'finalized') {
+        autoCreateWarranties(req.user.business_id, billId, req.user.user_id);
+      }
 
       // Collect stock targets that just crossed below their threshold (stock was
       // above before, at/below after). Bundle into one notification. For variant
@@ -1082,13 +1212,14 @@ router.get('/', requireAuth, async (req, res) => {
     }
     if (search) {
       request.input('search', sql.NVarChar(100), `%${search}%`);
-      where += ' AND (b.bill_number LIKE @search OR b.customer_phone LIKE @search)';
+      where += ' AND (b.bill_number LIKE @search OR b.customer_phone LIKE @search OR b.customer_name LIKE @search)';
     }
 
     const billsResult = await request.query(`
       SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
              b.customer_address, b.customer_gstin,
              b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+             b.warranty_extra_data,
              b.total, b.round_off, b.payment_mode, b.status,
              b.payment_status, b.credit_amount, b.credit_collected,
              b.created_by_user_id, b.created_at, b.finalized_at, b.receipt_token,
@@ -1145,6 +1276,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
         SELECT b.id, b.business_id, b.bill_number, b.table_id, b.customer_name, b.customer_phone,
                b.customer_address, b.customer_gstin,
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+             b.warranty_extra_data,
                b.total, b.round_off, b.payment_mode, b.status, b.price_list_id,
                b.created_by_user_id, b.created_at, b.receipt_token,
                -- See the single-bill query above: an accepted online order
@@ -1454,7 +1586,7 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   // credit ledger all reported the wrong tender. Optional: callers that do not
   // send it keep the stored mode, which is what every offline-queued finalize
   // relies on.
-  const { payment_mode, payments, collect } = req.body || {};
+  const { payment_mode, payments, collect, warranty_extra_data } = req.body || {};
   if (payment_mode !== undefined && !validPaymentModes.includes(payment_mode)) {
     return res.status(400).json({ error: `payment_mode must be one of: ${validPaymentModes.join(', ')}` });
   }
@@ -1463,6 +1595,13 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   // Old credit bills the customer is paying off with this one.
   const collections = parseCollections(collect);
   if (collections.error) return res.status(400).json({ error: collections.error });
+  // Warranty details (migration 065) — optional, same validation as create.
+  // Covers a bill drafted/held before this field existed: the cashier can
+  // still attach them right at the moment it's actually settled.
+  const warrantyExtraDataInvalid = validateExtraData(warranty_extra_data);
+  if (warrantyExtraDataInvalid) {
+    return res.status(400).json({ error: warrantyExtraDataInvalid });
+  }
   let tendered = null;
   try {
     await poolConnect;
@@ -1527,7 +1666,22 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
         `);
     }
 
+    if (Array.isArray(warranty_extra_data) && warranty_extra_data.length > 0) {
+      await pool.request()
+        .input('id', sql.UniqueIdentifier, req.params.id)
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('warranty_extra_data', sql.NVarChar(sql.MAX), JSON.stringify(warranty_extra_data))
+        .query(`
+          UPDATE bills SET warranty_extra_data = @warranty_extra_data
+          WHERE id = @id AND business_id = @business_id
+        `);
+    }
+
     const bill = await fetchBill(req.params.id, req.user.business_id);
+
+    // A draft just settled may contain warranty-eligible items. Not awaited —
+    // see autoCreateWarranties above.
+    autoCreateWarranties(req.user.business_id, req.params.id, req.user.user_id);
 
     audit.logBillFinalized(
       { user_id: req.user.user_id, user_name: req.user.name || null },
@@ -1559,6 +1713,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required' });
   }
+  const qtyError = badQuantity(items);
+  if (qtyError) return res.status(400).json({ error: qtyError });
 
   let addedLineItems = [];
 
@@ -1749,6 +1905,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
 
       addedLineItems = lineItems;
       await transaction.commit();
+      if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
 
       // Collect targets that just crossed below their threshold, send one
       // notification. Handles variant lines via their own stock/threshold.
@@ -1795,6 +1952,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items array is required' });
   }
+  const qtyError = badQuantity(items);
+  if (qtyError) return res.status(400).json({ error: qtyError });
   // Only overwrite a field when the key was actually sent, so callers that omit
   // them (e.g. the kitchen) never wipe existing details.
   const setCustomerName = Object.prototype.hasOwnProperty.call(req.body, 'customer_name');
@@ -2105,6 +2264,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
 
       replacementLineItems = lineItems;
       await transaction.commit();
+      if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
     } catch (err) {
       await transaction.rollback();
       throw err;
@@ -2151,7 +2311,8 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
         SELECT b.id, b.status, b.table_id, b.bill_number, b.total,
-               b.credit_collected, bs.inventory_enabled
+               b.credit_collected, bs.inventory_enabled,
+               COALESCE(b.finalized_at, b.created_at) AS settled_at
         FROM bills b
         JOIN businesses bs ON bs.id = b.business_id
         WHERE b.id = @id AND b.business_id = @business_id
@@ -2166,6 +2327,14 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
     // for the common case where a bill was already voided).
     if (bill.status === 'voided') {
       return res.status(409).json({ error: 'Bill is already voided' });
+    }
+
+    // A cashier may cancel any open order and correct today's sales; an older
+    // settled bill is the owner's call. Without this a cashier could take the
+    // cash for any past bill and void it quietly. "Today" is the shop's IST day.
+    if (req.user.role !== 'owner' && bill.status === 'finalized' &&
+        new Date(bill.settled_at) < dayRange(todayUtc()).start) {
+      return res.status(403).json({ error: 'Only the owner can void a bill from an earlier day' });
     }
 
     const transaction = pool.transaction();
@@ -2233,6 +2402,16 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
     // drops off the open-orders list.
     broadcast(req.user.business_id, { type: 'kitchen' });
     broadcast(req.user.business_id, { type: bill.table_id ? 'tables' : 'drafts' });
+    if (bill.inventory_enabled) broadcast(req.user.business_id, { type: 'stock' });
+
+    // Owners hear about every void of a settled bill. Not awaited, never throws.
+    if (bill.status === 'finalized') {
+      sendBillVoidedNotification(pool, sql, req.user.business_id, {
+        billNumber: stripBillPrefix(bill.bill_number),
+        total: bill.total,
+        voidedByUserId: req.user.user_id,
+      });
+    }
 
     return res.json({ success: true });
   } catch (err) {
@@ -2391,7 +2570,7 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
     // Ignored when the bill has a phone — this only fills a gap.
     if (!customer_phone && req.body && req.body.phone != null) {
       const typed = String(req.body.phone).trim();
-      if (!/^\d{10}$/.test(typed)) {
+      if (!isIndianMobile(typed)) {
         return res.status(400).json({ error: 'Customer phone must be 10 digits' });
       }
       await pool.request()

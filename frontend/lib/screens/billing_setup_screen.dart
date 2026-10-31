@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api.dart';
 import '../l10n/l10n_ext.dart';
 import '../services/bill_settings.dart';
 import '../theme/app_theme.dart';
-import '../utils/text_formatters.dart' show UpperCaseTextFormatter;
+import '../utils/text_formatters.dart'
+    show UpperCaseTextFormatter, isIndianMobile;
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 
@@ -13,14 +16,14 @@ import '../widgets/shell_app_bar.dart';
 ///
 /// Saved as businesses.bill_settings (see services/bill_settings.dart), plus
 /// the older print_logo flag and bill_footer_note (the terms text).
-class BillingSetupScreen extends StatefulWidget {
+class BillingSetupScreen extends ConsumerStatefulWidget {
   const BillingSetupScreen({super.key});
 
   @override
-  State<BillingSetupScreen> createState() => _BillingSetupScreenState();
+  ConsumerState<BillingSetupScreen> createState() => _BillingSetupScreenState();
 }
 
-class _BillingSetupScreenState extends State<BillingSetupScreen> {
+class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
   BillSettings? _s;
   bool _printLogo = false;
   bool _hasLogo = false;
@@ -32,17 +35,17 @@ class _BillingSetupScreenState extends State<BillingSetupScreen> {
 
   final _terms = TextEditingController();
   final _altPhone = TextEditingController();
+  final _altPhoneLabel = TextEditingController();
   final _note = TextEditingController();
   final _bank = {for (final k in BillSettings.bankKeys) k: TextEditingController()};
 
   static final _ifscRe = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
   static final _accountRe = RegExp(r'^[0-9]{6,20}$');
-  // Mobile or landline with STD code. Same rule as billSettings.js.
-  static final _altPhoneRe = RegExp(r'^\+?[0-9][0-9 -]{5,18}$');
 
+  // Indian mobile, same rule as billSettings.js.
   String? get _altPhoneError {
     final v = _altPhone.text.trim();
-    return v.isEmpty || _altPhoneRe.hasMatch(v)
+    return v.isEmpty || isIndianMobile(v)
         ? null
         : context.l10n.billSetupAltPhoneInvalid;
   }
@@ -57,6 +60,7 @@ class _BillingSetupScreenState extends State<BillingSetupScreen> {
   void dispose() {
     _terms.dispose();
     _altPhone.dispose();
+    _altPhoneLabel.dispose();
     _note.dispose();
     for (final c in _bank.values) {
       c.dispose();
@@ -76,6 +80,7 @@ class _BillingSetupScreenState extends State<BillingSetupScreen> {
         _hasLogo = (p['logo_url'] as String?)?.isNotEmpty ?? false;
         _terms.text = (p['bill_footer_note'] as String?) ?? '';
         _altPhone.text = s.altPhone;
+        _altPhoneLabel.text = s.altPhoneLabel;
         _note.text = s.note;
         for (final k in BillSettings.bankKeys) {
           _bank[k]!.text = s.bank[k] ?? '';
@@ -118,6 +123,7 @@ class _BillingSetupScreenState extends State<BillingSetupScreen> {
     try {
       final json = s.toJson()
         ..['alt_phone'] = _altPhone.text.trim()
+        ..['alt_phone_label'] = _altPhoneLabel.text.trim()
         ..['note'] = _note.text.trim()
         ..['bank'] = {
           for (final k in BillSettings.bankKeys) k: _bank[k]!.text.trim(),
@@ -220,14 +226,37 @@ class _BillingSetupScreenState extends State<BillingSetupScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(AppSpacing.space16, 0,
                     AppSpacing.space16, AppSpacing.space8),
-                child: AppTextField(
-                  label: l10n.billSetupAltPhone,
-                  controller: _altPhone,
-                  keyboardType: TextInputType.phone,
-                  maxLength: 20,
-                  errorText: _altPhoneError,
-                  prefixIcon: const Icon(Icons.phone_android_outlined,
-                      size: 16, color: AppColors.textSecondary),
+                // Label + number: prints as "GPay: 98…" ("WhatsApp", …), or
+                // just the number when the label is left empty.
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: AppTextField(
+                        label: l10n.billSetupAltPhoneLabel,
+                        hint: l10n.billSetupAltPhoneLabelHint,
+                        controller: _altPhoneLabel,
+                        maxLength: 20,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.space8),
+                    Expanded(
+                      flex: 3,
+                      child: AppTextField(
+                        label: l10n.billSetupAltPhone,
+                        controller: _altPhone,
+                        keyboardType: TextInputType.phone,
+                        maxLength: 10,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        errorText: _altPhoneError,
+                        prefixIcon: const Icon(Icons.phone_android_outlined,
+                            size: 16, color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             _check('show_gstin', s.showGstin, Icons.receipt_long_outlined,
@@ -280,6 +309,10 @@ class _BillingSetupScreenState extends State<BillingSetupScreen> {
                   ),
                 ),
               ),
+          ]),
+          _card([
+            _check('show_warranty_details', s.showWarrantyDetails,
+                Icons.verified_outlined, l10n.billSetupWarrantyDetails),
           ]),
           _card([
             _check('show_bank', s.showBank, Icons.account_balance_outlined,

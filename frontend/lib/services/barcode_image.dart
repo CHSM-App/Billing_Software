@@ -10,12 +10,15 @@ class BarcodeImage {
   /// [pixelWidth] is the raster width in device pixels. Defaults to 406 —
   /// a 2-inch label at 203 dpi (the standard thermal density). Height is derived
   /// from the content. [subtitle] is an optional extra line under the name (e.g.
-  /// a variant/size label like "Large").
+  /// a variant/size label like "Large"). Every text line is optional — a null
+  /// [itemName] / [subtitle] / [price], or [showValue] false, leaves it off
+  /// (the "Download all barcodes" field picker); the bars are always drawn.
   static Future<ui.Image> render({
     required String barcodeValue,
-    required String itemName,
-    required double price,
+    String? itemName,
+    double? price,
     String? subtitle,
+    bool showValue = true,
     int pixelWidth = 406, // 2 inch @ 203 dpi
   }) async {
     final width = pixelWidth.toDouble();
@@ -30,27 +33,26 @@ class BarcodeImage {
     const barcodeHeight = 90.0;
     const gap = 10.0;
 
-    final namePainter = _textPainter(itemName, nameSize, FontWeight.w700,
-        maxWidth: contentWidth, center: true);
-    final subtitlePainter = (subtitle != null && subtitle.isNotEmpty)
-        ? _textPainter(subtitle, subtitleSize, FontWeight.w500,
-            maxWidth: contentWidth, center: true)
-        : null;
-    final pricePainter = _textPainter('Rs. ${price.toStringAsFixed(2)}',
-        priceSize, FontWeight.w600,
-        maxWidth: contentWidth, center: true);
-    final valuePainter = _textPainter(barcodeValue, valueSize, FontWeight.w400,
-        maxWidth: contentWidth, center: true);
+    TextPainter? line(String? text, double size, FontWeight weight) =>
+        (text == null || text.isEmpty)
+            ? null
+            : _textPainter(text, size, weight,
+                maxWidth: contentWidth, center: true);
+
+    // Lines above the bars, top to bottom: name, size, price.
+    final above = [
+      line(itemName, nameSize, FontWeight.w700),
+      line(subtitle, subtitleSize, FontWeight.w500),
+      line(price == null ? null : 'Rs. ${price.toStringAsFixed(2)}', priceSize,
+          FontWeight.w600),
+    ].whereType<TextPainter>().toList();
+    final valuePainter =
+        showValue ? line(barcodeValue, valueSize, FontWeight.w400) : null;
 
     final totalHeight = margin +
-        namePainter.height +
-        (subtitlePainter != null ? gap + subtitlePainter.height : 0) +
-        gap +
-        pricePainter.height +
-        gap +
+        above.fold(0.0, (h, p) => h + p.height + gap) +
         barcodeHeight +
-        6 +
-        valuePainter.height +
+        (valuePainter != null ? 6 + valuePainter.height : 0) +
         margin;
 
     final recorder = ui.PictureRecorder();
@@ -61,18 +63,11 @@ class BarcodeImage {
         Rect.fromLTWH(0, 0, width, totalHeight), Paint()..color = Colors.white);
 
     var y = margin;
-    // Item name (centred).
-    namePainter.paint(canvas, Offset(margin + (contentWidth - namePainter.width) / 2, y));
-    y += namePainter.height + gap;
-    // Optional variant/size label (centred).
-    if (subtitlePainter != null) {
-      subtitlePainter.paint(
-          canvas, Offset(margin + (contentWidth - subtitlePainter.width) / 2, y));
-      y += subtitlePainter.height + gap;
+    // Name / size / price, each centred.
+    for (final p in above) {
+      p.paint(canvas, Offset(margin + (contentWidth - p.width) / 2, y));
+      y += p.height + gap;
     }
-    // Price (centred).
-    pricePainter.paint(canvas, Offset(margin + (contentWidth - pricePainter.width) / 2, y));
-    y += pricePainter.height + gap;
 
     // Actual Code128 barcode.
     final bc = Barcode.code128();
@@ -89,7 +84,8 @@ class BarcodeImage {
     y += barcodeHeight + 6;
 
     // Human-readable value under the bars.
-    valuePainter.paint(canvas, Offset(margin + (contentWidth - valuePainter.width) / 2, y));
+    valuePainter?.paint(
+        canvas, Offset(margin + (contentWidth - valuePainter.width) / 2, y));
 
     final picture = recorder.endRecording();
     return picture.toImage(pixelWidth, totalHeight.ceil());

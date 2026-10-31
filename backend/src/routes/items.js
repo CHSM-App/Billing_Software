@@ -258,7 +258,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, is_active, created_at
+      SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, warranty_eligible, default_warranty_months, is_active, created_at
       FROM items
       WHERE ${where}
       ORDER BY name ASC
@@ -277,6 +277,7 @@ router.get('/', requireAuth, async (req, res) => {
         const variantMatch = await variantReq.query(`
           SELECT TOP 1 i.id, i.business_id, i.name, i.barcode, i.item_no, i.major_category, i.category, i.price,
                  i.tax_rate, i.price_inclusive_tax, i.hsn_code, i.stock_quantity, i.low_stock_threshold, i.unit, i.pack_unit, i.pack_size,
+                 i.warranty_eligible, i.default_warranty_months,
                  i.is_active, i.created_at, v.id AS matched_variant_id
           FROM item_variants v
           JOIN items i ON i.id = v.item_id
@@ -316,7 +317,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, is_active, created_at, image_url
+        SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, warranty_eligible, default_warranty_months, is_active, created_at, image_url
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -337,6 +338,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
   const {
     name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code,
     stock_quantity, unit, low_stock_threshold, item_no, pack_unit, pack_size,
+    warranty_eligible, default_warranty_months,
     // Set by the client when the item is being created with sizes. The variants
     // themselves are POSTed separately straight after, so at INSERT time this is
     // the only signal that the missing price is intentional.
@@ -344,11 +346,17 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
   } = req.body;
 
   const sizedItem = has_variants === true;
+  const warrantyOn = warranty_eligible === true;
 
   // A variant item has no price of its own — each size carries one. A plain item
   // must have a price, or billing it would have nothing to charge.
   if (!sizedItem && (price === undefined || price === null)) {
     return res.status(400).json({ error: 'price is required unless the item has variants' });
+  }
+  // Without a period there is nothing to compute an expiry date from when the
+  // item is sold — see the auto-create hook in routes/bills.js.
+  if (warrantyOn && (default_warranty_months == null)) {
+    return res.status(400).json({ error: 'default_warranty_months is required when warranty_eligible is true' });
   }
   const invalid = validateText(name, 'Name', 200, { required: true })
     || validateNumber(price, 'Price')
@@ -365,8 +373,12 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
     // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
     // recipe quantity is stored, so an unknown value would silently skip it.
     || validateEnum(unit, 'Unit', VALID_UNITS)
-    || validatePack(pack_unit, pack_size);
+    || validatePack(pack_unit, pack_size)
+    || validateInteger(default_warranty_months, 'Default warranty period');
   if (invalid) return res.status(400).json({ error: invalid });
+  if (warrantyOn && parseInt(default_warranty_months, 10) <= 0) {
+    return res.status(400).json({ error: 'Default warranty period must be greater than zero' });
+  }
 
   try {
     await poolConnect;
@@ -407,11 +419,15 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       // existing callers are unaffected.
       .input('low_stock_threshold', sql.Decimal(10, 2),
         low_stock_threshold != null ? parseFloat(low_stock_threshold) : 50)
+      .input('warranty_eligible', sql.Bit, warrantyOn ? 1 : 0)
+      .input('default_warranty_months', sql.Int,
+        warrantyOn ? parseInt(default_warranty_months, 10) : null)
       .query(`
-        INSERT INTO items (business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, pack_unit, pack_size, low_stock_threshold)
+        INSERT INTO items (business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, pack_unit, pack_size, low_stock_threshold, warranty_eligible, default_warranty_months)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.item_no, INSERTED.major_category, INSERTED.category,
-               INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.pack_unit, INSERTED.pack_size, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @item_no, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @pack_unit, @pack_size, @low_stock_threshold)
+               INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.pack_unit, INSERTED.pack_size,
+               INSERTED.warranty_eligible, INSERTED.default_warranty_months, INSERTED.is_active, INSERTED.created_at
+        VALUES (@business_id, @name, @barcode, @item_no, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @pack_unit, @pack_size, @low_stock_threshold, @warranty_eligible, @default_warranty_months)
       `);
 
     const created = result.recordset[0];
@@ -442,12 +458,13 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   const {
     name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit,
-    low_stock_threshold, item_no, pack_unit, pack_size,
+    low_stock_threshold, item_no, pack_unit, pack_size, warranty_eligible, default_warranty_months,
   } = req.body;
 
-  if (!name && price === undefined && !major_category && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined && item_no === undefined && pack_unit === undefined && pack_size === undefined) {
+  if (!name && price === undefined && !major_category && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined && item_no === undefined && pack_unit === undefined && pack_size === undefined && warranty_eligible === undefined && default_warranty_months === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
+  const warrantyOn = warranty_eligible === true;
   const invalid = (name !== undefined
         ? validateText(name, 'Name', 200, { required: true })
         : null)
@@ -463,8 +480,12 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
     // recipe quantity is stored, so an unknown value would silently skip it.
     || validateEnum(unit, 'Unit', VALID_UNITS)
-    || validatePack(pack_unit, pack_size);
+    || validatePack(pack_unit, pack_size)
+    || validateInteger(default_warranty_months, 'Default warranty period');
   if (invalid) return res.status(400).json({ error: invalid });
+  if (warrantyOn && default_warranty_months !== undefined && parseInt(default_warranty_months, 10) <= 0) {
+    return res.status(400).json({ error: 'Default warranty period must be greater than zero' });
+  }
 
   try {
     await poolConnect;
@@ -476,7 +497,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT i.id, i.name, i.price, i.stock_quantity,
+        SELECT i.id, i.name, i.price, i.stock_quantity, i.default_warranty_months,
                (SELECT COUNT(*) FROM item_variants v
                  WHERE v.item_id = i.id AND v.is_active = 1) AS variant_count
         FROM items i
@@ -487,6 +508,15 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       return res.status(404).json({ error: 'Item not found' });
     }
     const before = check.recordset[0];
+
+    // Turning the flag on (or leaving it on) without a period would leave the
+    // auto-create hook in routes/bills.js with nothing to compute an expiry
+    // from. A period already stored on the item counts — re-saving needn't resend it.
+    const months = default_warranty_months !== undefined
+      ? default_warranty_months : before.default_warranty_months;
+    if (warrantyOn && months == null) {
+      return res.status(400).json({ error: 'default_warranty_months is required when warranty_eligible is true' });
+    }
     const sizedItem = before.variant_count > 0;
 
     // Renaming onto another item's name is the same collision as creating one.
@@ -570,11 +600,21 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       sets.push('pack_unit = @pack_unit', 'pack_size = @pack_size');
       inputPack(request, pack_unit, pack_size);
     }
+    if (warranty_eligible !== undefined) {
+      sets.push('warranty_eligible = @warranty_eligible');
+      request.input('warranty_eligible', sql.Bit, warrantyOn ? 1 : 0);
+    }
+    if (default_warranty_months !== undefined) {
+      sets.push('default_warranty_months = @default_warranty_months');
+      request.input('default_warranty_months', sql.Int,
+        default_warranty_months != null ? parseInt(default_warranty_months, 10) : null);
+    }
     const result = await request.query(`
       UPDATE items
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.item_no, INSERTED.major_category, INSERTED.category,
-             INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.pack_unit, INSERTED.pack_size, INSERTED.is_active, INSERTED.created_at
+             INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.pack_unit, INSERTED.pack_size,
+             INSERTED.warranty_eligible, INSERTED.default_warranty_months, INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);
 

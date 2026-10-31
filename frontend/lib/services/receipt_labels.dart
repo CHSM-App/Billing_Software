@@ -60,6 +60,8 @@ class ReceiptLabels {
   // name, so — like FSSAI — it's the same across all languages and isn't routed
   // through the ARB files.
   final String poweredBy;
+  // Title on a printed quotation (Bill.status 'quotation').
+  final String quotation;
 
   const ReceiptLabels({
     required this.languageCode,
@@ -106,6 +108,7 @@ class ReceiptLabels {
     this.settledTotalPaid = 'Total paid',
     this.totalReceived = 'TOTAL RECEIVED',
     this.poweredBy = 'Powered by Vengurla Tech',
+    this.quotation = 'QUOTATION',
   });
 
   factory ReceiptLabels.from(AppLocalizations l10n, String languageCode) =>
@@ -114,6 +117,7 @@ class ReceiptLabels {
         defaultBusiness: l10n.receiptDefaultBusiness,
         phonePrefix: l10n.receiptPhonePrefix,
         billNo: l10n.receiptBillNo,
+        quotation: l10n.receiptQuotation,
         table: l10n.receiptTable,
         date: l10n.receiptDate,
         customer: l10n.receiptCustomer,

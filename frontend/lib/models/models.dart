@@ -11,6 +11,50 @@ String formatQty(double qty) {
       .replaceAll(RegExp(r'\.$'), '');
 }
 
+/// Short display name for a unit, shown after a quantity ("2 kg", "3 btl").
+/// SI symbols for metric units; the rest follow India's GST UQC names in the
+/// lowercase form shop bills use. Dropdowns keep the full localized name.
+String unitShort(String unit) => const {
+      'piece': 'pcs',
+      'kg': 'kg',
+      'g': 'g',
+      'litre': 'L',
+      'ml': 'ml',
+      'metre': 'm',
+      'dozen': 'doz',
+      'plate': 'plt',
+      'packet': 'pkt',
+      'box': 'box',
+      'bottle': 'btl',
+      'pair': 'pr',
+      'set': 'set',
+      'bundle': 'bdl',
+      'bag': 'bag',
+      'sqft': 'sqft',
+      'ton': 't',
+      'quintal': 'qtl',
+      'roll': 'roll',
+      'case': 'cs',
+      'crate': 'crt',
+      'carton': 'ctn',
+    }[unit] ??
+    unit;
+
+/// EXPERIMENT (docs/experiments/receipt_units.md): item id → unit, refreshed
+/// by ItemsNotifier, so receipts can print "2 kg" — bill lines carry no unit.
+/// ponytail: global catalog map; store the unit on bill_items if this sticks.
+Map<String, String> catalogUnits = const {};
+
+/// [qty] with the item's short unit when the catalog knows [itemId]: "2 kg",
+/// "1.5 L", or just "3". Used wherever a bill line is listed.
+String qtyWithUnit(String? itemId, String qty) {
+  final unit = itemId == null ? null : catalogUnits[itemId];
+  return unit == null ? qty : '$qty ${unitShort(unit)}';
+}
+
+/// A bill line's quantity for a receipt — see [qtyWithUnit].
+String receiptQty(BillItem item, String qty) => qtyWithUnit(item.itemId, qty);
+
 /// [qty] base units as whole packs plus the loose rest: 17 bottles with a box of
 /// 15 is (packs: 1, loose: 2). Null when there is no pack or not one full pack.
 /// Display only: stock and bills always count base units.
@@ -181,6 +225,14 @@ class Item {
   /// load during billing.
   final String? imageUrl;
 
+  /// "Retail & Warranty" shops only: whether selling this item should
+  /// auto-create a warranty record (routes/bills.js' auto-create hook).
+  final bool warrantyEligible;
+
+  /// The warranty period (months) seeded onto an auto-created record. Null
+  /// when [warrantyEligible] is false.
+  final int? defaultWarrantyMonths;
+
   Item({
     required this.id,
     required this.businessId,
@@ -201,6 +253,8 @@ class Item {
     this.variants = const [],
     required this.isActive,
     this.imageUrl,
+    this.warrantyEligible = false,
+    this.defaultWarrantyMonths,
   });
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
@@ -229,6 +283,9 @@ class Item {
             .toList(),
         isActive: j['is_active'] == true || j['is_active'] == 1,
         imageUrl: j['image_url'] as String?,
+        warrantyEligible:
+            j['warranty_eligible'] == true || j['warranty_eligible'] == 1,
+        defaultWarrantyMonths: (j['default_warranty_months'] as num?)?.toInt(),
       );
 
   /// Whether this item is sold by a divisible measure (kg, g, litre, ...)
@@ -266,12 +323,40 @@ class Item {
         variants: newVariants,
         isActive: isActive,
         imageUrl: imageUrl,
+        warrantyEligible: warrantyEligible,
+        defaultWarrantyMonths: defaultWarrantyMonths,
       );
 
   bool get isLowStock =>
       stockQuantity != null &&
       lowStockThreshold != null &&
       stockQuantity! <= lowStockThreshold!;
+}
+
+/// Strip spaces, dashes and dots the same way the server's barcode lookup does,
+/// so scanner formatting differences never cause a miss.
+String _normaliseBarcode(String code) => code.replaceAll(RegExp(r'[\s\-\.]'), '');
+
+/// Resolve a scanned [code] against the loaded [items]. A size (variant)
+/// barcode wins over an item barcode: it is the more specific match, and a
+/// sized item may still carry a stale item-level code from before it had sizes.
+/// Returns null when nothing matches.
+({Item item, ItemVariant? variant})? matchBarcode(List<Item> items, String code) {
+  final target = _normaliseBarcode(code);
+  if (target.isEmpty) return null;
+  for (final i in items) {
+    for (final v in i.variants) {
+      if (v.barcode != null && _normaliseBarcode(v.barcode!) == target) {
+        return (item: i, variant: v);
+      }
+    }
+  }
+  for (final i in items) {
+    if (i.barcode != null && _normaliseBarcode(i.barcode!) == target) {
+      return (item: i, variant: null);
+    }
+  }
+  return null;
 }
 
 /// A stock-tracked ingredient (bun, patty, cheese) that is consumed by a dish's
@@ -406,6 +491,20 @@ class BillItem {
             double.tryParse((j['discount_amount'] ?? 0).toString()) ?? 0.0,
         kitchenStatus: j['kitchen_status'] as String?,
       );
+
+  /// The keys [BillItem.fromJson] reads — see [Bill.toSnapshotJson].
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'item_id': itemId,
+        'variant_id': variantId,
+        'item_name': itemName,
+        'quantity': quantity,
+        'unit_price': unitPrice,
+        'tax_rate': taxRate,
+        'hsn_code': hsnCode,
+        'line_total': lineTotal,
+        'discount_amount': discountAmount,
+      };
 }
 
 /// A bill-level additional charge — delivery, packaging, service, etc.
@@ -499,6 +598,10 @@ class Bill {
   final double chargesAmount;
   /// Itemised additional charges (delivery, packaging, ...) for display.
   final List<BillCharge> additionalCharges;
+  /// Warranty details captured at billing time (migration 065) — e.g. a
+  /// tyre's vehicle KM reading — printed on the receipt when the owner's
+  /// Billing Setup toggle allows it. Empty for most bills.
+  final List<WarrantyExtraField> warrantyExtraData;
   final double total;
   /// Signed invoice-level round-off adjustment (e.g. -0.22, +0.40). 0 when the
   /// business has rounding disabled. NEVER folded into subtotal/tax/total — the
@@ -580,7 +683,33 @@ class Bill {
   /// (printed receipts, invoice PDFs, WhatsApp). 'INV-0007' → '0007',
   /// offline 'INV-a7f4-0001' → 'a7f4-0001'. Numbers with no prefix are
   /// returned unchanged. The full [billNumber] stays the in-app identifier.
-  String get displayNumber => stripBillPrefix(billNumber);
+  /// A quotation keeps its 'QT-' so it can't pass for an invoice number.
+  String get displayNumber =>
+      status == 'quotation' ? billNumber : stripBillPrefix(billNumber);
+
+  /// What a [Quotation] stores: the billing page's cart as a bill, in exactly
+  /// the keys [Bill.fromJson] reads back, so a saved quote reopens into the
+  /// cart and prints as it was built.
+  Map<String, dynamic> toSnapshotJson() => {
+        'id': id,
+        'bill_number': billNumber,
+        'customer_name': customerName,
+        'customer_phone': customerPhone,
+        'customer_address': customerAddress,
+        'customer_gstin': customerGstin,
+        'subtotal': subtotal,
+        'tax_amount': taxAmount,
+        'discount_amount': discountAmount,
+        'charges_amount': chargesAmount,
+        'additional_charges': [for (final c in additionalCharges) c.toJson()],
+        'total': total,
+        'round_off': roundOff,
+        'payment_mode': paymentMode,
+        'status': status,
+        'price_list_id': priceListId,
+        'created_at': createdAt.toIso8601String(),
+        'items': [for (final i in items) i.toJson()],
+      };
 
   /// The final amount the customer pays: total, less discount, plus round-off.
   double get grandTotal => total - discountAmount + roundOff;
@@ -657,6 +786,7 @@ class Bill {
     this.discountAmount = 0.0,
     this.chargesAmount = 0.0,
     this.additionalCharges = const [],
+    this.warrantyExtraData = const [],
     required this.total,
     this.roundOff = 0.0,
     required this.paymentMode,
@@ -701,6 +831,9 @@ class Bill {
             ? double.parse(j['charges_amount'].toString())
             : 0.0,
         additionalCharges: BillCharge.listFrom(j['additional_charges']),
+        warrantyExtraData: (j['warranty_extra_data'] as List? ?? [])
+            .map((e) => WarrantyExtraField.fromJson(e as Map<String, dynamic>))
+            .toList(),
         total: double.parse(j['total'].toString()),
         roundOff: j['round_off'] != null
             ? double.parse(j['round_off'].toString())
@@ -745,6 +878,44 @@ class Bill {
             ),
         ],
       );
+}
+
+/// A priced quote given to a customer before the sale (routes/quotations.js).
+/// [bill] is the cart it was built from, numbered with the quotation's QT-
+/// number and status 'quotation' — so it prints with the bill templates and
+/// reopens into the cart like a held bill. It is NOT a bill: no stock moved
+/// and no invoice number was used until it is converted.
+class Quotation {
+  final String id;
+  final String number;
+  final double total;
+  final DateTime createdAt;
+  final Bill bill;
+
+  const Quotation({
+    required this.id,
+    required this.number,
+    required this.total,
+    required this.createdAt,
+    required this.bill,
+  });
+
+  factory Quotation.fromJson(Map<String, dynamic> j) {
+    final number = '${j['quotation_number']}';
+    return Quotation(
+      id: '${j['id']}',
+      number: number,
+      total: double.tryParse('${j['total']}') ?? 0.0,
+      createdAt: DateTime.parse('${j['created_at']}'),
+      bill: Bill.fromJson({
+        ...Map<String, dynamic>.from(j['snapshot'] as Map),
+        'id': j['id'],
+        'bill_number': number,
+        'status': 'quotation',
+        'created_at': '${j['created_at']}',
+      }),
+    );
+  }
 }
 
 /// A named set of prices — "Party", "Wholesale" — the cashier can bill with.
@@ -997,6 +1168,135 @@ class Customer {
             ? DateTime.tryParse(j['last_visit'].toString())
             : null,
       );
+}
+
+/// One labeled value on a [Warranty] record — either filled from a
+/// [WarrantyFieldTemplate] field or typed ad-hoc by staff. The backend stores
+/// both the same way (routes/warranties.js), so the app never needs to tell
+/// them apart.
+class WarrantyExtraField {
+  final String label;
+  final String value;
+
+  WarrantyExtraField({required this.label, required this.value});
+
+  factory WarrantyExtraField.fromJson(Map<String, dynamic> j) =>
+      WarrantyExtraField(
+        label: (j['label'] as String?) ?? '',
+        value: (j['value'] as String?) ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {'label': label, 'value': value};
+}
+
+/// A warranty record for a "Retail & Warranty" shop (tyre/battery/electronics
+/// retailers): who bought what, when, for how long, and anything extra the
+/// shop's category template or staff chose to capture (km reading, serial
+/// number, ...). See migration 064 / routes/warranties.js.
+class Warranty {
+  final String id;
+  final String? customerName;
+  final String customerPhone;
+  final String? itemId;
+  final String itemName;
+  final String? category;
+  final String? billId;
+  final String? serialNumber;
+  final DateTime purchaseDate;
+  final int warrantyMonths;
+  final DateTime expiryDate;
+  final List<WarrantyExtraField> extraData;
+  final String? notes;
+
+  Warranty({
+    required this.id,
+    this.customerName,
+    required this.customerPhone,
+    this.itemId,
+    required this.itemName,
+    this.category,
+    this.billId,
+    this.serialNumber,
+    required this.purchaseDate,
+    required this.warrantyMonths,
+    required this.expiryDate,
+    this.extraData = const [],
+    this.notes,
+  });
+
+  /// Name, or the phone when no name was recorded — same fallback as
+  /// [Customer.displayName].
+  String get displayName =>
+      (customerName != null && customerName!.trim().isNotEmpty)
+          ? customerName!.trim()
+          : customerPhone;
+
+  bool get isExpired => expiryDate.isBefore(DateTime.now());
+
+  /// Expires within 30 days — the same "expiring soon" horizon the backend
+  /// list filter uses (routes/warranties.js STATUS_FILTER).
+  bool get isExpiringSoon =>
+      !isExpired && expiryDate.isBefore(DateTime.now().add(const Duration(days: 30)));
+
+  factory Warranty.fromJson(Map<String, dynamic> j) => Warranty(
+        id: j['id'] as String,
+        customerName: j['customer_name'] as String?,
+        customerPhone: j['customer_phone'] as String? ?? '',
+        itemId: j['item_id'] as String?,
+        itemName: (j['item_name'] as String?) ?? '',
+        category: j['category'] as String?,
+        billId: j['bill_id'] as String?,
+        serialNumber: j['serial_number'] as String?,
+        purchaseDate: DateTime.parse(j['purchase_date'].toString()),
+        warrantyMonths: (j['warranty_months'] as num?)?.toInt() ?? 0,
+        expiryDate: DateTime.parse(j['expiry_date'].toString()),
+        extraData: (j['extra_data'] as List? ?? [])
+            .map((e) => WarrantyExtraField.fromJson(e))
+            .toList(),
+        notes: j['notes'] as String?,
+      );
+}
+
+/// The extra fields a business wants to ask for on every warranty record in
+/// one item category (migration 063) — e.g. "KM Reading"/"Vehicle Number" for
+/// Tyres, "Serial Number"/"IMEI" for Electronics.
+class WarrantyFieldTemplate {
+  final String category;
+  final List<WarrantyTemplateField> fields;
+
+  WarrantyFieldTemplate({required this.category, required this.fields});
+
+  factory WarrantyFieldTemplate.fromJson(Map<String, dynamic> j) =>
+      WarrantyFieldTemplate(
+        category: j['category'] as String,
+        fields: (j['fields'] as List? ?? [])
+            .map((f) => WarrantyTemplateField.fromJson(f))
+            .toList(),
+      );
+}
+
+/// One field definition within a [WarrantyFieldTemplate]. [type] is a UI
+/// rendering hint only (text/number/date) — the value is always stored as a
+/// string on the record itself.
+class WarrantyTemplateField {
+  final String key;
+  final String label;
+  final String type;
+
+  WarrantyTemplateField({
+    required this.key,
+    required this.label,
+    required this.type,
+  });
+
+  factory WarrantyTemplateField.fromJson(Map<String, dynamic> j) =>
+      WarrantyTemplateField(
+        key: j['key'] as String,
+        label: j['label'] as String,
+        type: (j['type'] as String?) ?? 'text',
+      );
+
+  Map<String, dynamic> toJson() => {'key': key, 'label': label, 'type': type};
 }
 
 class Expense {

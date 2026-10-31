@@ -60,6 +60,36 @@ export const ROUTES = [
     keywords: 'Vittam privacy policy, billing data privacy, data protection, data deletion',
   },
   {
+    path: '/terms',
+    file: 'terms.html',
+    changefreq: 'yearly',
+    priority: '0.4',
+    title: 'Terms of Service – Vittam Billing Software',
+    description:
+      'The agreement for using Vittam: accounts and staff, plans and payment, your business data, GST features, online ordering, suspension, liability and disputes.',
+    keywords: 'Vittam terms of service, billing software terms, terms and conditions',
+  },
+  {
+    path: '/acceptable-use',
+    file: 'acceptable-use.html',
+    changefreq: 'yearly',
+    priority: '0.3',
+    title: 'Acceptable Use Policy – Vittam',
+    description:
+      'What is not allowed on Vittam: illegal sales, fake GST invoices, content you have no rights to, spam, misuse of customer data, and attacks on the service.',
+    keywords: 'Vittam acceptable use policy, prohibited use, billing software rules',
+  },
+  {
+    path: '/ordering-terms',
+    file: 'ordering-terms.html',
+    changefreq: 'yearly',
+    priority: '0.3',
+    title: 'Customer Ordering Terms – Vittam',
+    description:
+      'Terms for customers ordering from a shop through its Vittam online store or table QR menu: who the seller is, payments, refunds, your data and complaints.',
+    keywords: 'Vittam ordering terms, online store terms, QR ordering terms',
+  },
+  {
     path: '/delete-account',
     file: 'delete-account.html',
     changefreq: 'yearly',

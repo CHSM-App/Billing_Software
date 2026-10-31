@@ -176,7 +176,10 @@ async function sendOtp(phone, purpose) {
     await saveOtp(normPhone, otpCode, purpose)
     logger.info(`[WhatsApp] Disabled — OTP for ${normPhone} (${purpose}): ${otpCode}`)
     // Return the OTP in dev so it can be used without a real phone
-    return { sent: false, dev_otp: process.env.NODE_ENV !== 'production' ? otpCode : undefined }
+    // Only when NODE_ENV says development in so many words. "Anything but
+    // production" leaked the code to every caller of a misconfigured server —
+    // and with it a PIN reset of any account.
+    return { sent: false, dev_otp: process.env.NODE_ENV === 'development' ? otpCode : undefined }
   }
 
   if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
@@ -221,6 +224,11 @@ async function sendOtp(phone, purpose) {
 // Returns true if valid, false if wrong/expired/already-used
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Wrong guesses one OTP survives before it is retired (migration 069). The
+// per-IP verify limiter alone let guesses from many IPs add up against the same
+// 6-digit code; this caps the code itself.
+const MAX_OTP_ATTEMPTS = 5
+
 async function verifyOtp(phone, otpCode, purpose) {
   const normPhone = normalisePhone(phone)
   if (!normPhone) return false
@@ -228,28 +236,52 @@ async function verifyOtp(phone, otpCode, purpose) {
   await poolConnect
   const otpHash = crypto.createHash('sha256').update(String(otpCode)).digest('hex')
 
+  // saveOtp retires older codes, so there is at most one live code per
+  // phone + purpose — the one every guess counts against.
   const result = await pool.request()
     .input('phone',      sql.NVarChar(20), normPhone)
     .input('purpose',    sql.NVarChar(20), purpose)
-    .input('otp_hash',   sql.NVarChar(64), otpHash)
     .input('now',        sql.DateTime2,    new Date())
     .query(`
-      SELECT id FROM whatsapp_otp_log
+      SELECT TOP 1 id, otp_hash FROM whatsapp_otp_log
       WHERE phone     = @phone
         AND purpose   = @purpose
-        AND otp_hash  = @otp_hash
         AND used      = 0
         AND expires_at > @now
+      ORDER BY created_at DESC
     `)
 
-  if (result.recordset.length === 0) return false
+  const live = result.recordset[0]
+  if (!live) return false
 
-  // Mark as used
-  await pool.request()
-    .input('id', sql.UniqueIdentifier, result.recordset[0].id)
-    .query(`UPDATE whatsapp_otp_log SET used = 1 WHERE id = @id`)
+  const match = live.otp_hash.length === otpHash.length &&
+    crypto.timingSafeEqual(Buffer.from(live.otp_hash), Buffer.from(otpHash))
 
-  return true
+  if (!match) {
+    // Atomic count; the guess that reaches the cap also retires the code.
+    await pool.request()
+      .input('id',  sql.UniqueIdentifier, live.id)
+      .input('max', sql.Int,              MAX_OTP_ATTEMPTS)
+      .query(`
+        UPDATE whatsapp_otp_log
+        SET attempts = ISNULL(attempts, 0) + 1,
+            used = CASE WHEN ISNULL(attempts, 0) + 1 >= @max THEN 1 ELSE used END
+        WHERE id = @id AND used = 0
+      `)
+    return false
+  }
+
+  // Consume it — but only while still under the cap, so a burst of parallel
+  // wrong guesses that retired the code cannot be raced by a right one.
+  const used = await pool.request()
+    .input('id',  sql.UniqueIdentifier, live.id)
+    .input('max', sql.Int,              MAX_OTP_ATTEMPTS)
+    .query(`
+      UPDATE whatsapp_otp_log SET used = 1
+      WHERE id = @id AND used = 0 AND ISNULL(attempts, 0) < @max
+    `)
+
+  return used.rowsAffected[0] > 0
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

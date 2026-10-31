@@ -43,11 +43,34 @@ describe('billSettings', () => {
     expect(normalize({ note: 'x'.repeat(301) }).error).toMatch(/Note/);
   });
 
+  test('warranty details print by default, and the toggle round-trips', () => {
+    expect(parse(null).show_warranty_details).toBe(true);
+    const r = normalize({ show_warranty_details: false });
+    expect(r.error).toBeUndefined();
+    expect(parse(r.value).show_warranty_details).toBe(false);
+  });
+
   test('alternate number is saved and printed after the main one', () => {
-    const s = parse(normalize({ alt_phone: ' 02366-262626 ' }).value);
-    expect(s.alt_phone).toBe('02366-262626');
-    expect(shopPhones('9876500000', s)).toBe('9876500000, 02366-262626');
-    expect(shopPhones(null, s)).toBe('02366-262626');
+    const s = parse(normalize({ alt_phone: ' 9822012345 ' }).value);
+    expect(s.alt_phone).toBe('9822012345');
+    expect(shopPhones('9876500000', s)).toBe('9876500000\n9822012345');
+    expect(shopPhones(null, s)).toBe('9822012345');
     expect(shopPhones('9876500000', parse(null))).toBe('9876500000');
+  });
+
+  test('alternate number must be an Indian mobile', () => {
+    for (const bad of ['02366-262626', '5123456789', '98220123456', '98220 12345']) {
+      expect(normalize({ alt_phone: bad }).error).toMatch(/alternate/);
+    }
+  });
+
+  test('alternate number label prints before it; empty label prints none', () => {
+    const s = parse(normalize({ alt_phone: '9822012345', alt_phone_label: ' GPay ' }).value);
+    expect(s.alt_phone_label).toBe('GPay');
+    expect(shopPhones('9876500000', s)).toBe('9876500000\nGPay: 9822012345');
+    expect(normalize({ alt_phone_label: 'x'.repeat(21) }).error).toMatch(/label/);
+    // A label with no number prints nothing extra.
+    expect(shopPhones('9876500000', parse(normalize({ alt_phone_label: 'GPay' }).value)))
+      .toBe('9876500000');
   });
 });

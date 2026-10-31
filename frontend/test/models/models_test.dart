@@ -990,4 +990,52 @@ void main() {
       expect(noPack.packs, isNull);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────
+  // matchBarcode — what a scan on the billing screen resolves to
+  // ─────────────────────────────────────────────────────────────
+  group('matchBarcode', () {
+    final plain = Item(
+        id: 'i1', businessId: 'b', name: 'Soap', barcode: '890-123 4.5', isActive: true);
+    // A sized item still carrying its old item-level code from before it had sizes.
+    final shirt = Item(
+      id: 'i2',
+      businessId: 'b',
+      name: 'Shirt',
+      barcode: '555',
+      isActive: true,
+      variants: [
+        ItemVariant(id: 'v1', itemId: 'i2', label: 'M', barcode: '111'),
+        ItemVariant(id: 'v2', itemId: 'i2', label: 'L', barcode: '222'),
+      ],
+    );
+    final items = [plain, shirt];
+
+    test('size barcode resolves to that size', () {
+      final hit = matchBarcode(items, '222')!;
+      expect(hit.item.id, 'i2');
+      expect(hit.variant!.id, 'v2');
+    });
+
+    test('item barcode resolves to the item with no size', () {
+      final hit = matchBarcode(items, '555')!;
+      expect(hit.item.id, 'i2');
+      expect(hit.variant, isNull);
+    });
+
+    test('spaces, dashes and dots are ignored on both sides', () {
+      expect(matchBarcode(items, '89012345')!.item.id, 'i1');
+      expect(matchBarcode(items, ' 8901-2345 ')!.item.id, 'i1');
+    });
+
+    test('a size barcode wins over an item barcode with the same code', () {
+      final clash = Item(id: 'i3', businessId: 'b', name: 'Old', barcode: '111', isActive: true);
+      expect(matchBarcode([clash, shirt], '111')!.variant!.id, 'v1');
+    });
+
+    test('unknown or empty code is null', () {
+      expect(matchBarcode(items, '999'), isNull);
+      expect(matchBarcode(items, ' - '), isNull);
+    });
+  });
 }

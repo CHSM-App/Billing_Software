@@ -110,6 +110,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navKitchen => 'Kitchen';
 
   @override
+  String get navWarranty => 'Warranty';
+
+  @override
   String get navOpenOrders => 'Open Orders';
 
   @override
@@ -129,6 +132,71 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get ordersTabCredit => 'Credit';
+
+  @override
+  String get ordersTabQuotations => 'Quotations';
+
+  @override
+  String get settingsQuotations => 'Quotations';
+
+  @override
+  String get settingsQuotationsSubtitle =>
+      'Give customers a priced quote, then turn it into a bill later';
+
+  @override
+  String get quotationQuoteShort => 'Quote';
+
+  @override
+  String get quotationSave => 'Save as quotation';
+
+  @override
+  String quotationSaved(String number) {
+    return 'Quotation $number saved';
+  }
+
+  @override
+  String get quotationNeedsInternet => 'Saving a quotation needs the internet';
+
+  @override
+  String get quotationConvertNeedsInternet =>
+      'Connect to the internet to bill a quotation';
+
+  @override
+  String get quotationsEmpty =>
+      'No quotations yet. Tap Quote on the billing page to make one.';
+
+  @override
+  String quotationItemCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count items',
+      one: '1 item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get quotationPrint => 'Print';
+
+  @override
+  String get quotationShare => 'Share';
+
+  @override
+  String get quotationConvert => 'Convert to bill';
+
+  @override
+  String quotationDeleteConfirm(String number) {
+    return 'Delete quotation $number?';
+  }
+
+  @override
+  String quotationShareText(String number, String business) {
+    return 'Quotation $number from $business';
+  }
+
+  @override
+  String get receiptQuotation => 'QUOTATION';
 
   @override
   String get billingCreditCustomerRequired =>
@@ -224,6 +292,134 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get customersTitle => 'Customers';
+
+  @override
+  String get warrantyTitle => 'Warranty';
+
+  @override
+  String get warrantySearchHint =>
+      'Search name, phone, serial number or details';
+
+  @override
+  String get warrantyFilterAll => 'All';
+
+  @override
+  String get warrantyFilterActive => 'Active';
+
+  @override
+  String get warrantyFilterExpiringSoon => 'Expiring soon';
+
+  @override
+  String get warrantyFilterExpired => 'Expired';
+
+  @override
+  String get warrantyFilterDate => 'Purchase date';
+
+  @override
+  String get warrantyFilterDateFrom => 'From';
+
+  @override
+  String get warrantyFilterDateTo => 'To';
+
+  @override
+  String get warrantyFilterDateApply => 'Apply';
+
+  @override
+  String get warrantyEmptyState => 'No warranty records yet. Tap + to add one.';
+
+  @override
+  String get warrantyEmptyActive => 'No active warranties.';
+
+  @override
+  String get warrantyEmptyExpiringSoon =>
+      'Nothing is expiring in the next 30 days.';
+
+  @override
+  String get warrantyEmptyExpired => 'No expired warranties.';
+
+  @override
+  String warrantyEmptySearch(String query) {
+    return 'No warranties match \"$query\".';
+  }
+
+  @override
+  String get warrantyEmptyDateRange =>
+      'No warranties purchased in that date range.';
+
+  @override
+  String get warrantyClearFilters => 'Clear filters';
+
+  @override
+  String warrantyExpiresOn(String date) {
+    return 'Expires $date';
+  }
+
+  @override
+  String get warrantyAddTitle => 'Add warranty record';
+
+  @override
+  String get warrantyEditTitle => 'Edit warranty record';
+
+  @override
+  String get warrantyCustomerName => 'Customer name';
+
+  @override
+  String get warrantyCustomerPhone => 'Customer phone';
+
+  @override
+  String get warrantyCustomerPhoneRequired => 'Customer phone is required';
+
+  @override
+  String get warrantyProduct => 'Product';
+
+  @override
+  String get warrantyProductRequired => 'Product is required';
+
+  @override
+  String get warrantyPickItem => 'Pick item';
+
+  @override
+  String get warrantySerialNumber => 'Serial number';
+
+  @override
+  String get warrantyPurchaseDate => 'Purchase date';
+
+  @override
+  String get warrantyPeriodMonths => 'Warranty period (months)';
+
+  @override
+  String get warrantyPeriodInvalid =>
+      'Enter a warranty period greater than zero';
+
+  @override
+  String get warrantyCategory => 'Category';
+
+  @override
+  String get warrantyExpiryDateLabel => 'Expiry date';
+
+  @override
+  String get warrantyExtraDetails => 'Additional Information';
+
+  @override
+  String get warrantyDetailLabel => 'Label';
+
+  @override
+  String get warrantyDetailValue => 'Value';
+
+  @override
+  String get warrantyAddDetail => 'Add detail';
+
+  @override
+  String get warrantyRemoveDetail => 'Remove detail';
+
+  @override
+  String get warrantyNotes => 'Notes';
+
+  @override
+  String get warrantyDeleteConfirmTitle => 'Delete this warranty record?';
+
+  @override
+  String get warrantyDeleteConfirmBody => 'This cannot be undone.';
 
   @override
   String get exportTitle => 'Export';
@@ -583,6 +779,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Track stock and reduce it automatically on each sale';
 
   @override
+  String get settingsWarranty => 'Warranty Tracking';
+
+  @override
+  String get settingsWarrantySubtitle =>
+      'Mark items as under warranty and track claims in the Warranty tab';
+
+  @override
   String get settingsGst => 'GST Invoices';
 
   @override
@@ -618,11 +821,37 @@ class AppLocalizationsEn extends AppLocalizations {
       'Items with an Item No show as (101) Item name on the billing page';
 
   @override
+  String get settingsNotifyOrders => 'Order alerts';
+
+  @override
+  String get settingsNotifyOrdersSubtitle =>
+      'Notify this account when an online or table order arrives';
+
+  @override
+  String get settingsNotifyLowStock => 'Low stock alerts';
+
+  @override
+  String get settingsNotifyLowStockSubtitle =>
+      'One quiet notification when items drop below their low stock limit';
+
+  @override
+  String get settingsGroupBilling => 'BILLING';
+
+  @override
+  String get settingsGroupStock => 'STOCK';
+
+  @override
+  String get settingsGroupOrdering => 'ORDERING';
+
+  @override
+  String get settingsGroupNotifications => 'NOTIFICATIONS';
+
+  @override
   String get settingsToggles => 'Settings';
 
   @override
   String get settingsTogglesSubtitle =>
-      'GST, inventory, round-off and other options';
+      'GST, inventory, notifications and other options';
 
   @override
   String get settingsManageStaff => 'Manage Staff';
@@ -653,6 +882,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsLanguage => 'Language';
+
+  @override
+  String get settingsConfirmSettle => 'Confirm before settling';
+
+  @override
+  String get settingsConfirmSettleSubtitle =>
+      'Ask once more before a bill is settled';
 
   @override
   String get settingsLanguageSubtitle => 'Choose your app language';
@@ -709,6 +945,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get businessTypeRestaurantTakeaway => 'Restaurant (takeaway)';
 
   @override
+  String get businessTypeRetailWarranty => 'Retail & Warranty Tracking';
+
+  @override
   String get appTagline => 'Smart Billing Solution';
 
   @override
@@ -757,7 +996,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get loginNoAccountFound => 'No account found with this phone number.';
 
   @override
-  String get loginIncorrectPin => 'Incorrect PIN. Please try again.';
+  String get loginIncorrectPin =>
+      'Incorrect phone number or PIN. Please try again.';
 
   @override
   String get loginAccountLocked =>
@@ -951,7 +1191,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get registerBusinessPhone => 'Business phone';
 
   @override
-  String get registerBusinessPhoneHint => '10-digit number';
+  String get registerBusinessPhoneHint => 'Mobile, or landline with STD code';
 
   @override
   String get registerAddress => 'Address (optional)';
@@ -1178,6 +1418,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billingWhatsappCaption => 'Settle';
 
   @override
+  String get billingConfirmSettle => 'Confirm & Settle';
+
+  @override
+  String get billingConfirmWhatsapp => 'Settle & Send';
+
+  @override
   String get billingSettleAndPrint => 'and print';
 
   @override
@@ -1317,6 +1563,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Add the customer\'s phone number to send on WhatsApp';
 
   @override
+  String get billingWarrantyNeedsPhone =>
+      'Add the customer\'s phone number to register the warranty';
+
+  @override
   String get billingWhatsappFailed => 'Could not send WhatsApp message';
 
   @override
@@ -1326,6 +1576,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billingOutOfStock => 'Out of stock';
+
+  @override
+  String get billingAllItemsTicked => 'All items ticked';
 
   @override
   String get billingInsufficientStock => 'Insufficient Stock';
@@ -1431,7 +1684,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billSetupAltPhone => 'Alternate mobile number (optional)';
 
   @override
-  String get billSetupAltPhoneInvalid => 'Enter a valid phone number';
+  String get billSetupAltPhoneInvalid => 'Enter a valid 10-digit mobile number';
+
+  @override
+  String get billSetupAltPhoneLabel => 'Label (optional)';
+
+  @override
+  String get billSetupAltPhoneLabelHint => 'e.g. GPay, WhatsApp';
 
   @override
   String get billSetupGstin => 'Shop GSTIN';
@@ -1457,6 +1716,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get billSetupNote => 'Note on bill';
+
+  @override
+  String get billSetupWarrantyDetails => 'Extra details';
 
   @override
   String get billSetupNoteSubtitle => 'A message printed on every bill';
@@ -1695,6 +1957,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String billingPaidOnline(String paid, String balance) {
+    return 'Paid online $paid · Balance $balance';
+  }
+
+  @override
   String billingSplitMismatch(String amount) {
     return 'Payments must add up to $amount';
   }
@@ -1909,6 +2176,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsFieldHsnHint => 'e.g. 9963 for restaurant service';
 
   @override
+  String get itemsWarrantyEligible => 'Carries warranty';
+
+  @override
+  String get itemsWarrantyDefaultMonths => 'Default warranty period (months)';
+
+  @override
+  String get itemsManageWarrantyFields =>
+      'Manage warranty fields for this category';
+
+  @override
+  String itemsWarrantyFieldsFor(String category) {
+    return 'Warranty fields for $category';
+  }
+
+  @override
   String get itemsFieldItemNo => 'Item No (optional)';
 
   @override
@@ -2011,6 +2293,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String itemsSizeEditTitle(String label) {
     return 'Edit — $label';
   }
+
+  @override
+  String get itemsListPrice => 'List price';
+
+  @override
+  String get itemsPriceListSaveFailed =>
+      'Item saved, but its price list price did not. Tap Save to try again.';
 
   @override
   String get itemsHasVariants => 'This item has variants';
@@ -2284,7 +2573,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get historyBillHistoryTitle => 'Bill History';
 
   @override
-  String get historySearchBillOrPhone => 'Search bill no. or phone…';
+  String get historySearchBillOrPhone => 'Search bill no., name or phone…';
 
   @override
   String get historyNoBillsForPeriod => 'No bills found for this period.';
@@ -2769,10 +3058,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get businessProfileNameHint => 'e.g. Kamble Provisions';
 
   @override
-  String get businessProfilePhoneHint => '10-digit mobile number';
+  String get businessProfilePhoneHint => 'Mobile, or landline with STD code';
 
   @override
-  String get businessProfilePhoneInvalid => 'Must be 10 digits';
+  String get businessProfilePhoneInvalid =>
+      'Enter a 10-digit mobile, or a landline with STD code';
 
   @override
   String get businessProfileEmail => 'Email (optional)';
@@ -3927,4 +4217,112 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get priceListBadNumber => 'Enter a valid number';
+
+  @override
+  String get termsConsentTos => 'Terms of Service';
+
+  @override
+  String get termsConsentAup => 'Acceptable Use Policy';
+
+  @override
+  String get termsConsentPrivacy => 'Privacy Policy';
+
+  @override
+  String get termsConsentLead => 'I have read and agree to the';
+
+  @override
+  String get termsConsentAnd => 'and';
+
+  @override
+  String get termsUpdatedTitle => 'We\'ve updated our Terms';
+
+  @override
+  String get termsUpdatedBody =>
+      'Please review the documents below. To keep using Vittam, tick the box at the bottom and tap Agree.';
+
+  @override
+  String termsUpdatedVersion(String version) {
+    return 'Version $version';
+  }
+
+  @override
+  String get termsAgree => 'Agree';
+
+  @override
+  String get termsSaveFailed =>
+      'Could not save your acceptance. Check your connection and try again.';
+
+  @override
+  String get settingsTermsSubtitle => 'The agreement for using Vittam';
+
+  @override
+  String get settingsAupSubtitle => 'What is not allowed on Vittam';
+
+  @override
+  String get settingsBarcodeScanner => 'Barcode Scanner';
+
+  @override
+  String get settingsBarcodeScannerSubtitle =>
+      'Connect a Bluetooth or USB scanner';
+
+  @override
+  String get scannerSteps =>
+      '1. Put the scanner in HID (keyboard) mode. Most scanners do this by scanning a setup barcode from their manual.\n2. Open Bluetooth settings and pair the scanner like a keyboard. A USB scanner just needs plugging in.\n3. Come back here and scan any barcode to test it.';
+
+  @override
+  String get scannerOpenBluetooth => 'Open Bluetooth settings';
+
+  @override
+  String get scannerOpenFailed =>
+      'Could not open Bluetooth settings. Open them from your device settings.';
+
+  @override
+  String get scannerTestTitle => 'Test scan';
+
+  @override
+  String get scannerTestHint => 'Tap here, then scan a barcode';
+
+  @override
+  String scannerTestMatched(String name) {
+    return 'Scanner works: $name';
+  }
+
+  @override
+  String scannerTestUnknown(String code) {
+    return 'Scanner works, read $code, but no item has this barcode';
+  }
+
+  @override
+  String get itemsDownloadBarcodes => 'Download all barcodes';
+
+  @override
+  String get barcodesPreparing => 'Preparing…';
+
+  @override
+  String barcodesSaving(int done, int total) {
+    return 'Saving barcodes $done/$total';
+  }
+
+  @override
+  String get barcodesMakingImages => 'Making barcode images…';
+
+  @override
+  String barcodesFailed(int count) {
+    return '$count barcodes could not be saved';
+  }
+
+  @override
+  String get barcodesPickFields => 'Show on each barcode image';
+
+  @override
+  String get barcodesFieldName => 'Item name';
+
+  @override
+  String get barcodesFieldSize => 'Variant';
+
+  @override
+  String get barcodesFieldPrice => 'Price';
+
+  @override
+  String get barcodesFieldCode => 'Barcode number';
 }

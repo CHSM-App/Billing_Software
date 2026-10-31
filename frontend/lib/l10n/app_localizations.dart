@@ -296,6 +296,12 @@ abstract class AppLocalizations {
   /// **'Kitchen'**
   String get navKitchen;
 
+  /// No description provided for @navWarranty.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty'**
+  String get navWarranty;
+
   /// No description provided for @navOpenOrders.
   ///
   /// In en, this message translates to:
@@ -337,6 +343,102 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Credit'**
   String get ordersTabCredit;
+
+  /// No description provided for @ordersTabQuotations.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotations'**
+  String get ordersTabQuotations;
+
+  /// No description provided for @settingsQuotations.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotations'**
+  String get settingsQuotations;
+
+  /// No description provided for @settingsQuotationsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Give customers a priced quote, then turn it into a bill later'**
+  String get settingsQuotationsSubtitle;
+
+  /// No description provided for @quotationQuoteShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Quote'**
+  String get quotationQuoteShort;
+
+  /// No description provided for @quotationSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as quotation'**
+  String get quotationSave;
+
+  /// No description provided for @quotationSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotation {number} saved'**
+  String quotationSaved(String number);
+
+  /// No description provided for @quotationNeedsInternet.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving a quotation needs the internet'**
+  String get quotationNeedsInternet;
+
+  /// No description provided for @quotationConvertNeedsInternet.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect to the internet to bill a quotation'**
+  String get quotationConvertNeedsInternet;
+
+  /// No description provided for @quotationsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No quotations yet. Tap Quote on the billing page to make one.'**
+  String get quotationsEmpty;
+
+  /// No description provided for @quotationItemCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 item} other{{count} items}}'**
+  String quotationItemCount(int count);
+
+  /// No description provided for @quotationPrint.
+  ///
+  /// In en, this message translates to:
+  /// **'Print'**
+  String get quotationPrint;
+
+  /// No description provided for @quotationShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get quotationShare;
+
+  /// No description provided for @quotationConvert.
+  ///
+  /// In en, this message translates to:
+  /// **'Convert to bill'**
+  String get quotationConvert;
+
+  /// No description provided for @quotationDeleteConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete quotation {number}?'**
+  String quotationDeleteConfirm(String number);
+
+  /// No description provided for @quotationShareText.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotation {number} from {business}'**
+  String quotationShareText(String number, String business);
+
+  /// No description provided for @receiptQuotation.
+  ///
+  /// In en, this message translates to:
+  /// **'QUOTATION'**
+  String get receiptQuotation;
 
   /// No description provided for @billingCreditCustomerRequired.
   ///
@@ -493,6 +595,246 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Customers'**
   String get customersTitle;
+
+  /// No description provided for @warrantyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty'**
+  String get warrantyTitle;
+
+  /// No description provided for @warrantySearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search name, phone, serial number or details'**
+  String get warrantySearchHint;
+
+  /// No description provided for @warrantyFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get warrantyFilterAll;
+
+  /// No description provided for @warrantyFilterActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get warrantyFilterActive;
+
+  /// No description provided for @warrantyFilterExpiringSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Expiring soon'**
+  String get warrantyFilterExpiringSoon;
+
+  /// No description provided for @warrantyFilterExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get warrantyFilterExpired;
+
+  /// No description provided for @warrantyFilterDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase date'**
+  String get warrantyFilterDate;
+
+  /// No description provided for @warrantyFilterDateFrom.
+  ///
+  /// In en, this message translates to:
+  /// **'From'**
+  String get warrantyFilterDateFrom;
+
+  /// No description provided for @warrantyFilterDateTo.
+  ///
+  /// In en, this message translates to:
+  /// **'To'**
+  String get warrantyFilterDateTo;
+
+  /// No description provided for @warrantyFilterDateApply.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply'**
+  String get warrantyFilterDateApply;
+
+  /// No description provided for @warrantyEmptyState.
+  ///
+  /// In en, this message translates to:
+  /// **'No warranty records yet. Tap + to add one.'**
+  String get warrantyEmptyState;
+
+  /// No description provided for @warrantyEmptyActive.
+  ///
+  /// In en, this message translates to:
+  /// **'No active warranties.'**
+  String get warrantyEmptyActive;
+
+  /// No description provided for @warrantyEmptyExpiringSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing is expiring in the next 30 days.'**
+  String get warrantyEmptyExpiringSoon;
+
+  /// No description provided for @warrantyEmptyExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'No expired warranties.'**
+  String get warrantyEmptyExpired;
+
+  /// No description provided for @warrantyEmptySearch.
+  ///
+  /// In en, this message translates to:
+  /// **'No warranties match \"{query}\".'**
+  String warrantyEmptySearch(String query);
+
+  /// No description provided for @warrantyEmptyDateRange.
+  ///
+  /// In en, this message translates to:
+  /// **'No warranties purchased in that date range.'**
+  String get warrantyEmptyDateRange;
+
+  /// No description provided for @warrantyClearFilters.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear filters'**
+  String get warrantyClearFilters;
+
+  /// No description provided for @warrantyExpiresOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Expires {date}'**
+  String warrantyExpiresOn(String date);
+
+  /// No description provided for @warrantyAddTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add warranty record'**
+  String get warrantyAddTitle;
+
+  /// No description provided for @warrantyEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit warranty record'**
+  String get warrantyEditTitle;
+
+  /// No description provided for @warrantyCustomerName.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer name'**
+  String get warrantyCustomerName;
+
+  /// No description provided for @warrantyCustomerPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer phone'**
+  String get warrantyCustomerPhone;
+
+  /// No description provided for @warrantyCustomerPhoneRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Customer phone is required'**
+  String get warrantyCustomerPhoneRequired;
+
+  /// No description provided for @warrantyProduct.
+  ///
+  /// In en, this message translates to:
+  /// **'Product'**
+  String get warrantyProduct;
+
+  /// No description provided for @warrantyProductRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Product is required'**
+  String get warrantyProductRequired;
+
+  /// No description provided for @warrantyPickItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick item'**
+  String get warrantyPickItem;
+
+  /// No description provided for @warrantySerialNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Serial number'**
+  String get warrantySerialNumber;
+
+  /// No description provided for @warrantyPurchaseDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase date'**
+  String get warrantyPurchaseDate;
+
+  /// No description provided for @warrantyPeriodMonths.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty period (months)'**
+  String get warrantyPeriodMonths;
+
+  /// No description provided for @warrantyPeriodInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a warranty period greater than zero'**
+  String get warrantyPeriodInvalid;
+
+  /// No description provided for @warrantyCategory.
+  ///
+  /// In en, this message translates to:
+  /// **'Category'**
+  String get warrantyCategory;
+
+  /// No description provided for @warrantyExpiryDateLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Expiry date'**
+  String get warrantyExpiryDateLabel;
+
+  /// No description provided for @warrantyExtraDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Additional Information'**
+  String get warrantyExtraDetails;
+
+  /// No description provided for @warrantyDetailLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Label'**
+  String get warrantyDetailLabel;
+
+  /// No description provided for @warrantyDetailValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Value'**
+  String get warrantyDetailValue;
+
+  /// No description provided for @warrantyAddDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Add detail'**
+  String get warrantyAddDetail;
+
+  /// No description provided for @warrantyRemoveDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove detail'**
+  String get warrantyRemoveDetail;
+
+  /// No description provided for @warrantyNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get warrantyNotes;
+
+  /// No description provided for @warrantyDeleteConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this warranty record?'**
+  String get warrantyDeleteConfirmTitle;
+
+  /// No description provided for @warrantyDeleteConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This cannot be undone.'**
+  String get warrantyDeleteConfirmBody;
 
   /// No description provided for @exportTitle.
   ///
@@ -1088,6 +1430,18 @@ abstract class AppLocalizations {
   /// **'Track stock and reduce it automatically on each sale'**
   String get settingsInventorySubtitle;
 
+  /// No description provided for @settingsWarranty.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty Tracking'**
+  String get settingsWarranty;
+
+  /// No description provided for @settingsWarrantySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Mark items as under warranty and track claims in the Warranty tab'**
+  String get settingsWarrantySubtitle;
+
   /// No description provided for @settingsGst.
   ///
   /// In en, this message translates to:
@@ -1148,6 +1502,54 @@ abstract class AppLocalizations {
   /// **'Items with an Item No show as (101) Item name on the billing page'**
   String get settingsShowItemNoSubtitle;
 
+  /// No description provided for @settingsNotifyOrders.
+  ///
+  /// In en, this message translates to:
+  /// **'Order alerts'**
+  String get settingsNotifyOrders;
+
+  /// No description provided for @settingsNotifyOrdersSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Notify this account when an online or table order arrives'**
+  String get settingsNotifyOrdersSubtitle;
+
+  /// No description provided for @settingsNotifyLowStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Low stock alerts'**
+  String get settingsNotifyLowStock;
+
+  /// No description provided for @settingsNotifyLowStockSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'One quiet notification when items drop below their low stock limit'**
+  String get settingsNotifyLowStockSubtitle;
+
+  /// No description provided for @settingsGroupBilling.
+  ///
+  /// In en, this message translates to:
+  /// **'BILLING'**
+  String get settingsGroupBilling;
+
+  /// No description provided for @settingsGroupStock.
+  ///
+  /// In en, this message translates to:
+  /// **'STOCK'**
+  String get settingsGroupStock;
+
+  /// No description provided for @settingsGroupOrdering.
+  ///
+  /// In en, this message translates to:
+  /// **'ORDERING'**
+  String get settingsGroupOrdering;
+
+  /// No description provided for @settingsGroupNotifications.
+  ///
+  /// In en, this message translates to:
+  /// **'NOTIFICATIONS'**
+  String get settingsGroupNotifications;
+
   /// No description provided for @settingsToggles.
   ///
   /// In en, this message translates to:
@@ -1157,7 +1559,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsTogglesSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'GST, inventory, round-off and other options'**
+  /// **'GST, inventory, notifications and other options'**
   String get settingsTogglesSubtitle;
 
   /// No description provided for @settingsManageStaff.
@@ -1219,6 +1621,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Language'**
   String get settingsLanguage;
+
+  /// No description provided for @settingsConfirmSettle.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm before settling'**
+  String get settingsConfirmSettle;
+
+  /// No description provided for @settingsConfirmSettleSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask once more before a bill is settled'**
+  String get settingsConfirmSettleSubtitle;
 
   /// No description provided for @settingsLanguageSubtitle.
   ///
@@ -1303,6 +1717,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Restaurant (takeaway)'**
   String get businessTypeRestaurantTakeaway;
+
+  /// No description provided for @businessTypeRetailWarranty.
+  ///
+  /// In en, this message translates to:
+  /// **'Retail & Warranty Tracking'**
+  String get businessTypeRetailWarranty;
 
   /// No description provided for @appTagline.
   ///
@@ -1403,7 +1823,7 @@ abstract class AppLocalizations {
   /// No description provided for @loginIncorrectPin.
   ///
   /// In en, this message translates to:
-  /// **'Incorrect PIN. Please try again.'**
+  /// **'Incorrect phone number or PIN. Please try again.'**
   String get loginIncorrectPin;
 
   /// No description provided for @loginAccountLocked.
@@ -1769,7 +2189,7 @@ abstract class AppLocalizations {
   /// No description provided for @registerBusinessPhoneHint.
   ///
   /// In en, this message translates to:
-  /// **'10-digit number'**
+  /// **'Mobile, or landline with STD code'**
   String get registerBusinessPhoneHint;
 
   /// No description provided for @registerAddress.
@@ -2210,6 +2630,18 @@ abstract class AppLocalizations {
   /// **'Settle'**
   String get billingWhatsappCaption;
 
+  /// No description provided for @billingConfirmSettle.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm & Settle'**
+  String get billingConfirmSettle;
+
+  /// No description provided for @billingConfirmWhatsapp.
+  ///
+  /// In en, this message translates to:
+  /// **'Settle & Send'**
+  String get billingConfirmWhatsapp;
+
   /// No description provided for @billingSettleAndPrint.
   ///
   /// In en, this message translates to:
@@ -2438,6 +2870,12 @@ abstract class AppLocalizations {
   /// **'Add the customer\'s phone number to send on WhatsApp'**
   String get billingWhatsappNeedsPhone;
 
+  /// No description provided for @billingWarrantyNeedsPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Add the customer\'s phone number to register the warranty'**
+  String get billingWarrantyNeedsPhone;
+
   /// No description provided for @billingWhatsappFailed.
   ///
   /// In en, this message translates to:
@@ -2455,6 +2893,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Out of stock'**
   String get billingOutOfStock;
+
+  /// No description provided for @billingAllItemsTicked.
+  ///
+  /// In en, this message translates to:
+  /// **'All items ticked'**
+  String get billingAllItemsTicked;
 
   /// No description provided for @billingInsufficientStock.
   ///
@@ -2627,8 +3071,20 @@ abstract class AppLocalizations {
   /// No description provided for @billSetupAltPhoneInvalid.
   ///
   /// In en, this message translates to:
-  /// **'Enter a valid phone number'**
+  /// **'Enter a valid 10-digit mobile number'**
   String get billSetupAltPhoneInvalid;
+
+  /// No description provided for @billSetupAltPhoneLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Label (optional)'**
+  String get billSetupAltPhoneLabel;
+
+  /// No description provided for @billSetupAltPhoneLabelHint.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. GPay, WhatsApp'**
+  String get billSetupAltPhoneLabelHint;
 
   /// No description provided for @billSetupGstin.
   ///
@@ -2677,6 +3133,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Note on bill'**
   String get billSetupNote;
+
+  /// No description provided for @billSetupWarrantyDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Extra details'**
+  String get billSetupWarrantyDetails;
 
   /// No description provided for @billSetupNoteSubtitle.
   ///
@@ -3080,6 +3542,12 @@ abstract class AppLocalizations {
   /// **'{amount} extra'**
   String billingPayExtra(String amount);
 
+  /// No description provided for @billingPaidOnline.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid online {paid} · Balance {balance}'**
+  String billingPaidOnline(String paid, String balance);
+
   /// No description provided for @billingSplitMismatch.
   ///
   /// In en, this message translates to:
@@ -3448,6 +3916,30 @@ abstract class AppLocalizations {
   /// **'e.g. 9963 for restaurant service'**
   String get itemsFieldHsnHint;
 
+  /// No description provided for @itemsWarrantyEligible.
+  ///
+  /// In en, this message translates to:
+  /// **'Carries warranty'**
+  String get itemsWarrantyEligible;
+
+  /// No description provided for @itemsWarrantyDefaultMonths.
+  ///
+  /// In en, this message translates to:
+  /// **'Default warranty period (months)'**
+  String get itemsWarrantyDefaultMonths;
+
+  /// No description provided for @itemsManageWarrantyFields.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage warranty fields for this category'**
+  String get itemsManageWarrantyFields;
+
+  /// No description provided for @itemsWarrantyFieldsFor.
+  ///
+  /// In en, this message translates to:
+  /// **'Warranty fields for {category}'**
+  String itemsWarrantyFieldsFor(String category);
+
   /// No description provided for @itemsFieldItemNo.
   ///
   /// In en, this message translates to:
@@ -3645,6 +4137,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Edit — {label}'**
   String itemsSizeEditTitle(String label);
+
+  /// No description provided for @itemsListPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'List price'**
+  String get itemsListPrice;
+
+  /// No description provided for @itemsPriceListSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Item saved, but its price list price did not. Tap Save to try again.'**
+  String get itemsPriceListSaveFailed;
 
   /// No description provided for @itemsHasVariants.
   ///
@@ -4117,7 +4621,7 @@ abstract class AppLocalizations {
   /// No description provided for @historySearchBillOrPhone.
   ///
   /// In en, this message translates to:
-  /// **'Search bill no. or phone…'**
+  /// **'Search bill no., name or phone…'**
   String get historySearchBillOrPhone;
 
   /// No description provided for @historyNoBillsForPeriod.
@@ -4951,13 +5455,13 @@ abstract class AppLocalizations {
   /// No description provided for @businessProfilePhoneHint.
   ///
   /// In en, this message translates to:
-  /// **'10-digit mobile number'**
+  /// **'Mobile, or landline with STD code'**
   String get businessProfilePhoneHint;
 
   /// No description provided for @businessProfilePhoneInvalid.
   ///
   /// In en, this message translates to:
-  /// **'Must be 10 digits'**
+  /// **'Enter a 10-digit mobile, or a landline with STD code'**
   String get businessProfilePhoneInvalid;
 
   /// No description provided for @businessProfileEmail.
@@ -6933,6 +7437,192 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enter a valid number'**
   String get priceListBadNumber;
+
+  /// No description provided for @termsConsentTos.
+  ///
+  /// In en, this message translates to:
+  /// **'Terms of Service'**
+  String get termsConsentTos;
+
+  /// No description provided for @termsConsentAup.
+  ///
+  /// In en, this message translates to:
+  /// **'Acceptable Use Policy'**
+  String get termsConsentAup;
+
+  /// No description provided for @termsConsentPrivacy.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy Policy'**
+  String get termsConsentPrivacy;
+
+  /// No description provided for @termsConsentLead.
+  ///
+  /// In en, this message translates to:
+  /// **'I have read and agree to the'**
+  String get termsConsentLead;
+
+  /// No description provided for @termsConsentAnd.
+  ///
+  /// In en, this message translates to:
+  /// **'and'**
+  String get termsConsentAnd;
+
+  /// No description provided for @termsUpdatedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'We\'ve updated our Terms'**
+  String get termsUpdatedTitle;
+
+  /// No description provided for @termsUpdatedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Please review the documents below. To keep using Vittam, tick the box at the bottom and tap Agree.'**
+  String get termsUpdatedBody;
+
+  /// No description provided for @termsUpdatedVersion.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}'**
+  String termsUpdatedVersion(String version);
+
+  /// No description provided for @termsAgree.
+  ///
+  /// In en, this message translates to:
+  /// **'Agree'**
+  String get termsAgree;
+
+  /// No description provided for @termsSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save your acceptance. Check your connection and try again.'**
+  String get termsSaveFailed;
+
+  /// No description provided for @settingsTermsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'The agreement for using Vittam'**
+  String get settingsTermsSubtitle;
+
+  /// No description provided for @settingsAupSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'What is not allowed on Vittam'**
+  String get settingsAupSubtitle;
+
+  /// No description provided for @settingsBarcodeScanner.
+  ///
+  /// In en, this message translates to:
+  /// **'Barcode Scanner'**
+  String get settingsBarcodeScanner;
+
+  /// No description provided for @settingsBarcodeScannerSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect a Bluetooth or USB scanner'**
+  String get settingsBarcodeScannerSubtitle;
+
+  /// No description provided for @scannerSteps.
+  ///
+  /// In en, this message translates to:
+  /// **'1. Put the scanner in HID (keyboard) mode. Most scanners do this by scanning a setup barcode from their manual.\n2. Open Bluetooth settings and pair the scanner like a keyboard. A USB scanner just needs plugging in.\n3. Come back here and scan any barcode to test it.'**
+  String get scannerSteps;
+
+  /// No description provided for @scannerOpenBluetooth.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Bluetooth settings'**
+  String get scannerOpenBluetooth;
+
+  /// No description provided for @scannerOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open Bluetooth settings. Open them from your device settings.'**
+  String get scannerOpenFailed;
+
+  /// No description provided for @scannerTestTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Test scan'**
+  String get scannerTestTitle;
+
+  /// No description provided for @scannerTestHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap here, then scan a barcode'**
+  String get scannerTestHint;
+
+  /// No description provided for @scannerTestMatched.
+  ///
+  /// In en, this message translates to:
+  /// **'Scanner works: {name}'**
+  String scannerTestMatched(String name);
+
+  /// No description provided for @scannerTestUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Scanner works, read {code}, but no item has this barcode'**
+  String scannerTestUnknown(String code);
+
+  /// No description provided for @itemsDownloadBarcodes.
+  ///
+  /// In en, this message translates to:
+  /// **'Download all barcodes'**
+  String get itemsDownloadBarcodes;
+
+  /// No description provided for @barcodesPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing…'**
+  String get barcodesPreparing;
+
+  /// No description provided for @barcodesSaving.
+  ///
+  /// In en, this message translates to:
+  /// **'Saving barcodes {done}/{total}'**
+  String barcodesSaving(int done, int total);
+
+  /// No description provided for @barcodesMakingImages.
+  ///
+  /// In en, this message translates to:
+  /// **'Making barcode images…'**
+  String get barcodesMakingImages;
+
+  /// No description provided for @barcodesFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} barcodes could not be saved'**
+  String barcodesFailed(int count);
+
+  /// No description provided for @barcodesPickFields.
+  ///
+  /// In en, this message translates to:
+  /// **'Show on each barcode image'**
+  String get barcodesPickFields;
+
+  /// No description provided for @barcodesFieldName.
+  ///
+  /// In en, this message translates to:
+  /// **'Item name'**
+  String get barcodesFieldName;
+
+  /// No description provided for @barcodesFieldSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Variant'**
+  String get barcodesFieldSize;
+
+  /// No description provided for @barcodesFieldPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get barcodesFieldPrice;
+
+  /// No description provided for @barcodesFieldCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Barcode number'**
+  String get barcodesFieldCode;
 }
 
 class _AppLocalizationsDelegate

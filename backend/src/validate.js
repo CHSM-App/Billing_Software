@@ -68,11 +68,51 @@ function validateEnum(value, label, allowed) {
   return null;
 }
 
+// Largest number of {label, value} pairs an extra_data array may carry —
+// shared by routes/warranties.js (a warranty record's own extra_data) and
+// routes/bills.js (warranty details captured at billing time, migration 065).
+const MAX_EXTRA_DATA = 30;
+
+/// Validates an extra_data array — labeled pairs, e.g. warranty details
+/// filled from a category template plus any ad-hoc rows staff added. Values
+/// are always stored as strings; any type-specific rendering (number/date)
+/// is a UI concern, not a storage concern.
+function validateExtraData(extraData) {
+  if (extraData === undefined || extraData === null) return null;
+  if (!Array.isArray(extraData)) return 'extra_data must be an array';
+  if (extraData.length > MAX_EXTRA_DATA) return `At most ${MAX_EXTRA_DATA} extra fields are allowed`;
+  for (const e of extraData) {
+    if (!e || typeof e !== 'object') return 'each extra_data entry must be an object';
+    if (validateText(e.label, 'Extra field label', 100, { required: true })) {
+      return 'each extra_data entry needs a label';
+    }
+    if (e.value != null && String(e.value).length > 500) {
+      return 'each extra_data value must be 500 characters or fewer';
+    }
+  }
+  return null;
+}
+
+/// Indian mobile number: 10 digits starting 6–9. Login/OTP routes keep the
+/// looser /^\d{10}$/ so an account created before this rule still signs in.
+/// Mirrors isIndianMobile() in frontend/lib/utils/text_formatters.dart.
+const isIndianMobile = (v) => /^[6-9]\d{9}$/.test(String(v ?? ''));
+
+/// The shop's own phone: a mobile, or a landline with its STD code (0 + 10
+/// digits, spaces/hyphens allowed: 02366-262626). Only the business phone
+/// takes landlines — logins, staff and customers get OTPs/WhatsApp, so they
+/// stay isIndianMobile. Mirrors isBusinessPhone() in text_formatters.dart.
+const isBusinessPhone = (v) =>
+  isIndianMobile(v) || /^0[1-9]\d{9}$/.test(String(v ?? '').trim().replace(/[\s-]/g, ''));
+
 module.exports = {
+  isIndianMobile,
+  isBusinessPhone,
   MAX_DECIMAL_10_2,
   MAX_DECIMAL_12_4,
   validateNumber,
   validateInteger,
   validateText,
   validateEnum,
+  validateExtraData,
 };

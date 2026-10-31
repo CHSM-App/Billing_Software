@@ -4,17 +4,24 @@ import '../storage.dart';
 class SessionData {
   final String userId;
   final String userName;
+  /// The logged-in user's own mobile number. Empty until their next login on
+  /// a build that saves it.
+  final String userPhone;
   final String userRole;
   final String businessId;
   final String businessName;
   final String businessType;
   final bool inventoryEnabled;
+  final bool warrantyEnabled;
   final bool hasBarcodeScanner;
   final bool gstEnabled;
   final bool roundOffEnabled;
 
   /// Show each item's number on the billing page as "(101) Masala Dosa".
   final bool showItemNo;
+
+  /// Quotations feature (Settings): the Quote button and the Quotations tab.
+  final bool quotationsEnabled;
 
   /// Online store master switch. Gates whether the shell polls the online-order
   /// queue and shows its tab at all.
@@ -26,15 +33,18 @@ class SessionData {
   const SessionData({
     required this.userId,
     required this.userName,
+    this.userPhone = '',
     required this.userRole,
     required this.businessId,
     required this.businessName,
     required this.businessType,
     required this.inventoryEnabled,
+    this.warrantyEnabled = false,
     required this.hasBarcodeScanner,
     required this.gstEnabled,
     required this.roundOffEnabled,
     this.showItemNo = false,
+    this.quotationsEnabled = false,
     required this.storeEnabled,
     this.customersEnabled = true,
   });
@@ -56,15 +66,18 @@ class SessionData {
   static SessionData fromMap(Map<String, dynamic> m) => SessionData(
         userId: m['user_id'] ?? '',
         userName: m['user_name'] ?? '',
+        userPhone: m['user_phone'] ?? '',
         userRole: m['user_role'] ?? '',
         businessId: m['business_id'] ?? '',
         businessName: m['business_name'] ?? '',
         businessType: m['business_type'] ?? '',
         inventoryEnabled: m['inventory_enabled'] == true,
+        warrantyEnabled: m['warranty_enabled'] == true,
         hasBarcodeScanner: m['has_barcode_scanner'] == true,
         gstEnabled: m['gst_enabled'] == true,
         roundOffEnabled: m['round_off_enabled'] == true,
         showItemNo: m['show_item_no'] == true,
+        quotationsEnabled: m['quotations_enabled'] == true,
         storeEnabled: m['store_enabled'] == true,
         customersEnabled: m['customers_enabled'] != false,
       );
@@ -122,6 +135,11 @@ final hasBarcodeProvider = Provider<bool>((ref) => true);
 final inventoryEnabledProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.inventoryEnabled ?? false);
 
+// Retail-only warranty tracking feature. When true, the Warranty nav tab and
+// each item's "Carries warranty" fields appear.
+final warrantyEnabledProvider = Provider<bool>((ref) =>
+    ref.watch(sessionProvider).valueOrNull?.warrantyEnabled ?? false);
+
 // Master GST toggle. When false (the default), all GST UI and receipt sections
 // are hidden and the app behaves exactly as before.
 final gstEnabledProvider = Provider<bool>((ref) =>
@@ -136,3 +154,8 @@ final roundOffEnabledProvider = Provider<bool>((ref) =>
 // item names; the number stays searchable either way.
 final showItemNoProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.showItemNo ?? false);
+
+// Quotations (Settings, off by default): the billing page's Quote button and
+// the Orders page's Quotations tab.
+final quotationsEnabledProvider = Provider<bool>((ref) =>
+    ref.watch(sessionProvider).valueOrNull?.quotationsEnabled ?? false);

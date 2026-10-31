@@ -355,15 +355,21 @@ router.post('/message', whatsappLimiter, async (req, res) => {
     }
 
     // Per-business daily cap — every queued/sent/failed row today counts.
-    const dailyLimit = parseInt(process.env.CAMPAIGN_DAILY_LIMIT, 10) || 500;
     const usedResult = await pool.request()
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT COUNT(*) AS used FROM campaign_messages
+        SELECT COUNT(*) AS used,
+               (SELECT is_trial FROM subscriptions WHERE business_id = @business_id) AS is_trial
+        FROM campaign_messages
         WHERE business_id = @business_id
           AND status IN ('queued', 'sent', 'failed')
           AND created_at >= CAST(CAST(GETUTCDATE() AS DATE) AS DATETIME2)
       `);
+    // A trial costs nothing to create, so it gets a far smaller cap: otherwise
+    // a throwaway sign-up is a free-text bulk sender on our WhatsApp account.
+    const dailyLimit = usedResult.recordset[0].is_trial
+      ? (parseInt(process.env.CAMPAIGN_TRIAL_DAILY_LIMIT, 10) || 25)
+      : (parseInt(process.env.CAMPAIGN_DAILY_LIMIT, 10) || 500);
     const remaining = Math.max(0, dailyLimit - usedResult.recordset[0].used);
     if (recipients.length > remaining) {
       return res.status(429).json({

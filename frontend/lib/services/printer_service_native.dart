@@ -1,5 +1,6 @@
 import 'dart:async' show TimeoutException;
 import 'dart:convert';
+import 'dart:developer' as dev show log;
 import 'dart:ffi'
     show IntPtr, Uint8, Uint32, nullptr, AllocatorAlloc, Uint8Pointer,
         AbiSpecificIntegerPointer, Uint32Pointer, StructPointer;
@@ -18,7 +19,14 @@ import '../models/models.dart';
 
 // On Windows we still fall back to flutter_thermal_printer (BLE/USB).
 import 'package:flutter_thermal_printer/flutter_thermal_printer.dart' as ftp
-    show FlutterThermalPrinter;
+    show
+        FlutterThermalPrinter,
+        BleCharacteristic,
+        BleCharacteristicExtension,
+        BleDeviceExtension,
+        CharacteristicProperty,
+        QueueType,
+        UniversalBle;
 import 'package:flutter_thermal_printer/utils/printer.dart' as ftp
     show Printer, ConnectionType;
 import 'package:flutter_thermal_printer/printer_manager.dart' as ftp
@@ -403,9 +411,11 @@ class PrinterService {
     var total = (labels?.colTotal ?? 'Total').length;
 
     for (final item in bill.items) {
-      final q = item.quantity % 1 == 0
-          ? item.quantity.toInt().toString()
-          : item.quantity.toStringAsFixed(1);
+      final q = receiptQty(
+          item,
+          item.quantity % 1 == 0
+              ? item.quantity.toInt().toString()
+              : item.quantity.toStringAsFixed(1));
       if (q.length > qty) qty = q.length;
       final pr = item.receiptPrice.toStringAsFixed(2);
       if (pr.length > price) price = pr.length;
@@ -496,7 +506,8 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       bool gstEnabled = true,
-      ReceiptLabels? labels}) {
+      ReceiptLabels? labels,
+      BillSettings settings = const BillSettings()}) {
     final inner = _ColProfile(
       cols: basep.cols - 2,
       nameCols: basep.nameCols - 2,
@@ -515,7 +526,8 @@ class PrinterService {
           businessGstin: businessGstin,
           businessFssai: businessFssai,
           gstEnabled: gstEnabled,
-          labels: labels);
+          labels: labels,
+          settings: settings);
     }
 
     final body = _buildReceiptBody(bill, inner,
@@ -525,7 +537,8 @@ class PrinterService {
         businessGstin: businessGstin,
         businessFssai: businessFssai,
         gstEnabled: gstEnabled,
-        labels: labels);
+        labels: labels,
+        settings: settings);
 
     final edge = '+${'-' * inner.cols}+';
     final divider = '-' * inner.cols;
@@ -562,7 +575,8 @@ class PrinterService {
       String? businessGstin,
       String? businessFssai,
       bool gstEnabled = true,
-      ReceiptLabels? labels}) {
+      ReceiptLabels? labels,
+      BillSettings settings = const BillSettings()}) {
     // Size the item columns to this bill's actual values, giving the slack to
     // the name column. Falls back to the static profile when it can't improve.
     final p = _fitProfile(basep, bill, gstEnabled, labels);
@@ -597,8 +611,13 @@ class PrinterService {
       lines.addAll(_centreMultiline(businessAddress, p.cols));
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
-      lines.add(
-          _centre('${labels?.phonePrefix ?? 'Ph:'} $businessPhone', p.cols));
+      // One number per line (BillSettings.shopPhones); "Ph:" on the first.
+      final nums = businessPhone.split('\n');
+      for (var i = 0; i < nums.length; i++) {
+        lines.add(_centre(
+            i == 0 ? '${labels?.phonePrefix ?? 'Ph:'} ${nums[i]}' : nums[i],
+            p.cols));
+      }
     }
     if (gst) {
       lines.add(_centre('${labels?.gstin ?? 'GSTIN:'} $businessGstin', p.cols));
@@ -608,6 +627,9 @@ class PrinterService {
     }
     lines.add('-' * p.cols);
 
+    if (bill.status == 'quotation') {
+      lines.add(_boldLineMarker + _centre(labels?.quotation ?? 'QUOTATION', p.cols));
+    }
     // Bill info
     lines.add('${labels?.billNo ?? 'Bill#:'} ${bill.displayNumber}');
     // Table orders print their table number so the receipt is identifiable.
@@ -625,6 +647,14 @@ class PrinterService {
     if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty) {
       lines.add('${labels?.customerPhone ?? 'Ph:'} ${bill.customerPhone}');
     }
+    // Warranty details captured at billing time (migration 065) — e.g. a
+    // tyre's vehicle KM reading — printed as plain "Label: value" lines
+    // alongside the customer info, same as every other bill-info line here.
+    if (settings.showWarrantyDetails) {
+      for (final e in bill.warrantyExtraData) {
+        lines.add('${e.label}: ${e.value}');
+      }
+    }
     lines.add('-' * p.cols);
 
     // Items header — titles centred in their columns.
@@ -641,9 +671,11 @@ class PrinterService {
     // Items
     for (var i = 0; i < bill.items.length; i++) {
       final item = bill.items[i];
-      final qty = item.quantity % 1 == 0
-          ? item.quantity.toInt().toString()
-          : item.quantity.toStringAsFixed(1);
+      final qty = receiptQty(
+          item,
+          item.quantity % 1 == 0
+              ? item.quantity.toInt().toString()
+              : item.quantity.toStringAsFixed(1));
       // Wrap the name within its column instead of truncating, so a long name
       // prints in full across several lines while staying inside the name
       // column (qty/price/total sit on the first line only).
@@ -781,6 +813,10 @@ class PrinterService {
         labels: labels,
         logo: logo));
 
+    if (bill.status == 'quotation') {
+      rows.add(ReceiptRow.center(labels?.quotation ?? 'QUOTATION',
+          size: sizeTitle, bold: true));
+    }
     // Bill info (label left, value right)
     rows.add(ReceiptRow.cols([
       ReceiptCell('${labels?.billNo ?? 'Bill#:'} ${bill.displayNumber}',
@@ -818,6 +854,14 @@ class PrinterService {
       }
       if (bill.customerGstin != null && bill.customerGstin!.isNotEmpty) {
         rows.add(line('${labels?.gstin ?? 'GSTIN:'} ${bill.customerGstin}'));
+      }
+      // Warranty details captured at billing time (migration 065) — e.g. a
+      // tyre's vehicle KM reading — printed as plain "Label: value" lines
+      // alongside the rest of the customer info, not a separate section.
+      if (settings.showWarrantyDetails) {
+        for (final e in bill.warrantyExtraData) {
+          rows.add(line('${e.label}: ${e.value}'));
+        }
       }
     }
     rows.add(ReceiptRow.rule());
@@ -869,9 +913,11 @@ class PrinterService {
 
     for (var i = 0; i < bill.items.length; i++) {
       final item = bill.items[i];
-      final qty = item.quantity % 1 == 0
-          ? item.quantity.toInt().toString()
-          : item.quantity.toStringAsFixed(1);
+      final qty = receiptQty(
+          item,
+          item.quantity % 1 == 0
+              ? item.quantity.toInt().toString()
+              : item.quantity.toStringAsFixed(1));
       // Total column shows the NET line price (unit price × qty, before tax) —
       // consistent for retail and restaurant. Tax is summed once at the bottom.
       final netLine = item.unitPrice * item.quantity;
@@ -1005,8 +1051,13 @@ class PrinterService {
       }
     }
     if (businessPhone != null && businessPhone.isNotEmpty) {
-      rows.add(ReceiptRow.center(
-          '${labels?.phonePrefix ?? 'Ph:'} $businessPhone', size: sizeBody));
+      // One number per line (BillSettings.shopPhones); "Ph:" on the first.
+      final nums = businessPhone.split('\n');
+      for (var i = 0; i < nums.length; i++) {
+        rows.add(ReceiptRow.center(
+            i == 0 ? '${labels?.phonePrefix ?? 'Ph:'} ${nums[i]}' : nums[i],
+            size: sizeBody));
+      }
     }
     if (businessGstin != null && businessGstin.isNotEmpty) {
       rows.add(ReceiptRow.center(
@@ -1684,18 +1735,58 @@ class PrinterService {
       if (!await ftpInstance.connect(ftpPrinter)) {
         throw PrinterException('Could not connect to printer');
       }
-      // BLE (Windows). BLE is packet-based and the
-      // write size is capped by the ATT MTU — chunks larger than ~512 bytes make
-      // writeCharacteristic.write() fail silently (nothing prints). So keep 512
-      // (safe, proven) and just drop the artificial per-chunk delay for smooth
-      // feed: longData:false removes the 10ms sleep the package adds after every
-      // chunk (that sleep was what made the print head keep stopping / banding).
-      await ftpInstance.printData(
-        ftpPrinter,
-        bytes,
-        longData: false,
-        chunkSize: 512,
-      );
+      // BLE (Windows). Written here, not via ftp printData: that swallows
+      // write errors (a failed bill looked printed) and used a fixed 512-byte
+      // chunk. A write larger than the negotiated MTU (less the 3-byte ATT
+      // header) forces a long write, which cheap printers (CN811) reject — so
+      // the small test print went through while a raster bill failed on its
+      // first chunk. Windows only lets us query the MTU, not raise it.
+      final mtu = await ftpPrinter.requestMtu(512);
+      final chunk = (mtu - 3).clamp(20, 509);
+      // Same pick as the plugin: the last service's first writable
+      // characteristic.
+      ftp.BleCharacteristic? out;
+      for (final s in await ftpPrinter.discoverServices()) {
+        for (final c in s.characteristics) {
+          if (c.properties.contains(ftp.CharacteristicProperty.write)) {
+            out = c;
+            break;
+          }
+        }
+      }
+      if (out == null) {
+        throw PrinterException('Printer has no writable Bluetooth channel');
+      }
+      // Awaiting each write let Windows send just one packet per connection
+      // event: 48 KB took 30 s (~150 ms a write) even without response. So
+      // issue a burst of [burst] chunks at once — Windows packs several per
+      // event — with only the burst's LAST chunk acked: writes on one
+      // characteristic go out in order, so that ack means the whole burst
+      // reached the printer, which paces its buffer. The plugin's command
+      // queue serialises calls, so it is bypassed for the burst.
+      // ponytail: fixed burst (~3.8 KB in flight); lower it if long bills
+      // drop rows, raise it if a printer keeps up.
+      const burst = 16;
+      final noAck = out.properties
+          .contains(ftp.CharacteristicProperty.writeWithoutResponse);
+      final sw = Stopwatch()..start();
+      ftp.UniversalBle.queueType = ftp.QueueType.none;
+      try {
+        for (var i = 0; i < bytes.length; i += chunk * burst) {
+          final burstEnd = (i + chunk * burst).clamp(0, bytes.length);
+          await Future.wait([
+            for (var j = i; j < burstEnd; j += chunk)
+              out.write(bytes.sublist(j, (j + chunk).clamp(0, burstEnd)),
+                  withResponse: !noAck || j + chunk >= burstEnd),
+          ]);
+        }
+      } finally {
+        ftp.UniversalBle.queueType = ftp.QueueType.global;
+      }
+      dev.log(
+          'BLE mtu=$mtu chunk=$chunk noAck=$noAck bytes=${bytes.length} '
+          'sent in ${sw.elapsedMilliseconds} ms',
+          name: 'PRINT');
     } catch (e) {
       if (e is PrinterException) rethrow;
       throw PrinterException(e.toString());
@@ -1885,6 +1976,8 @@ class PrinterService {
       out.add((labels?.totalPaid ?? 'Total:',
           rs(grandTotal + bill.collectedTotal), true));
     }
+    // A quotation takes no money, so it has no payment line.
+    if (bill.status == 'quotation') return out;
     final tendered = bill.tendered;
     final many = tendered.length > 1;
     out.add((labels?.payment ?? 'Payment:',

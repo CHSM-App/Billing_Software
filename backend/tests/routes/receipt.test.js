@@ -380,7 +380,7 @@ describe('GET /receipt/:token honours Billing Setup', () => {
     expect(res.text).toContain('Bank Details');
     expect(res.text).toContain('Free home delivery');
     expect(res.text).toContain('Address: Plot 5, Sawantwadi');
-    expect(res.text).toContain('9876500000, 02366-262626');
+    expect(res.text).toContain('9876500000<br/>02366-262626');
     expect(res.text).toContain('IFSC: SBIN0001234');
     expect(res.text).toContain('Plot 5, Sawantwadi');
     expect(res.text).toContain('27ABCDE1234F1Z5');

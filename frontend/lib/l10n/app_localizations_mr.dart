@@ -110,6 +110,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get navKitchen => 'किचन';
 
   @override
+  String get navWarranty => 'वॉरंटी';
+
+  @override
   String get navOpenOrders => 'खुल्या ऑर्डर';
 
   @override
@@ -129,6 +132,65 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get ordersTabCredit => 'उधारी';
+
+  @override
+  String get ordersTabQuotations => 'कोटेशन';
+
+  @override
+  String get settingsQuotations => 'कोटेशन';
+
+  @override
+  String get settingsQuotationsSubtitle =>
+      'ग्राहकाला किंमतीचे कोटेशन द्या, नंतर त्याचे बिल करा';
+
+  @override
+  String get quotationQuoteShort => 'कोटेशन';
+
+  @override
+  String get quotationSave => 'कोटेशन म्हणून जतन करा';
+
+  @override
+  String quotationSaved(String number) {
+    return 'कोटेशन $number जतन झाले';
+  }
+
+  @override
+  String get quotationNeedsInternet => 'कोटेशन जतन करण्यासाठी इंटरनेट हवे';
+
+  @override
+  String get quotationConvertNeedsInternet =>
+      'कोटेशनचे बिल करण्यासाठी इंटरनेट हवे';
+
+  @override
+  String get quotationsEmpty =>
+      'अजून कोटेशन नाही. बिलिंग पानावरील कोटेशन बटण दाबा.';
+
+  @override
+  String quotationItemCount(int count) {
+    return '$count वस्तू';
+  }
+
+  @override
+  String get quotationPrint => 'प्रिंट';
+
+  @override
+  String get quotationShare => 'शेअर करा';
+
+  @override
+  String get quotationConvert => 'बिल करा';
+
+  @override
+  String quotationDeleteConfirm(String number) {
+    return 'कोटेशन $number हटवायचे?';
+  }
+
+  @override
+  String quotationShareText(String number, String business) {
+    return '$business कडून कोटेशन $number';
+  }
+
+  @override
+  String get receiptQuotation => 'कोटेशन';
 
   @override
   String get billingCreditCustomerRequired =>
@@ -224,6 +286,133 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get customersTitle => 'ग्राहक';
+
+  @override
+  String get warrantyTitle => 'वॉरंटी';
+
+  @override
+  String get warrantySearchHint => 'नाव, फोन, सिरीयल नंबर किंवा तपशील शोधा';
+
+  @override
+  String get warrantyFilterAll => 'सर्व';
+
+  @override
+  String get warrantyFilterActive => 'सक्रिय';
+
+  @override
+  String get warrantyFilterExpiringSoon => 'लवकरच संपणार';
+
+  @override
+  String get warrantyFilterExpired => 'कालबाह्य';
+
+  @override
+  String get warrantyFilterDate => 'खरेदी तारीख';
+
+  @override
+  String get warrantyFilterDateFrom => 'पासून';
+
+  @override
+  String get warrantyFilterDateTo => 'पर्यंत';
+
+  @override
+  String get warrantyFilterDateApply => 'लागू करा';
+
+  @override
+  String get warrantyEmptyState =>
+      'अद्याप कोणतीही वॉरंटी नोंद नाही. जोडण्यासाठी + दाबा.';
+
+  @override
+  String get warrantyEmptyActive => 'कोणतीही सक्रिय वॉरंटी नाही.';
+
+  @override
+  String get warrantyEmptyExpiringSoon =>
+      'पुढील 30 दिवसांत काहीही कालबाह्य होत नाही.';
+
+  @override
+  String get warrantyEmptyExpired => 'कोणतीही कालबाह्य वॉरंटी नाही.';
+
+  @override
+  String warrantyEmptySearch(String query) {
+    return '\"$query\" शी जुळणारी कोणतीही वॉरंटी नाही.';
+  }
+
+  @override
+  String get warrantyEmptyDateRange =>
+      'त्या तारीख श्रेणीत कोणतीही वॉरंटी खरेदी केलेली नाही.';
+
+  @override
+  String get warrantyClearFilters => 'फिल्टर साफ करा';
+
+  @override
+  String warrantyExpiresOn(String date) {
+    return '$date ला कालबाह्य';
+  }
+
+  @override
+  String get warrantyAddTitle => 'वॉरंटी नोंद जोडा';
+
+  @override
+  String get warrantyEditTitle => 'वॉरंटी नोंद संपादित करा';
+
+  @override
+  String get warrantyCustomerName => 'ग्राहकाचे नाव';
+
+  @override
+  String get warrantyCustomerPhone => 'ग्राहकाचा फोन';
+
+  @override
+  String get warrantyCustomerPhoneRequired => 'ग्राहकाचा फोन आवश्यक आहे';
+
+  @override
+  String get warrantyProduct => 'उत्पादन';
+
+  @override
+  String get warrantyProductRequired => 'उत्पादन आवश्यक आहे';
+
+  @override
+  String get warrantyPickItem => 'आयटम निवडा';
+
+  @override
+  String get warrantySerialNumber => 'सिरीयल नंबर';
+
+  @override
+  String get warrantyPurchaseDate => 'खरेदीची तारीख';
+
+  @override
+  String get warrantyPeriodMonths => 'वॉरंटी कालावधी (महिने)';
+
+  @override
+  String get warrantyPeriodInvalid => 'शून्यपेक्षा जास्त वॉरंटी कालावधी टाका';
+
+  @override
+  String get warrantyCategory => 'श्रेणी';
+
+  @override
+  String get warrantyExpiryDateLabel => 'कालबाह्यतेची तारीख';
+
+  @override
+  String get warrantyExtraDetails => 'अतिरिक्त माहिती';
+
+  @override
+  String get warrantyDetailLabel => 'लेबल';
+
+  @override
+  String get warrantyDetailValue => 'मूल्य';
+
+  @override
+  String get warrantyAddDetail => 'तपशील जोडा';
+
+  @override
+  String get warrantyRemoveDetail => 'तपशील काढा';
+
+  @override
+  String get warrantyNotes => 'नोंदी';
+
+  @override
+  String get warrantyDeleteConfirmTitle => 'ही वॉरंटी नोंद हटवायची?';
+
+  @override
+  String get warrantyDeleteConfirmBody => 'ही कृती पूर्ववत केली जाऊ शकत नाही.';
 
   @override
   String get exportTitle => 'निर्यात करा';
@@ -585,6 +774,13 @@ class AppLocalizationsMr extends AppLocalizations {
       'स्टॉक ट्रॅक करा आणि प्रत्येक विक्रीवर तो आपोआप कमी करा';
 
   @override
+  String get settingsWarranty => 'वॉरंटी ट्रॅकिंग';
+
+  @override
+  String get settingsWarrantySubtitle =>
+      'वस्तू वॉरंटी अंतर्गत आहेत असे चिन्हांकित करा आणि वॉरंटी टॅबमध्ये क्लेम ट्रॅक करा';
+
+  @override
   String get settingsGst => 'GST बिल';
 
   @override
@@ -620,11 +816,36 @@ class AppLocalizationsMr extends AppLocalizations {
       'आयटम क्र. असलेले आयटम बिलिंगवर (101) आयटमचे नाव असे दिसतील';
 
   @override
+  String get settingsNotifyOrders => 'ऑर्डर सूचना';
+
+  @override
+  String get settingsNotifyOrdersSubtitle =>
+      'ऑनलाइन किंवा टेबल ऑर्डर आल्यावर या खात्याला सूचना द्या';
+
+  @override
+  String get settingsNotifyLowStock => 'कमी स्टॉक सूचना';
+
+  @override
+  String get settingsNotifyLowStockSubtitle =>
+      'आयटम कमी स्टॉक मर्यादेखाली गेल्यावर एक शांत सूचना';
+
+  @override
+  String get settingsGroupBilling => 'बिलिंग';
+
+  @override
+  String get settingsGroupStock => 'स्टॉक';
+
+  @override
+  String get settingsGroupOrdering => 'ऑर्डरिंग';
+
+  @override
+  String get settingsGroupNotifications => 'सूचना';
+
+  @override
   String get settingsToggles => 'सेटिंग्ज';
 
   @override
-  String get settingsTogglesSubtitle =>
-      'GST, इन्व्हेंटरी, राउंड-ऑफ व इतर पर्याय';
+  String get settingsTogglesSubtitle => 'GST, इन्व्हेंटरी, सूचना व इतर पर्याय';
 
   @override
   String get settingsManageStaff => 'कर्मचारी व्यवस्थापन';
@@ -655,6 +876,13 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get settingsLanguage => 'भाषा';
+
+  @override
+  String get settingsConfirmSettle => 'बिल पूर्ण करण्यापूर्वी विचारा';
+
+  @override
+  String get settingsConfirmSettleSubtitle =>
+      'पैसे घेण्यापूर्वी एकदा खात्री करा';
 
   @override
   String get settingsLanguageSubtitle => 'तुमची अ‍ॅप भाषा निवडा';
@@ -710,6 +938,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get businessTypeRestaurantTakeaway => 'रेस्टॉरंट (पार्सल)';
 
   @override
+  String get businessTypeRetailWarranty => 'रिटेल आणि वॉरंटी ट्रॅकिंग';
+
+  @override
   String get appTagline => 'स्मार्ट बिलिंग सोल्युशन';
 
   @override
@@ -758,7 +989,8 @@ class AppLocalizationsMr extends AppLocalizations {
   String get loginNoAccountFound => 'या मोबाइल नंबरचे खाते सापडले नाही.';
 
   @override
-  String get loginIncorrectPin => 'चुकीचा पिन. पुन्हा प्रयत्न करा.';
+  String get loginIncorrectPin =>
+      'चुकीचा मोबाइल नंबर किंवा पिन. पुन्हा प्रयत्न करा.';
 
   @override
   String get loginAccountLocked =>
@@ -952,10 +1184,10 @@ class AppLocalizationsMr extends AppLocalizations {
   String get registerBusinessNameHint => 'उदा. शर्मा जनरल स्टोअर';
 
   @override
-  String get registerBusinessPhone => 'व्यवसायाचा मोबाइल नंबर';
+  String get registerBusinessPhone => 'व्यवसायाचा फोन नंबर';
 
   @override
-  String get registerBusinessPhoneHint => '१० अंकी नंबर';
+  String get registerBusinessPhoneHint => 'मोबाइल, किंवा STD कोडसह लँडलाइन';
 
   @override
   String get registerAddress => 'पत्ता (ऐच्छिक)';
@@ -1181,6 +1413,12 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billingWhatsappCaption => 'पाठवा';
 
   @override
+  String get billingConfirmSettle => 'खात्री करा, पैसे घ्या';
+
+  @override
+  String get billingConfirmWhatsapp => 'पैसे घ्या आणि पाठवा';
+
+  @override
   String get billingSettleAndPrint => 'आणि प्रिंट';
 
   @override
@@ -1321,6 +1559,10 @@ class AppLocalizationsMr extends AppLocalizations {
       'व्हॉट्सअ‍ॅपवर पाठवण्यासाठी ग्राहकाचा फोन नंबर टाका';
 
   @override
+  String get billingWarrantyNeedsPhone =>
+      'वॉरंटी नोंदवण्यासाठी ग्राहकाचा फोन नंबर टाका';
+
+  @override
   String get billingWhatsappFailed => 'व्हॉट्सअ‍ॅप संदेश पाठवता आला नाही';
 
   @override
@@ -1330,6 +1572,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billingOutOfStock => 'स्टॉक संपला';
+
+  @override
+  String get billingAllItemsTicked => 'सर्व वस्तू टिक केल्या';
 
   @override
   String get billingInsufficientStock => 'स्टॉक अपुरा आहे';
@@ -1435,7 +1680,13 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billSetupAltPhone => 'पर्यायी मोबाइल नंबर (ऐच्छिक)';
 
   @override
-  String get billSetupAltPhoneInvalid => 'योग्य फोन नंबर टाका';
+  String get billSetupAltPhoneInvalid => 'योग्य 10 अंकी मोबाइल नंबर टाका';
+
+  @override
+  String get billSetupAltPhoneLabel => 'लेबल (ऐच्छिक)';
+
+  @override
+  String get billSetupAltPhoneLabelHint => 'उदा. GPay, WhatsApp';
 
   @override
   String get billSetupGstin => 'दुकानाचा GSTIN';
@@ -1461,6 +1712,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get billSetupNote => 'बिलावरील टीप';
+
+  @override
+  String get billSetupWarrantyDetails => 'अतिरिक्त तपशील';
 
   @override
   String get billSetupNoteSubtitle => 'प्रत्येक बिलावर छापला जाणारा संदेश';
@@ -1699,6 +1953,11 @@ class AppLocalizationsMr extends AppLocalizations {
   }
 
   @override
+  String billingPaidOnline(String paid, String balance) {
+    return 'ऑनलाइन भरले $paid · बाकी $balance';
+  }
+
+  @override
   String billingSplitMismatch(String amount) {
     return 'पेमेंटची बेरीज $amount असायला हवी';
   }
@@ -1914,6 +2173,21 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsFieldHsnHint => 'उदा. रेस्टॉरंट सेवेसाठी ९९६३';
 
   @override
+  String get itemsWarrantyEligible => 'वॉरंटी लागू आहे';
+
+  @override
+  String get itemsWarrantyDefaultMonths => 'डिफॉल्ट वॉरंटी कालावधी (महिने)';
+
+  @override
+  String get itemsManageWarrantyFields =>
+      'या श्रेणीसाठी वॉरंटी फील्ड व्यवस्थापित करा';
+
+  @override
+  String itemsWarrantyFieldsFor(String category) {
+    return '$category साठी वॉरंटी फील्ड';
+  }
+
+  @override
   String get itemsFieldItemNo => 'आयटम क्र. (ऐच्छिक)';
 
   @override
@@ -2017,6 +2291,13 @@ class AppLocalizationsMr extends AppLocalizations {
   String itemsSizeEditTitle(String label) {
     return 'संपादन — $label';
   }
+
+  @override
+  String get itemsListPrice => 'यादीतील किंमत';
+
+  @override
+  String get itemsPriceListSaveFailed =>
+      'वस्तू जतन झाली, पण दर यादीतील किंमत जतन झाली नाही. पुन्हा प्रयत्नासाठी जतन करा दाबा.';
 
   @override
   String get itemsHasVariants => 'या वस्तूचे प्रकार आहेत';
@@ -2291,7 +2572,7 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get historySearchBillOrPhone =>
-      'बिल क्रमांक किंवा मोबाइल नंबरने शोधा…';
+      'बिल क्रमांक, नाव किंवा मोबाइल नंबरने शोधा…';
 
   @override
   String get historyNoBillsForPeriod => 'या कालावधीत कोणतेही बिल नाही.';
@@ -2725,7 +3006,7 @@ class AppLocalizationsMr extends AppLocalizations {
   String get businessProfileAddress => 'पत्ता';
 
   @override
-  String get businessProfilePhone => 'मोबाइल';
+  String get businessProfilePhone => 'फोन';
 
   @override
   String get businessProfileGst => 'जीएसटीआयएन (ऐच्छिक)';
@@ -2777,10 +3058,11 @@ class AppLocalizationsMr extends AppLocalizations {
   String get businessProfileNameHint => 'उदा. कांबळे प्रोव्हिजन्स';
 
   @override
-  String get businessProfilePhoneHint => '१० अंकी मोबाइल नंबर';
+  String get businessProfilePhoneHint => 'मोबाइल, किंवा STD कोडसह लँडलाइन';
 
   @override
-  String get businessProfilePhoneInvalid => '१० अंकी असणे आवश्यक';
+  String get businessProfilePhoneInvalid =>
+      '१० अंकी मोबाइल, किंवा STD कोडसह लँडलाइन टाका';
 
   @override
   String get businessProfileEmail => 'ईमेल (ऐच्छिक)';
@@ -3938,4 +4220,111 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get priceListBadNumber => 'योग्य संख्या टाका';
+
+  @override
+  String get termsConsentTos => 'Terms of Service';
+
+  @override
+  String get termsConsentAup => 'Acceptable Use Policy';
+
+  @override
+  String get termsConsentPrivacy => 'Privacy Policy';
+
+  @override
+  String get termsConsentLead => 'I have read and agree to the';
+
+  @override
+  String get termsConsentAnd => 'and';
+
+  @override
+  String get termsUpdatedTitle => 'We\'ve updated our Terms';
+
+  @override
+  String get termsUpdatedBody =>
+      'Please review the documents below. To keep using Vittam, tick the box at the bottom and tap Agree.';
+
+  @override
+  String termsUpdatedVersion(String version) {
+    return 'Version $version';
+  }
+
+  @override
+  String get termsAgree => 'Agree';
+
+  @override
+  String get termsSaveFailed =>
+      'Could not save your acceptance. Check your connection and try again.';
+
+  @override
+  String get settingsTermsSubtitle => 'The agreement for using Vittam';
+
+  @override
+  String get settingsAupSubtitle => 'What is not allowed on Vittam';
+
+  @override
+  String get settingsBarcodeScanner => 'बारकोड स्कॅनर';
+
+  @override
+  String get settingsBarcodeScannerSubtitle => 'ब्लूटूथ किंवा USB स्कॅनर जोडा';
+
+  @override
+  String get scannerSteps =>
+      '1. स्कॅनर HID (कीबोर्ड) मोडमध्ये ठेवा. बहुतेक स्कॅनरमध्ये हे त्यांच्या मॅन्युअलमधील सेटअप बारकोड स्कॅन करून होते.\n2. ब्लूटूथ सेटिंग्ज उघडा आणि स्कॅनर कीबोर्डप्रमाणे पेअर करा. USB स्कॅनर फक्त जोडा.\n3. इथे परत या आणि चाचणीसाठी कोणताही बारकोड स्कॅन करा.';
+
+  @override
+  String get scannerOpenBluetooth => 'ब्लूटूथ सेटिंग्ज उघडा';
+
+  @override
+  String get scannerOpenFailed =>
+      'ब्लूटूथ सेटिंग्ज उघडता आल्या नाहीत. डिव्हाइसच्या सेटिंग्जमधून उघडा.';
+
+  @override
+  String get scannerTestTitle => 'चाचणी स्कॅन';
+
+  @override
+  String get scannerTestHint => 'इथे टॅप करा, मग बारकोड स्कॅन करा';
+
+  @override
+  String scannerTestMatched(String name) {
+    return 'स्कॅनर चालू आहे: $name';
+  }
+
+  @override
+  String scannerTestUnknown(String code) {
+    return 'स्कॅनर चालू आहे, $code वाचला, पण या बारकोडचा आयटम नाही';
+  }
+
+  @override
+  String get itemsDownloadBarcodes => 'सर्व बारकोड डाउनलोड करा';
+
+  @override
+  String get barcodesPreparing => 'तयारी करत आहे…';
+
+  @override
+  String barcodesSaving(int done, int total) {
+    return 'बारकोड सेव्ह करत आहे $done/$total';
+  }
+
+  @override
+  String get barcodesMakingImages => 'बारकोड इमेज तयार करत आहे…';
+
+  @override
+  String barcodesFailed(int count) {
+    return '$count बारकोड सेव्ह करता आले नाहीत';
+  }
+
+  @override
+  String get barcodesPickFields => 'प्रत्येक बारकोड इमेजवर दाखवा';
+
+  @override
+  String get barcodesFieldName => 'आयटमचे नाव';
+
+  @override
+  String get barcodesFieldSize => 'प्रकार';
+
+  @override
+  String get barcodesFieldPrice => 'किंमत';
+
+  @override
+  String get barcodesFieldCode => 'बारकोड नंबर';
 }

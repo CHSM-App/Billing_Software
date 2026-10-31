@@ -52,4 +52,13 @@ describe('serializeCharges / attachCharges', () => {
     const row = attachCharges({ additional_charges: '{not json', charges_amount: 5 });
     expect(row.additional_charges).toEqual([]);
   });
+
+  test('also parses warranty_extra_data (migration 065) the same way', () => {
+    const raw = JSON.stringify([{ label: 'KM Reading', value: '45230' }]);
+    const row = attachCharges({ warranty_extra_data: raw });
+    expect(row.warranty_extra_data).toEqual([{ label: 'KM Reading', value: '45230' }]);
+
+    expect(attachCharges({ warranty_extra_data: null }).warranty_extra_data).toEqual([]);
+    expect(attachCharges({ warranty_extra_data: undefined }).warranty_extra_data).toEqual([]);
+  });
 });

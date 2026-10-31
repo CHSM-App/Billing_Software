@@ -7,7 +7,7 @@ const billSettings = require('../billSettings');
 const { attachCreditInfo, CREDIT_PART } = require('../creditPayments');
 const { renderInvoice, DOWNLOAD_ONCLICK, DOWNLOAD_FALLBACK, PDF_LINK } = require('../invoiceHtml');
 const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
-const { publicPageLimiter } = require('../middleware/rateLimiter');
+const { pdfLimiter } = require('../middleware/rateLimiter');
 const { execFile } = require('child_process');
 const fsp = require('fs/promises');
 const os = require('os');
@@ -22,14 +22,40 @@ const router = express.Router();
 const PDF_BROWSER = process.env.PDF_BROWSER_PATH
   || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 
+// Browsers printing at once. Each is a full Edge process (~150 MB, 1-2 s of
+// CPU); unbounded, a few IPs looping this public URL could exhaust the server
+// that also runs billing. Over the cap the caller is told to retry shortly.
+const MAX_PDF_RENDERS = 2;
+let pdfRenders = 0;
+
 function pdfRoute(prefix) {
+  const table = prefix ? 'credit_settlements' : 'bills';
+  const finalizedOnly = prefix ? '' : " AND status = 'finalized'";
   return async (req, res) => {
     const token = String(req.params.token || '').replace(/\s+/g, '');
     if (!/^[\w-]{1,16}$/.test(token)) return res.status(404).send('<h2>Receipt not found</h2>');
-    const paper = ['a4', 'a5'].includes(req.query.p) ? `?p=${req.query.p}` : '';
-    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'receipt-'));
-    const out = path.join(dir, 'receipt.pdf');
+    // Check the receipt exists BEFORE starting a browser — one unique-index
+    // seek — so a made-up token costs a query, not a process.
     try {
+      await poolConnect;
+      const found = await pool.request()
+        .input('token', sql.NVarChar(16), token)
+        .query(`SELECT 1 AS ok FROM ${table} WHERE receipt_token = @token${finalizedOnly}`);
+      if (found.recordset.length === 0) return res.status(404).send('<h2>Receipt not found</h2>');
+    } catch (err) {
+      logger.error({ err }, 'receipt pdf lookup error');
+      return res.status(500).send('<h2>Could not create the PDF. Please try again.</h2>');
+    }
+    if (pdfRenders >= MAX_PDF_RENDERS) {
+      res.set('Retry-After', '5');
+      return res.status(503).send('<h2>Busy creating other PDFs. Please try again in a few seconds.</h2>');
+    }
+    pdfRenders++;
+    const paper = ['a4', 'a5'].includes(req.query.p) ? `?p=${req.query.p}` : '';
+    let dir;
+    try {
+      dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'receipt-'));
+      const out = path.join(dir, 'receipt.pdf');
       // Exit code is unreliable across Chrome/Edge versions — the file is the result.
       await new Promise((resolve) => execFile(PDF_BROWSER, [
         '--headless=new', '--disable-gpu', '--no-pdf-header-footer', '--print-to-pdf-no-header',
@@ -44,13 +70,14 @@ function pdfRoute(prefix) {
       logger.error({ err }, 'receipt pdf error');
       return res.status(500).send('<h2>Could not create the PDF. Please try again.</h2>');
     } finally {
-      fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+      pdfRenders--;
+      if (dir) fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
   };
 }
 
-router.get('/s/:token/pdf', publicPageLimiter, pdfRoute('s/'));
-router.get('/:token/pdf', publicPageLimiter, pdfRoute(''));
+router.get('/s/:token/pdf', pdfLimiter, pdfRoute('s/'));
+router.get('/:token/pdf', pdfLimiter, pdfRoute(''));
 
 // Shared by the bill receipt and the credit Payment Receipt pages.
 const PAGE_CSS = `
@@ -301,6 +328,7 @@ router.get('/:token', async (req, res) => {
         SELECT b.id, b.bill_number, b.customer_name, b.customer_phone,
                b.customer_address, b.customer_gstin,
                b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+               b.warranty_extra_data,
                b.total, b.round_off, b.payment_mode, b.created_at, b.finalized_at,
                b.payment_status, b.settled_payment_mode, b.credit_amount, b.credit_collected,
                t.table_number,
@@ -502,7 +530,7 @@ router.get('/:token', async (req, res) => {
     <div class="shop-name">${esc(bill.shop_name)}</div>
     <div class="shop-sub">
       ${addressLine ? addressLine + '<br/>' : ''}
-      ${shopPhone ? 'Tel: ' + esc(shopPhone) : ''}
+      ${shopPhone ? 'Tel: ' + esc(shopPhone).replace(/\n/g, '<br/>') : ''}
       ${shopPhone && bill.shop_email ? '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}
       ${bill.shop_email ? '<a href="mailto:' + esc(bill.shop_email) + '">' + esc(bill.shop_email) + '</a>' : ''}
       ${cfg.show_gstin && bill.gst_number ? '<br/>GSTIN: ' + esc(bill.gst_number) : ''}
@@ -536,14 +564,17 @@ router.get('/:token', async (req, res) => {
     </div>` : ''}
   </div>
 
-  ${cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin) ? `
+  ${(cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin)) ||
+    (cfg.show_warranty_details && bill.warranty_extra_data.length) ? `
   <!-- Customer -->
   <div class="customer">
     <div class="sec-label">Billed To</div>
-    ${bill.customer_name ? '<div class="cname">' + esc(bill.customer_name) + '</div>' : ''}
-    ${bill.customer_phone ? '<div class="cphone">Mob: ' + esc(bill.customer_phone) + '</div>' : ''}
-    ${bill.customer_address ? '<div class="cphone">Address: ' + esc(bill.customer_address) + '</div>' : ''}
-    ${bill.customer_gstin ? '<div class="cphone">GSTIN: ' + esc(bill.customer_gstin) + '</div>' : ''}
+    ${cust && bill.customer_name ? '<div class="cname">' + esc(bill.customer_name) + '</div>' : ''}
+    ${cust && bill.customer_phone ? '<div class="cphone">Mob: ' + esc(bill.customer_phone) + '</div>' : ''}
+    ${cust && bill.customer_address ? '<div class="cphone">Address: ' + esc(bill.customer_address) + '</div>' : ''}
+    ${cust && bill.customer_gstin ? '<div class="cphone">GSTIN: ' + esc(bill.customer_gstin) + '</div>' : ''}
+    ${cfg.show_warranty_details ? bill.warranty_extra_data.map((e) =>
+        '<div class="cphone">' + esc(e.label) + ': ' + esc(e.value) + '</div>').join('') : ''}
   </div>` : ''}
 
   <!-- Items -->
@@ -631,7 +662,11 @@ router.get('/:token', async (req, res) => {
   <!-- Footer -->
   <div class="footer">
     ${shopNote ? '<div class="note"><b>Note</b><br/>' + esc(shopNote) + '</div>' : ''}
-    ${cfg.show_terms && bill.bill_footer_note ? '<div class="note"><b>Terms &amp; Conditions</b><br/>' + esc(bill.bill_footer_note) + '</div>' : ''}
+    ${cfg.show_terms && bill.bill_footer_note ? '<div class="note">'
+      // Heading only when a Note / Bank section sits beside it; on its own the
+      // footer prints plain, as it did before Billing Setup existed.
+      + (shopNote || bank.length ? '<b>Terms &amp; Conditions</b><br/>' : '')
+      + esc(bill.bill_footer_note) + '</div>' : ''}
     ${bank.length ? '<div class="note"><b>Bank Details</b><br/>' + bank.map(esc).join('<br/>') + '</div>' : ''}
     <div class="thanks">Thank you for your business.</div>
     <div class="powered">powered by vittam</div>

@@ -53,7 +53,7 @@ describe('staff — auth guard', () => {
     const res = await request(app)
       .post('/api/staff')
       .set(authHeader({ role: 'cashier' }))
-      .send({ name: 'Bob', phone: '9876543210', pin: '1234' });
+      .send({ name: 'Bob', phone: '9876543210', pin: '4831' });
     expect(res.status).toBe(403);
   });
 });
@@ -97,7 +97,7 @@ describe('POST /api/staff', () => {
     const res = await request(app)
       .post('/api/staff')
       .set(authHeader({ role: 'owner' }))
-      .send({ name: 'Bob', phone: '9876543210', pin: '1234' });
+      .send({ name: 'Bob', phone: '9876543210', pin: '4831' });
     expect(res.status).toBe(201);
     expect(res.body.name).toBe('Bob');
     expect(res.body.role).toBe('cashier');
@@ -109,7 +109,7 @@ describe('POST /api/staff', () => {
     const res = await request(app)
       .post('/api/staff')
       .set(authHeader({ role: 'owner' }))
-      .send({ name: 'Bob', phone: '9876543210', pin: '1234' });
+      .send({ name: 'Bob', phone: '9876543210', pin: '4831' });
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/already registered/i);
   });
@@ -118,7 +118,7 @@ describe('POST /api/staff', () => {
     const res = await request(app)
       .post('/api/staff')
       .set(authHeader({ role: 'owner' }))
-      .send({ phone: '9876543210', pin: '1234' });
+      .send({ phone: '9876543210', pin: '4831' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/name/);
   });
@@ -127,7 +127,7 @@ describe('POST /api/staff', () => {
     const res = await request(app)
       .post('/api/staff')
       .set(authHeader({ role: 'owner' }))
-      .send({ name: 'Bob', pin: '1234' });
+      .send({ name: 'Bob', pin: '4831' });
     expect(res.status).toBe(400);
   });
 
@@ -160,7 +160,7 @@ describe('POST /api/staff', () => {
     const res = await request(app)
       .post('/api/staff')
       .set(authHeader({ role: 'owner' }))
-      .send({ name: 'Bob', phone: '98765', pin: '1234' });
+      .send({ name: 'Bob', phone: '98765', pin: '4831' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Phone/);
   });

@@ -129,15 +129,18 @@ class AuthStorage {
   // SharedPreferences keys
   static const _keyUserId           = 'user_id';
   static const _keyUserName         = 'user_name';
+  static const _keyUserPhone        = 'user_phone';
   static const _keyUserRole         = 'user_role';
   static const _keyBusinessId       = 'business_id';
   static const _keyBusinessName     = 'business_name';
   static const _keyBusinessType     = 'business_type';
   static const _keyInventoryEnabled = 'inventory_enabled';
+  static const _keyWarrantyEnabled  = 'warranty_enabled';
   static const _keyHasBarcodeScanner = 'has_barcode_scanner';
   static const _keyGstEnabled       = 'gst_enabled';
   static const _keyRoundOffEnabled  = 'round_off_enabled';
   static const _keyShowItemNo       = 'show_item_no';
+  static const _keyQuotationsEnabled = 'quotations_enabled';
   // Online store master switch. Cached in the session so the shell knows
   // whether to poll the online-order queue at all, without a profile fetch
   // (which is owner-only — a cashier could never answer the question).
@@ -178,6 +181,12 @@ class AuthStorage {
   static const _keyKitchenAutoPrint = 'kitchen_auto_print';
   static const _keyKitchenPaperSize = 'kitchen_paper_size';
   static const _keyRecentNetworkPrinters = 'recent_network_printers';
+  // Ad-hoc warranty/extra-detail labels typed on the spot (e.g. "Vehicle",
+  // "IMEI"), newest first — offered as suggestions so a label typed once
+  // doesn't need retyping on the next bill. Business-specific vocabulary, so
+  // it's cleared on logout like the rest of the session (unlike the printer
+  // list above, which is per-device).
+  static const _keyWarrantyLabelSuggestions = 'warranty_label_suggestions';
 
   // -------------------------------------------------------------------------
   // Write
@@ -188,15 +197,18 @@ class AuthStorage {
     required String refreshToken,
     required String userId,
     required String userName,
+    String? userPhone,
     required String userRole,
     required String businessId,
     required String businessName,
     required String businessType,
     bool inventoryEnabled = false,
+    bool warrantyEnabled = false,
     bool hasBarcodeScanner = false,
     bool gstEnabled = false,
     bool roundOffEnabled = false,
     bool showItemNo = false,
+    bool quotationsEnabled = false,
     bool storeEnabled = false,
     bool customersEnabled = true,
   }) async {
@@ -211,15 +223,18 @@ class AuthStorage {
     await Future.wait([
       prefs.setString(_keyUserId, userId),
       prefs.setString(_keyUserName, userName),
+      prefs.setString(_keyUserPhone, userPhone ?? ''),
       prefs.setString(_keyUserRole, userRole),
       prefs.setString(_keyBusinessId, businessId),
       prefs.setString(_keyBusinessName, businessName),
       prefs.setString(_keyBusinessType, businessType),
       prefs.setBool(_keyInventoryEnabled, inventoryEnabled),
+      prefs.setBool(_keyWarrantyEnabled, warrantyEnabled),
       prefs.setBool(_keyHasBarcodeScanner, hasBarcodeScanner),
       prefs.setBool(_keyGstEnabled, gstEnabled),
       prefs.setBool(_keyRoundOffEnabled, roundOffEnabled),
       prefs.setBool(_keyShowItemNo, showItemNo),
+      prefs.setBool(_keyQuotationsEnabled, quotationsEnabled),
       prefs.setBool(_keyStoreEnabled, storeEnabled),
       prefs.setBool(_keyCustomersEnabled, customersEnabled),
     ]);
@@ -235,6 +250,11 @@ class AuthStorage {
   Future<void> updateInventoryEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyInventoryEnabled, enabled);
+  }
+
+  Future<void> updateWarrantyEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyWarrantyEnabled, enabled);
   }
 
   Future<void> updateHasBarcodeScanner(bool enabled) async {
@@ -255,6 +275,11 @@ class AuthStorage {
   Future<void> updateShowItemNo(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyShowItemNo, enabled);
+  }
+
+  Future<void> updateQuotationsEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyQuotationsEnabled, enabled);
   }
 
   Future<void> updateStoreEnabled(bool enabled) async {
@@ -495,6 +520,32 @@ class AuthStorage {
         [address, ...previous.where((a) => a != address)].take(5).toList());
   }
 
+  /// Ad-hoc extra-detail labels typed before, newest first.
+  Future<List<String>> getWarrantyLabelSuggestions() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_keyWarrantyLabelSuggestions) ?? const [];
+  }
+
+  /// Remembers [labels] (ad-hoc labels just used on a saved bill/warranty
+  /// record) so they're offered as suggestions next time — same
+  /// newest-first, deduped, capped pattern as [rememberNetworkPrinter].
+  /// Dedup is case-insensitive so "Vehicle" and "vehicle" collapse to one
+  /// suggestion (keeping whichever casing was typed most recently).
+  Future<void> rememberWarrantyLabels(Iterable<String> labels) async {
+    final toAdd = labels.map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+    if (toAdd.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final previous = prefs.getStringList(_keyWarrantyLabelSuggestions) ?? const [];
+    final merged = [...toAdd.reversed, ...previous];
+    final seen = <String>{};
+    final deduped = <String>[];
+    for (final label in merged) {
+      if (seen.add(label.toLowerCase())) deduped.add(label);
+    }
+    await prefs.setStringList(
+        _keyWarrantyLabelSuggestions, deduped.take(20).toList());
+  }
+
   Future<void> saveAccessToken(String accessToken) =>
       _secure.write(key: _keyAccessToken, value: accessToken);
 
@@ -527,15 +578,18 @@ class AuthStorage {
     return {
       'user_id'          : prefs.getString(_keyUserId),
       'user_name'        : prefs.getString(_keyUserName),
+      'user_phone'       : prefs.getString(_keyUserPhone),
       'user_role'        : prefs.getString(_keyUserRole),
       'business_id'      : prefs.getString(_keyBusinessId),
       'business_name'    : prefs.getString(_keyBusinessName),
       'business_type'    : prefs.getString(_keyBusinessType),
       'inventory_enabled': prefs.getBool(_keyInventoryEnabled) ?? false,
+      'warranty_enabled' : prefs.getBool(_keyWarrantyEnabled) ?? false,
       'has_barcode_scanner': prefs.getBool(_keyHasBarcodeScanner) ?? false,
       'gst_enabled'      : prefs.getBool(_keyGstEnabled) ?? false,
       'round_off_enabled': prefs.getBool(_keyRoundOffEnabled) ?? false,
       'show_item_no'     : prefs.getBool(_keyShowItemNo) ?? false,
+      'quotations_enabled': prefs.getBool(_keyQuotationsEnabled) ?? false,
       'store_enabled'    : prefs.getBool(_keyStoreEnabled) ?? false,
       'customers_enabled': prefs.getBool(_keyCustomersEnabled) ?? true,
     };
@@ -582,15 +636,18 @@ Future<void> saveSession({
   required String refreshToken,
   required String userId,
   required String userName,
+  String? userPhone,
   required String userRole,
   required String businessId,
   required String businessName,
   required String businessType,
   bool inventoryEnabled = false,
+  bool warrantyEnabled = false,
   bool hasBarcodeScanner = false,
   bool gstEnabled = false,
   bool roundOffEnabled = false,
   bool showItemNo = false,
+  bool quotationsEnabled = false,
   bool storeEnabled = false,
   bool customersEnabled = true,
 }) => AuthStorage.instance.saveSession(
@@ -598,15 +655,18 @@ Future<void> saveSession({
       refreshToken: refreshToken,
       userId: userId,
       userName: userName,
+      userPhone: userPhone,
       userRole: userRole,
       businessId: businessId,
       businessName: businessName,
       businessType: businessType,
       inventoryEnabled: inventoryEnabled,
+      warrantyEnabled: warrantyEnabled,
       hasBarcodeScanner: hasBarcodeScanner,
       gstEnabled: gstEnabled,
       roundOffEnabled: roundOffEnabled,
       showItemNo: showItemNo,
+      quotationsEnabled: quotationsEnabled,
       storeEnabled: storeEnabled,
       customersEnabled: customersEnabled,
     );
@@ -653,11 +713,17 @@ Future<String>  getKitchenPaperSize()          => AuthStorage.instance.getKitche
 Future<List<String>> getRecentNetworkPrinters() => AuthStorage.instance.getRecentNetworkPrinters();
 Future<void>    rememberNetworkPrinter(String address) =>
     AuthStorage.instance.rememberNetworkPrinter(address);
+Future<List<String>> getWarrantyLabelSuggestions() =>
+    AuthStorage.instance.getWarrantyLabelSuggestions();
+Future<void>    rememberWarrantyLabels(Iterable<String> labels) =>
+    AuthStorage.instance.rememberWarrantyLabels(labels);
 Future<void>    updateInventoryEnabled(bool e) => AuthStorage.instance.updateInventoryEnabled(e);
+Future<void>    updateWarrantyEnabled(bool e)  => AuthStorage.instance.updateWarrantyEnabled(e);
 Future<void>    updateHasBarcodeScanner(bool e) => AuthStorage.instance.updateHasBarcodeScanner(e);
 Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGstEnabled(e);
 Future<void>    updateRoundOffEnabled(bool e)  => AuthStorage.instance.updateRoundOffEnabled(e);
 Future<void>    updateShowItemNo(bool e)       => AuthStorage.instance.updateShowItemNo(e);
+Future<void>    updateQuotationsEnabled(bool e) => AuthStorage.instance.updateQuotationsEnabled(e);
 Future<void>    updateStoreEnabled(bool e)     => AuthStorage.instance.updateStoreEnabled(e);
 Future<void>    updateCustomersEnabled(bool e) => AuthStorage.instance.updateCustomersEnabled(e);
 Future<void>    saveGstProfile({String? gstNumber, String? businessAddress, String? businessPhone, String? defaultSacCode, String? fssaiNumber}) =>
