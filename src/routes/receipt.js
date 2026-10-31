@@ -1,0 +1,697 @@
+const express = require('express');
+const { pool, poolConnect, sql } = require('../db');
+const logger = require('../logger');
+const { attachCharges } = require('../charges');
+const { stripBillPrefix } = require('../billNumber');
+const billSettings = require('../billSettings');
+const { attachCreditInfo, CREDIT_PART } = require('../creditPayments');
+const { renderInvoice, DOWNLOAD_ONCLICK, DOWNLOAD_FALLBACK, PDF_LINK } = require('../invoiceHtml');
+const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
+const { pdfLimiter } = require('../middleware/rateLimiter');
+const { execFile } = require('child_process');
+const fsp = require('fs/promises');
+const os = require('os');
+const path = require('path');
+
+const router = express.Router();
+
+// "Download PDF": a headless browser prints our own receipt page to a file, so
+// the PDF is the page exactly. Served as a real file download because the
+// in-app browsers WhatsApp opens links in ignore window.print().
+// ponytail: one browser process per download (~1-2s); keep a warm puppeteer instance if PDF traffic grows.
+const PDF_BROWSER = process.env.PDF_BROWSER_PATH
+  || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+
+// Browsers printing at once. Each is a full Edge process (~150 MB, 1-2 s of
+// CPU); unbounded, a few IPs looping this public URL could exhaust the server
+// that also runs billing. Over the cap the caller is told to retry shortly.
+const MAX_PDF_RENDERS = 2;
+let pdfRenders = 0;
+
+function pdfRoute(prefix) {
+  const table = prefix ? 'credit_settlements' : 'bills';
+  const finalizedOnly = prefix ? '' : " AND status = 'finalized'";
+  return async (req, res) => {
+    const token = String(req.params.token || '').replace(/\s+/g, '');
+    if (!/^[\w-]{1,16}$/.test(token)) return res.status(404).send('<h2>Receipt not found</h2>');
+    // Check the receipt exists BEFORE starting a browser — one unique-index
+    // seek — so a made-up token costs a query, not a process.
+    try {
+      await poolConnect;
+      const found = await pool.request()
+        .input('token', sql.NVarChar(16), token)
+        .query(`SELECT 1 AS ok FROM ${table} WHERE receipt_token = @token${finalizedOnly}`);
+      if (found.recordset.length === 0) return res.status(404).send('<h2>Receipt not found</h2>');
+    } catch (err) {
+      logger.error({ err }, 'receipt pdf lookup error');
+      return res.status(500).send('<h2>Could not create the PDF. Please try again.</h2>');
+    }
+    if (pdfRenders >= MAX_PDF_RENDERS) {
+      res.set('Retry-After', '5');
+      return res.status(503).send('<h2>Busy creating other PDFs. Please try again in a few seconds.</h2>');
+    }
+    pdfRenders++;
+    const paper = ['a4', 'a5'].includes(req.query.p) ? `?p=${req.query.p}` : '';
+    let dir;
+    try {
+      dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'receipt-'));
+      const out = path.join(dir, 'receipt.pdf');
+      // Exit code is unreliable across Chrome/Edge versions — the file is the result.
+      await new Promise((resolve) => execFile(PDF_BROWSER, [
+        '--headless=new', '--disable-gpu', '--no-pdf-header-footer', '--print-to-pdf-no-header',
+        `--user-data-dir=${path.join(dir, 'profile')}`, `--print-to-pdf=${out}`,
+        `http://127.0.0.1:${process.env.PORT || 3000}/receipt/${prefix}${token}${paper}`,
+      ], { timeout: 30000 }, resolve));
+      const pdf = await fsp.readFile(out);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="receipt-${token}.pdf"`);
+      return res.send(pdf);
+    } catch (err) {
+      logger.error({ err }, 'receipt pdf error');
+      return res.status(500).send('<h2>Could not create the PDF. Please try again.</h2>');
+    } finally {
+      pdfRenders--;
+      if (dir) fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+}
+
+router.get('/s/:token/pdf', pdfLimiter, pdfRoute('s/'));
+router.get('/:token/pdf', pdfLimiter, pdfRoute(''));
+
+// Shared by the bill receipt and the credit Payment Receipt pages.
+const PAGE_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Inter',sans-serif;background:#eef0f4;min-height:100vh;padding:20px 12px;color:#1c1c1e;-webkit-font-smoothing:antialiased}
+  .receipt{max-width:500px;margin:0 auto;background:#fff;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.10)}
+
+  /* ── top bar ── */
+  .top-bar{background:#1a1a2e;padding:24px 24px 20px;border-radius:4px 4px 0 0;text-align:center}
+  .top-bar .logo{width:64px;height:64px;object-fit:contain;border-radius:4px;margin-bottom:12px;display:block;margin-left:auto;margin-right:auto}
+  .top-bar .shop-name{font-size:18px;font-weight:700;color:#fff;letter-spacing:.4px}
+  .top-bar .shop-sub{font-size:12px;color:#a0a8c0;margin-top:5px;line-height:1.7}
+  .top-bar .shop-sub a{color:#a0a8c0;text-decoration:none}
+
+  /* ── section divider ── */
+  .divider{height:1px;background:#f0f0f0;margin:0 24px}
+  .divider-dashed{border:none;border-top:1px dashed #ddd;margin:0 24px}
+
+  /* ── meta row ── */
+  .meta{display:flex;justify-content:space-between;align-items:flex-start;padding:16px 24px;gap:12px;flex-wrap:wrap}
+  .meta-item .label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#9a9aaa;margin-bottom:3px}
+  .meta-item .value{font-size:13px;font-weight:600;color:#1c1c1e}
+  .badge{display:inline-block;padding:3px 10px;border-radius:3px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;background:#e8f4ec;color:#1e7e34}
+  /* Credit (udhaari): unpaid — flag it red instead of the paid-green. */
+  .badge-credit{background:#fdecec;color:#c0392b}
+
+  /* ── customer ── */
+  .customer{padding:12px 24px;background:#f9f9fb;border-top:1px solid #f0f0f0;border-bottom:1px solid #f0f0f0}
+  .customer .sec-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#9a9aaa;margin-bottom:6px}
+  .customer .cname{font-size:14px;font-weight:600;color:#1c1c1e}
+  .customer .cphone{font-size:12px;color:#666;margin-top:2px}
+
+  /* ── items ── */
+  table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+  .table-head{background:#f4f5f7}
+  .table-head th{padding:10px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#888;text-align:left}
+  .table-head th:first-child{padding-left:24px}
+  .table-head th:last-child{padding-right:24px}
+  .table-head th.r{text-align:right}
+  /* Fixed column widths so the amount can never be pushed outside the card */
+  th.col-qty,td.col-qty{width:14%}
+  th.col-rate,td.col-rate{width:24%}
+  th.col-amt,td.col-amt{width:26%}
+  tbody td{padding:11px 12px;border-bottom:1px solid #f4f4f6;color:#2c2c2e;vertical-align:middle}
+  tbody td:first-child{padding-left:24px}
+  tbody td:last-child{padding-right:24px}
+  tbody tr:last-child td{border-bottom:none}
+  td.r{text-align:right}
+  td.item-name{font-weight:500;word-break:break-word;overflow-wrap:anywhere}
+  td.item-name .hsn{display:block;font-size:10px;font-weight:500;color:#9a9aaa;margin-top:2px}
+  td.amount{font-weight:600}
+
+  /* ── GST summary ── */
+  .gst-summary{padding:12px 24px 4px;background:#f9f9fb}
+  .gst-summary .gst-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:#9a9aaa;margin-bottom:6px}
+  .gst-summary table{font-size:12px}
+  .gst-summary th{padding:4px 0;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#888;text-align:left}
+  .gst-summary th.r,.gst-summary td.r{text-align:right}
+  .gst-summary td{padding:4px 0;color:#555}
+
+  /* ── totals ── */
+  .totals{padding:14px 24px;background:#f9f9fb;border-top:1px solid #eee}
+  .totals .t-row{display:flex;justify-content:space-between;font-size:13px;color:#555;padding:3px 0}
+  .totals .t-due{color:#c0392b;font-weight:600;padding-top:8px}
+  .totals .t-paid{color:#1e7e34;font-size:12px}
+  .totals .t-grand{display:flex;justify-content:space-between;font-size:16px;font-weight:700;color:#1a1a2e;padding:12px 0 0;margin-top:8px;border-top:2px solid #1a1a2e}
+
+  /* ── footer ── */
+  .footer{padding:16px 24px;text-align:center;border-top:1px solid #eee}
+  .footer .note{font-size:12px;color:#444;font-style:italic;margin-bottom:6px}
+  .footer .thanks{font-size:13px;font-weight:600;color:#333;letter-spacing:.2px}
+  .footer .powered{font-size:11px;color:#bbb;margin-top:8px}
+
+  /* ── download button ── */
+  .actions{max-width:500px;margin:16px auto 0;text-align:center}
+  .btn-download{display:inline-flex;margin:4px;text-decoration:none;align-items:center;gap:8px;background:#1a1a2e;color:#fff;border:none;border-radius:6px;padding:12px 22px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15);transition:opacity .15s}
+  .btn-download:hover{opacity:.9}
+  .btn-download svg{width:16px;height:16px}
+
+  /* When saving/printing: hide the button and neutralise screen chrome */
+  @media print{
+    body{background:#fff;padding:0}
+    .receipt{box-shadow:none;max-width:none}
+    .actions{display:none}
+  }
+`;
+
+// GET /receipt/s/:token — public, no auth
+// The Payment Receipt for one Credit-tab payment (migration 052): every bill
+// it paid, what was paid on each and what each still owed right after.
+router.get('/s/:token', async (req, res) => {
+  try {
+    await poolConnect;
+    const token = String(req.params.token || '').replace(/\s+/g, '').slice(0, 16);
+    if (!token) return res.status(404).send('<h2>Receipt not found</h2>');
+    const head = await pool.request()
+      .input('token', sql.NVarChar(16), token)
+      .query(`
+        SELECT s.id, s.customer_name, s.customer_phone, s.mode, s.total, s.created_at,
+               bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
+               bs.email AS shop_email, bs.city, bs.state, bs.pincode,
+               bs.gst_number, bs.fssai_number, bs.logo_url, bs.print_logo, bs.bill_footer_note
+        FROM credit_settlements s
+        JOIN businesses bs ON bs.id = s.business_id
+        WHERE s.receipt_token = @token
+      `);
+    if (head.recordset.length === 0) {
+      return res.status(404).send('<h2>Receipt not found</h2>');
+    }
+    const s = head.recordset[0];
+
+    // "Bal due" is as of THIS payment: payments made later on the same bill
+    // don't count, so an old receipt never changes under the customer.
+    const linesResult = await pool.request()
+      .input('id', sql.UniqueIdentifier, s.id)
+      .query(`
+        SELECT b.bill_number, COALESCE(b.finalized_at, b.created_at) AS bill_date,
+               b.total - b.discount_amount + ISNULL(b.round_off, 0) AS bill_total,
+               pay.amount AS paid,
+               ${CREDIT_PART} - (SELECT ISNULL(SUM(p2.amount), 0) FROM credit_payments p2
+                                 WHERE p2.bill_id = b.id AND p2.created_at <= pay.created_at) AS due
+        FROM credit_payments pay
+        JOIN bills b ON b.id = pay.bill_id
+        WHERE pay.settlement_id = @id
+        ORDER BY b.created_at DESC
+      `);
+    const lines = linesResult.recordset;
+
+    const fmt = (n) => Number(n).toFixed(2);
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const titleCase = (m) => m.charAt(0).toUpperCase() + m.slice(1);
+    const ist = (d, withTime) => new Date(d).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric',
+      ...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: true } : {}),
+    });
+    const addressLine = esc([s.address, s.city, s.state, s.pincode].filter(Boolean).join(', '));
+
+    const rows = lines.map((l) => `<tr>
+          <td class="item-name">${esc(stripBillPrefix(l.bill_number))}<span class="hsn">${ist(l.bill_date, false)}</span></td>
+          <td class="r col-rate">&#8377;${fmt(l.bill_total)}</td>
+          <td class="r amount col-amt">&#8377;${fmt(l.paid)}${Number(l.due) > 0.004
+            ? `<span class="hsn bal">Bal due &#8377;${fmt(l.due)}</span>` : ''}</td>
+        </tr>`).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Payment Receipt &mdash; ${esc(s.shop_name)}</title>
+<style>${PAGE_CSS}
+  td .hsn.bal{color:#c0392b;font-weight:600}
+  .t-received{display:flex;justify-content:space-between;align-items:baseline;padding:16px 0 4px;margin-top:10px;border-top:1px solid #eee}
+  .t-received .k{font-size:18px;font-weight:700;color:#1a1a2e;letter-spacing:.3px}
+  .t-received .v{font-size:22px;font-weight:700;color:#1e7e34}
+</style>
+</head>
+<body>
+<div class="receipt">
+  <div class="top-bar">
+    ${s.logo_url && s.print_logo ? '<img src="' + esc(s.logo_url) + '" class="logo" alt=""/>' : ''}
+    <div class="shop-name">${esc(s.shop_name)}</div>
+    <div class="shop-sub">
+      ${addressLine ? addressLine + '<br/>' : ''}
+      ${s.shop_phone ? 'Tel: ' + esc(s.shop_phone) : ''}
+      ${s.gst_number ? '<br/>GSTIN: ' + esc(s.gst_number) : ''}
+      ${s.fssai_number ? '<br/>FSSAI: ' + esc(s.fssai_number) : ''}
+    </div>
+  </div>
+
+  <div class="meta">
+    <div class="meta-item">
+      <div class="label">Receipt</div>
+      <div class="value">Payment Receipt</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Date &amp; Time</div>
+      <div class="value">${ist(s.created_at, true)}</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Payment</div>
+      <div class="value"><span class="badge">${esc(titleCase(s.mode))}</span></div>
+    </div>
+  </div>
+
+  ${s.customer_name || s.customer_phone ? `
+  <div class="customer">
+    <div class="sec-label">Received From</div>
+    ${s.customer_name ? '<div class="cname">' + esc(s.customer_name) + '</div>' : ''}
+    ${s.customer_phone ? '<div class="cphone">Mob: ' + esc(s.customer_phone) + '</div>' : ''}
+  </div>` : ''}
+
+  <table>
+    <thead class="table-head">
+      <tr>
+        <th>Settled Invoices</th>
+        <th class="r col-rate">Bill</th>
+        <th class="r col-amt">Paid</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  <div class="totals">
+    <div class="t-row"><span>Total paid</span><span>&#8377;${fmt(s.total)}</span></div>
+    <div class="t-received"><span class="k">TOTAL RECEIVED</span><span class="v">&#8377;${fmt(s.total)}</span></div>
+  </div>
+
+  <div class="footer">
+    ${s.bill_footer_note ? '<div class="note">' + esc(s.bill_footer_note) + '</div>' : ''}
+    <div class="thanks">Thank you for your payment.</div>
+    <div class="powered">powered by vittam</div>
+  </div>
+</div>
+
+<div class="actions">
+  ${PDF_LINK.replace('<a ', '<a class="btn-download" ')}
+  <button type="button" class="btn-download" onclick="${DOWNLOAD_ONCLICK}">Print</button>
+  ${DOWNLOAD_FALLBACK}
+</div>
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(html);
+  } catch (err) {
+    logger.error({ err }, 'settlement receipt page error');
+    return res.status(500).send('<h2>Something went wrong</h2>');
+  }
+});
+
+// GET /receipt/:token — public, no auth
+// Serves a full HTML receipt page for the given token.
+router.get('/:token', async (req, res) => {
+  try {
+    await poolConnect;
+    // Strip ALL whitespace that some WhatsApp/link renderers inject mid-token
+    // (e.g. "6pWhWmV -Yaf93HJn" → "6pWhWmV-Yaf93HJn"). A valid receipt token is
+    // URL-safe base64 and never contains spaces. Cap at 16 so an over-long
+    // value returns a clean 404 instead of a SQL "invalid data length" (8016).
+    const token = String(req.params.token || '').replace(/\s+/g, '').slice(0, 16);
+    if (!token) return res.status(404).send('<h2>Receipt not found</h2>');
+    const row = await pool.request()
+      .input('token', sql.NVarChar(16), token)
+      .query(`
+        SELECT b.id, b.bill_number, b.customer_name, b.customer_phone,
+               b.customer_address, b.customer_gstin,
+               b.subtotal, b.tax_amount, b.discount_amount, b.charges_amount, b.additional_charges,
+               b.warranty_extra_data,
+               b.total, b.round_off, b.payment_mode, b.created_at, b.finalized_at,
+               b.payment_status, b.settled_payment_mode, b.credit_amount, b.credit_collected,
+               t.table_number,
+               -- Who settled it (else who started it, on older bills).
+               COALESCE(fu.name, cu.name) AS billed_by,
+               bs.name AS shop_name, bs.address, bs.phone AS shop_phone,
+               bs.email AS shop_email, bs.city, bs.state, bs.pincode,
+               bs.gst_number, bs.fssai_number, bs.logo_url, bs.print_logo, bs.bill_footer_note,
+               bs.gst_enabled, bs.default_sac_code, bs.bill_settings
+        FROM bills b
+        JOIN businesses bs ON bs.id = b.business_id
+        LEFT JOIN tables t ON t.id = b.table_id
+        LEFT JOIN users fu ON fu.id = b.finalized_by_user_id
+        LEFT JOIN users cu ON cu.id = b.created_by_user_id
+        WHERE b.receipt_token = @token AND b.status = 'finalized'
+      `);
+
+    if (row.recordset.length === 0) {
+      return res.status(404).send('<h2>Receipt not found</h2>');
+    }
+
+    const bill = attachCharges(row.recordset[0]);
+
+    const itemsResult = await pool.request()
+      .input('token', sql.NVarChar(16), token)
+      .query(`
+        SELECT bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount
+        FROM bill_items bi
+        JOIN bills b ON b.id = bi.bill_id
+        ${BILL_ITEMS_JOIN}
+        WHERE b.receipt_token = @token
+        ${BILL_ITEMS_ORDER}
+      `);
+
+    const items = itemsResult.recordset;
+
+    // Old dues this bill collected; or, for a credit bill, what has been paid
+    // on it since (migration 051).
+    await attachCreditInfo([bill]);
+    const fmtDate = (d) => new Date(d).toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric',
+    });
+
+    // A split bill's parts (migration 050) — only split bills have any.
+    const parts = bill.payment_mode !== 'split' ? [] : (await pool.request()
+      .input('token', sql.NVarChar(16), token)
+      .query(`
+        SELECT bp.mode, bp.amount
+        FROM bill_payments bp
+        JOIN bills b ON b.id = bp.bill_id
+        WHERE b.receipt_token = @token
+        ORDER BY bp.created_at, bp.mode
+      `)).recordset;
+
+    const fmt = (n) => Number(n).toFixed(2);
+    // Split a tax figure into the CGST/SGST halves that RENDER, giving the odd
+    // paisa to CGST so the two always add back to exactly the original. Naively
+    // printing (tax / 2) twice loses or gains a paisa on any odd-paise tax
+    // (0.95 -> 0.47 + 0.47 = 0.94), which makes the receipt's Subtotal + CGST +
+    // SGST disagree with its Grand Total by 0.01.
+    const gstHalves = (tax) => {
+      const paise = Math.round(Number(tax) * 100);
+      return [((paise + 1) >> 1) / 100, (paise >> 1) / 100];
+    };
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // The sale date — a held order is dated when it was settled.
+    const date = new Date(bill.finalized_at || bill.created_at).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: true,
+    });
+    // Full name, whitespace collapsed ("Ramesh  Patil " → "Ramesh Patil").
+    const billedBy = String(bill.billed_by || '').trim().replace(/\s+/g, ' ');
+
+    // Billing Setup (businesses.bill_settings). NULL = defaults = the card as before.
+    const cfg = billSettings.parse(bill.bill_settings);
+    const bank = billSettings.bankLines(cfg);
+    const shopNote = billSettings.noteText(cfg);
+    const cust = cfg.show_customer;
+    const shopPhone = cfg.show_phone ? billSettings.shopPhones(bill.shop_phone, cfg) : null;
+
+    const addrParts = [bill.address, bill.city, bill.state, bill.pincode].filter(Boolean);
+    const addressLine = cfg.show_address && addrParts.length ? esc(addrParts.join(', ')) : '';
+
+    // GST tax-invoice extras only render when the business has GST enabled AND
+    // the bill actually carries tax. Otherwise the receipt is byte-for-byte as
+    // before. CGST/SGST are a display split (each = tax_amount / 2); nothing is
+    // recomputed from line items, so totals never drift.
+    const gstEnabled = !!bill.gst_enabled && Number(bill.tax_amount) > 0;
+    // Final payable = total − discount + round_off, less any tax that must be
+    // ignored because the business has GST off. Without the correction a bill
+    // whose stored tax_amount predates the toggle would show a grand total
+    // higher than the net payable the customer actually paid.
+    const grandTotal =
+      Number(bill.total)
+      - Number(bill.discount_amount || 0)
+      + Number(bill.round_off || 0)
+      - (bill.gst_enabled ? 0 : Number(bill.tax_amount || 0));
+    // Per-line HSN/SAC: the item's own code, else the business default SAC.
+    const codeFor = (i) => i.hsn_code || bill.default_sac_code || '';
+    const showHsnCol = gstEnabled && cfg.show_tax_summary && items.some((i) => codeFor(i));
+
+    // Rate-wise GST summary rows: group taxable value + tax by tax_rate.
+    // taxable = qty×unit_price; lineTax = line_total − taxable; cgst = sgst = lineTax/2.
+    //
+    // bill_items store the PRE-discount line tax (line_total = qty×price + tax,
+    // computed before the bill-level discount is applied), while bills.tax_amount
+    // holds the discounted figure. The discount reduces the taxable base, so both
+    // the taxable value and the tax here are scaled by discountedNet/subtotal —
+    // otherwise this summary would contradict the CGST/SGST totals below it.
+    const discountRatio =
+      Number(bill.subtotal) > 0
+        ? (Number(bill.subtotal) - Number(bill.discount_amount || 0)) / Number(bill.subtotal)
+        : 1;
+    const gstByRate = {};
+    if (gstEnabled && cfg.show_tax_summary) {
+      for (const i of items) {
+        const rate = i.tax_rate != null ? Number(i.tax_rate) : 0;
+        if (rate <= 0) continue;
+        const taxable = Number(i.quantity) * Number(i.unit_price);
+        const lineTax = Number(i.line_total) - taxable;
+        const g = (gstByRate[rate] = gstByRate[rate] || { taxable: 0, tax: 0 });
+        g.taxable += taxable * discountRatio;
+        g.tax += lineTax * discountRatio;
+      }
+    }
+    const gstSummaryRows = Object.keys(gstByRate)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map((rate) => {
+        const g = gstByRate[rate];
+        const half = rate / 2;
+        return `<tr>
+          <td>${fmt(g.taxable)}</td>
+          <td class="r">${half}% &nbsp;&#8377;${fmt(g.tax / 2)}</td>
+          <td class="r">${half}% &nbsp;&#8377;${fmt(g.tax / 2)}</td>
+        </tr>`;
+      }).join('');
+
+    // A settled credit bill (payment_mode='credit', payment_status='paid') was
+    // actually collected via settled_payment_mode — show that. Only an UNPAID
+    // credit bill still reads "Credit" (and stays red below).
+    // A split bill reads "Cash ₹300 · UPI ₹200 · Credit ₹200", its credit part
+    // following the same settled rule.
+    const isUnpaidCredit =
+      (bill.payment_mode === 'credit' || bill.payment_mode === 'split') &&
+      bill.payment_status === 'unpaid';
+    const settledAs = (mode) =>
+      mode === 'credit' && bill.payment_status === 'paid' && bill.settled_payment_mode
+        ? bill.settled_payment_mode
+        : mode;
+    const titleCase = (m) => m.charAt(0).toUpperCase() + m.slice(1);
+    const payLabel = parts.length
+      ? parts.map((p) => `${titleCase(settledAs(p.mode))} ₹${fmt(p.amount)}`).join(' · ')
+      : titleCase(settledAs(bill.payment_mode));
+
+    // Shared from a device printing A4/A5: show the same invoice it prints.
+    const paper = ['a4', 'a5'].includes(req.query.p) ? req.query.p : null;
+    if (paper) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      return res.send(renderInvoice({
+        paper, bill, items, parts, grandTotal, billedBy, settledAs, isUnpaidCredit,
+      }));
+    }
+
+    const itemRows = items.map((i) => {
+      const qty = Number(i.quantity) % 1 === 0 ? Number(i.quantity) : fmt(i.quantity);
+      // Rate BEFORE the line discount: unit_price is stored discounted, but a
+      // discount must not read as a price change (2 × 180 less 50 → Rate 180,
+      // not 155). Same as BillItem.receiptPrice in the app.
+      const rate = Number(i.quantity) > 0
+        ? Number(i.unit_price) + Number(i.discount_amount || 0) / Number(i.quantity)
+        : Number(i.unit_price);
+      return `<tr>
+          <td class="item-name">${esc(i.item_name)}${Number(i.discount_amount) > 0 ? ' (Disc &#8377;' + fmt(i.discount_amount) + ')' : ''}${showHsnCol ? '<span class="hsn">' + esc(codeFor(i)) + '</span>' : ''}</td>
+          <td class="r col-qty">${qty}</td>
+          <td class="r col-rate">&#8377;${fmt(rate)}</td>
+          <td class="r amount col-amt">&#8377;${fmt(i.line_total)}</td>
+        </tr>`;
+    }).join('');
+
+    const totalQty = items.reduce((s, i) => s + Number(i.quantity), 0);
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Receipt &mdash; ${esc(stripBillPrefix(bill.bill_number))}</title>
+<style>${PAGE_CSS}</style>
+</head>
+<body>
+<div class="receipt">
+
+  <!-- Header -->
+  <div class="top-bar">
+    ${bill.logo_url && bill.print_logo ? '<img src="' + esc(bill.logo_url) + '" class="logo" alt=""/>' : ''}
+    <div class="shop-name">${esc(bill.shop_name)}</div>
+    <div class="shop-sub">
+      ${addressLine ? addressLine + '<br/>' : ''}
+      ${shopPhone ? 'Tel: ' + esc(shopPhone).replace(/\n/g, '<br/>') : ''}
+      ${shopPhone && bill.shop_email ? '&nbsp;&nbsp;|&nbsp;&nbsp;' : ''}
+      ${bill.shop_email ? '<a href="mailto:' + esc(bill.shop_email) + '">' + esc(bill.shop_email) + '</a>' : ''}
+      ${cfg.show_gstin && bill.gst_number ? '<br/>GSTIN: ' + esc(bill.gst_number) : ''}
+      ${cfg.show_fssai && bill.fssai_number ? '<br/>FSSAI: ' + esc(bill.fssai_number) : ''}
+    </div>
+  </div>
+
+  <!-- Bill meta -->
+  <div class="meta">
+    <div class="meta-item">
+      <div class="label">Bill No</div>
+      <div class="value">${esc(stripBillPrefix(bill.bill_number))}</div>
+    </div>
+    ${bill.table_number ? `
+    <div class="meta-item">
+      <div class="label">Table</div>
+      <div class="value">${esc(String(bill.table_number))}</div>
+    </div>` : ''}
+    <div class="meta-item">
+      <div class="label">Date &amp; Time</div>
+      <div class="value">${date}</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Payment</div>
+      <div class="value"><span class="badge${isUnpaidCredit ? ' badge-credit' : ''}">${esc(payLabel)}</span></div>
+    </div>
+    ${cfg.show_cashier && billedBy ? `
+    <div class="meta-item">
+      <div class="label">Cashier</div>
+      <div class="value">${esc(billedBy)}</div>
+    </div>` : ''}
+  </div>
+
+  ${(cust && (bill.customer_name || bill.customer_phone || bill.customer_address || bill.customer_gstin)) ||
+    (cfg.show_warranty_details && bill.warranty_extra_data.length) ? `
+  <!-- Customer -->
+  <div class="customer">
+    <div class="sec-label">Billed To</div>
+    ${cust && bill.customer_name ? '<div class="cname">' + esc(bill.customer_name) + '</div>' : ''}
+    ${cust && bill.customer_phone ? '<div class="cphone">Mob: ' + esc(bill.customer_phone) + '</div>' : ''}
+    ${cust && bill.customer_address ? '<div class="cphone">Address: ' + esc(bill.customer_address) + '</div>' : ''}
+    ${cust && bill.customer_gstin ? '<div class="cphone">GSTIN: ' + esc(bill.customer_gstin) + '</div>' : ''}
+    ${cfg.show_warranty_details ? bill.warranty_extra_data.map((e) =>
+        '<div class="cphone">' + esc(e.label) + ': ' + esc(e.value) + '</div>').join('') : ''}
+  </div>` : ''}
+
+  <!-- Items -->
+  <table>
+    <thead class="table-head">
+      <tr>
+        <th>Description</th>
+        <th class="r col-qty">Qty</th>
+        <th class="r col-rate">Rate</th>
+        <th class="r col-amt">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+  </table>
+
+  <!-- Totals -->
+  <div class="totals">
+    <div class="t-row">
+      <span>Total Qty</span>
+      <span>${totalQty % 1 === 0 ? totalQty : fmt(totalQty)}</span>
+    </div>
+    <div class="t-row">
+      <span>Items</span>
+      <span>${items.length}</span>
+    </div>
+    <div class="t-row">
+      <span>Subtotal</span>
+      <span>&#8377;${fmt(bill.subtotal)}</span>
+    </div>
+    ${gstEnabled ? `<div class="t-row">
+      <span>CGST</span>
+      <span>&#8377;${fmt(gstHalves(bill.tax_amount)[0])}</span>
+    </div>
+    <div class="t-row">
+      <span>SGST</span>
+      <span>&#8377;${fmt(gstHalves(bill.tax_amount)[1])}</span>
+    </div>` : ''}
+    ${Number(bill.discount_amount) > 0 ? `<div class="t-row">
+      <span>Discount</span>
+      <span>&minus;&#8377;${fmt(bill.discount_amount)}</span>
+    </div>` : ''}
+    ${bill.additional_charges.map((c) => `<div class="t-row">
+      <span>${esc(c.name)}</span>
+      <span>+&#8377;${fmt(c.amount)}</span>
+    </div>`).join('')}
+    ${Number(bill.round_off) !== 0 ? `<div class="t-row">
+      <span>Round Off</span>
+      <span>${Number(bill.round_off) < 0 ? '&minus;' : '+'}&#8377;${fmt(Math.abs(Number(bill.round_off)))}</span>
+    </div>` : ''}
+    <div class="t-grand">
+      <span>Grand Total</span>
+      <span>&#8377;${fmt(grandTotal)}</span>
+    </div>
+    ${(bill.collected || []).length ? `
+    ${bill.collected.map((c) => `<div class="t-row">
+      <span>Prev. due &middot; Bill ${esc(stripBillPrefix(c.bill_number))}</span>
+      <span>+&#8377;${fmt(c.amount)}</span>
+    </div>`).join('')}
+    <div class="t-grand">
+      <span>Total</span>
+      <span>&#8377;${fmt(grandTotal + Number(bill.credit_collected || 0))}</span>
+    </div>` : ''}
+    ${(bill.credit_payments || []).map((p) => `<div class="t-row t-paid">
+      <span>Paid${p.paid_in_bill_number ? ' in Bill ' + esc(stripBillPrefix(p.paid_in_bill_number)) : ''} &middot; ${esc(titleCase(p.mode))} &middot; ${fmtDate(p.created_at)}</span>
+      <span>&minus;&#8377;${fmt(p.amount)}</span>
+    </div>`).join('')}
+    ${isUnpaidCredit ? `<div class="t-row t-due">
+      <span>Balance Due</span>
+      <span>&#8377;${fmt((bill.credit_amount != null ? Number(bill.credit_amount) : grandTotal) - Number(bill.credit_paid || 0))}</span>
+    </div>` : ''}
+  </div>
+
+  ${gstSummaryRows ? `
+  <!-- GST summary -->
+  <div class="gst-summary">
+    <div class="gst-label">GST Summary</div>
+    <table>
+      <thead>
+        <tr><th>Taxable Value</th><th class="r">CGST</th><th class="r">SGST</th></tr>
+      </thead>
+      <tbody>${gstSummaryRows}</tbody>
+    </table>
+  </div>` : ''}
+
+  <!-- Footer -->
+  <div class="footer">
+    ${shopNote ? '<div class="note"><b>Note</b><br/>' + esc(shopNote) + '</div>' : ''}
+    ${cfg.show_terms && bill.bill_footer_note ? '<div class="note">'
+      // Heading only when a Note / Bank section sits beside it; on its own the
+      // footer prints plain, as it did before Billing Setup existed.
+      + (shopNote || bank.length ? '<b>Terms &amp; Conditions</b><br/>' : '')
+      + esc(bill.bill_footer_note) + '</div>' : ''}
+    ${bank.length ? '<div class="note"><b>Bank Details</b><br/>' + bank.map(esc).join('<br/>') + '</div>' : ''}
+    <div class="thanks">Thank you for your business.</div>
+    <div class="powered">powered by vittam</div>
+  </div>
+
+</div>
+
+<div class="actions">
+  ${PDF_LINK.replace('<a ', '<a class="btn-download" ')}
+  <button type="button" class="btn-download" onclick="${DOWNLOAD_ONCLICK}">
+    Print
+  </button>
+  ${DOWNLOAD_FALLBACK}
+</div>
+
+</body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(html);
+  } catch (err) {
+    logger.error({ err }, 'receipt page error');
+    return res.status(500).send('<h2>Something went wrong</h2>');
+  }
+});
+
+module.exports = router;
