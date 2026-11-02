@@ -46,12 +46,24 @@ void main() {
   });
 
   test('unit after the quantity only when show_units is on', () {
-    catalogUnits = {'rice': 'kg'};
+    catalogUnits = {'rice': (unit: 'kg', packUnit: null, packSize: null)};
     final item = BillItem(
         id: 'i', billId: 'b', itemId: 'rice', itemName: 'Rice',
         quantity: 2, unitPrice: 50, lineTotal: 100);
-    expect(const BillSettings().qty(item, '2'), '2');
-    expect(BillSettings.fromJson({'show_units': true}).qty(item, '2'), '2 kg');
+    expect(const BillSettings().line(item, '2').qty, '2');
+    expect(BillSettings.fromJson({'show_units': true}).line(item, '2').qty,
+        '2 kg');
+    catalogUnits = const {};
+  });
+
+  test('whole boxes print as boxes even with show_units off', () {
+    catalogUnits = {'soap': (unit: 'piece', packUnit: 'box', packSize: 12)};
+    final item = BillItem(
+        id: 'i', billId: 'b', itemId: 'soap', itemName: 'Soap',
+        quantity: 12, unitPrice: 10, lineTotal: 120);
+    final line = const BillSettings().line(item, '12');
+    expect(line.qty, '1 box');
+    expect(line.price, 120);
     catalogUnits = const {};
   });
 

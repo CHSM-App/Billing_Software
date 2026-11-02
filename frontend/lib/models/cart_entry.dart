@@ -98,6 +98,12 @@ class CartEntry {
   String? get packUnit => variant != null ? variant!.packUnit : item.packUnit;
   double? get packSize => variant != null ? variant!.packSize : item.packSize;
 
+  /// The line's unit: the size's own when it has one, else the item's.
+  String get unit => variant?.unit ?? item.unit;
+
+  /// Sold by measure (1.5 kg) rather than counted — see [measuredUnits].
+  bool get isMeasured => measuredUnits.contains(unit);
+
   /// 17 bottles → (packs: 1, loose: 2). Null under one full pack. Display only.
   ({int packs, double loose})? get packs => packBreakdown(quantity, packSize);
 

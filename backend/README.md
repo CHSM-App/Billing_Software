@@ -39,6 +39,19 @@ JWT_SECRET=changeme
 PORT=3000
 ```
 
+Optional — AI purchase-bill scanning (`src/purchaseScan.js`). Without a key and
+model the "Scan bill" button never appears. Each business must also be switched
+on in the admin portal (Bill Scanning section); it is off by default.
+```
+ANTHROPIC_API_KEY=
+PURCHASE_SCAN_MODEL=claude-haiku-4-5
+PURCHASE_SCAN_MONTHLY_LIMIT=100      # default free scans/month; admin can override per business
+PURCHASE_SCAN_MAX_FILE_SIZE_MB=10
+PURCHASE_SCAN_MAX_PDF_PAGES=20
+```
+Original bill files are stored in `backend/private_uploads/` (never served
+publicly). Back it up with the database.
+
 ## 4. Create the schema
 
 **Option A — Node script (recommended)**

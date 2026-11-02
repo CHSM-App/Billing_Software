@@ -142,9 +142,11 @@ class BillSettings {
     return all.isEmpty ? null : all.join('\n');
   }
 
-  /// A printed bill line's quantity: "2 kg" with [showUnits], else just "2".
-  String qty(BillItem item, String qty) =>
-      showUnits ? receiptQty(item, qty) : qty;
+  /// A printed bill line's quantity and rate: "2 kg" with [showUnits], else
+  /// just "2"; whole packs always print as "1 box" at the box rate — see
+  /// [receiptLine].
+  ({String qty, double price, bool packed}) line(BillItem item, String qty) =>
+      receiptLine(item, qty, withUnit: showUnits);
 
   /// The UPI payment link [bill]'s QR encodes, or null when the QR is off.
   /// The amount is what is still owed on a credit bill, else the printed

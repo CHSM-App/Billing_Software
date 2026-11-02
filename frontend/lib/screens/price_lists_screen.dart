@@ -214,8 +214,14 @@ class _PriceListEditScreenState extends ConsumerState<_PriceListEditScreen> {
           ),
         ],
       ),
-      body: ListView.builder(
-        itemCount: shown.length + 1,
+      body: LayoutBuilder(builder: (context, box) {
+        // Two items side by side where there is room; a phone keeps one, or
+        // the price field would crush the item name.
+        final cols = box.maxWidth >= 600 ? 2 : 1;
+        final rowCount = (shown.length + cols - 1) ~/ cols;
+        const line = BorderSide(color: AppColors.border);
+        return ListView.builder(
+        itemCount: rowCount + 1,
         itemBuilder: (context, i) {
           if (i == 0) {
             return Padding(
@@ -257,33 +263,52 @@ class _PriceListEditScreenState extends ConsumerState<_PriceListEditScreen> {
               ]),
             );
           }
-          final r = shown[i - 1];
-          final base = r.basePrice;
-          // What a blank field bills at: the % rule on the default price.
-          final ruled = base == null || pct == null || pct == 0
-              ? base
-              : double.parse((base * (1 + pct / 100)).toStringAsFixed(2));
-          return ListTile(
-            title: Text(r.label, maxLines: 2, overflow: TextOverflow.ellipsis),
-            subtitle: Text(l10n.priceListDefaultPrice(
-                base == null ? '–' : base.toStringAsFixed(2))),
-            trailing: SizedBox(
-              width: 110,
-              child: TextField(
-                controller: _ctrl(r.key),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: numbers,
-                textAlign: TextAlign.right,
-                decoration: InputDecoration(
-                  isDense: true,
-                  prefixText: '₹ ',
-                  hintText: ruled?.toStringAsFixed(2),
-                ),
-                onChanged: (v) => _prices[r.key] = v,
-              ),
+          // One grid row: [cols] items, with a light-grey line under it (and
+          // above the first) so the rows read as a table.
+          final start = (i - 1) * cols;
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border(top: i == 1 ? line : BorderSide.none, bottom: line),
             ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              for (var c = 0; c < cols; c++)
+                Expanded(
+                  child: start + c < shown.length
+                      ? _priceTile(shown[start + c], pct, numbers)
+                      : const SizedBox.shrink(),
+                ),
+            ]),
           );
         },
+      );
+      }),
+    );
+  }
+
+  Widget _priceTile(_Row r, double? pct, List<TextInputFormatter> numbers) {
+    final base = r.basePrice;
+    // What a blank field bills at: the % rule on the default price.
+    final ruled = base == null || pct == null || pct == 0
+        ? base
+        : double.parse((base * (1 + pct / 100)).toStringAsFixed(2));
+    return ListTile(
+      title: Text(r.label, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(context.l10n.priceListDefaultPrice(
+          base == null ? '–' : base.toStringAsFixed(2))),
+      trailing: SizedBox(
+        width: 110,
+        child: TextField(
+          controller: _ctrl(r.key),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: numbers,
+          textAlign: TextAlign.right,
+          decoration: InputDecoration(
+            isDense: true,
+            prefixText: '₹ ',
+            hintText: ruled?.toStringAsFixed(2),
+          ),
+          onChanged: (v) => _prices[r.key] = v,
+        ),
       ),
     );
   }

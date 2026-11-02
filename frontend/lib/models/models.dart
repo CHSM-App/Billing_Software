@@ -40,20 +40,69 @@ String unitShort(String unit) => const {
     }[unit] ??
     unit;
 
-/// EXPERIMENT (docs/experiments/receipt_units.md): item id → unit, refreshed
-/// by ItemsNotifier, so receipts can print "2 kg" — bill lines carry no unit.
+/// Units sold by measure: only these take a decimal quantity (1.5 kg) and
+/// show "/kg" after the price. Counted units — pcs, box, a custom "jar" — are
+/// whole numbers.
+const measuredUnits = {
+  'kg', 'g', 'litre', 'ml', 'metre', 'sqft', 'ton', 'quintal',
+};
+
+/// A catalog line's unit and pack — what a bill line needs to print "2 kg" or
+/// "1 box".
+typedef LineUnit = ({String unit, String? packUnit, double? packSize});
+
+/// EXPERIMENT (docs/experiments/receipt_units.md): item id — or
+/// "itemId:variantId" for a size — → its unit and pack, refreshed by
+/// ItemsNotifier. Bill lines carry neither.
 /// ponytail: global catalog map; store the unit on bill_items if this sticks.
-Map<String, String> catalogUnits = const {};
+Map<String, LineUnit> catalogUnits = const {};
+
+/// The catalog's unit and pack for a bill line: the size's, else the item's.
+LineUnit? _lineUnit(String? itemId, [String? variantId]) => itemId == null
+    ? null
+    : catalogUnits[variantId == null ? itemId : '$itemId:$variantId'] ??
+        catalogUnits[itemId];
 
 /// [qty] with the item's short unit when the catalog knows [itemId]: "2 kg",
 /// "1.5 L", or just "3". Used wherever a bill line is listed.
 String qtyWithUnit(String? itemId, String qty) {
-  final unit = itemId == null ? null : catalogUnits[itemId];
-  return unit == null ? qty : '$qty ${unitShort(unit)}';
+  final u = _lineUnit(itemId);
+  return u == null ? qty : '$qty ${unitShort(u.unit)}';
 }
 
-/// A bill line's quantity for a receipt — see [qtyWithUnit].
-String receiptQty(BillItem item, String qty) => qtyWithUnit(item.itemId, qty);
+/// How a bill line prints: its quantity text and the rate beside it.
+///
+/// A line holding whole packs prints in packs at the pack rate — 24 with 1 box
+/// = 12 is "2 box" at 12 × the piece rate, so Qty × Price = Total still reads
+/// true. Packs plus loose ("2 box + 2 pcs") keep the piece rate. Otherwise
+/// [qty] as given, plus the unit when [withUnit]. Lines the catalog doesn't
+/// know (deleted items, custom lines) print [qty] alone. [packed]: the
+/// quantity is no longer in base units, so a column total can't add it up.
+({String qty, double price, bool packed}) receiptLine(BillItem item, String qty,
+    {bool withUnit = true}) {
+  final u = _lineUnit(item.itemId, item.variantId);
+  final unit = u == null ? null : unitShort(u.unit);
+  final packUnit = u?.packUnit;
+  final p = packUnit == null ? null : packBreakdown(item.quantity, u!.packSize);
+  if (p != null) {
+    final packs = '${p.packs} ${unitShort(packUnit!)}';
+    return p.loose == 0
+        ? (qty: packs, price: item.receiptPrice * u!.packSize!, packed: true)
+        : (
+            qty: '$packs + ${formatQty(p.loose)} $unit',
+            price: item.receiptPrice,
+            packed: true,
+          );
+  }
+  return (
+    qty: withUnit && unit != null ? '$qty $unit' : qty,
+    price: item.receiptPrice,
+    packed: false,
+  );
+}
+
+/// A bill line's quantity for a receipt — see [receiptLine].
+String receiptQty(BillItem item, String qty) => receiptLine(item, qty).qty;
 
 /// [qty] base units as whole packs plus the loose rest: 17 bottles with a box of
 /// 15 is (packs: 1, loose: 2). Null when there is no pack or not one full pack.
@@ -131,6 +180,10 @@ class ItemVariant {
   /// This size's pack ("1 box = 24"), or null. See [packBreakdown].
   final String? packUnit;
   final double? packSize;
+
+  /// This size's own unit (Rice "5 kg bag" by bag), or null = counted in the
+  /// item's unit. Its stock and pack are in this unit.
+  final String? unit;
   final int sortOrder;
   final bool isActive;
 
@@ -144,6 +197,7 @@ class ItemVariant {
     this.lowStockThreshold,
     this.packUnit,
     this.packSize,
+    this.unit,
     this.sortOrder = 0,
     this.isActive = true,
   });
@@ -162,6 +216,7 @@ class ItemVariant {
         packSize: j['pack_size'] != null
             ? double.parse(j['pack_size'].toString())
             : null,
+        unit: j['unit'] as String?,
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         isActive: j['is_active'] == true || j['is_active'] == 1,
       );
@@ -289,8 +344,9 @@ class Item {
       );
 
   /// Whether this item is sold by a divisible measure (kg, g, litre, ...)
-  /// rather than as whole pieces. Drives decimal-quantity entry in the cart.
-  bool get isMeasured => unit != 'piece';
+  /// rather than counted (pcs, box, a custom "jar"). Drives decimal-quantity
+  /// entry in the cart. A size may have its own unit — see CartEntry.unit.
+  bool get isMeasured => measuredUnits.contains(unit);
 
   /// Whether the cashier must pick a size before this item can be added.
   bool get hasVariants => variants.isNotEmpty;

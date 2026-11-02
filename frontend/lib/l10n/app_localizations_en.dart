@@ -1828,14 +1828,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String billingCgst(String rate) {
-    return 'CGST ($rate%)';
-  }
+  String get billingCgst => 'CGST';
 
   @override
-  String billingSgst(String rate) {
-    return 'SGST ($rate%)';
-  }
+  String get billingSgst => 'SGST';
 
   @override
   String get billingDiscountApplied => 'Discount Applied';
@@ -2294,6 +2290,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsUnitCarton => 'Carton';
+
+  @override
+  String get itemsUnitOther => 'Other…';
+
+  @override
+  String get itemsUnitCustom => 'Your unit';
+
+  @override
+  String get itemsUnitSameAsItem => 'Same as item';
 
   @override
   String get itemsFieldPack => 'Sold in packs';
@@ -3735,6 +3740,93 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get purchaseImportPdfTooltip => 'Import from purchase list PDF';
+
+  @override
+  String get purchaseScanTooltip => 'Scan supplier bill (AI)';
+
+  @override
+  String purchaseScanLimitReached(int used, int limit) {
+    return 'Monthly scan limit reached ($used/$limit)';
+  }
+
+  @override
+  String get purchaseScanTakePhoto => 'Take photo';
+
+  @override
+  String get purchaseScanChooseGallery => 'Choose from gallery';
+
+  @override
+  String get purchaseScanChooseFile => 'Choose PDF or image file';
+
+  @override
+  String get purchaseScanReading => 'Reading bill…';
+
+  @override
+  String get purchaseScanNetworkError =>
+      'Couldn\'t reach the server. Check the connection and try again.';
+
+  @override
+  String purchaseScanUsage(int used, int limit) {
+    return '$used / $limit scans used this month';
+  }
+
+  @override
+  String get purchaseScanReviewTitle => 'Check against the bill before saving';
+
+  @override
+  String purchaseScanTotalMismatch(String printed, String entered) {
+    return 'Bill total Rs. $printed, entered Rs. $entered. Please check the invoice lines and taxes.';
+  }
+
+  @override
+  String purchaseScanWarnAmountMissing(int line) {
+    return 'Line $line: amount couldn\'t be read — enter it from the bill.';
+  }
+
+  @override
+  String purchaseScanWarnLineTax(int line) {
+    return 'Line $line: GST printed on the bill doesn\'t match its rate.';
+  }
+
+  @override
+  String purchaseScanWarnCgstSgst(int line) {
+    return 'Line $line: CGST and SGST on the bill are different.';
+  }
+
+  @override
+  String purchaseScanWarnTaxType(int line) {
+    return 'Line $line: IGST / CGST+SGST doesn\'t match the bill\'s interstate setting.';
+  }
+
+  @override
+  String purchaseScanWarnCess(int line) {
+    return 'Line $line: cess is printed but not recorded. Add it as a separate line if needed.';
+  }
+
+  @override
+  String purchaseScanWarnSubtotal(String printed, String computed) {
+    return 'Taxable value on the bill Rs. $printed, lines add up to Rs. $computed.';
+  }
+
+  @override
+  String purchaseScanWarnTaxTotal(String printed, String computed) {
+    return 'GST total on the bill Rs. $printed, calculated Rs. $computed.';
+  }
+
+  @override
+  String get purchaseScanOtherCharges => 'Other charges';
+
+  @override
+  String get purchaseFieldFreeQty => 'Free';
+
+  @override
+  String get purchaseRoundOff => 'Round off';
+
+  @override
+  String get purchaseViewOriginal => 'View original bill';
+
+  @override
+  String get purchaseOpenOriginalFailed => 'Couldn\'t open the original bill.';
 
   @override
   String get purchaseFieldInvoiceNumber => 'Invoice number';

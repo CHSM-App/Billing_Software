@@ -1822,14 +1822,10 @@ class AppLocalizationsMr extends AppLocalizations {
   }
 
   @override
-  String billingCgst(String rate) {
-    return 'CGST ($rate%)';
-  }
+  String get billingCgst => 'CGST';
 
   @override
-  String billingSgst(String rate) {
-    return 'SGST ($rate%)';
-  }
+  String get billingSgst => 'SGST';
 
   @override
   String get billingDiscountApplied => 'दिलेली सूट';
@@ -2291,6 +2287,15 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsUnitCarton => 'कार्टन';
+
+  @override
+  String get itemsUnitOther => 'इतर…';
+
+  @override
+  String get itemsUnitCustom => 'तुमचे एकक';
+
+  @override
+  String get itemsUnitSameAsItem => 'वस्तूप्रमाणे';
 
   @override
   String get itemsFieldPack => 'पॅकमध्ये विक्री';
@@ -3736,6 +3741,93 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get purchaseImportPdfTooltip => 'खरेदी यादी PDF मधून आयात करा';
+
+  @override
+  String get purchaseScanTooltip => 'पुरवठादाराचे बिल स्कॅन करा (AI)';
+
+  @override
+  String purchaseScanLimitReached(int used, int limit) {
+    return 'या महिन्याची स्कॅन मर्यादा संपली ($used/$limit)';
+  }
+
+  @override
+  String get purchaseScanTakePhoto => 'फोटो काढा';
+
+  @override
+  String get purchaseScanChooseGallery => 'गॅलरीमधून निवडा';
+
+  @override
+  String get purchaseScanChooseFile => 'PDF किंवा इमेज फाइल निवडा';
+
+  @override
+  String get purchaseScanReading => 'बिल वाचत आहे…';
+
+  @override
+  String get purchaseScanNetworkError =>
+      'सर्व्हरशी संपर्क झाला नाही. कनेक्शन तपासा आणि पुन्हा प्रयत्न करा.';
+
+  @override
+  String purchaseScanUsage(int used, int limit) {
+    return 'या महिन्यात $used / $limit स्कॅन वापरले';
+  }
+
+  @override
+  String get purchaseScanReviewTitle => 'सेव्ह करण्यापूर्वी बिलाशी तपासा';
+
+  @override
+  String purchaseScanTotalMismatch(String printed, String entered) {
+    return 'बिलावरील एकूण रु. $printed, नोंदवलेले रु. $entered. कृपया बिलातील वस्तू आणि कर तपासा.';
+  }
+
+  @override
+  String purchaseScanWarnAmountMissing(int line) {
+    return 'ओळ $line: रक्कम वाचता आली नाही — बिलावरून भरा.';
+  }
+
+  @override
+  String purchaseScanWarnLineTax(int line) {
+    return 'ओळ $line: बिलावरील GST त्याच्या दराशी जुळत नाही.';
+  }
+
+  @override
+  String purchaseScanWarnCgstSgst(int line) {
+    return 'ओळ $line: बिलावरील CGST आणि SGST वेगवेगळे आहेत.';
+  }
+
+  @override
+  String purchaseScanWarnTaxType(int line) {
+    return 'ओळ $line: IGST / CGST+SGST बिलाच्या आंतरराज्य सेटिंगशी जुळत नाही.';
+  }
+
+  @override
+  String purchaseScanWarnCess(int line) {
+    return 'ओळ $line: सेस छापलेला आहे पण नोंदवला जात नाही. गरज असल्यास वेगळी ओळ जोडा.';
+  }
+
+  @override
+  String purchaseScanWarnSubtotal(String printed, String computed) {
+    return 'बिलावरील करपात्र मूल्य रु. $printed, ओळींची बेरीज रु. $computed.';
+  }
+
+  @override
+  String purchaseScanWarnTaxTotal(String printed, String computed) {
+    return 'बिलावरील एकूण GST रु. $printed, गणना केलेला रु. $computed.';
+  }
+
+  @override
+  String get purchaseScanOtherCharges => 'इतर शुल्क';
+
+  @override
+  String get purchaseFieldFreeQty => 'मोफत';
+
+  @override
+  String get purchaseRoundOff => 'राउंड ऑफ';
+
+  @override
+  String get purchaseViewOriginal => 'मूळ बिल पहा';
+
+  @override
+  String get purchaseOpenOriginalFailed => 'मूळ बिल उघडता आले नाही.';
 
   @override
   String get purchaseFieldInvoiceNumber => 'बिल क्रमांक';

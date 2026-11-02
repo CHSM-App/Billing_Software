@@ -253,7 +253,7 @@ class InvoicePdf {
             // Plain figures in the item grid; "Rs." stays on the totals.
             _itemsTable(bill, showGst, codeOf, lineTaxOf,
                 (v) => v.toStringAsFixed(2), shaped,
-                (i) => settings.qty(i, formatQty(i.quantity))),
+                (i) => settings.line(i, formatQty(i.quantity))),
             pw.SizedBox(height: 10),
             _summary(bill, grandTotal, showGst, money),
             if (showGst && settings.showTaxSummary) ...[
@@ -664,40 +664,64 @@ class InvoicePdf {
       double Function(BillItem) lineTaxOf,
       String Function(num) money,
       ShapedText shaped,
-      String Function(BillItem) qtyOf) {
+      ({String qty, double price, bool packed}) Function(BillItem) lineOf) {
     final headStyle = pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold);
     final cellStyle = const pw.TextStyle(fontSize: 9);
     final anyHsn = showGst && bill.items.any((i) => codeOf(i).isNotEmpty);
 
+    // Two-line labels ("Taxable\nAmt") keep columns narrow; their lines align
+    // with the cell, not just the block.
     pw.Widget cell(String t, {pw.TextStyle? style, pw.Alignment align = pw.Alignment.centerLeft}) =>
         pw.Container(
           alignment: align,
           padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          child: pw.Text(t, style: style ?? cellStyle),
+          child: pw.Text(t,
+              style: style ?? cellStyle,
+              textAlign: align == pw.Alignment.centerRight
+                  ? pw.TextAlign.right
+                  : align == pw.Alignment.center
+                      ? pw.TextAlign.center
+                      : pw.TextAlign.left),
         );
 
-    // Column widths — # | Item | [HSN] | Qty | Price | [GST] | Amount
-    final widths = <int, pw.TableColumnWidth>{
-      0: const pw.FixedColumnWidth(22),           // #
-      1: const pw.FlexColumnWidth(4),             // Item
-    };
-    var col = 2;
-    if (anyHsn) widths[col++] = const pw.FixedColumnWidth(52); // HSN/SAC
-    widths[col++] = const pw.FixedColumnWidth(40);            // Qty
-    widths[col++] = const pw.FlexColumnWidth(1.6);           // Price
-    if (showGst) widths[col++] = const pw.FlexColumnWidth(1.8); // GST
-    widths[col++] = const pw.FlexColumnWidth(1.8);           // Amount
+    // A GST bill shows each line's taxable value, its GST, and the line total
+    // (taxable + GST). A bill-level discount lowers the taxable value — the
+    // GST column ([lineTaxOf]) is already on the discounted net — so taxable
+    // is scaled by the same ratio and every row foots: taxable + GST = total.
+    final discountRatio = bill.subtotal > 0
+        ? (bill.subtotal - bill.discountAmount) / bill.subtotal
+        : 1.0;
+    double taxableOf(BillItem i) => i.quantity * i.unitPrice * discountRatio;
+
+    // Columns
+    //   GST:     # | Item | [HSN] | Qty | Rate | Taxable | GST | Total
+    //   non-GST: # | Item | Qty | Rate | Amount
+    // Every column except Item sizes to its widest cell (header included), so
+    // amounts never wrap mid-number and nothing is wider than it needs to be.
+    // Item takes whatever is left — the most room on A4, less on A5. If a bill
+    // is too wide for the page, the table shrinks the sized columns in
+    // proportion rather than overflowing.
+    const auto = pw.IntrinsicColumnWidth();
+    final widths = <int, pw.TableColumnWidth>{1: const pw.FlexColumnWidth()};
+    final columnCount = 2 + (anyHsn ? 1 : 0) + (showGst ? 5 : 3);
+    for (var c = 0; c < columnCount; c++) {
+      widths.putIfAbsent(c, () => auto);
+    }
 
     pw.TableRow headerRow() {
       final cells = <pw.Widget>[
         cell('#', style: headStyle, align: pw.Alignment.center),
         cell('Item name', style: headStyle),
       ];
-      if (anyHsn) cells.add(cell('HSN/SAC', style: headStyle, align: pw.Alignment.center));
+      if (anyHsn) cells.add(cell('HSN/\nSAC', style: headStyle, align: pw.Alignment.center));
       cells.add(cell('Qty', style: headStyle, align: pw.Alignment.centerRight));
-      cells.add(cell('Price/Unit', style: headStyle, align: pw.Alignment.centerRight));
-      if (showGst) cells.add(cell('GST', style: headStyle, align: pw.Alignment.centerRight));
-      cells.add(cell('Amount', style: headStyle, align: pw.Alignment.centerRight));
+      cells.add(cell('Rate', style: headStyle, align: pw.Alignment.centerRight));
+      if (showGst) {
+        cells.add(cell('Taxable\nAmt', style: headStyle, align: pw.Alignment.centerRight));
+        cells.add(cell('GST', style: headStyle, align: pw.Alignment.centerRight));
+      }
+      cells.add(cell(showGst ? 'Total' : 'Amount',
+          style: headStyle, align: pw.Alignment.centerRight));
       return pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey300),
           children: cells);
@@ -715,29 +739,37 @@ class InvoicePdf {
         ),
       ];
       if (anyHsn) cells.add(cell(codeOf(i), align: pw.Alignment.center));
-      cells.add(cell(qtyOf(i), align: pw.Alignment.centerRight));
-      cells.add(cell(money(i.receiptPrice), align: pw.Alignment.centerRight));
+      final line = lineOf(i);
+      cells.add(cell(line.qty, align: pw.Alignment.centerRight));
+      cells.add(cell(money(line.price), align: pw.Alignment.centerRight));
       if (showGst) {
         final rate = i.taxRate ?? 0;
+        cells.add(cell(money(taxableOf(i)), align: pw.Alignment.centerRight));
+        // Rate on its own line: the column sizes to the amount, not to
+        // "4267.74 (18%)" on one line.
         cells.add(cell(
-            '${money(lineTaxOf(i))} (${_trimRate(rate)}%)',
+            '${money(lineTaxOf(i))}\n(${_trimRate(rate)}%)',
+            align: pw.Alignment.centerRight));
+        cells.add(cell(money(taxableOf(i) + lineTaxOf(i)),
+            align: pw.Alignment.centerRight));
+      } else {
+        // Without GST, Amount is the NET line value (qty × unit price),
+        // matching the thermal receipt and tying back to the Sub Total.
+        cells.add(cell(money(i.quantity * i.unitPrice),
             align: pw.Alignment.centerRight));
       }
-      // Amount is the NET line value (qty × unit price, before tax), matching
-      // the thermal receipt. Tax is shown once in its own column / the summary,
-      // so a tax-inclusive amount here would double-count it and the Total row
-      // would no longer equal the Sub Total in the summary box.
-      cells.add(cell(money(i.quantity * i.unitPrice),
-          align: pw.Alignment.centerRight));
       return pw.TableRow(children: cells);
     }
 
-    // Total row: sum of GST(₹) and the NET Amount — the latter ties back to the
-    // Sub Total in the summary box.
+    // Total row. GST bill: Σ taxable ties to the summary's Taxable Amount and
+    // Σ total to taxable + GST. Non-GST: Σ net Amount ties to the Sub Total.
     final totalQty = bill.items.fold<double>(0, (s, i) => s + i.quantity);
+    final anyPacked = bill.items.any((i) => lineOf(i).packed);
     final totalGst = bill.items.fold<double>(0, (s, i) => s + lineTaxOf(i));
-    final totalAmt =
-        bill.items.fold<double>(0, (s, i) => s + i.quantity * i.unitPrice);
+    final totalTaxable = bill.items.fold<double>(0, (s, i) => s + taxableOf(i));
+    final totalAmt = showGst
+        ? totalTaxable + totalGst
+        : bill.items.fold<double>(0, (s, i) => s + i.quantity * i.unitPrice);
 
     pw.TableRow totalRow() {
       final cells = <pw.Widget>[
@@ -745,9 +777,14 @@ class InvoicePdf {
         cell('Total', style: headStyle),
       ];
       if (anyHsn) cells.add(cell(''));
-      cells.add(cell(formatQty(totalQty), style: headStyle, align: pw.Alignment.centerRight));
+      // Blank once a line prints in boxes: "1 box" and "3 pcs" don't add up.
+      cells.add(cell(anyPacked ? '' : formatQty(totalQty),
+          style: headStyle, align: pw.Alignment.centerRight));
       cells.add(cell(''));
-      if (showGst) cells.add(cell(money(totalGst), style: headStyle, align: pw.Alignment.centerRight));
+      if (showGst) {
+        cells.add(cell(money(totalTaxable), style: headStyle, align: pw.Alignment.centerRight));
+        cells.add(cell(money(totalGst), style: headStyle, align: pw.Alignment.centerRight));
+      }
       cells.add(cell(money(totalAmt), style: headStyle, align: pw.Alignment.centerRight));
       return pw.TableRow(children: cells);
     }
@@ -833,9 +870,17 @@ class InvoicePdf {
                 // Round Off, Grand Total. Discount precedes tax because tax is on
                 // the discounted net. GST off → no tax rows at all, even if the
                 // bill still stores a tax_amount from when the toggle was on.
-                _totRow('Sub Total', money(bill.subtotal)),
+                // A GST bill heads with the Taxable Amount (the value GST is
+                // charged on, = the table's Taxable Amt total). With a discount
+                // that is the discounted net, so Sub Total and Discount stay
+                // above it to show where it came from.
+                if (!showGst || bill.discountAmount > 0)
+                  _totRow('Sub Total', money(bill.subtotal)),
                 if (bill.discountAmount > 0)
                   _totRow('Discount', '- ${money(bill.discountAmount)}'),
+                if (showGst)
+                  _totRow('Taxable Amount',
+                      money(bill.subtotal - bill.discountAmount)),
                 if (showGst) ...[
                   // Split in paise, odd paisa to CGST, so CGST + SGST adds back
                   // to exactly taxAmount. money(taxAmount / 2) twice loses or
@@ -882,9 +927,14 @@ class InvoicePdf {
         fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal);
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      // The label takes the remaining width with a fixed gap before the value:
+      // on A5, "Taxable Amount" and a five-figure value otherwise touch.
       child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [pw.Text(k, style: style), pw.Text(v, style: style)],
+        children: [
+          pw.Expanded(child: pw.Text(k, style: style)),
+          pw.SizedBox(width: 6),
+          pw.Text(v, style: style),
+        ],
       ),
     );
   }
@@ -911,8 +961,16 @@ class InvoicePdf {
     for (final i in bill.items) {
       final code = codeOf(i);
       final taxable = i.quantity * i.unitPrice * discountFactor;
-      final tax = lineTaxOf(i) * discountFactor;
-      final g = groups.putIfAbsent(code, () => _HsnAgg(rate: i.taxRate ?? 0));
+      // lineTaxOf is ALREADY on the discounted net (see build()); scaling it
+      // by discountFactor again under-stated the tax on every discounted bill,
+      // so this table disagreed with the CGST/SGST in the summary box.
+      final tax = lineTaxOf(i);
+      // One row per HSN code AND rate. Keyed on the code alone, items with no
+      // HSN (or one code at two rates) merged into a single row showing the
+      // first item's rate against everyone's tax.
+      final rate = i.taxRate ?? 0;
+      final g = groups.putIfAbsent(
+          '$code|$rate', () => _HsnAgg(code: code, rate: rate));
       g.taxable += taxable;
       g.tax += tax;
     }
@@ -923,30 +981,37 @@ class InvoicePdf {
         pw.Container(
             alignment: align,
             padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-            child: pw.Text(t, style: style ?? cellStyle));
+            child: pw.Text(t,
+                style: style ?? cellStyle,
+                textAlign: align == pw.Alignment.centerLeft
+                    ? pw.TextAlign.left
+                    : pw.TextAlign.right));
 
+    // Columns size to their content (the table default) and share out any
+    // spare width. Two-line headers keep that content narrow, so on A5 the
+    // amounts stay on one line instead of wrapping under a wide header.
     final rows = <pw.TableRow>[
       pw.TableRow(
         decoration: const pw.BoxDecoration(color: PdfColors.grey300),
         children: [
-          c('HSN/SAC', style: headStyle, align: pw.Alignment.centerLeft),
-          c('Taxable amount', style: headStyle),
-          c('CGST Rate', style: headStyle),
-          c('CGST Amt', style: headStyle),
-          c('SGST Rate', style: headStyle),
-          c('SGST Amt', style: headStyle),
-          c('Total Tax', style: headStyle),
+          c('HSN/\nSAC', style: headStyle, align: pw.Alignment.centerLeft),
+          c('Taxable\namount', style: headStyle),
+          c('CGST\nRate', style: headStyle),
+          c('CGST\nAmt', style: headStyle),
+          c('SGST\nRate', style: headStyle),
+          c('SGST\nAmt', style: headStyle),
+          c('Total\nTax', style: headStyle),
         ],
       ),
     ];
 
     var totTaxable = 0.0, totTax = 0.0;
-    groups.forEach((code, g) {
+    groups.forEach((_, g) {
       totTaxable += g.taxable;
       totTax += g.tax;
       final half = g.rate / 2;
       rows.add(pw.TableRow(children: [
-        c(code, align: pw.Alignment.centerLeft),
+        c(g.code, align: pw.Alignment.centerLeft),
         c(money(g.taxable)),
         c('${_trimRate(half)}%'),
         c(money(g.tax / 2)),
@@ -1024,8 +1089,9 @@ class InvoicePdf {
 }
 
 class _HsnAgg {
+  final String code;
   final double rate;
   double taxable = 0;
   double tax = 0;
-  _HsnAgg({required this.rate});
+  _HsnAgg({required this.code, required this.rate});
 }

@@ -85,6 +85,39 @@ function amountToWords(amount) {
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const money = (v) => `Rs.${Number(v).toFixed(2)}`;
 const qtyStr = (q) => (Number(q) % 1 === 0 ? String(Number(q)) : Number(q).toFixed(2));
+
+// Short unit names, as unitShort() in the app's models.dart. A custom unit
+// prints as typed.
+const UNIT_SHORT = {
+  piece: 'pcs', kg: 'kg', g: 'g', litre: 'L', ml: 'ml', metre: 'm', dozen: 'doz',
+  plate: 'plt', packet: 'pkt', box: 'box', bottle: 'btl', pair: 'pr', set: 'set',
+  bundle: 'bdl', bag: 'bag', sqft: 'sqft', ton: 't', quintal: 'qtl', roll: 'roll',
+  case: 'cs', crate: 'crt', carton: 'ctn',
+};
+const unitShort = (u) => UNIT_SHORT[u] || u;
+
+/// A line's printed quantity, as receiptLine() in the app's models.dart.
+/// [i] carries the catalog's unit / pack_unit / pack_size (null for a deleted
+/// item). With 1 box = 12: 24 → "2 box" and the rate × 12 ([mult]); 26 → "2
+/// box + 2 pcs" at the piece rate. Otherwise the bare quantity, plus the unit
+/// when [showUnits]. [packed]: the quantity is no longer in base units.
+function lineQty(i, showUnits) {
+  const q = Number(i.quantity);
+  const unit = i.unit ? unitShort(i.unit) : null;
+  const size = Number(i.pack_size);
+  if (i.pack_unit && size > 1) {
+    // The epsilon keeps 12 / 12 from flooring to 0 on a float that is 11.999…
+    const packs = Math.floor(q / size + 1e-9);
+    if (packs >= 1) {
+      const loose = Math.max(0, Number((q - packs * size).toFixed(3)));
+      const p = `${packs} ${unitShort(i.pack_unit)}`;
+      return loose === 0
+        ? { qty: p, mult: size, packed: true }
+        : { qty: `${p} + ${qtyStr(loose)}${unit ? ` ${unit}` : ''}`, mult: 1, packed: true };
+    }
+  }
+  return { qty: showUnits && unit ? `${qtyStr(q)} ${unit}` : qtyStr(q), mult: 1, packed: false };
+}
 const trimRate = (r) => String(Number(r));
 const titleCase = (m) => (m ? m.charAt(0).toUpperCase() + m.slice(1) : '');
 
@@ -163,10 +196,11 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
   const nameOf = (i) => esc(i.item_name) +
     (Number(i.discount_amount) > 0 ? ` (Disc &#8377;${Number(i.discount_amount).toFixed(2)})` : '');
 
+  const qtys = items.map((i) => lineQty(i, cfg.show_units));
   const itemRows = items.map((i, idx) => `<tr>
       <td class="c">${idx + 1}</td><td>${nameOf(i)}</td>
       ${anyHsn ? `<td class="c">${esc(codeOf(i))}</td>` : ''}
-      <td class="r">${qtyStr(i.quantity)}</td><td class="r">${money(rate(i))}</td>
+      <td class="r">${esc(qtys[idx].qty)}</td><td class="r">${money(rate(i) * qtys[idx].mult)}</td>
       ${showGst ? `<td class="r">${money(lineTax(i))} (${trimRate(i.tax_rate || 0)}%)</td>` : ''}
       <td class="r">${money(net(i))}</td></tr>`).join('');
   const sum = (f) => items.reduce((s, i) => s + f(i), 0);
@@ -248,7 +282,7 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
     </tr></thead>
     <tbody>${itemRows}
       <tr class="b"><td></td><td>Total</td>${anyHsn ? '<td></td>' : ''}
-        <td class="r">${qtyStr(sum((i) => Number(i.quantity)))}</td><td></td>
+        <td class="r">${qtys.some((q) => q.packed) ? '' : qtyStr(sum((i) => Number(i.quantity)))}</td><td></td>
         ${showGst ? `<td class="r">${money(sum(lineTax))}</td>` : ''}
         <td class="r">${money(sum(net))}</td></tr>
     </tbody>
@@ -298,4 +332,4 @@ function renderInvoice({ paper, bill, items, parts, grandTotal, billedBy, settle
 </html>`;
 }
 
-module.exports = { renderInvoice, amountToWords, DOWNLOAD_ONCLICK, DOWNLOAD_FALLBACK, PDF_LINK };
+module.exports = { renderInvoice, amountToWords, lineQty, DOWNLOAD_ONCLICK, DOWNLOAD_FALLBACK, PDF_LINK };

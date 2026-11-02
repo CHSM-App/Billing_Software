@@ -40,3 +40,10 @@ the catalog, then drop `catalogUnits`.
 default).** Printed bills go through `BillSettings.qty()`; on-screen lists (history, credit
 bills) still always show the unit. The patch predates the toggle, so undoing it now also means
 removing `show_units` from `billSettings.js`, `bill_settings.dart` and Billing Setup.
+
+**Since 2026-11-02, units, size units and boxes build on this.** `catalogUnits` now maps
+`itemId` and `itemId:variantId` to the unit **and pack**, and printed bills go through
+`BillSettings.line()` / `receiptLine()`: whole packs print as "1 box" at the box rate, and a
+part pack prints as "1 box + 2 pcs". The online receipt link does the same (`lineQty` in
+`invoiceHtml.js`). The old patch no longer reverses cleanly; undoing this now means reverting
+those by hand.

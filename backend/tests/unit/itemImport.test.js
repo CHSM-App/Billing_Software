@@ -24,7 +24,7 @@ test('groups variant rows into one item, keeps plain items', () => {
 test('reports row-level errors', () => {
   const { errors } = parseImportRows([
     { row: 2, name: 'A' },                                             // no price
-    { row: 3, name: 'B', price: 10, unit: 'cup' },                     // bad unit
+    { row: 3, name: 'B', price: 10, unit: 'bigglassjars' },            // unit over 10 chars
     { row: 4, name: 'C', price: 10 }, { row: 5, name: 'C', price: 12 }, // duplicate plain
     { row: 6, name: 'D', variant_label: 'S', variant_price: 1 },
     { row: 7, name: 'D', variant_price: 2 },                           // missing variant name

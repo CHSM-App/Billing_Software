@@ -143,6 +143,7 @@ CREATE TABLE item_variants (
     low_stock_threshold DECIMAL(10,2)    NULL,
     pack_unit           NVARCHAR(20)     NULL,   -- this size's pack (migration 058)
     pack_size           DECIMAL(10,2)    NULL,
+    unit                NVARCHAR(20)     NULL,   -- NULL = the item's unit (migration 075)
     sort_order          INT              NOT NULL DEFAULT 0,
     is_active           BIT              NOT NULL DEFAULT 1,
     created_at          DATETIME2        NOT NULL DEFAULT GETUTCDATE(),

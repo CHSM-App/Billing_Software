@@ -86,11 +86,11 @@ describe('validation — item price and stock', () => {
     expect(res.body.error).toMatch(/tax/i);
   });
 
-  test('rejects an unknown unit', async () => {
-    // Unit drives g<->kg conversion when a recipe quantity is stored, so an
-    // unknown value would silently skip it.
+  test('rejects a unit over 10 characters', async () => {
+    // Any short custom unit is fine ("jar", "cup"); item units are display
+    // only — recipes convert raw-material units, which keep a fixed list.
     const res = await request(app).post('/api/items').set(owner())
-      .send({ name: 'Rice', price: 10, unit: 'furlong' });
+      .send({ name: 'Rice', price: 10, unit: 'furlongsxyz' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/unit/i);
   });

@@ -897,6 +897,63 @@ describe('item packs', () => {
 });
 
 // ------------------------------------------------------------------
+// Units — any short text; a size may carry its own (NULL = the item's)
+// ------------------------------------------------------------------
+describe('item units', () => {
+  const owner = () => authHeader({ role: 'owner' });
+
+  test('POST saves a custom unit trimmed and lowercased', async () => {
+    nameIsFree();
+    mockRequest.recordset = [{ ...sampleItem, unit: 'jar' }];
+    const res = await request(app).post('/api/items').set(owner())
+      .send({ name: 'Pickle', price: 80, unit: '  Jar ' });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.unit).toBe('jar');
+  });
+
+  test('POST rejects a unit over 10 characters', async () => {
+    const res = await request(app).post('/api/items').set(owner())
+      .send({ name: 'Pickle', price: 80, unit: 'bigglassjars' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Unit/);
+  });
+
+  test('a variant saves its own unit', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] }) // owned
+      .mockResolvedValueOnce({ recordset: [{ id: 'v1', unit: 'bag' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
+    const res = await request(app).post(`/api/items/${ITEM_ID}/variants`).set(owner())
+      .send({ label: '5 kg bag', price: 400, unit: 'Bag' });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.unit).toBe('bag');
+    const insertSql = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /INSERT INTO item_variants/.test(s));
+    expect(insertSql).toMatch(/@pack_size, @unit, @sort_order/);
+  });
+
+  test('a variant without a unit stores NULL (the item\'s unit)', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [{ id: ITEM_ID }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [{ id: 'v1' }], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] });
+    const res = await request(app).post(`/api/items/${ITEM_ID}/variants`).set(owner())
+      .send({ label: 'Loose', price: 80 });
+    expect(res.status).toBe(201);
+    expect(mockRequest.inputs.unit).toBeNull();
+  });
+
+  test('PUT variant with a blank unit clears it', async () => {
+    mockRequest.recordset = [{ id: 'v1' }];
+    const res = await request(app).put(`/api/items/${ITEM_ID}/variants/v1`).set(owner())
+      .send({ unit: '' });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.unit).toBeNull();
+    const updateSql = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /UPDATE item_variants/.test(s));
+    expect(updateSql).toMatch(/unit = @unit/);
+  });
+});
+
+// ------------------------------------------------------------------
 // Auto barcode on manual add/edit (fillMissingBarcode)
 //
 // Every manual save leaves a scannable code: a row saved without one gets the

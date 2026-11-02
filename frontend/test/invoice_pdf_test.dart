@@ -150,6 +150,69 @@ void main() {
     // The undiscounted tax must NOT appear anywhere.
     expect(text.contains('3672.00'), false,
         reason: 'undiscounted tax leaked into the invoice');
+    // GST layout: Taxable Amt and Total columns, Taxable Amount in the box.
+    // Taxable = 20400 × 15800/20400 = 15800; line Total = 15800 + 2844 = 18644.
+    for (final needle in ['Taxable', 'Total', '15800.00']) {
+      expect(text.contains(needle), true, reason: 'PDF missing "$needle"');
+    }
+    // HSN table: CGST = SGST = 2844 / 2 = 1422 — the discount applied ONCE.
+    // Applying it twice gave 2844 × 15800/20400 = 2202.71 (1101.35 each).
+    expect(text.contains('1422.00'), true, reason: 'HSN tax not on discounted net');
+    expect(text.contains('1101.35'), false, reason: 'discount applied twice to HSN tax');
+  });
+
+  test('HSN summary keeps different GST rates on separate rows', () async {
+    // The reported bill: two items with NO HSN code at 9% and 6% merged into
+    // one row showing 4.5% against both items' tax (7.02).
+    BillItem it(String id, String name, double p, double r, String? hsn) =>
+        BillItem(id: id, billId: 'b3', itemName: name, quantity: 1,
+            unitPrice: p, taxRate: r, hsnCode: hsn,
+            lineTotal: p * (1 + r / 100));
+    final bill = Bill(
+      id: 'b3', businessId: 'biz1', billNumber: '0003',
+      subtotal: 1588, taxAmount: 187.02, discountAmount: 0, total: 1775.02,
+      paymentMode: 'cash', status: 'finalized', createdByUserId: 'u1',
+      createdAt: DateTime(2026, 11, 3),
+      items: [
+        it('i1', 'Skybags Backpack', 1500, 12, '1006'),
+        it('i2', 'Amul Butter 100g', 58, 9, null),
+        it('i3', 'Amul Milk 500ml', 30, 6, null),
+      ],
+    );
+    final text = _renderedText(await InvoicePdf.build(
+      bill: bill, pageFormat: PdfPageFormat.a4,
+      businessName: 'Sharma Testing', gstEnabled: true,
+    ));
+    // Butter: 58 at 4.5% + 4.5% = 2.61 each. Milk: 30 at 3% + 3% = 0.90 each.
+    for (final needle in ['4.5%', '3%', 'Rs.2.61', 'Rs.0.90', 'Rs.5.22', 'Rs.1.80']) {
+      expect(text.contains(needle), true, reason: 'HSN summary missing "$needle"');
+    }
+    expect(text.contains('Rs.7.02'), false, reason: 'two rates merged into one row');
+  });
+
+  test('GST invoice without discount heads the box with Taxable Amount only',
+      () async {
+    final bill = Bill(
+      id: 'b2', businessId: 'biz1', billNumber: 'INV-120',
+      subtotal: 1000, taxAmount: 180, discountAmount: 0, total: 1180,
+      paymentMode: 'cash', status: 'finalized', createdByUserId: 'u1',
+      createdAt: DateTime(2026, 4, 27),
+      items: [
+        BillItem(id: 'i1', billId: 'b2', itemName: 'FAN', quantity: 2,
+            unitPrice: 500, taxRate: 18, lineTotal: 1180),
+      ],
+    );
+    final text = _renderedText(await InvoicePdf.build(
+      bill: bill, pageFormat: PdfPageFormat.a5,
+      businessName: 'GST Shop', gstEnabled: true,
+    ));
+    expect(text.contains('Taxable'), true);
+    expect(text.contains('Sub Total'), false,
+        reason: 'GST bill should show Taxable Amount instead of Sub Total');
+    // Taxable 1000 + GST 180 = line total 1180.
+    for (final needle in ['1000.00', '180.00', '1180.00']) {
+      expect(text.contains(needle), true, reason: 'PDF missing "$needle"');
+    }
   });
 
   test('non-GST invoice omits GST columns/table', () async {

@@ -4881,8 +4881,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   /// Build the CGST/SGST rows for the cart totals when GST is enabled.
-  /// Each is half the [tax]; the rate is derived from the taxable [subtotal]
-  /// (e.g. 18% GST → CGST 9% / SGST 9%). Returns (label, amount) pairs.
+  /// Each is half the [tax]. Labelled plain "CGST" / "SGST": a rate derived
+  /// from a mixed-rate cart (5.9%) matched no real slab and only confused.
+  /// Returns (label, amount) pairs.
   List<(String, String)> _gstSplitRows(
       AppLocalizations l10n, double subtotal, double tax) {
     // Split in paise and give the odd one to CGST, so CGST + SGST always adds
@@ -4893,15 +4894,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final paise = (tax * 100).round();
     final cgstAmt = ((paise + 1) ~/ 2) / 100;
     final sgstAmt = (paise ~/ 2) / 100;
-    // Effective half-rate for the label; blank-safe when subtotal is 0.
-    String rate = '';
-    if (subtotal > 0) {
-      final r = tax / subtotal * 100 / 2;
-      rate = r % 1 == 0 ? r.toStringAsFixed(0) : r.toStringAsFixed(1);
-    }
     return [
-      (l10n.billingCgst(rate), cgstAmt.toStringAsFixed(2)),
-      (l10n.billingSgst(rate), sgstAmt.toStringAsFixed(2)),
+      (l10n.billingCgst, cgstAmt.toStringAsFixed(2)),
+      (l10n.billingSgst, sgstAmt.toStringAsFixed(2)),
     ];
   }
 
@@ -6097,9 +6092,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       rate = math.max(rate, w('₹${e.netPrice(gst).toStringAsFixed(2)}', small));
       rate = math.max(
           rate, w('₹${e.discountedNetPrice(gst).toStringAsFixed(2)}', small));
-      unit = math.max(unit, w('/ ${unitShort(e.item.unit)}', small));
+      unit = math.max(unit, w('/ ${unitShort(e.unit)}', small));
       total = math.max(total, w('₹${e.lineNet(gst).toStringAsFixed(2)}', bold));
-      if (e.item.isMeasured) field = 48; // _CartQtyField's decimal width
+      if (e.isMeasured) field = 48; // _CartQtyField's decimal width
     }
     // Stepper: two 28px − / + buttons, the qty field and a 1px border each
     // side; then 4px and the unit.
@@ -6261,7 +6256,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           _CartQtyField(
             key: ValueKey('qty-${entry.key}'),
             quantity: entry.quantity,
-            allowDecimal: entry.item.isMeasured,
+            allowDecimal: entry.isMeasured,
             width: fieldWidth,
             onSubmitted: (q) => _cartChange(entry.key,
                 () => ref.read(cartProvider.notifier).setQty(entry.key, q)),
@@ -6339,7 +6334,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           Flexible(
             child: Padding(
               padding: const EdgeInsets.only(left: 4),
-              child: Text('/ ${unitShort(entry.item.unit)}',
+              child: Text('/ ${unitShort(entry.unit)}',
                   maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
             ),
           ),
@@ -6450,7 +6445,7 @@ String? cartPackLabel(BuildContext context, CartEntry e) {
   if (p == null || unit == null) return null;
   final packs = '${p.packs} ${unitShort(unit)}';
   return p.loose > 0
-      ? '$packs + ${formatQty(p.loose)} ${unitShort(e.item.unit)}'
+      ? '$packs + ${formatQty(p.loose)} ${unitShort(e.unit)}'
       : packs;
 }
 
@@ -7878,7 +7873,12 @@ class _ExcelItemRow extends ConsumerStatefulWidget {
     if (treatAsVariantItem) return '';
     final p = rowPrice(list);
     if (p == null) return '';
-    final suffix = item.isMeasured && !isVariantRow ? '/${unitShort(item.unit)}' : '';
+    // A size shows "/kg" only for a unit of its own — a size counted in the
+    // item's unit is usually a pack of it ("5 kg" at ₹400), not a rate.
+    final unit = isVariantRow ? variant!.unit : item.unit;
+    final suffix = unit != null && measuredUnits.contains(unit)
+        ? '/${unitShort(unit)}'
+        : '';
     return '₹${p.toStringAsFixed(2)}$suffix';
   }
 
@@ -8225,7 +8225,9 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                                         focusNode: _qtyFocus,
                                         enabled: inCart,
                                         textAlign: TextAlign.center,
-                                        keyboardType: widget.item.isMeasured
+                                        keyboardType: measuredUnits.contains(
+                                                widget.variant?.unit ??
+                                                    widget.item.unit)
                                             ? const TextInputType
                                                 .numberWithOptions(decimal: true)
                                             : TextInputType.number,

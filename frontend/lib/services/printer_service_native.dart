@@ -414,13 +414,14 @@ class PrinterService {
     var total = (labels?.colTotal ?? 'Total').length;
 
     for (final item in bill.items) {
-      final q = settings.qty(
+      final line = settings.line(
           item,
           item.quantity % 1 == 0
               ? item.quantity.toInt().toString()
               : item.quantity.toStringAsFixed(1));
+      final q = line.qty;
       if (q.length > qty) qty = q.length;
-      final pr = item.receiptPrice.toStringAsFixed(2);
+      final pr = line.price.toStringAsFixed(2);
       if (pr.length > price) price = pr.length;
       if (withGst) {
         final g = _itemGstLabel(item, gstEnabled);
@@ -674,7 +675,7 @@ class PrinterService {
     // Items
     for (var i = 0; i < bill.items.length; i++) {
       final item = bill.items[i];
-      final qty = settings.qty(
+      final line = settings.line(
           item,
           item.quantity % 1 == 0
               ? item.quantity.toInt().toString()
@@ -690,8 +691,8 @@ class PrinterService {
       lines.add(_itemRow(
         p,
         firstName,
-        qty,
-        item.receiptPrice.toStringAsFixed(2),
+        line.qty,
+        line.price.toStringAsFixed(2),
         _itemGstLabel(item, gstEnabled),
         netLine.toStringAsFixed(2),
       ));
@@ -917,7 +918,7 @@ class PrinterService {
 
     for (var i = 0; i < bill.items.length; i++) {
       final item = bill.items[i];
-      final qty = settings.qty(
+      final line = settings.line(
           item,
           item.quantity % 1 == 0
               ? item.quantity.toInt().toString()
@@ -927,8 +928,8 @@ class PrinterService {
       final netLine = item.unitPrice * item.quantity;
       rows.add(itemRow(
         item.receiptName,
-        qty,
-        item.receiptPrice.toStringAsFixed(2),
+        line.qty,
+        line.price.toStringAsFixed(2),
         _itemGstLabel(item, gstEnabled),
         netLine.toStringAsFixed(2),
       ));

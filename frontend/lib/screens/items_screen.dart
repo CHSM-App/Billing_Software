@@ -73,8 +73,135 @@ String itemUnitLabel(BuildContext context, String unit) {
       return l10n.itemsUnitCrate;
     case 'carton':
       return l10n.itemsUnitCarton;
-    default:
+    case 'piece':
       return l10n.itemsUnitPiece;
+    default:
+      // The owner's own unit ("jar") — shown as typed.
+      return unit;
+  }
+}
+
+/// Units the unit dropdowns list. Any other short text is allowed too, via
+/// "Other…" in [_UnitPicker]; keep in step with VALID_UNITS in
+/// backend/src/routes/items.js.
+const _itemUnits = [
+  'piece',
+  'kg',
+  'g',
+  'litre',
+  'ml',
+  'metre',
+  'dozen',
+  'plate',
+  'packet',
+  'box',
+  'bottle',
+  'pair',
+  'set',
+  'bundle',
+  'bag',
+  'sqft',
+  'ton',
+  'quintal',
+  'roll',
+  'case',
+  'crate',
+  'carton',
+];
+
+/// [Unit ▾] with the listed units plus "Other…", which opens a box for the
+/// owner's own unit ("jar", trimmed and lowercased like the server stores it).
+/// With [sameLabel], a first entry stands for null — a size counted in its
+/// item's unit. Other with an empty box fails the form's validation.
+class _UnitPicker extends StatefulWidget {
+  final String? unit;
+  final String? sameLabel;
+  final ValueChanged<String?>? onChanged;
+
+  /// The leading ruler icon. Off in a half-width cell, where it would crowd
+  /// out the unit's name.
+  final bool showIcon;
+
+  const _UnitPicker(
+      {super.key,
+      required this.unit,
+      required this.onChanged,
+      this.sameLabel,
+      this.showIcon = true});
+
+  @override
+  State<_UnitPicker> createState() => _UnitPickerState();
+}
+
+class _UnitPickerState extends State<_UnitPicker> {
+  static const _other = '\u0000other';
+  late bool _custom = widget.unit != null && !_itemUnits.contains(widget.unit);
+  late final _ctrl = TextEditingController(text: _custom ? widget.unit : '');
+
+  @override
+  void initState() {
+    super.initState();
+    // AppTextField has no onChanged.
+    _ctrl.addListener(() {
+      if (_custom) widget.onChanged?.call(_ctrl.text.trim().toLowerCase());
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<String?>(
+          initialValue: _custom ? _other : widget.unit,
+          isExpanded: true,
+          // A text field's type, so the pick reads like the boxes beside it.
+          style: Theme.of(context).textTheme.bodyLarge,
+          decoration: InputDecoration(
+            labelText: l10n.itemsFieldUnit,
+            prefixIcon: widget.showIcon
+                ? const Icon(Icons.straighten_outlined,
+                    size: 18, color: AppColors.textSecondary)
+                : null,
+          ),
+          items: [
+            if (widget.sameLabel != null)
+              DropdownMenuItem(value: null, child: Text(widget.sameLabel!)),
+            for (final u in _itemUnits)
+              DropdownMenuItem(
+                value: u,
+                child: Text(itemUnitLabel(context, u),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            DropdownMenuItem(value: _other, child: Text(l10n.itemsUnitOther)),
+          ],
+          onChanged: widget.onChanged == null
+              ? null
+              : (v) {
+                  setState(() => _custom = v == _other);
+                  widget.onChanged!(
+                      _custom ? _ctrl.text.trim().toLowerCase() : v);
+                },
+        ),
+        if (_custom) ...[
+          const SizedBox(height: AppSpacing.space8),
+          AppTextField(
+            label: l10n.itemsUnitCustom,
+            controller: _ctrl,
+            maxLength: 10,
+            validator: (v) =>
+                (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
+          ),
+        ],
+      ],
+    );
   }
 }
 
@@ -117,6 +244,7 @@ class _PackRow extends StatelessWidget {
           child: DropdownButtonFormField<String?>(
             value: _packUnits.contains(unit) ? unit : null,
             isExpanded: true,
+            style: Theme.of(context).textTheme.bodyLarge,
             decoration: InputDecoration(labelText: l10n.itemsFieldPack),
             items: [
               DropdownMenuItem(value: null, child: Text(l10n.itemsPackNone)),
@@ -131,7 +259,7 @@ class _PackRow extends StatelessWidget {
           ),
         ),
         if (unit != null) ...[
-          const SizedBox(width: AppSpacing.space8),
+          const SizedBox(width: AppSpacing.space12),
           Expanded(
             child: AppTextField(
               label: l10n.itemsFieldPackSize(itemUnitLabel(context, unit!)),
@@ -1056,7 +1184,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
             StockOverviewRow(
               name: v.label,
               stockQuantity: v.stockQuantity,
-              unitLabel: unitShort(item.unit),
+              unitLabel: unitShort(v.unit ?? item.unit),
               isLowStock: v.isLowStock,
             ),
         ],
@@ -1532,6 +1660,9 @@ class _VariantDraft {
   final packSize = TextEditingController();
   String? packUnit;
 
+  /// This size's own unit, or null = counted in the item's unit.
+  String? unit;
+
   /// This size's list prices, as typed (list id → text), as they were when
   /// the form opened, and the list the row's dropdown is on.
   final listPrices = <String, String>{};
@@ -1555,7 +1686,8 @@ class _VariantDraft {
       barcode.text.trim().isEmpty &&
       stock.text.trim().isEmpty &&
       lowStock.text.trim().isEmpty &&
-      packUnit == null;
+      packUnit == null &&
+      unit == null;
 
   void dispose() {
     label.dispose();
@@ -1718,31 +1850,6 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
 
   static String _fmtPrice(double v) => v.toStringAsFixed(v % 1 == 0 ? 0 : 2);
 
-  static const _units = [
-    'piece',
-    'kg',
-    'g',
-    'litre',
-    'ml',
-    'metre',
-    'dozen',
-    'plate',
-    'packet',
-    'box',
-    'bottle',
-    'pair',
-    'set',
-    'bundle',
-    'bag',
-    'sqft',
-    'ton',
-    'quintal',
-    'roll',
-    'case',
-    'crate',
-    'carton',
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -1761,7 +1868,9 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _barcodeCtrl.text = item.barcode ?? '';
       _stockCtrl.text = item.stockQuantity?.toString() ?? '';
       _lowStockCtrl.text = item.lowStockThreshold?.toString() ?? '';
-      _unit = _units.contains(item.unit) ? item.unit : 'piece';
+      // Kept as is, a custom unit included — resetting an unknown one to
+      // piece silently rewrote it on the next save.
+      _unit = item.unit;
       _packUnit = item.packUnit;
       _packSizeCtrl.text =
           item.packSize != null ? formatQty(item.packSize!) : '';
@@ -1772,7 +1881,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         for (final v in item.variants) {
           final d = _VariantDraft(_firstPl)
             ..saved = v
-            ..packUnit = v.packUnit;
+            ..packUnit = v.packUnit
+            ..unit = v.unit;
           d.label.text = v.label;
           d.price.text = v.price == null ? '' : _fmtPrice(v.price!);
           d.barcode.text = v.barcode ?? '';
@@ -2040,20 +2150,23 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     required ValueChanged<String?> onPick,
     required TextEditingController ctrl,
     required TextEditingController base,
+    bool showIcon = true,
   }) {
     final list = widget.priceLists.firstWhere((l) => l.id == listId);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-          flex: 5,
           child: DropdownButtonFormField<String>(
             initialValue: listId,
             isExpanded: true,
+            style: Theme.of(context).textTheme.bodyLarge,
             decoration: InputDecoration(
               labelText: l10n.priceListPick,
-              prefixIcon: const Icon(Icons.sell_outlined,
-                  size: 18, color: AppColors.textSecondary),
+              prefixIcon: showIcon
+                  ? const Icon(Icons.sell_outlined,
+                      size: 18, color: AppColors.textSecondary)
+                  : null,
             ),
             items: [
               for (final l in widget.priceLists)
@@ -2073,9 +2186,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
             }),
           ),
         ),
-        const SizedBox(width: AppSpacing.space8),
+        const SizedBox(width: AppSpacing.space12),
         Expanded(
-          flex: 4,
           child: ListenableBuilder(
             listenable: base,
             builder: (context, _) {
@@ -2091,7 +2203,6 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
                 ],
-                textAlign: TextAlign.right,
                 decoration: InputDecoration(
                   labelText: l10n.itemsListPrice,
                   prefixText: '₹ ',
@@ -2299,6 +2410,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         if (widget.inventoryEnabled && d.lowStock.text.trim().isNotEmpty)
           'low_stock_threshold': double.parse(d.lowStock.text.trim()),
         if (d.packUnit != null) ..._packPayload(d.packUnit, d.packSize),
+        if (d.unit != null) 'unit': d.unit,
         'sort_order': sortOrder,
       };
 
@@ -2321,6 +2433,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
         'low_stock_threshold': n(d.lowStock),
       if (pack['pack_unit'] != o.packUnit || pack['pack_size'] != o.packSize)
         ...pack,
+      if (d.unit != o.unit) 'unit': d.unit,
       if (o.sortOrder != sortOrder) 'sort_order': sortOrder,
     };
   }
@@ -2656,12 +2769,19 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     );
   }
 
-  /// One size: name + price, then barcode + stock, then the low-stock alert.
-  /// Two fields per row — the dialog is 400px wide and each AppTextField
-  /// carries 16px of padding either side, so more than two per row is unusable.
+  /// One size, as a card: a header (number, its name as typed, delete), then
+  /// every field on one two-column grid — name | price, price list | list
+  /// price, barcode | stock, low-stock alert | unit, then the pack. Two per
+  /// row: the dialog is 400px wide and each field carries 16px of padding a
+  /// side, so three would be unusable. Rows and columns share one 12px gap.
   Widget _buildVariantCard(AppLocalizations l10n, int index) {
     final d = _variantDrafts[index];
     final numeric = const TextInputType.numberWithOptions(decimal: true);
+    final theme = Theme.of(context);
+    const gap = AppSpacing.space12;
+    // Stock and its alert count in the size's own unit when it has one.
+    final unitLabel = unitShort(
+        (d.unit == null || d.unit!.isEmpty) ? _unit : d.unit!);
 
     String? nonNegative(String? v) {
       if (v == null || v.trim().isEmpty) return null;
@@ -2670,131 +2790,158 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       return null;
     }
 
+    // Two equal halves, tops aligned so an error under one field doesn't
+    // shift its neighbour. A lone field keeps its half.
+    Widget pair(Widget a, [Widget? b]) => Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: a),
+            const SizedBox(width: gap),
+            Expanded(child: b ?? const SizedBox()),
+          ],
+        );
+
+    final unitPicker = _UnitPicker(
+      // Optional: Rice "5 kg bag" sold by bag while the item is in kg.
+      unit: d.unit,
+      sameLabel: l10n.itemsUnitSameAsItem,
+      showIcon: false,
+      onChanged: _saving ? null : (v) => setState(() => d.unit = v),
+    );
+
     return Container(
       // Keyed so deleting a middle row doesn't hand its dropdown state on.
       key: ObjectKey(d),
-      margin: const EdgeInsets.only(bottom: AppSpacing.space8),
-      padding: const EdgeInsets.all(AppSpacing.space8),
+      margin: const EdgeInsets.only(bottom: gap),
+      padding: const EdgeInsets.fromLTRB(gap, AppSpacing.space8, gap, gap),
       decoration: BoxDecoration(
-        color: AppColors.surfaceVariant.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(AppRadius.small),
+        // White on the filled grey fields, so the card and its boxes read as
+        // two layers rather than one grey slab.
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Text(
-                l10n.itemsVariantRowTitle(index + 1),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary,
-                    ),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: _saving ? null : () => _removeVariantRow(index),
-                icon: const Icon(Icons.delete_outline,
-                    size: 18, color: AppColors.error),
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.all(4),
-                constraints: const BoxConstraints(),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Expanded(
-                child: AppTextField(
-                  label: l10n.itemsVariantNameShort,
-                  hint: l10n.itemsVariantNameHint,
-                  controller: d.label,
-                  capitalizeWords: true,
-                  maxLength: 50,
-                  validator: (v) => d.isBlank
-                      ? null
-                      : (v == null || v.trim().isEmpty
-                          ? l10n.commonRequired
-                          : null),
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '${index + 1}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary,
+                  ),
                 ),
               ),
               const SizedBox(width: AppSpacing.space8),
+              // The size's name as it is typed, so a long list of cards is
+              // scannable; "Variant 2" until there is one.
               Expanded(
-                child: AppTextField(
-                  // Required now: with no item-level price to fall back on, a
-                  // size with no price would have nothing to charge.
-                  // Sizes inherit the item's inclusive/exclusive flag, so the
-                  // label tracks it too.
-                  label: _priceLabel(l10n),
-                  controller: d.price,
-                  keyboardType: numeric,
-                  validator: (v) {
-                    if (d.isBlank) return null;
-                    if (v == null || v.trim().isEmpty) {
-                      return l10n.commonRequired;
-                    }
-                    return nonNegative(v);
-                  },
+                child: ListenableBuilder(
+                  listenable: d.label,
+                  builder: (context, _) => Text(
+                    d.label.text.trim().isEmpty
+                        ? l10n.itemsVariantRowTitle(index + 1)
+                        : d.label.text.trim(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                 ),
+              ),
+              IconButton(
+                tooltip: l10n.commonRemove,
+                onPressed: _saving ? null : () => _removeVariantRow(index),
+                icon: const Icon(Icons.delete_outline,
+                    size: 20, color: AppColors.error),
+                visualDensity: VisualDensity.compact,
               ),
             ],
           ),
+          const Divider(height: AppSpacing.space16, color: AppColors.border),
+          pair(
+            AppTextField(
+              label: l10n.itemsVariantNameShort,
+              hint: l10n.itemsVariantNameHint,
+              controller: d.label,
+              capitalizeWords: true,
+              maxLength: 50,
+              validator: (v) => d.isBlank
+                  ? null
+                  : (v == null || v.trim().isEmpty ? l10n.commonRequired : null),
+            ),
+            AppTextField(
+              // Required now: with no item-level price to fall back on, a size
+              // with no price would have nothing to charge. Sizes inherit the
+              // item's inclusive/exclusive flag, so the label tracks it too.
+              label: _priceLabel(l10n),
+              controller: d.price,
+              keyboardType: numeric,
+              validator: (v) {
+                if (d.isBlank) return null;
+                if (v == null || v.trim().isEmpty) return l10n.commonRequired;
+                return nonNegative(v);
+              },
+            ),
+          ),
           if (widget.priceLists.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.space8),
+            const SizedBox(height: gap),
             _buildPriceListRow(l10n,
                 prices: d.listPrices,
                 listId: d.plId,
                 onPick: (v) => d.plId = v,
                 ctrl: d.plCtrl,
-                base: d.price),
+                base: d.price,
+                showIcon: false),
           ],
-          const SizedBox(height: AppSpacing.space8),
-          Row(
-            children: [
-              Expanded(
-                child: AppTextField(
-                  label: l10n.itemsSizeBarcodeOptional,
-                  controller: d.barcode,
-                  keyboardType: TextInputType.number,
-                  maxLength: 100,
-                ),
-              ),
-              if (widget.inventoryEnabled) ...[
-                const SizedBox(width: AppSpacing.space8),
-                Expanded(
-                  child: AppTextField(
+          const SizedBox(height: gap),
+          pair(
+            AppTextField(
+              label: l10n.itemsSizeBarcodeOptional,
+              controller: d.barcode,
+              keyboardType: TextInputType.number,
+              maxLength: 100,
+            ),
+            widget.inventoryEnabled
+                ? AppTextField(
                     label: l10n.itemsSizeStock,
                     controller: d.stock,
                     keyboardType: numeric,
                     validator: nonNegative,
-                  ),
-                ),
-              ],
-            ],
+                    suffixIcon: UnitSuffix(unitLabel),
+                  )
+                : unitPicker,
           ),
           if (widget.inventoryEnabled) ...[
-            const SizedBox(height: AppSpacing.space8),
-            Row(
-              children: [
-                Expanded(
-                  child: AppTextField(
-                    label: l10n.itemsFieldLowStock,
-                    controller: d.lowStock,
-                    keyboardType: numeric,
-                    validator: nonNegative,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.space8),
-                const Expanded(child: SizedBox()),
-              ],
+            const SizedBox(height: gap),
+            pair(
+              AppTextField(
+                label: l10n.itemsFieldLowStock,
+                controller: d.lowStock,
+                keyboardType: numeric,
+                validator: nonNegative,
+                suffixIcon: UnitSuffix(unitLabel),
+              ),
+              unitPicker,
             ),
           ],
-          const SizedBox(height: AppSpacing.space8),
+          const SizedBox(height: gap),
           _PackRow(
             unit: d.packUnit,
             size: d.packSize,
-            baseUnit: _unit,
+            baseUnit: (d.unit == null || d.unit!.isEmpty) ? _unit : d.unit!,
             onUnitChanged: _saving ? null : (v) => setState(() => d.packUnit = v),
           ),
         ],
@@ -2924,22 +3071,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                   ],
                 ],
                 const SizedBox(height: AppSpacing.space12),
-                DropdownButtonFormField<String>(
-                  value: _unit,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    labelText: l10n.itemsFieldUnit,
-                    prefixIcon: const Icon(Icons.straighten_outlined,
-                        size: 18, color: AppColors.textSecondary),
-                  ),
-                  items: [
-                    for (final u in _units)
-                      DropdownMenuItem(
-                        value: u,
-                        child: Text(itemUnitLabel(context, u),
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                      ),
-                  ],
+                _UnitPicker(
+                  unit: _unit,
                   onChanged: (v) => setState(() => _unit = v ?? 'piece'),
                 ),
                 if (!_sizedItem) ...[
@@ -3554,6 +3687,11 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
   final _barcodeCtrl = TextEditingController();
   final _packSizeCtrl = TextEditingController();
   String? _packUnit;
+
+  /// The new size's own unit (null = the item's). [_addRound] re-keys the
+  /// picker so it clears with the other fields after each add.
+  String? _unit;
+  int _addRound = 0;
   bool _busy = false;
 
   @override
@@ -3589,6 +3727,8 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
         if (widget.inventoryEnabled && _lowStockCtrl.text.trim().isNotEmpty)
           'low_stock_threshold': double.tryParse(_lowStockCtrl.text.trim()),
         if (_packUnit != null) ..._packPayload(_packUnit, _packSizeCtrl),
+        // No form here to block an empty "Other" box — treat it as unset.
+        if (_unit != null && _unit!.isNotEmpty) 'unit': _unit,
         'sort_order': _variants.length,
       };
       final created = await createVariant(widget.item.id, data);
@@ -3601,6 +3741,8 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
         _barcodeCtrl.clear();
         _packSizeCtrl.clear();
         _packUnit = null;
+        _unit = null;
+        _addRound++;
       });
       widget.onChanged(List.unmodifiable(_variants));
     } on ApiException catch (e) {
@@ -3730,18 +3872,21 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
   /// Edit (or clear) an existing size's barcode and pack. Persists the change
   /// and patches the local list so scans/prints use the new value immediately.
   Future<void> _editVariantBarcode(ItemVariant v) async {
-    final result = await showDialog<({String barcode, Map<String, dynamic> pack})>(
+    final result = await showDialog<
+        ({String barcode, Map<String, dynamic> pack, String? unit})>(
       context: context,
       builder: (_) => _SizeEditDialog(variant: v, baseUnit: widget.item.unit),
     );
     if (result == null) return;
     final newBarcode = result.barcode;
     final pack = result.pack;
+    final unit = result.unit;
 
     // No change → skip the round-trip.
     final packChanged =
         pack['pack_unit'] != v.packUnit || pack['pack_size'] != v.packSize;
-    if (newBarcode == (v.barcode ?? '') && !packChanged) return;
+    final unitChanged = unit != v.unit;
+    if (newBarcode == (v.barcode ?? '') && !packChanged && !unitChanged) return;
 
     setState(() => _busy = true);
     try {
@@ -3749,6 +3894,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
       final result = await updateVariant(widget.item.id, v.id, {
         'barcode': newBarcode.isEmpty ? null : newBarcode,
         if (packChanged) ...pack,
+        if (unitChanged) 'unit': unit,
       });
       final updated = ItemVariant.fromJson(result);
       if (!mounted) return;
@@ -3820,7 +3966,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                     if (v.packUnit != null && v.packSize != null)
                       '1 ${unitShort(v.packUnit!)} = '
                           '${formatQty(v.packSize!)} '
-                          '${unitShort(widget.item.unit)}',
+                          '${unitShort(v.unit ?? widget.item.unit)}',
                   ].join('  ·  ');
                   return ListTile(
                     dense: true,
@@ -3899,10 +4045,10 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                   controller: _stockCtrl,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
-                  // A size has no unit of its own — it is counted in the parent
-                  // item's unit, which is what the stock rows below display.
+                  // Counted in the size's own unit when picked below, else
+                  // the item's.
                   suffixIcon:
-                      UnitSuffix(unitShort(widget.item.unit)),
+                      UnitSuffix(unitShort(_unit ?? widget.item.unit)),
                 ),
                 const SizedBox(height: AppSpacing.space8),
                 // Same per-size alert as the create form's size rows — the
@@ -3913,7 +4059,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   suffixIcon:
-                      UnitSuffix(unitShort(widget.item.unit)),
+                      UnitSuffix(unitShort(_unit ?? widget.item.unit)),
                 ),
               ],
               const SizedBox(height: AppSpacing.space8),
@@ -3925,10 +4071,17 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
                 keyboardType: TextInputType.text,
               ),
               const SizedBox(height: AppSpacing.space8),
+              _UnitPicker(
+                key: ValueKey(_addRound),
+                unit: _unit,
+                sameLabel: l10n.itemsUnitSameAsItem,
+                onChanged: _busy ? null : (u) => setState(() => _unit = u),
+              ),
+              const SizedBox(height: AppSpacing.space8),
               _PackRow(
                 unit: _packUnit,
                 size: _packSizeCtrl,
-                baseUnit: widget.item.unit,
+                baseUnit: _unit ?? widget.item.unit,
                 onUnitChanged: _busy ? null : (u) => setState(() => _packUnit = u),
               ),
             ],
@@ -3974,6 +4127,7 @@ class _SizeEditDialogState extends State<_SizeEditDialog> {
   late final _packSize = TextEditingController(
       text: widget.variant.packSize != null ? formatQty(widget.variant.packSize!) : '');
   late String? _packUnit = widget.variant.packUnit;
+  late String? _unit = widget.variant.unit;
 
   @override
   void dispose() {
@@ -3998,10 +4152,16 @@ class _SizeEditDialogState extends State<_SizeEditDialog> {
               keyboardType: TextInputType.text,
             ),
             const SizedBox(height: AppSpacing.space12),
+            _UnitPicker(
+              unit: _unit,
+              sameLabel: l10n.itemsUnitSameAsItem,
+              onChanged: (u) => setState(() => _unit = u),
+            ),
+            const SizedBox(height: AppSpacing.space12),
             _PackRow(
               unit: _packUnit,
               size: _packSize,
-              baseUnit: widget.baseUnit,
+              baseUnit: _unit ?? widget.baseUnit,
               onUnitChanged: (u) => setState(() => _packUnit = u),
             ),
           ],
@@ -4017,6 +4177,7 @@ class _SizeEditDialogState extends State<_SizeEditDialog> {
               Navigator.pop(context, (
                 barcode: _barcode.text.trim(),
                 pack: _packPayload(_packUnit, _packSize),
+                unit: _unit,
               ));
             },
             child: Text(l10n.commonSave)),
@@ -4190,7 +4351,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600)),
                             Text(
-                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? '${formatQty(v.stockQuantity!)} ${unitShort(widget.item.unit)}' : '—'}',
+                              '${l10n.itemsCurrentStock}: ${v.stockQuantity != null ? '${formatQty(v.stockQuantity!)} ${unitShort(v.unit ?? widget.item.unit)}' : '—'}',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -4199,7 +4360,7 @@ class _VariantStockDialogState extends State<_VariantStockDialog> {
                             // Live preview of the resulting stock after the adjustment.
                             if (_entered(v) > 0)
                               Text(
-                                '${_removing ? l10n.itemsTotalAfterRemoving : l10n.itemsTotalAfterAdding}: ${formatQty(((v.stockQuantity ?? 0) + _adding(v)).clamp(0, double.infinity))} ${unitShort(widget.item.unit)}',
+                                '${_removing ? l10n.itemsTotalAfterRemoving : l10n.itemsTotalAfterAdding}: ${formatQty(((v.stockQuantity ?? 0) + _adding(v)).clamp(0, double.infinity))} ${unitShort(v.unit ?? widget.item.unit)}',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall

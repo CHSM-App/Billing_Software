@@ -329,8 +329,12 @@ class _DraftTicketState extends State<_DraftTicket> {
   /// The line's short unit ("kg", "pcs"), from the live catalog like
   /// [_packLabel].
   String? _unit(BillItem it) {
-    final unit = widget.catalog.where((i) => i.id == it.itemId).firstOrNull?.unit;
-    return unit == null ? null : unitShort(unit);
+    final item = widget.catalog.where((i) => i.id == it.itemId).firstOrNull;
+    if (item == null) return null;
+    final size = it.variantId == null
+        ? null
+        : item.variants.where((v) => v.id == it.variantId).firstOrNull;
+    return unitShort(size?.unit ?? item.unit);
   }
 
   /// The dish list hit its top/bottom under a finger: keep the drag going on

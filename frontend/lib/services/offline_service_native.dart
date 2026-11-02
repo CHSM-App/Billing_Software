@@ -96,7 +96,8 @@ class OfflineService {
       // 15: cached_items.item_no.
       // 16: pack_unit / pack_size on cached_items and cached_variants.
       // 17: customer_address / customer_gstin on offline_bills and offline_drafts.
-      version: 17,
+      // 18: cached_variants.unit — a size's own unit.
+      version: 18,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
       // Self-heal: _createSchema is all IF NOT EXISTS, so this is a no-op on a
@@ -245,6 +246,7 @@ class OfflineService {
         low_stock_threshold REAL,
         pack_unit           TEXT,
         pack_size           REAL,
+        unit                TEXT,
         sort_order          INTEGER NOT NULL DEFAULT 0,
         is_active           INTEGER NOT NULL DEFAULT 1
       )
@@ -387,6 +389,14 @@ class OfflineService {
         }
       }
     }
+    if (oldVersion < 18) {
+      // v17 → v18: a size's own unit (migration 075). Additive; the next sync
+      // fills it in. Guarded: a rebuilt table already has it.
+      final cols = await db.rawQuery('PRAGMA table_info(cached_variants)');
+      if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'unit')) {
+        await db.execute('ALTER TABLE cached_variants ADD COLUMN unit TEXT');
+      }
+    }
   }
 
   /// Cache of bills and drafts fetched FROM the server.
@@ -463,6 +473,7 @@ class OfflineService {
             'low_stock_threshold': v.lowStockThreshold,
             'pack_unit': v.packUnit,
             'pack_size': v.packSize,
+            'unit': v.unit,
             'sort_order': v.sortOrder,
             'is_active': v.isActive ? 1 : 0,
           });
@@ -716,6 +727,7 @@ class OfflineService {
           : null,
       packUnit: row['pack_unit'] as String?,
       packSize: (row['pack_size'] as num?)?.toDouble(),
+      unit: row['unit'] as String?,
       sortOrder: (row['sort_order'] as int?) ?? 0,
       isActive: (row['is_active'] as int) == 1,
     );

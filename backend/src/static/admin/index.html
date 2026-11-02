@@ -172,6 +172,7 @@
             <th data-sort="staff">Staff</th>
             <th data-sort="bills">Bills</th>
             <th data-sort="items">Items</th>
+            <th data-sort="scans" title="AI bill scans this month / free scans per month">Scans</th>
             <th>Devices</th>
             <th data-sort="wa">WhatsApp</th>
             <th data-sort="verified">Verified</th>
@@ -260,6 +261,21 @@
       <span>Allow customers &amp; WhatsApp offers</span>
       <label class="switch"><input type="checkbox" id="fCustomers"/><span class="slider"></span></label>
     </div>
+
+    <div class="section-label">Bill Scanning (AI)</div>
+    <div class="toggle-row">
+      <span>Allow scanning purchase bills</span>
+      <label class="switch"><input type="checkbox" id="fScan"/><span class="slider"></span></label>
+    </div>
+    <div class="field">
+      <label>Free scans / month <span class="muted">(blank = default)</span></label>
+      <div class="row">
+        <button class="ghost" id="fScanMinus" type="button">&minus;</button>
+        <input type="number" id="fScanLimit" min="0"/>
+        <button class="ghost" id="fScanPlus" type="button">+</button>
+      </div>
+    </div>
+    <div class="kv"><span class="k">Used this month</span><span id="dScansUsed">—</span></div>
 
     <div class="section-label">Messaging &amp; Verification</div>
     <div class="field">
@@ -463,6 +479,7 @@
         + '<td>'+staff+'</td>'
         + '<td>'+(b.bill_count!=null?b.bill_count:0)+'</td>'
         + '<td>'+(b.item_count!=null?b.item_count:0)+'</td>'
+        + '<td>'+scansCell(b, sub)+'</td>'
         + '<td>'+devChips(sub)+'</td>'
         + '<td>'+wa+'</td>'
         + '<td>'+ver+'</td>'
@@ -493,6 +510,7 @@
     staff:    function(b){ return b.staff_count || 0; },
     bills:    function(b){ return b.bill_count || 0; },
     items:    function(b){ return b.item_count || 0; },
+    scans:    function(b){ return b.scans_month || 0; },
     wa:       function(b){ return low(b.whatsapp_mode); },
     verified: function(b){ return b.is_verified ? 1 : 0; }
   };
@@ -503,6 +521,18 @@
       render();
     });
   });
+
+  // AI bill scans: "used / free per month", amber once the allowance is used up.
+  // Usage still shows when switched off, so past spend stays visible.
+  function scansCell(b, sub){
+    var used = b.scans_month || 0;
+    if(!sub || !sub.allow_purchase_scan){
+      return '<span class="muted">Off'+(used ? ' · '+used : '')+'</span>';
+    }
+    var full = used >= sub.purchase_scan_limit;
+    return '<span class="chip '+(full?'amber':'gray')+'">'+used+' / '+sub.purchase_scan_limit+'</span>'
+      + (b.scans_failed_month ? '<div class="biz-sub">'+b.scans_failed_month+' failed</div>' : '');
+  }
 
   // Stored value -> what people call it. The type is still restaurant_with_tables
   // in the DB, but there is only one kind of restaurant now.
@@ -554,6 +584,10 @@
     $('fDesktop').checked = sub.allow_desktop !== false;
     $('fOnlineStore').checked = sub.allow_online_store !== false;
     $('fCustomers').checked = sub.allow_customers !== false;
+    $('fScan').checked = !!sub.allow_purchase_scan;
+    $('fScanLimit').placeholder = 'default ('+b.default_scan_limit+')';
+    $('fScanLimit').value = sub.purchase_scan_limit_is_default || sub.purchase_scan_limit==null ? '' : sub.purchase_scan_limit;
+    $('dScansUsed').textContent = (b.scans_month||0) + (b.scans_failed_month ? ' ('+b.scans_failed_month+' failed)' : '');
     $('fWhatsapp').value = b.whatsapp_mode || 'deeplink';
     $('fVerified').checked = !!b.is_verified;
     $('dMsg').textContent = '';
@@ -565,6 +599,14 @@
   $('dClose').addEventListener('click', closeDrawer);
   $('dCancel').addEventListener('click', closeDrawer);
   $('overlay').addEventListener('click', closeDrawer);
+
+  // − / + step the allowance; a blank box starts from the default.
+  function stepScanLimit(d){
+    var v = $('fScanLimit').value === '' ? (current ? current.default_scan_limit : 0) : parseInt($('fScanLimit').value,10) || 0;
+    $('fScanLimit').value = Math.max(0, v + d);
+  }
+  $('fScanMinus').addEventListener('click', function(){ stepScanLimit(-1); });
+  $('fScanPlus').addEventListener('click', function(){ stepScanLimit(1); });
 
   $('dSave').addEventListener('click', function(){
     if(!current) return;
@@ -581,6 +623,9 @@
       allow_desktop: $('fDesktop').checked,
       allow_online_store: $('fOnlineStore').checked,
       allow_customers: $('fCustomers').checked,
+      allow_purchase_scan: $('fScan').checked,
+      // Blank = back to the server default (null), not 0 (which blocks all scans).
+      purchase_scan_limit: $('fScanLimit').value === '' ? null : Math.max(0, parseInt($('fScanLimit').value,10) || 0),
       is_trial: $('fTrial').checked,
       whatsapp_mode: $('fWhatsapp').value,
       is_verified: $('fVerified').checked
@@ -626,13 +671,13 @@
     ['Clothing',"Men's Wear",'Cotton T-Shirt','piece','',5,'Yes','6109','','','','XL',449,'8901000000116',20,5],
     ['Stationery','Notebooks','Ruled Notebook 172 Pages','piece',45,12,'Yes','4820','8901000000123',200,30,'','','','','']
   ];
-  var UNITS = 'piece, kg, g, litre, ml, metre, dozen, plate, packet, box, bottle, pair, set, bundle, bag, sqft, ton, quintal, roll';
+  var UNITS = 'piece, kg, g, litre, ml, metre, dozen, plate, packet, box, bottle, pair, set, bundle, bag, sqft, ton, quintal, roll, case, crate, carton';
   var HELP = [
     ['Column','Required','Notes'],
     ['Major Category','No','Top-level group, e.g. Chinese, Grocery'],
     ['Category','No','Minor / sub category, e.g. Chinese Starters'],
     ['Item Name','Yes','Must be unique. For variants repeat the same name on each variant row'],
-    ['Unit','No','One of: '+UNITS+'. Default piece'],
+    ['Unit','No','Any short unit, up to 10 letters, e.g. '+UNITS+'. Default piece'],
     ['Price','Yes (no variants)','Leave blank when the item has variants'],
     ['Tax Rate %','No','GST %, e.g. 0, 5, 12, 18, 28'],
     ['Price Includes Tax','No','Yes / No. Default No'],

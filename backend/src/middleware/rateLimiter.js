@@ -118,6 +118,22 @@ const whatsappLimiter = rateLimit({
   handler: onLimitReached,
 });
 
+// POST /api/vendor-bills/scan — 30 per user per hour, failures INCLUDED.
+//
+// Each scan is a paid AI call. The monthly allowance (subscriptions.
+// purchase_scan_limit) is the commercial control, but it only counts
+// SUCCESSFUL scans — this caps retries of unreadable photos and runaway loops.
+// 30/hour is far above an owner entering a stack of supplier bills.
+const purchaseScanLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: globalKey,
+  message: 'Too many bill scans. Please try again in a little while.',
+  handler: onLimitReached,
+});
+
 // POST /api/login — 20 failed attempts per (IP + phone) per 15 minutes.
 //
 // Keyed on IP *and* the phone being logged in, not IP alone. On shared/NAT'd
@@ -332,4 +348,4 @@ const demoLimiter = rateLimit({
   handler: onLimitReached,
 });
 
-module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, loginLimiter, loginIpFailLimiter, otpPhoneDailyLimiter, registerLimiter, registerAccountLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter, publicPageLimiter, pdfLimiter, adminLoginLimiter };
+module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, purchaseScanLimiter, loginLimiter, loginIpFailLimiter, otpPhoneDailyLimiter, registerLimiter, registerAccountLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter, publicPageLimiter, pdfLimiter, adminLoginLimiter };

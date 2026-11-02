@@ -3341,14 +3341,14 @@ abstract class AppLocalizations {
   /// No description provided for @billingCgst.
   ///
   /// In en, this message translates to:
-  /// **'CGST ({rate}%)'**
-  String billingCgst(String rate);
+  /// **'CGST'**
+  String get billingCgst;
 
   /// No description provided for @billingSgst.
   ///
   /// In en, this message translates to:
-  /// **'SGST ({rate}%)'**
-  String billingSgst(String rate);
+  /// **'SGST'**
+  String get billingSgst;
 
   /// No description provided for @billingDiscountApplied.
   ///
@@ -4143,6 +4143,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Carton'**
   String get itemsUnitCarton;
+
+  /// No description provided for @itemsUnitOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other…'**
+  String get itemsUnitOther;
+
+  /// No description provided for @itemsUnitCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Your unit'**
+  String get itemsUnitCustom;
+
+  /// No description provided for @itemsUnitSameAsItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Same as item'**
+  String get itemsUnitSameAsItem;
 
   /// No description provided for @itemsFieldPack.
   ///
@@ -6585,6 +6603,138 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Import from purchase list PDF'**
   String get purchaseImportPdfTooltip;
+
+  /// No description provided for @purchaseScanTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan supplier bill (AI)'**
+  String get purchaseScanTooltip;
+
+  /// No description provided for @purchaseScanLimitReached.
+  ///
+  /// In en, this message translates to:
+  /// **'Monthly scan limit reached ({used}/{limit})'**
+  String purchaseScanLimitReached(int used, int limit);
+
+  /// No description provided for @purchaseScanTakePhoto.
+  ///
+  /// In en, this message translates to:
+  /// **'Take photo'**
+  String get purchaseScanTakePhoto;
+
+  /// No description provided for @purchaseScanChooseGallery.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose from gallery'**
+  String get purchaseScanChooseGallery;
+
+  /// No description provided for @purchaseScanChooseFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose PDF or image file'**
+  String get purchaseScanChooseFile;
+
+  /// No description provided for @purchaseScanReading.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading bill…'**
+  String get purchaseScanReading;
+
+  /// No description provided for @purchaseScanNetworkError.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reach the server. Check the connection and try again.'**
+  String get purchaseScanNetworkError;
+
+  /// No description provided for @purchaseScanUsage.
+  ///
+  /// In en, this message translates to:
+  /// **'{used} / {limit} scans used this month'**
+  String purchaseScanUsage(int used, int limit);
+
+  /// No description provided for @purchaseScanReviewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Check against the bill before saving'**
+  String get purchaseScanReviewTitle;
+
+  /// No description provided for @purchaseScanTotalMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill total Rs. {printed}, entered Rs. {entered}. Please check the invoice lines and taxes.'**
+  String purchaseScanTotalMismatch(String printed, String entered);
+
+  /// No description provided for @purchaseScanWarnAmountMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Line {line}: amount couldn\'t be read — enter it from the bill.'**
+  String purchaseScanWarnAmountMissing(int line);
+
+  /// No description provided for @purchaseScanWarnLineTax.
+  ///
+  /// In en, this message translates to:
+  /// **'Line {line}: GST printed on the bill doesn\'t match its rate.'**
+  String purchaseScanWarnLineTax(int line);
+
+  /// No description provided for @purchaseScanWarnCgstSgst.
+  ///
+  /// In en, this message translates to:
+  /// **'Line {line}: CGST and SGST on the bill are different.'**
+  String purchaseScanWarnCgstSgst(int line);
+
+  /// No description provided for @purchaseScanWarnTaxType.
+  ///
+  /// In en, this message translates to:
+  /// **'Line {line}: IGST / CGST+SGST doesn\'t match the bill\'s interstate setting.'**
+  String purchaseScanWarnTaxType(int line);
+
+  /// No description provided for @purchaseScanWarnCess.
+  ///
+  /// In en, this message translates to:
+  /// **'Line {line}: cess is printed but not recorded. Add it as a separate line if needed.'**
+  String purchaseScanWarnCess(int line);
+
+  /// No description provided for @purchaseScanWarnSubtotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Taxable value on the bill Rs. {printed}, lines add up to Rs. {computed}.'**
+  String purchaseScanWarnSubtotal(String printed, String computed);
+
+  /// No description provided for @purchaseScanWarnTaxTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'GST total on the bill Rs. {printed}, calculated Rs. {computed}.'**
+  String purchaseScanWarnTaxTotal(String printed, String computed);
+
+  /// No description provided for @purchaseScanOtherCharges.
+  ///
+  /// In en, this message translates to:
+  /// **'Other charges'**
+  String get purchaseScanOtherCharges;
+
+  /// No description provided for @purchaseFieldFreeQty.
+  ///
+  /// In en, this message translates to:
+  /// **'Free'**
+  String get purchaseFieldFreeQty;
+
+  /// No description provided for @purchaseRoundOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Round off'**
+  String get purchaseRoundOff;
+
+  /// No description provided for @purchaseViewOriginal.
+  ///
+  /// In en, this message translates to:
+  /// **'View original bill'**
+  String get purchaseViewOriginal;
+
+  /// No description provided for @purchaseOpenOriginalFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open the original bill.'**
+  String get purchaseOpenOriginalFailed;
 
   /// No description provided for @purchaseFieldInvoiceNumber.
   ///

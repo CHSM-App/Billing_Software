@@ -355,10 +355,16 @@ router.get('/:token', async (req, res) => {
     const itemsResult = await pool.request()
       .input('token', sql.NVarChar(16), token)
       .query(`
-        SELECT bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount
+        SELECT bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount,
+               -- The catalog's unit and pack, for "1 box" lines (lineQty in
+               -- invoiceHtml.js). A size's own, else its item's.
+               COALESCE(iv.unit, it.unit) AS unit,
+               CASE WHEN bi.variant_id IS NULL THEN it.pack_unit ELSE iv.pack_unit END AS pack_unit,
+               CASE WHEN bi.variant_id IS NULL THEN it.pack_size ELSE iv.pack_size END AS pack_size
         FROM bill_items bi
         JOIN bills b ON b.id = bi.bill_id
         ${BILL_ITEMS_JOIN}
+        LEFT JOIN item_variants iv ON iv.id = bi.variant_id
         WHERE b.receipt_token = @token
         ${BILL_ITEMS_ORDER}
       `);

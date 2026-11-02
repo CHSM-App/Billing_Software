@@ -9,7 +9,7 @@ import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
 // const String baseUrl = 'http://192.168.1.11:8000/api';
-const String baseUrl = 'https://institutions-points-scene-prairie.trycloudflare.com/api';
+const String baseUrl = 'https://vittam.vengurlatech.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
 
@@ -1337,6 +1337,42 @@ Future<void> deleteVendorBill(String id) async {
 /// Distinct vendors seen on past bills, for the entry form's autocomplete.
 Future<List<dynamic>> getVendors() async =>
     _parse(await _authGet(Uri.parse('$baseUrl/vendor-bills/vendors')));
+
+/// Whether this shop may scan bills (admin switch + server set up), and how
+/// many of this month's free scans are used: {enabled, used, limit}.
+Future<Map<String, dynamic>> getPurchaseScanStatus() async =>
+    Map<String, dynamic>.from(_parse(
+        await _authGet(Uri.parse('$baseUrl/vendor-bills/scan/status'))) as Map);
+
+/// Send a supplier bill (JPEG/PNG/WebP/PDF bytes) to be read by AI. Returns
+/// {scan_id, draft, warnings, scans_used, scans_limit}; nothing is saved.
+///
+/// Bypasses the shared request plumbing on purpose: reading a bill takes
+/// 10–60 s, past the 15 s [_requestTimeout], and its "couldn't read" 502 /
+/// "not set up" 503 are answers about the BILL, not a server outage — through
+/// [_logResponse] they would flip the whole app to offline.
+Future<Map<String, dynamic>> scanPurchaseBill(
+    List<int> bytes, String contentType) async {
+  final uri = Uri.parse('$baseUrl/vendor-bills/scan');
+  final response = await _withAutoRefresh((h) async {
+    final headers = Map<String, String>.from(h)..['Content-Type'] = contentType;
+    _logRequest('POST', uri, headers, body: '<${bytes.length} bytes>');
+    final r = await http
+        .post(uri, headers: headers, body: bytes)
+        .timeout(const Duration(minutes: 2));
+    dev.log('${r.statusCode} POST ${uri.path}', name: 'API');
+    return r;
+  });
+  return Map<String, dynamic>.from(_parse(response) as Map);
+}
+
+/// The original bill file a vendor bill was scanned from.
+Future<List<int>> vendorBillAttachmentBytes(String id) async {
+  final response =
+      await _authGet(Uri.parse('$baseUrl/vendor-bills/$id/attachment'));
+  if (response.statusCode != 200) _parse(response); // throws ApiException
+  return response.bodyBytes;
+}
 
 // ---------------------------------------------------------------------------
 // Expenses

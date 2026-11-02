@@ -331,6 +331,19 @@ describe('amountToWords', () => {
   ])('%p → %s', (n, words) => expect(amountToWords(n)).toBe(words));
 });
 
+describe('lineQty — whole packs print as packs', () => {
+  const { lineQty } = require('../../src/invoiceHtml');
+  const box12 = { unit: 'piece', pack_unit: 'box', pack_size: 12 };
+  test.each([
+    [{ ...box12, quantity: 24 }, false, { qty: '2 box', mult: 12, packed: true }],
+    [{ ...box12, quantity: 14 }, false, { qty: '1 box + 2 pcs', mult: 1, packed: true }],
+    [{ ...box12, quantity: 5 }, true, { qty: '5 pcs', mult: 1, packed: false }],
+    [{ ...box12, quantity: 5 }, false, { qty: '5', mult: 1, packed: false }],
+    [{ unit: 'jar', quantity: 3 }, true, { qty: '3 jar', mult: 1, packed: false }],
+    [{ unit: null, quantity: 3 }, true, { qty: '3', mult: 1, packed: false }],
+  ])('%p (units %p)', (i, showUnits, want) => expect(lineQty(i, showUnits)).toEqual(want));
+});
+
 describe('GET /receipt/:token/pdf', () => {
   // The token ends up in a spawned browser's URL — anything off-alphabet must
   // be refused before a process starts.

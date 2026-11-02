@@ -85,3 +85,70 @@ describe('GET /admin/api/businesses — users with app version', () => {
     expect(res.body.businesses[1].users).toEqual([]);
   });
 });
+
+describe('admin — AI bill scanning per business', () => {
+  const subRow = (over = {}) => row({
+    sub_status: 'active', sub_expires_at: '2027-01-01T00:00:00Z', max_staff: 5,
+    allow_purchase_scan: null, purchase_scan_limit: null,
+    scans_month: 0, scans_failed_month: 0, ...over,
+  });
+
+  afterEach(() => { delete process.env.PURCHASE_SCAN_MONTHLY_LIMIT; });
+
+  test('list shows this month\'s scans and treats NULL as blocked + default limit', async () => {
+    process.env.PURCHASE_SCAN_MONTHLY_LIMIT = '100';
+    mockRequest.recordset = [subRow({ scans_month: 23, scans_failed_month: 2 })];
+    const res = await request(app).get('/admin/api/businesses').set(adminAuth());
+    const b = res.body.businesses[0];
+    expect(b.scans_month).toBe(23);
+    expect(b.scans_failed_month).toBe(2);
+    expect(b.default_scan_limit).toBe(100);
+    expect(b.subscription).toMatchObject({
+      allow_purchase_scan: false, purchase_scan_limit: 100, purchase_scan_limit_is_default: true,
+    });
+  });
+
+  test('list reports a business-specific allowance', async () => {
+    mockRequest.recordset = [subRow({ allow_purchase_scan: 1, purchase_scan_limit: 40 })];
+    const res = await request(app).get('/admin/api/businesses').set(adminAuth());
+    expect(res.body.businesses[0].subscription).toMatchObject({
+      allow_purchase_scan: true, purchase_scan_limit: 40, purchase_scan_limit_is_default: false,
+    });
+    // Only successful scans are counted as usage.
+    expect(mockRequest.query.mock.calls[0][0]).toMatch(/ps\.status = 'ok'[\s\S]*AS scans_month/);
+  });
+
+  const put = (body) => request(app).put('/admin/api/businesses/b1').set(adminAuth()).send(body);
+  const merge = () => mockRequest.query.mock.calls.find(([q]) => /MERGE subscriptions/.test(q));
+
+  test('enables scanning and sets the free scans per month', async () => {
+    mockRequest.recordset = [{ id: 'b1' }];
+    const res = await put({ allow_purchase_scan: true, purchase_scan_limit: 50 });
+    expect(res.status).toBe(200);
+    expect(merge()[0]).toMatch(/allow_purchase_scan = @allow_purchase_scan/);
+    expect(mockRequest.inputs.allow_purchase_scan).toBe(1);
+    expect(mockRequest.inputs.purchase_scan_limit).toBe(50);
+  });
+
+  test('null resets the allowance to the default', async () => {
+    mockRequest.recordset = [{ id: 'b1', purchase_scan_limit: 50, allow_purchase_scan: 1 }];
+    const res = await put({ purchase_scan_limit: null });
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.purchase_scan_limit).toBeNull();
+    // Untouched switch keeps its current value.
+    expect(mockRequest.inputs.allow_purchase_scan).toBe(1);
+  });
+
+  test('rejects a negative or fractional allowance', async () => {
+    expect((await put({ purchase_scan_limit: -1 })).status).toBe(400);
+    expect((await put({ purchase_scan_limit: 2.5 })).status).toBe(400);
+    expect((await put({ purchase_scan_limit: '10' })).status).toBe(400);
+  });
+
+  test('blocking keeps the allowance as it was', async () => {
+    mockRequest.recordset = [{ id: 'b1', purchase_scan_limit: 30, allow_purchase_scan: 1 }];
+    await put({ allow_purchase_scan: false });
+    expect(mockRequest.inputs.allow_purchase_scan).toBe(0);
+    expect(mockRequest.inputs.purchase_scan_limit).toBe(30);
+  });
+});

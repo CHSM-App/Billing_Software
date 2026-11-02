@@ -1,14 +1,20 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api.dart' as api;
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart' show formatQty, unitShort;
 import '../providers.dart';
+import '../services/file_export.dart' show shareFile;
 import '../services/purchase_list_pdf_import.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
@@ -301,6 +307,14 @@ class _LineDraft {
   final TextEditingController price;
   final TextEditingController rate;
   final TextEditingController hsn;
+
+  /// Scheme goods ("10 + 2 free"): received into stock, never charged.
+  final TextEditingController free;
+
+  /// The supplier's own wording for this line, when it came from a scanned
+  /// bill. Saving a linked line teaches the server "this vendor's text means
+  /// this item", so the next bill from them links itself.
+  String? vendorText;
   String? itemId;
   String? variantId;
   String? rawMaterialId;
@@ -325,6 +339,8 @@ class _LineDraft {
     String price = '',
     String rate = '',
     String hsn = '',
+    String free = '',
+    this.vendorText,
     this.itemId,
     this.variantId,
     this.rawMaterialId,
@@ -333,7 +349,8 @@ class _LineDraft {
         qty = TextEditingController(text: qty),
         price = TextEditingController(text: price),
         rate = TextEditingController(text: rate),
-        hsn = TextEditingController(text: hsn) {
+        hsn = TextEditingController(text: hsn),
+        free = TextEditingController(text: free) {
     _linkedName = isLinked ? this.name.text : null;
     this.name.addListener(_onNameChanged);
   }
@@ -342,7 +359,7 @@ class _LineDraft {
     if (isLinked && name.text != _linkedName) unlink();
   }
 
-  List<Listenable> get listenables => [name, qty, price, rate];
+  List<Listenable> get listenables => [name, qty, price, rate, free];
 
   void dispose() {
     name.removeListener(_onNameChanged);
@@ -352,6 +369,7 @@ class _LineDraft {
     price.dispose();
     rate.dispose();
     hsn.dispose();
+    free.dispose();
   }
 
   /// Whether this line is tied to a stock target. Only linked lines move
@@ -400,6 +418,12 @@ class _LineDraft {
     return inPacks && packSize != null ? typed * packSize! : typed;
   }
 
+  /// Free goods in base units, typed in the same unit/pack as [qty].
+  double get freeQuantity {
+    final typed = double.tryParse(free.text.trim()) ?? 0;
+    return inPacks && packSize != null ? typed * packSize! : typed;
+  }
+
   /// The user types the line's total amount, not a per-unit price — a vendor
   /// bill quotes "10 kg — Rs. 500", and dividing that by hand is a step the
   /// form can take instead.
@@ -421,9 +445,13 @@ class _LineDraft {
         'name': name.text.trim(),
         if (unit != null) 'unit': unit,
         'quantity': quantity,
+        // Per PAID unit: free goods add stock, not cost.
         'unit_price': unitPrice,
+        if (freeQuantity > 0) 'free_quantity': freeQuantity,
         if (taxRate != null) 'tax_rate': taxRate,
         if (hsn.text.trim().isNotEmpty) 'hsn_code': hsn.text.trim(),
+        if (vendorText != null) 'vendor_text': vendorText,
+        if (inPacks) 'in_packs': true,
       };
 }
 
@@ -603,6 +631,19 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
   bool _reverseCharge = false;
   bool _saving = false;
 
+  /// Printed round-off. Only a scan sets it (the form has no field for it);
+  /// it is kept on edit so re-saving doesn't silently drop it.
+  double _roundOff = 0;
+  bool _dateTouched = false;
+
+  /// AI bill scanning: whether this shop may scan ({enabled, used, limit}),
+  /// and what the last scan read. [_scanId] ties the saved bill to its
+  /// original file; [_scannedTotal] drives the total check above Save.
+  Map<String, dynamic>? _scanStatus;
+  String? _scanId;
+  double? _scannedTotal;
+  List<Map<String, dynamic>> _scanWarnings = const [];
+
   bool get _isEdit => widget.record != null;
 
   @override
@@ -624,6 +665,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
       _interstate = r['is_interstate'] == true;
       _itcEligible = r['itc_eligible'] != false;
       _reverseCharge = r['reverse_charge'] == true;
+      _roundOff = _n(r['round_off']);
+      _dateTouched = true;
       for (final l in (r['lines'] as List? ?? [])) {
         final m = Map<String, dynamic>.from(l as Map);
         _lines.add(_LineDraft(
@@ -634,6 +677,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           price: (_n(m['unit_price']) * _n(m['quantity'])).toStringAsFixed(2),
           rate: m['tax_rate'] == null ? '' : _n(m['tax_rate']).toString(),
           hsn: m['hsn_code']?.toString() ?? '',
+          free: _n(m['free_quantity']) > 0 ? _qty(_n(m['free_quantity'])) : '',
           itemId: m['item_id']?.toString(),
           variantId: m['variant_id']?.toString(),
           rawMaterialId: m['raw_material_id']?.toString(),
@@ -646,6 +690,13 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
     ref.read(vendorsProvider.future).then((v) {
       if (mounted) setState(() => _vendors = v);
     }).catchError((_) {});
+    // Scanning is offered on new bills only, and only when the admin enabled
+    // it for this shop; any failure here just leaves the button hidden.
+    if (!_isEdit) {
+      api.getPurchaseScanStatus().then((s) {
+        if (mounted) setState(() => _scanStatus = s);
+      }).catchError((_) {});
+    }
   }
 
   Iterable<Map<String, dynamic>> _vendorSuggestions(String q) {
@@ -832,6 +883,13 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
               ? context.l10n.purchaseEditTitle
               : context.l10n.purchaseAddTitle),
           actions: [
+            if (_scanStatus?['enabled'] == true) _scanAction(),
+            if (_isEdit && widget.record!['has_attachment'] == true)
+              IconButton(
+                icon: const Icon(Icons.receipt_long_outlined),
+                tooltip: context.l10n.purchaseViewOriginal,
+                onPressed: _saving ? null : _viewOriginal,
+              ),
             IconButton(
               icon: const Icon(Icons.file_upload_outlined),
               tooltip: context.l10n.purchaseImportPdfTooltip,
@@ -984,7 +1042,12 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           firstDate: DateTime(2020),
           lastDate: DateTime.now(),
         );
-        if (picked != null) setState(() => _invoiceDate = picked);
+        if (picked != null) {
+          setState(() {
+            _invoiceDate = picked;
+            _dateTouched = true;
+          });
+        }
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -1097,8 +1160,30 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           ),
         ]),
         const SizedBox(height: 8),
-        AppTextField(
-            label: context.l10n.purchaseFieldHsnOptional, controller: l.hsn),
+        Row(children: [
+          Expanded(
+            flex: 2,
+            child: AppTextField(
+                label: context.l10n.purchaseFieldHsnOptional,
+                controller: l.hsn),
+          ),
+          const SizedBox(width: 8),
+          // Scheme goods: counted into stock, not into the line's cost.
+          Expanded(
+            child: AppTextField(
+              label: context.l10n.purchaseFieldFreeQty,
+              controller: l.free,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              validator: (v) {
+                final t = (v ?? '').trim();
+                if (t.isEmpty) return null;
+                final f = double.tryParse(t);
+                return (f == null || f < 0) ? context.l10n.purchaseInvalid : null;
+              },
+            ),
+          ),
+        ]),
         const SizedBox(height: 6),
         // AppTextField exposes no onChanged, so the live line total tracks the
         // controllers directly.
@@ -1118,9 +1203,10 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
                 child: Text(
                   l.unit == null || l.unit!.isEmpty
                       ? context.l10n.purchaseUpdatesStock
-                      : context.l10n.purchaseUpdatesStockUnit(l.inPacks
-                          ? '${formatQty(l.quantity)} ${unitShort(l.unit!)}'
-                          : unitShort(l.unit!)),
+                      : context.l10n.purchaseUpdatesStockUnit(
+                          l.inPacks || l.freeQuantity > 0
+                              ? '${formatQty(l.quantity + l.freeQuantity)} ${unitShort(l.unit!)}'
+                              : unitShort(l.unit!)),
                   style:
                       const TextStyle(fontSize: 11, color: AppColors.primary),
                 ),
@@ -1290,8 +1376,8 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
             .toDouble();
         // Tax is charged on the discounted net, mirroring the server.
         final tax = subtotal > 0 ? rawTax * ((subtotal - discount) / subtotal) : 0.0;
-        final total = subtotal - discount + tax;
-        return Container(
+        final total = subtotal - discount + tax + _roundOff;
+        final totalsBox = Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: AppColors.primary.withValues(alpha: 0.06),
@@ -1301,13 +1387,80 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
             _kv(context.l10n.purchaseTaxableValue, subtotal),
             if (discount > 0) _kv(context.l10n.purchaseDiscount, -discount),
             if (tax > 0) _kv(_interstate ? 'IGST' : 'CGST + SGST', tax),
+            if (_roundOff != 0) _kv(context.l10n.purchaseRoundOff, _roundOff),
             const Divider(height: 16),
             _kv(context.l10n.purchaseTotal, total, bold: true),
           ]),
         );
+        final review = _scanReviewNotes(total);
+        if (review.isEmpty) return totalsBox;
+        return Column(children: [totalsBox, const SizedBox(height: 12), _reviewBanner(review)]);
       },
     );
   }
+
+  /// What a scanned bill needs checked: the live total against the printed
+  /// one (it clears as the user fixes lines), then the server's per-line GST
+  /// checks. Values are never adjusted to make these go away.
+  List<String> _scanReviewNotes(double entered) {
+    final l10n = context.l10n;
+    final notes = <String>[];
+    if (_scannedTotal != null && (entered - _scannedTotal!).abs() > 1) {
+      notes.add(l10n.purchaseScanTotalMismatch(
+          _money.format(_scannedTotal), _money.format(entered)));
+    }
+    for (final w in _scanWarnings) {
+      final line = (w['line'] is num) ? (w['line'] as num).toInt() + 1 : 0;
+      final printed = _money.format(_n(w['printed']));
+      final computed = _money.format(_n(w['computed']));
+      switch (w['code']) {
+        case 'line_amount_missing':
+          notes.add(l10n.purchaseScanWarnAmountMissing(line));
+        case 'line_tax_mismatch':
+          notes.add(l10n.purchaseScanWarnLineTax(line));
+        case 'cgst_sgst_unequal':
+          notes.add(l10n.purchaseScanWarnCgstSgst(line));
+        case 'tax_type_mismatch':
+          notes.add(l10n.purchaseScanWarnTaxType(line));
+        case 'cess_not_supported':
+          notes.add(l10n.purchaseScanWarnCess(line));
+        case 'subtotal_mismatch':
+          notes.add(l10n.purchaseScanWarnSubtotal(printed, computed));
+        case 'tax_total_mismatch':
+          notes.add(l10n.purchaseScanWarnTaxTotal(printed, computed));
+        // total_mismatch is covered live by the check above.
+      }
+    }
+    return notes;
+  }
+
+  Widget _reviewBanner(List<String> notes) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.warning.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadius.medium),
+          border: Border.all(color: AppColors.warning.withValues(alpha: 0.5)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.warning_amber_rounded,
+                size: 18, color: AppColors.warning),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(context.l10n.purchaseScanReviewTitle,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          for (final n in notes)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('• $n', style: const TextStyle(fontSize: 12)),
+            ),
+        ]),
+      );
 
   Widget _kv(String k, double v, {bool bold = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
@@ -1325,6 +1478,281 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
           ],
         ),
       );
+
+  /// Adds imported lines below whatever is already in the form. A single blank
+  /// starter line (still empty) is replaced rather than kept, so importing into
+  /// a fresh form doesn't leave a stray empty row. Call inside setState.
+  void _appendLines(List<_LineDraft> lines) {
+    if (_lines.length == 1 &&
+        _lines.single.name.text.trim().isEmpty &&
+        !_lines.single.isLinked) {
+      _lines.removeAt(0).dispose();
+    }
+    _lines.addAll(lines);
+  }
+
+  // ---------------------------------------------------------------------------
+  // AI bill scanning — the server reads the bill into a DRAFT that fills this
+  // form; nothing is saved until the owner reviews it and taps Save.
+  // ---------------------------------------------------------------------------
+
+  Widget _scanAction() {
+    final used = (_scanStatus!['used'] as num?)?.toInt() ?? 0;
+    final limit = (_scanStatus!['limit'] as num?)?.toInt() ?? 0;
+    final full = used >= limit;
+    return IconButton(
+      icon: const Icon(Icons.document_scanner_outlined),
+      tooltip: full
+          ? context.l10n.purchaseScanLimitReached(used, limit)
+          : context.l10n.purchaseScanTooltip,
+      onPressed: _saving || full ? null : _scanBill,
+    );
+  }
+
+  static bool get _isMobile =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  /// The bill's bytes: camera / gallery / file on a phone, a file elsewhere.
+  Future<List<int>?> _pickBill() async {
+    var source = 'file';
+    if (_isMobile) {
+      final picked = await showModalBottomSheet<String>(
+        context: context,
+        builder: (c) => SafeArea(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: Text(c.l10n.purchaseScanTakePhoto),
+              onTap: () => Navigator.pop(c, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(c.l10n.purchaseScanChooseGallery),
+              onTap: () => Navigator.pop(c, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf_outlined),
+              title: Text(c.l10n.purchaseScanChooseFile),
+              onTap: () => Navigator.pop(c, 'file'),
+            ),
+          ]),
+        ),
+      );
+      if (picked == null) return null;
+      source = picked;
+    }
+    if (source != 'file') {
+      // 2000px wide keeps small bill print legible while staying well under
+      // the 5 MB per-image limit.
+      final x = await ImagePicker().pickImage(
+        source: source == 'camera' ? ImageSource.camera : ImageSource.gallery,
+        maxWidth: 2000,
+        imageQuality: 85,
+      );
+      return x?.readAsBytes();
+    }
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
+      withData: true,
+    );
+    if (picked == null || picked.files.isEmpty) return null;
+    final f = picked.files.single;
+    return f.bytes ?? await File(f.path!).readAsBytes();
+  }
+
+  /// The file's real type from its first bytes (the server checks the same
+  /// way). Unknown types go as octet-stream and get the server's clear refusal.
+  static String _billType(List<int> b) {
+    bool at(int i, List<int> sig) =>
+        b.length >= i + sig.length &&
+        Iterable<int>.generate(sig.length).every((k) => b[i + k] == sig[k]);
+    if (at(0, const [0xFF, 0xD8, 0xFF])) return 'image/jpeg';
+    if (at(0, const [0x89, 0x50, 0x4E, 0x47])) return 'image/png';
+    if (at(0, 'RIFF'.codeUnits) && at(8, 'WEBP'.codeUnits)) return 'image/webp';
+    if (at(0, '%PDF-'.codeUnits)) return 'application/pdf';
+    return 'application/octet-stream';
+  }
+
+  Future<void> _scanBill() async {
+    List<int>? bytes;
+    try {
+      bytes = await _pickBill();
+    } catch (e) {
+      if (mounted) _snack(context.l10n.purchaseFilePickerFailed('$e'));
+      return;
+    }
+    if (bytes == null || !mounted) return;
+
+    // _saving also disables Save, Import and Scan, so nothing double-submits.
+    setState(() => _saving = true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(children: [
+            const CircularProgressIndicator(),
+            const SizedBox(width: 16),
+            Expanded(child: Text(c.l10n.purchaseScanReading)),
+          ]),
+        ),
+      ),
+    );
+    Map<String, dynamic>? result;
+    Object? error;
+    try {
+      result = await api.scanPurchaseBill(bytes, _billType(bytes));
+    } catch (e) {
+      error = e;
+    }
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    setState(() => _saving = false);
+
+    if (error != null) {
+      // The server's message covers each case: not enabled (403), allowance
+      // used (429), unreadable bill (502), not set up (503), bad file (400).
+      _snack(api.sanitizeUiErrorMessage(error,
+          fallback: context.l10n.purchaseScanNetworkError));
+      api.getPurchaseScanStatus().then((s) {
+        if (mounted) setState(() => _scanStatus = s);
+      }).catchError((_) {});
+      return;
+    }
+    _applyScan(result!);
+  }
+
+  /// A saved vendor mapping first; otherwise exactly ONE exact-name match.
+  /// Several items with the same name are never guessed between.
+  StockTarget? _matchTarget(List<StockTarget> targets, Map<String, dynamic> m) {
+    final match = m['match'];
+    if (match is Map) {
+      bool same(String? a, Object? b) =>
+          a != null && b != null && a.toLowerCase() == b.toString().toLowerCase();
+      for (final t in targets) {
+        if (same(t.itemId, match['item_id']) ||
+            same(t.variantId, match['variant_id']) ||
+            same(t.rawMaterialId, match['raw_material_id'])) {
+          return t;
+        }
+      }
+    }
+    final key = (m['name']?.toString() ?? '').trim().toLowerCase();
+    final exact = targets.where((t) => t.name.toLowerCase() == key).toList();
+    return exact.length == 1 ? exact.single : null;
+  }
+
+  void _fillIfEmpty(TextEditingController c, Object? value) {
+    final v = value?.toString().trim() ?? '';
+    if (c.text.trim().isEmpty && v.isNotEmpty) c.text = v;
+  }
+
+  void _applyScan(Map<String, dynamic> r) {
+    final draft = Map<String, dynamic>.from(r['draft'] as Map);
+    final h = Map<String, dynamic>.from(draft['header'] as Map);
+    final targets = _stockTargets();
+
+    final lines = <_LineDraft>[];
+    for (final row in (draft['lines'] as List? ?? const [])) {
+      final m = Map<String, dynamic>.from(row as Map);
+      final line = _LineDraft(
+        name: m['name']?.toString() ?? '',
+        qty: _qty(_n(m['quantity'])),
+        // The taxable line value — exactly what this form's Amount field holds.
+        // Left blank when the bill's amount couldn't be read.
+        price: m['amount'] == null ? '' : _n(m['amount']).toStringAsFixed(2),
+        rate: m['tax_rate'] == null ? '' : _qty(_n(m['tax_rate'])),
+        hsn: m['hsn_code']?.toString() ?? '',
+        free: _n(m['free_quantity']) > 0 ? _qty(_n(m['free_quantity'])) : '',
+        vendorText: m['vendor_text']?.toString(),
+      );
+      final target = _matchTarget(targets, m);
+      if (target != null) {
+        line.link(target);
+        final match = m['match'];
+        // The vendor sells this in packs (boxes) — remembered from last time.
+        line.inPacks = match is Map &&
+            match['in_packs'] == true &&
+            target.packSize != null;
+      }
+      lines.add(line);
+    }
+    final other = _n(h['other_charges']);
+    if (other > 0) {
+      lines.add(_LineDraft(
+          name: context.l10n.purchaseScanOtherCharges,
+          qty: '1',
+          price: other.toStringAsFixed(2)));
+    }
+
+    final used = (r['scans_used'] as num?)?.toInt() ?? 0;
+    final limit = (r['scans_limit'] as num?)?.toInt() ?? 0;
+    setState(() {
+      _scanId = r['scan_id']?.toString();
+      _scannedTotal = h['total'] == null ? null : _n(h['total']);
+      _scanWarnings = [
+        for (final w in (r['warnings'] as List? ?? const []))
+          Map<String, dynamic>.from(w as Map),
+      ];
+      _roundOff = _n(h['round_off']);
+      // Header fields only fill what is still empty — never what was typed.
+      _fillIfEmpty(_vendorCtrl, h['vendor_name']);
+      _fillIfEmpty(_gstinCtrl, h['vendor_gstin']);
+      _fillIfEmpty(_invoiceCtrl, h['invoice_number']);
+      if (_n(h['discount_amount']) > 0) {
+        _fillIfEmpty(_discountCtrl, _n(h['discount_amount']).toStringAsFixed(2));
+      }
+      final date = DateTime.tryParse(h['invoice_date']?.toString() ?? '');
+      // The date picker only allows 2020..today; a misread date outside that
+      // would crash it, so it is ignored instead.
+      if (!_dateTouched &&
+          date != null &&
+          !date.isAfter(DateTime.now()) &&
+          !date.isBefore(DateTime(2020))) {
+        _invoiceDate = date;
+      }
+      if (h['is_interstate'] is bool) _interstate = h['is_interstate'] as bool;
+      _appendLines(lines);
+      _scanStatus = {...?_scanStatus, 'used': used, 'limit': limit};
+    });
+    _snack(context.l10n.purchaseScanUsage(used, limit));
+  }
+
+  /// The original invoice this bill was scanned from.
+  Future<void> _viewOriginal() async {
+    final id = widget.record!['id'].toString();
+    try {
+      final bytes = Uint8List.fromList(await api.vendorBillAttachmentBytes(id));
+      if (!mounted) return;
+      if (_billType(bytes) != 'application/pdf') {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => Dialog(
+            child: InteractiveViewer(maxScale: 6, child: Image.memory(bytes)),
+          ),
+        );
+        return;
+      }
+      final name = 'bill_$id.pdf';
+      if (_isMobile) {
+        // No file:// launching on Android — the share sheet offers a viewer.
+        await shareFile(bytes, name, 'application/pdf');
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}${Platform.pathSeparator}$name');
+      await file.writeAsBytes(bytes, flush: true);
+      if (!await launchUrl(Uri.file(file.path)) && mounted) {
+        _snack(context.l10n.purchaseOpenOriginalFailed);
+      }
+    } catch (_) {
+      if (mounted) _snack(context.l10n.purchaseOpenOriginalFailed);
+    }
+  }
 
   /// Lets the user pick a purchase-list PDF (from purchase_list_screen.dart's
   /// export), recovers the item/quantity rows via text extraction, shows them
@@ -1373,13 +1801,7 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
     // receive stock. Unmatched rows stay as free-text lines.
     final targets = _stockTargets();
     setState(() {
-      // A single blank starter line (still empty) is replaced rather than
-      // kept, so importing into a fresh form doesn't leave a stray empty row.
-      if (_lines.length == 1 &&
-          _lines.single.name.text.trim().isEmpty &&
-          !_lines.single.isLinked) {
-        _lines.removeAt(0).dispose();
-      }
+      final imported = <_LineDraft>[];
       for (final row in reviewed) {
         final line = _LineDraft(
           name: row.name,
@@ -1393,8 +1815,9 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
         );
         final match = findStockTargetByName(targets, row.name);
         if (match != null) line.link(match);
-        _lines.add(line);
+        imported.add(line);
       }
+      _appendLines(imported);
     });
   }
 
@@ -1455,6 +1878,9 @@ class _VendorBillFormScreenState extends ConsumerState<VendorBillFormScreen> {
         'payment_status': _paymentStatus,
         if (_discountCtrl.text.trim().isNotEmpty)
           'discount_amount': double.tryParse(_discountCtrl.text.trim()) ?? 0,
+        if (_roundOff != 0) 'round_off': _roundOff,
+        // Links the bill to its original file; the server checks it is ours.
+        if (_scanId != null) 'scan_id': _scanId,
         'lines': _lines.map((l) => l.toJson()).toList(),
       };
       if (_isEdit) {

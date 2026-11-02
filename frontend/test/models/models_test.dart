@@ -962,6 +962,67 @@ void main() {
     });
   });
 
+  // ─────────────────────────────────────────────────────────────
+  // Bill lines — whole packs print as packs at the pack rate
+  // ─────────────────────────────────────────────────────────────
+  group('receiptLine', () {
+    BillItem line(double qty, {String? variantId}) => BillItem(
+        id: 'l', billId: 'b', itemId: 'soap', variantId: variantId,
+        itemName: 'Soap', quantity: qty, unitPrice: 10,
+        lineTotal: qty * 10);
+
+    setUp(() => catalogUnits = {
+          'soap': (unit: 'piece', packUnit: 'box', packSize: 12),
+          'soap:big': (unit: 'jar', packUnit: null, packSize: null),
+        });
+    tearDown(() => catalogUnits = const {});
+
+    test('whole boxes → "1 box" at the box rate', () {
+      final r = receiptLine(line(12), '12');
+      expect(r.qty, '1 box');
+      expect(r.price, 120);
+      expect(r.packed, isTrue);
+      expect(receiptLine(line(24), '24').qty, '2 box');
+    });
+    test('boxes plus loose keep the piece rate', () {
+      final r = receiptLine(line(14), '14');
+      expect(r.qty, '1 box + 2 pcs');
+      expect(r.price, 10);
+    });
+    test('under one box: the unit only when asked', () {
+      expect(receiptLine(line(5), '5').qty, '5 pcs');
+      expect(receiptLine(line(5), '5', withUnit: false).qty, '5');
+      expect(receiptLine(line(5), '5').packed, isFalse);
+    });
+    test('a size uses its own unit and pack', () {
+      final r = receiptLine(line(12, variantId: 'big'), '12');
+      expect(r.qty, '12 jar');
+      expect(r.price, 10);
+    });
+    test('an item the catalog does not know prints the bare quantity', () {
+      catalogUnits = const {};
+      expect(receiptLine(line(12), '12').qty, '12');
+    });
+  });
+
+  group('units', () {
+    Item item(String unit) => Item.fromJson(
+        {'id': 'i', 'business_id': 'b', 'name': 'X', 'price': 1, 'unit': unit});
+    test('only measures take decimals', () {
+      expect(item('kg').isMeasured, isTrue);
+      expect(item('piece').isMeasured, isFalse);
+      expect(item('box').isMeasured, isFalse);
+      expect(item('jar').isMeasured, isFalse);
+    });
+    test('a size with its own unit overrides the item', () {
+      final v = ItemVariant.fromJson(
+          {'id': 'v', 'item_id': 'i', 'label': 'Loose', 'unit': 'kg'});
+      expect(CartEntry(item: item('bag'), variant: v, quantity: 1).unit, 'kg');
+      expect(CartEntry(item: item('bag'), variant: v, quantity: 1).isMeasured, isTrue);
+      expect(CartEntry(item: item('bag'), quantity: 1).unit, 'bag');
+    });
+  });
+
   group('CartEntry pack', () {
     final item = Item.fromJson({
       'id': 'i1', 'business_id': 'b', 'name': 'Water', 'price': 20,

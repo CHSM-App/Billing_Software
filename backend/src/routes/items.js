@@ -15,13 +15,23 @@ const {
 
 const router = express.Router();
 
-// Units an item may be sold in. Must stay in sync with `_units` in the Flutter
-// item form — the value drives unit conversion, not just display.
+// The units the app lists for an item (`_units` in the Flutter item form). An
+// item's or size's own unit may also be short custom text (see normUnit); a
+// PACK unit must be one of these.
 const VALID_UNITS = [
   'piece', 'kg', 'g', 'litre', 'ml', 'metre', 'dozen', 'plate',
   'packet', 'box', 'bottle', 'pair', 'set', 'bundle', 'bag', 'sqft', 'ton',
   'quintal', 'roll', 'case', 'crate', 'carton',
 ];
+
+// An item's or size's unit as stored: trimmed and lowercased, so "Kg " and
+// "kg" are one unit. Display only — billing and stock never convert item
+// units (raw materials keep their own fixed list). Blank → null.
+const MAX_UNIT_LEN = 10;
+function normUnit(u) {
+  const s = u == null ? '' : String(u).trim().toLowerCase();
+  return s === '' ? null : s;
+}
 
 // A pack ("1 box = 15 bottle") is an entry/display shortcut only: stock and bill
 // quantities always stay in the base unit, so billing never reads these. Sent
@@ -165,7 +175,7 @@ async function attachVariants(businessId, itemRows) {
   });
   const result = await request.query(`
     SELECT v.id, v.item_id, v.label, v.price, v.barcode,
-           v.stock_quantity, v.low_stock_threshold, v.pack_unit, v.pack_size, v.sort_order, v.is_active
+           v.stock_quantity, v.low_stock_threshold, v.pack_unit, v.pack_size, v.unit, v.sort_order, v.is_active
     FROM item_variants v
     JOIN items i ON i.id = v.item_id
     WHERE i.business_id = @business_id
@@ -396,9 +406,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
     || validateText(hsn_code, 'HSN/SAC code', 10)
     || validateText(major_category, 'Major category', 100)
     || validateText(category, 'Category', 100)
-    // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
-    // recipe quantity is stored, so an unknown value would silently skip it.
-    || validateEnum(unit, 'Unit', VALID_UNITS)
+    || validateText(unit, 'Unit', MAX_UNIT_LEN)
     || validatePack(pack_unit, pack_size)
     || validateInteger(default_warranty_months, 'Default warranty period');
   if (invalid) return res.status(400).json({ error: invalid });
@@ -438,7 +446,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('hsn_code', sql.NVarChar(10), hsn_code || null)
       .input('stock_quantity', sql.Decimal(10, 2),
         sizedItem || stock_quantity == null ? null : parseFloat(stock_quantity))
-      .input('unit', sql.NVarChar(20), unit || 'piece')
+      .input('unit', sql.NVarChar(20), normUnit(unit) || 'piece')
       // Low-stock alert level. Previously hardcoded to 50, so it was impossible
       // to set from the app — a shop selling 5 kg of rice alerted at the same
       // level as one selling 500 packets. 50 stays the default when omitted so
@@ -505,9 +513,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     || validateText(hsn_code, 'HSN/SAC code', 10)
     || validateText(major_category, 'Major category', 100)
     || validateText(category, 'Category', 100)
-    // Unit is not free text — it drives the g↔kg / ml↔litre conversion when a
-    // recipe quantity is stored, so an unknown value would silently skip it.
-    || validateEnum(unit, 'Unit', VALID_UNITS)
+    || validateText(unit, 'Unit', MAX_UNIT_LEN)
     || validatePack(pack_unit, pack_size)
     || validateInteger(default_warranty_months, 'Default warranty period');
   if (invalid) return res.status(400).json({ error: invalid });
@@ -617,7 +623,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     }
     if (unit !== undefined) {
       sets.push('unit = @unit');
-      request.input('unit', sql.NVarChar(20), unit || 'piece');
+      request.input('unit', sql.NVarChar(20), normUnit(unit) || 'piece');
     }
     if (low_stock_threshold !== undefined) {
       sets.push('low_stock_threshold = @low_stock_threshold');
@@ -797,12 +803,12 @@ async function loadOwnedItem(itemId, businessId) {
 const VARIANT_OUTPUT =
   'INSERTED.id, INSERTED.item_id, INSERTED.label, INSERTED.price, INSERTED.barcode, ' +
   'INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.pack_unit, INSERTED.pack_size, ' +
-  'INSERTED.sort_order, INSERTED.is_active';
+  'INSERTED.unit, INSERTED.sort_order, INSERTED.is_active';
 
 // POST /api/items/:id/variants
 router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
   const {
-    label, price, barcode, stock_quantity, low_stock_threshold, sort_order, pack_unit, pack_size,
+    label, price, barcode, stock_quantity, low_stock_threshold, sort_order, pack_unit, pack_size, unit,
   } = req.body;
 
   const invalid = validateText(label, 'Size name', 50, { required: true })
@@ -811,6 +817,7 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
     || validateNumber(low_stock_threshold, 'Low stock alert')
     || validateInteger(sort_order, 'sort_order')
     || validateText(barcode, 'Barcode', 100)
+    || validateText(unit, 'Unit', MAX_UNIT_LEN)
     || validatePack(pack_unit, pack_size);
   if (invalid) return res.status(400).json({ error: invalid });
 
@@ -828,10 +835,12 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
       .input('stock_quantity', sql.Decimal(10, 2), stock_quantity != null ? parseFloat(stock_quantity) : null)
       .input('low_stock_threshold', sql.Decimal(10, 2), low_stock_threshold != null ? parseFloat(low_stock_threshold) : null)
       .input('sort_order', sql.Int, sort_order != null ? parseInt(sort_order, 10) : 0)
+      // NULL = counted in the item's unit.
+      .input('unit', sql.NVarChar(20), normUnit(unit))
       .query(`
-        INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, pack_unit, pack_size, sort_order)
+        INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, pack_unit, pack_size, unit, sort_order)
         OUTPUT ${VARIANT_OUTPUT}
-        VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @pack_unit, @pack_size, @sort_order)
+        VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @pack_unit, @pack_size, @unit, @sort_order)
       `);
 
     // Once an item has sizes, its own stock is meaningless — stock is tracked
@@ -858,12 +867,12 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
 // PUT /api/items/:id/variants/:variantId
 router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) => {
   const {
-    label, price, barcode, stock_quantity, low_stock_threshold, sort_order, pack_unit, pack_size,
+    label, price, barcode, stock_quantity, low_stock_threshold, sort_order, pack_unit, pack_size, unit,
   } = req.body;
 
   if (label === undefined && price === undefined && barcode === undefined &&
       stock_quantity === undefined && low_stock_threshold === undefined && sort_order === undefined &&
-      pack_unit === undefined && pack_size === undefined) {
+      pack_unit === undefined && pack_size === undefined && unit === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   // The same rules as create — this route had none, so an edit could set a
@@ -876,6 +885,7 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
     || validateNumber(low_stock_threshold, 'Low stock alert')
     || validateInteger(sort_order, 'sort_order')
     || validateText(barcode, 'Barcode', 100)
+    || validateText(unit, 'Unit', MAX_UNIT_LEN)
     || validatePack(pack_unit, pack_size);
   if (invalid) return res.status(400).json({ error: invalid });
 
@@ -917,6 +927,10 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
     if (pack_unit !== undefined) {
       sets.push('pack_unit = @pack_unit', 'pack_size = @pack_size');
       inputPack(request, pack_unit, pack_size);
+    }
+    if (unit !== undefined) {
+      sets.push('unit = @unit');
+      request.input('unit', sql.NVarChar(20), normUnit(unit));
     }
 
     const result = await request.query(`
@@ -1158,3 +1172,5 @@ router.put('/:id/variants/:variantId/recipe', requireAuth, ownerOnly, async (req
 
 module.exports = router;
 module.exports.VALID_UNITS = VALID_UNITS;
+module.exports.MAX_UNIT_LEN = MAX_UNIT_LEN;
+module.exports.normUnit = normUnit;

@@ -200,7 +200,7 @@ void main() {
     final db = await databaseFactory.openDatabase(path);
     final cols = await db.rawQuery('PRAGMA table_info(cached_items)');
     expect(cols.map((c) => c['name']), containsAll(['item_no', 'pack_unit', 'pack_size']));
-    expect(await db.getVersion(), 17);
+    expect(await db.getVersion(), 18);
 
     // And the cache works end to end on the upgraded table.
     await OfflineService.instance.replaceItemCache([
@@ -256,12 +256,61 @@ void main() {
     await OfflineService.instance.init();
 
     final db = await databaseFactory.openDatabase(path);
-    expect(await db.getVersion(), 17);
+    expect(await db.getVersion(), 18);
     final cols = (await db.rawQuery('PRAGMA table_info(offline_bills)'))
         .map((c) => c['name']);
     expect(cols, containsAll(['customer_address', 'customer_gstin']));
     final pending = await OfflineService.instance.getPendingBills();
     expect(pending.single['customer_name'], 'Asha');
     expect(pending.single['customer_address'], isNull);
+  });
+
+  // v18: a size's own unit. A v17 size cache gains the column and keeps
+  // working; sizes without one read back as null (= the item's unit).
+  test('a v17 device gains cached_variants.unit', () async {
+    final path =
+        '${await databaseFactory.getDatabasesPath()}/billing_offline.db';
+    await databaseFactory.deleteDatabase(path);
+    final old = await databaseFactory.openDatabase(path,
+        options: OpenDatabaseOptions(
+          version: 17,
+          onCreate: (db, _) => db.execute('''
+            CREATE TABLE cached_variants (
+              id TEXT NOT NULL PRIMARY KEY, item_id TEXT NOT NULL,
+              business_id TEXT NOT NULL, label TEXT NOT NULL, price REAL,
+              barcode TEXT, stock_quantity REAL, low_stock_threshold REAL,
+              pack_unit TEXT, pack_size REAL,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              is_active INTEGER NOT NULL DEFAULT 1)
+          '''),
+        ));
+    await old.close();
+
+    await OfflineService.instance.init();
+
+    final db = await databaseFactory.openDatabase(path);
+    expect(await db.getVersion(), 18);
+    final cols = (await db.rawQuery('PRAGMA table_info(cached_variants)'))
+        .map((c) => c['name']);
+    expect(cols, contains('unit'));
+
+    await OfflineService.instance.replaceItemCache([
+      Item(
+        id: 'rice', businessId: 'biz-1', name: 'Rice', unit: 'kg',
+        isActive: true,
+        variants: [
+          ItemVariant(id: 'bag', itemId: 'rice', label: '5 kg bag',
+              price: 400, unit: 'bag'),
+          ItemVariant(id: 'loose', itemId: 'rice', label: 'Loose', price: 80),
+        ],
+      ),
+    ], 'biz-1');
+    final sizes = (await OfflineService.instance
+            .getCachedItemsWithStatus('biz-1'))
+        .items
+        .single
+        .variants;
+    expect(sizes.firstWhere((v) => v.id == 'bag').unit, 'bag');
+    expect(sizes.firstWhere((v) => v.id == 'loose').unit, isNull);
   });
 }

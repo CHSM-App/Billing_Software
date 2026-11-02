@@ -87,7 +87,7 @@ List<StockTarget> buildStockTargets({
           if (exclude.contains(name)) continue;
           out.add(StockTarget(
             name: name,
-            unit: it.unit,
+            unit: v.unit ?? it.unit,
             currentStock: v.stockQuantity,
             lowStockThreshold: v.lowStockThreshold,
             variantId: v.id,

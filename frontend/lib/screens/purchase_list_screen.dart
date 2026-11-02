@@ -85,7 +85,7 @@ class _PurchaseListScreenState extends ConsumerState<PurchaseListScreen> {
             if (v.isLowStock) {
               _addRow(
                 name: '${item.name} (${v.label})',
-                unit: item.unit,
+                unit: v.unit ?? item.unit,
                 currentStock: v.stockQuantity,
                 lowStockThreshold: v.lowStockThreshold,
               );
