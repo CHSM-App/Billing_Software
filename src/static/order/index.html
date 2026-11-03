@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#FFFFFF" />
+  <title>Order</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <!-- The item list, chips and cart are the billing screen's, shared with the
+       online store — see src/static/_shared/menu-list.js. -->
+  <script src="/order/menu-list.js"></script>
+</head>
+<body>
+  <!-- OTP sheet -->
+  <div class="backdrop" id="otpBackdrop">
+    <div class="sheet">
+      <h2 id="otpTitle">Verify your phone</h2>
+      <p id="otpSub">We'll send a one-time code on WhatsApp to confirm your order.</p>
+      <input id="nameInput" type="text" placeholder="Your name (optional)" autocomplete="name" />
+      <input id="phoneInput" type="tel" placeholder="Mobile number" autocomplete="tel" inputmode="numeric" />
+      <input id="otpInput" type="text" placeholder="Enter OTP" inputmode="numeric" style="display:none" />
+      <button type="button" class="link" id="otpResend" style="display:none">Resend OTP</button>
+      <div class="err" id="otpErr"></div>
+      <button class="btn" id="otpBtn">Send OTP</button>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    // qrToken is the last path segment of /order/:qrToken
+    var parts = location.pathname.split('/').filter(Boolean);
+    var qrToken = parts[parts.length - 1];
+    var API = '/order/' + encodeURIComponent(qrToken);
+    var LS_TOKEN = 'order_token_' + qrToken;
+    var LS_PHONE = 'order_phone_' + qrToken;
+
+    var orderToken = localStorage.getItem(LS_TOKEN) || null;
+    var ml = MenuList({
+      actionLabel: 'Place Order',
+      onAction: placeOrder,
+      actionNote: 'By placing this order, you agree to the shop’s applicable ordering policies and Vittam’s ' +
+        '<a href="/ordering-terms" target="_blank" rel="noopener">Customer Ordering Terms</a>.',
+    });
+    var esc = ml.esc;
+
+    var $ = function (id) { return document.getElementById(id); };
+    var rupee = function (n) { return '₹' + Number(n).toFixed(Number(n) % 1 ? 2 : 0); };
+
+    // Persistent, prominent notice when ordering is blocked (table busy or being
+    // settled). Sits above the menu, and the cart is cleared under it.
+    function showBlocked(code, message) {
+      ml.clear();
+      var title = code === 'table_billed'
+        ? 'Table is being settled'
+        : 'Table has a running order';
+      var body = message ||
+        (code === 'table_billed'
+          ? 'This table is being paid for at the counter. Please wait or ask staff.'
+          : 'This table already has a running order. Please ask staff for help.');
+      var el = $('blockedBanner');
+      var html =
+        '<div id="blockedBanner" class="running" style="background:#fef2f2;border-color:#fecaca">' +
+        '<h3 style="color:#991b1b">⚠️ ' + esc(title) + '</h3>' +
+        '<div style="font-size:14px;color:#7f1d1d">' + esc(body) + '</div></div>';
+      if (el) el.outerHTML = html; else ml.extra.insertAdjacentHTML('afterbegin', html);
+    }
+
+    // ---- load menu + running order ----
+    function load() {
+      fetch(API + '/menu').then(function (r) {
+        if (!r.ok) throw new Error('menu');
+        return r.json();
+      }).then(function (data) {
+        ml.setHeader(data.shop_name, 'Table ' + data.table_number);
+        document.title = data.shop_name + ' — Table ' + data.table_number;
+        ml.setItems(data.items || []);
+        loadCurrent();
+      }).catch(function () {
+        ml.showError('Menu is not available right now.');
+      });
+    }
+
+    function loadCurrent() {
+      if (!orderToken) return;
+      fetch(API + '/current', { headers: { Authorization: 'Bearer ' + orderToken } })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.verified === false) { orderToken = null; localStorage.removeItem(LS_TOKEN); return; }
+          renderRunning(d);
+        }).catch(function () {});
+    }
+
+    function renderRunning(d) {
+      var el = $('runningBox');
+      if (!d || !d.items || d.items.length === 0) { if (el) el.remove(); return; }
+      var html = '<div class="running" id="runningBox"><h3>Your table\'s order — ' +
+        esc(d.bill_number || '') + '</h3>';
+      d.items.forEach(function (i) {
+        html += '<div class="row"><span>' + esc(i.item_name) + ' × ' + i.quantity +
+          '<div class="st">' + (i.kitchen_status === 'delivered' ? '🍽️ Served'
+            : i.kitchen_status === 'ready' ? '✅ Ready' : '👨‍🍳 Preparing') +
+          '</div></span><span>' + rupee(i.line_total) + '</span></div>';
+      });
+      html += '<div class="row" style="border-top:1px solid #a7f3d0;margin-top:6px;padding-top:6px;font-weight:700"><span>Total</span><span>' +
+        rupee(d.total) + '</span></div></div>';
+      if (el) el.outerHTML = html; else ml.extra.insertAdjacentHTML('beforeend', html);
+    }
+
+    // ---- place order (with OTP gate) ----
+    function placeOrder() {
+      if (orderToken) submitOrder(); else openOtp();
+    }
+
+    var otpStage = 'phone';
+    function openOtp() {
+      otpStage = 'phone';
+      $('otpErr').textContent = '';
+      $('otpInput').style.display = 'none';
+      $('otpInput').value = '';
+      $('phoneInput').value = localStorage.getItem(LS_PHONE) || '';
+      $('otpBtn').textContent = 'Send OTP';
+      $('otpBtn').disabled = false;
+      clearInterval(resendTimer);
+      $('otpResend').style.display = 'none';
+      $('otpBackdrop').classList.add('show');
+    }
+    $('otpBackdrop').onclick = function (e) { if (e.target === this) this.classList.remove('show'); };
+
+    // Asks for a code on WhatsApp. Shared by Send and Resend; reports the
+    // outcome in the sheet and hands back ok/failed.
+    var resendTimer = null;
+    function sendCode(phone, done) {
+      var err = $('otpErr');
+      fetch(API + '/send-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phone }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok) { err.textContent = res.j.error || 'Failed to send OTP.'; return done(false); }
+          localStorage.setItem(LS_PHONE, phone);
+          $('otpSub').textContent = 'Enter the code we sent to ' + phone + '.';
+          if (res.j.dev_otp) { $('otpInput').value = res.j.dev_otp; } // dev convenience
+          resendCountdown();
+          done(true);
+        }).catch(function () { err.textContent = 'Network error.'; done(false); });
+    }
+
+    // Resend stays locked for 30s after each send — WhatsApp can take a moment,
+    // and the server allows only 5 codes per number per 15 minutes.
+    function resendCountdown() {
+      var b = $('otpResend'), left = 30;
+      clearInterval(resendTimer);
+      b.style.display = 'block';
+      function tick() {
+        b.disabled = left > 0;
+        b.textContent = left > 0 ? 'Resend OTP in ' + left + 's' : 'Resend OTP';
+        if (left-- <= 0) clearInterval(resendTimer);
+      }
+      tick();
+      resendTimer = setInterval(tick, 1000);
+    }
+    $('otpResend').onclick = function () {
+      var phone = $('phoneInput').value.trim();
+      $('otpErr').textContent = '';
+      this.disabled = true; this.textContent = 'Sending…';
+      sendCode(phone, function (ok) {
+        if (ok) { ml.toast('New code sent on WhatsApp'); return; }
+        $('otpResend').disabled = false; $('otpResend').textContent = 'Resend OTP';
+      });
+    };
+
+    $('otpBtn').onclick = function () {
+      var phone = $('phoneInput').value.trim();
+      var err = $('otpErr'); err.textContent = '';
+      if (otpStage === 'phone') {
+        if (phone.length < 8) { err.textContent = 'Enter a valid mobile number.'; return; }
+        $('otpBtn').disabled = true; $('otpBtn').textContent = 'Sending…';
+        sendCode(phone, function (ok) {
+          $('otpBtn').disabled = false;
+          if (!ok) { $('otpBtn').textContent = 'Send OTP'; return; }
+          otpStage = 'otp';
+          $('otpInput').style.display = 'block';
+          $('otpBtn').textContent = 'Verify & Order';
+          $('otpInput').focus();
+        });
+      } else {
+        var otp = $('otpInput').value.trim();
+        if (!otp) { err.textContent = 'Enter the OTP.'; return; }
+        $('otpBtn').disabled = true; $('otpBtn').textContent = 'Verifying…';
+        fetch(API + '/verify-otp', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: phone, otp: otp }) })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok) { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Verify & Order'; err.textContent = res.j.error || 'Invalid OTP.'; return; }
+            orderToken = res.j.order_token;
+            localStorage.setItem(LS_TOKEN, orderToken);
+            submitOrder();
+          }).catch(function () { $('otpBtn').disabled = false; $('otpBtn').textContent = 'Verify & Order'; err.textContent = 'Network error.'; });
+      }
+    };
+
+    function submitOrder() {
+      var lines = ml.lines().map(function (l) {
+        return { item_id: l.item_id, variant_id: l.variant_id, quantity: l.qty };
+      });
+      if (lines.length === 0) { $('otpBackdrop').classList.remove('show'); return; }
+      ml.setBusy(true);
+      fetch(API, { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + orderToken },
+        body: JSON.stringify({ items: lines, name: $('nameInput').value.trim() || undefined }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (res) {
+          ml.setBusy(false);
+          $('otpBackdrop').classList.remove('show');
+          if (res.status === 401) { // token expired / spent — re-verify by OTP
+            orderToken = null; localStorage.removeItem(LS_TOKEN); openOtp();
+            $('otpErr').textContent =
+              res.j.error || 'Please verify your phone again to place a new order.';
+            return;
+          }
+          if (res.status === 409) {
+            // Table busy (someone else ordering) or being settled at counter.
+            // Clear any stale token so the next attempt re-verifies cleanly.
+            orderToken = null; localStorage.removeItem(LS_TOKEN);
+            showBlocked(res.j.code, res.j.error);
+            return;
+          }
+          if (!res.ok) { ml.toast(res.j.error || 'Could not place order'); return; }
+          ml.clear();
+          ml.toast('Order sent to the kitchen! 🍽️');
+          loadCurrent();
+        }).catch(function () { ml.setBusy(false); ml.toast('Network error'); });
+    }
+
+    load();
+  })();
+  </script>
+</body>
+</html>

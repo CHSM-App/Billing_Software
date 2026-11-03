@@ -1,0 +1,781 @@
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { pool, poolConnect, sql } = require('../db');
+const crypto = require('crypto');
+const { signAccessToken, signRefreshToken, verifyRefreshToken, publicTokenSecret } = require('../auth');
+const { loginLimiter, loginIpFailLimiter, otpPhoneDailyLimiter, registerLimiter, registerAccountLimiter, refreshLimiter, otpSendLimiter, otpVerifyLimiter } = require('../middleware/rateLimiter');
+const { requireAuth } = require('../auth');
+const logger = require('../logger');
+const billSettings = require('../billSettings');
+const audit = require('../audit');
+const whatsapp = require('../whatsapp');
+const { uniqueStoreToken } = require('../storeToken');
+const authState = require('../authState');
+const { TERMS_VERSION } = require('../legal');
+const { isIndianMobile, isBusinessPhone } = require('../validate');
+
+const router = express.Router();
+
+// Signs the short-lived "this phone passed OTP" token (verify-otp → reset-pin /
+// register). Derived per kind, see auth.js publicTokenSecret.
+const OTP_SECRET = publicTokenSecret('otp');
+
+// A restaurant always runs with tables. The takeaway-only variant was retired in
+// migration 041, which converted the businesses that still carried it — so this
+// list is also what stops a new one being created. 'retail_warranty' was
+// retired the same way in migration 066: warranty tracking is now a toggle
+// (warranty_enabled) on a plain 'retail' business instead of a separate type.
+const VALID_BUSINESS_TYPES = ['retail', 'restaurant_with_tables'];
+
+// Starter catalog seeded into every new business so the item list isn't empty
+// on first login. Picked by business_type. major = the group, category = the
+// subcategory under it (migration 036). stock_quantity is only meaningful for
+// retail (restaurants don't track stock per dish here), so it's omitted for
+// restaurant items.
+const STARTER_ITEMS = {
+  retail: [
+    { name: 'Basmati Rice',          major: 'Grocery',       category: 'Rice & Grains', price: 120, unit: 'kg',    stock_quantity: 25 },
+    { name: 'Toor Dal',              major: 'Grocery',       category: 'Pulses',        price: 160, unit: 'kg',    stock_quantity: 20 },
+    { name: 'Tata Salt 1kg',         major: 'Grocery',       category: 'Essentials',    price: 28,  unit: 'piece', stock_quantity: 40 },
+    { name: 'Fortune Sunflower Oil 1L', major: 'Grocery',    category: 'Oil & Ghee',    price: 150, unit: 'piece', stock_quantity: 20 },
+    { name: 'Amul Milk 500ml',       major: 'Dairy',         category: 'Milk',          price: 30,  unit: 'piece', stock_quantity: 30 },
+    { name: 'Amul Butter 100g',      major: 'Dairy',         category: 'Butter & Cheese', price: 58, unit: 'piece', stock_quantity: 15 },
+    { name: 'Parle-G Biscuit',       major: 'Snacks',        category: 'Biscuits',      price: 10,  unit: 'piece', stock_quantity: 50 },
+    { name: 'Lays Classic Salted',   major: 'Snacks',        category: 'Chips',         price: 20,  unit: 'piece', stock_quantity: 40 },
+    { name: 'Colgate Toothpaste',    major: 'Personal Care', category: 'Oral Care',     price: 55,  unit: 'piece', stock_quantity: 20 },
+    { name: 'Lifebuoy Soap',         major: 'Personal Care', category: 'Bath & Body',   price: 35,  unit: 'piece', stock_quantity: 30 },
+  ],
+  restaurant_with_tables: [
+    { name: 'Paneer Tikka',          major: 'Indian',    category: 'Starters',     price: 220, unit: 'plate' },
+    { name: 'Paneer Butter Masala',  major: 'Indian',    category: 'Main Course',  price: 240, unit: 'plate' },
+    { name: 'Dal Tadka',             major: 'Indian',    category: 'Main Course',  price: 160, unit: 'plate' },
+    { name: 'Butter Naan',           major: 'Indian',    category: 'Breads',       price: 45,  unit: 'piece' },
+    { name: 'Veg Biryani',           major: 'Indian',    category: 'Rice',         price: 190, unit: 'plate' },
+    { name: 'Veg Manchurian',        major: 'Chinese',   category: 'Chinese Starters',    price: 180, unit: 'plate' },
+    { name: 'Veg Hakka Noodles',     major: 'Chinese',   category: 'Noodles & Rice',      price: 170, unit: 'plate' },
+    { name: 'Veg Fried Rice',        major: 'Chinese',   category: 'Noodles & Rice',      price: 170, unit: 'plate' },
+    { name: 'Cold Coffee',           major: 'Beverages', category: 'Cold Drinks',  price: 110, unit: 'glass' },
+    { name: 'Masala Chai',           major: 'Beverages', category: 'Hot Drinks',   price: 30,  unit: 'cup' },
+  ],
+};
+
+// Tax identifier formats — kept identical to routes/businesses.js so a value
+// accepted at sign-up is never rejected later in Business Profile.
+const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const PAN_RE   = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+const FSSAI_RE = /^[0-9]{14}$/;
+
+// Lock the account on every LOCK_EVERY-th consecutive PIN failure. A 4-digit
+// PIN has 10,000 values, so the budget must stay tiny: 5 guesses, then 15 min,
+// doubling each further lock (30 min, 1 h, 2 h ...) up to a day. A correct PIN
+// or a forgot-PIN reset clears the count. That keeps a sustained guesser to a
+// handful of tries a day, while a real user with a typo never notices.
+const LOCK_EVERY = 5;
+const FIRST_LOCK_MS = 15 * 60 * 1000;
+const MAX_LOCK_MS = 24 * 60 * 60 * 1000;
+
+/** Lock length after this many consecutive failures, or 0 for no lock. */
+function lockoutMs(failedAttempts) {
+  if (failedAttempts <= 0 || failedAttempts % LOCK_EVERY !== 0) return 0;
+  const nth = failedAttempts / LOCK_EVERY; // 1st, 2nd ... lock
+  return Math.min(FIRST_LOCK_MS * 2 ** (nth - 1), MAX_LOCK_MS);
+}
+
+// Compared against when the phone is unknown, so that answer takes as long as
+// a wrong PIN and timing cannot tell the two apart.
+const DUMMY_PIN_HASH = bcrypt.hashSync('not-a-real-pin', 10);
+
+// POST /api/register
+router.post('/register', registerLimiter, registerAccountLimiter, async (req, res) => {
+  const {
+    business_name,
+    address,
+    phone,
+    inventory_enabled,
+    has_barcode_scanner,
+    owner_name,
+    owner_phone,
+    pin,
+    // Optional tax identifiers captured at sign-up so the first bill can already
+    // print a compliant header. All three are editable later in Business Profile.
+    gst_number,
+    pan_number,
+    fssai_number,
+  } = req.body;
+  // App builds up to v1.1.10 still send the retired takeaway type for a
+  // restaurant. Fold it the same way migration 041 did instead of rejecting
+  // sign-ups from apps not yet updated.
+  const business_type = req.body.business_type === 'restaurant_no_tables'
+    ? 'restaurant_with_tables'
+    : req.body.business_type;
+
+  // Basic validation
+  if (!business_name || !business_type || !phone || !owner_name || !owner_phone || !pin) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  if (!VALID_BUSINESS_TYPES.includes(business_type)) {
+    // Shown verbatim by the app, so plain words — not the stored values.
+    return res.status(400).json({ error: 'Business type must be Retail or Restaurant' });
+  }
+  if (!/^\d{4}$/.test(pin)) {
+    return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+  }
+  if (!isIndianMobile(owner_phone)) {
+    return res.status(400).json({ error: 'Phone must be a valid 10-digit mobile number' });
+  }
+  if (!isBusinessPhone(phone)) {
+    return res.status(400).json({ error: 'Business phone must be a 10-digit mobile number, or a landline with its STD code' });
+  }
+  // Optional tax identifiers — same formats the Business Profile screen enforces.
+  if (gst_number) {
+    if (!GSTIN_RE.test(gst_number)) {
+      return res.status(400).json({ error: 'Invalid GSTIN format (e.g. 27ABCDE1234F1Z5)' });
+    }
+  }
+  if (pan_number && !PAN_RE.test(pan_number)) {
+    return res.status(400).json({ error: 'Invalid PAN format (e.g. ABCDE1234F)' });
+  }
+  if (fssai_number && !FSSAI_RE.test(fssai_number)) {
+    return res.status(400).json({ error: 'Invalid FSSAI number — must be exactly 14 digits' });
+  }
+
+  // Legal terms (src/legal.js). The app sends accept_terms: true once the box
+  // on the sign-up consent block is ticked; the server records ITS version, so
+  // a client can never claim a version of its choosing. Builds before the
+  // consent block send nothing — enforced only once REQUIRE_TERMS_ACCEPT=true,
+  // same rollout as REQUIRE_REGISTER_OTP below.
+  const acceptedTerms = !!TERMS_VERSION && req.body.accept_terms === true;
+  if (TERMS_VERSION && !acceptedTerms && process.env.REQUIRE_TERMS_ACCEPT === 'true') {
+    return res.status(400).json({ error: 'Please accept the Terms of Service to continue' });
+  }
+
+  // Proof that whoever is signing up controls owner_phone: the verified_token
+  // from POST /verify-otp (purpose 'register'). Apps before this change verify
+  // the OTP but never send the token, so it is enforced only once
+  // REQUIRE_REGISTER_OTP=true — flip it when those builds have aged out.
+  if (process.env.REQUIRE_REGISTER_OTP === 'true') {
+    let proof;
+    try {
+      proof = jwt.verify(String(req.body.verified_token || ''), OTP_SECRET);
+    } catch {
+      return res.status(401).json({ error: 'Please verify your phone number with the OTP first' });
+    }
+    if (proof.typ !== 'otp' || proof.purpose !== 'register' || proof.verified_phone !== owner_phone) {
+      return res.status(401).json({ error: 'Please verify your phone number with the OTP first' });
+    }
+  }
+
+  const toTitleCase = (str) => str.replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const businessNameSaved = toTitleCase(business_name.trim());
+  const ownerNameSaved    = toTitleCase(owner_name.trim());
+  const addressSaved      = address ? toTitleCase(address.trim()) : null;
+
+  try {
+    await poolConnect;
+    const pinHash = await bcrypt.hash(pin, 10);
+    const transaction = pool.transaction();
+    await transaction.begin();
+
+    try {
+      // One phone = one login, across every business (migration 071). Login
+      // finds a user by phone alone, so a second row would hijack or lock out
+      // the first.
+      const phoneTaken = await transaction.request()
+        .input('phone', sql.NVarChar(20), owner_phone)
+        .query('SELECT TOP 1 id FROM users WHERE phone = @phone');
+      if (phoneTaken.recordset.length > 0) {
+        await transaction.rollback();
+        return res.status(409).json({ error: 'An account with this phone number already exists.' });
+      }
+
+      // A GSTIN identifies exactly one business — reject a duplicate up front
+      // rather than letting it through and confusing two businesses' invoices.
+      if (gst_number) {
+        const dup = await transaction.request()
+          .input('gst', sql.NVarChar(15), gst_number)
+          .query('SELECT 1 FROM businesses WHERE gst_number = @gst');
+        if (dup.recordset.length > 0) {
+          await transaction.rollback();
+          return res.status(409).json({
+            error: 'This GSTIN is already registered with another business',
+          });
+        }
+      }
+
+      // The public store link, derived from the shop's own name so it is
+      // readable and can be dictated over the phone: /store/vengurla-tech.
+      // A second shop with the same name gets vengurla-tech-2, and so on.
+      // Computed inside the transaction so it sees this transaction's own view
+      // of the table; the filtered unique index on store_token is the backstop
+      // if two identical names register in the very same instant.
+      const storeToken = await uniqueStoreToken(
+        transaction.request(), businessNameSaved);
+
+      // Insert business. Supplying a GSTIN at sign-up turns GST on immediately,
+      // so the very first bill prints as a tax invoice.
+      const businessResult = await transaction.request()
+        .input('store_token', sql.NVarChar(32), storeToken)
+        .input('name', sql.NVarChar(200), businessNameSaved)
+        .input('business_type', sql.NVarChar(50), business_type)
+        .input('address', sql.NVarChar(500), addressSaved)
+        .input('phone', sql.NVarChar(20), phone)
+        .input('inventory_enabled', sql.Bit, inventory_enabled ? 1 : 0)
+        // Barcode scanning is enabled by default; only disabled if a client
+        // explicitly sends has_barcode_scanner: false.
+        .input('has_barcode_scanner', sql.Bit, has_barcode_scanner === false ? 0 : 1)
+        .input('gst_number', sql.NVarChar(15), gst_number || null)
+        .input('gst_enabled', sql.Bit, gst_number ? 1 : 0)
+        .input('pan_number', sql.NVarChar(10), pan_number || null)
+        .input('fssai_number', sql.NVarChar(20), fssai_number || null)
+        .query(`
+          INSERT INTO businesses (name, business_type, address, phone, inventory_enabled, has_barcode_scanner,
+                                  gst_number, gst_enabled, pan_number, fssai_number, store_token, whatsapp_mode)
+          OUTPUT INSERTED.id
+          VALUES (@name, @business_type, @address, @phone, @inventory_enabled, @has_barcode_scanner,
+                  @gst_number, @gst_enabled, @pan_number, @fssai_number, @store_token, 'api')
+        `);
+
+      const businessId = businessResult.recordset[0].id;
+
+      // Insert owner user
+      const ownerResult = await transaction.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .input('name', sql.NVarChar(200), ownerNameSaved)
+        .input('phone', sql.NVarChar(20), owner_phone)
+        .input('pin_hash', sql.NVarChar(255), pinHash)
+        .query(`
+          INSERT INTO users (business_id, name, phone, pin_hash, role)
+          OUTPUT INSERTED.id
+          VALUES (@business_id, @name, @phone, @pin_hash, 'owner')
+        `);
+
+      // Evidence of the sign-up consent, in the same transaction: a failed
+      // registration must not leave an acceptance behind, and vice versa.
+      if (acceptedTerms) {
+        const ownerId = ownerResult.recordset[0].id;
+        await transaction.request()
+          .input('user_id', sql.UniqueIdentifier, ownerId)
+          .input('business_id', sql.UniqueIdentifier, businessId)
+          .input('terms_version', sql.NVarChar(20), TERMS_VERSION)
+          .input('ip_address', sql.NVarChar(45), req.ip || null)
+          .query(`
+            INSERT INTO terms_acceptances (user_id, business_id, terms_version, source, ip_address)
+            VALUES (@user_id, @business_id, @terms_version, 'register', @ip_address)
+          `);
+        await audit.logTermsAccepted(businessId, ownerId, ownerNameSaved,
+          TERMS_VERSION, 'register', transaction.request());
+      }
+
+      // Seed a small starter catalog so the Items screen isn't empty on first
+      // login — picked by business_type. Best-effort: never block registration.
+      const starterItems = STARTER_ITEMS[business_type] || [];
+      for (const item of starterItems) {
+        await transaction.request()
+          .input('business_id', sql.UniqueIdentifier, businessId)
+          .input('name', sql.NVarChar(200), item.name)
+          .input('major_category', sql.NVarChar(100), item.major)
+          .input('category', sql.NVarChar(100), item.category)
+          .input('price', sql.Decimal(10, 2), item.price)
+          .input('unit', sql.NVarChar(20), item.unit)
+          .input('stock_quantity', sql.Decimal(10, 2), item.stock_quantity ?? null)
+          .input('warranty_eligible', sql.Bit, item.warranty_eligible ? 1 : 0)
+          .input('default_warranty_months', sql.Int, item.default_warranty_months ?? null)
+          .query(`
+            INSERT INTO items (business_id, name, major_category, category, price, unit, stock_quantity, warranty_eligible, default_warranty_months)
+            VALUES (@business_id, @name, @major_category, @category, @price, @unit, @stock_quantity, @warranty_eligible, @default_warranty_months)
+          `);
+      }
+
+      // --- Free trial: 30 days from registration, no grace period ---
+      // Auto-provision an active trial subscription so the user can log in and
+      // use the app immediately. After 30 days the GET /license auto-expire logic
+      // blocks them until a paid subscription is activated from the admin dashboard.
+      const trialExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await transaction.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .input('expires_at', sql.DateTime2, trialExpiresAt)
+        .query(`
+          INSERT INTO subscriptions
+            (business_id, status, expires_at, max_offline_days, grace_period_days, is_trial,
+             max_staff, allow_mobile, allow_desktop)
+          VALUES
+            (@business_id, 'active', @expires_at, 1, 0, 1,
+             10, 1, 1)
+        `);
+
+      // Trial users skip manual approval — mark the business verified so the
+      // login gate (is_verified check) passes right away.
+      await transaction.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .query(`UPDATE businesses SET is_verified = 1 WHERE id = @business_id`);
+
+      await transaction.commit();
+
+      // Fire-and-forget — alert admin about new onboarding request
+      whatsapp.sendOnboardingAlert({
+        businessName: businessNameSaved,
+        ownerName:    ownerNameSaved,
+        phone:        owner_phone,
+        businessType: business_type,
+      }).catch(err => logger.warn({ err }, 'Onboarding alert failed'));
+
+      return res.json({
+        success: true,
+        message: 'Registration successful. Your 30-day free trial has started.',
+        trial_expires_at: trialExpiresAt.toISOString(),
+      });
+    } catch (err) {
+      await transaction.rollback();
+      throw err;
+    }
+  } catch (err) {
+    logger.error({ err }, 'Register error');
+    return res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// POST /api/send-otp
+// Sends a WhatsApp OTP to the given phone number.
+// purpose: 'register' (before registration) | 'forgot_pin' (reset PIN)
+router.post('/send-otp', registerLimiter, otpSendLimiter, otpPhoneDailyLimiter, async (req, res) => {
+  const { phone, purpose } = req.body;
+
+  if (!phone || !purpose) {
+    return res.status(400).json({ error: 'phone and purpose are required' });
+  }
+  if (!['register', 'forgot_pin'].includes(purpose)) {
+    return res.status(400).json({ error: 'purpose must be "register" or "forgot_pin"' });
+  }
+  if (!/^\d{10}$/.test(phone)) {
+    return res.status(400).json({ error: 'Phone must be a 10-digit number' });
+  }
+
+  try {
+    await poolConnect;
+    const existing = await pool.request()
+      .input('phone', sql.NVarChar(20), phone)
+      .query(`SELECT id FROM users WHERE phone = @phone`);
+
+    if (purpose === 'register' && existing.recordset.length > 0) {
+      return res.status(409).json({ error: 'An account with this phone number already exists.' });
+    }
+    if (purpose === 'forgot_pin' && existing.recordset.length === 0) {
+      return res.status(404).json({ error: 'No account found with this phone number.' });
+    }
+  } catch (err) {
+    logger.error({ err }, 'send-otp phone lookup error');
+    return res.status(500).json({ error: 'Failed to send OTP' });
+  }
+
+  try {
+    const result = await whatsapp.sendOtp(phone, purpose);
+    return res.json({
+      success: true,
+      message: 'OTP sent successfully.',
+      // Only expose dev_otp in non-production environments
+      ...(result.dev_otp ? { dev_otp: result.dev_otp } : {}),
+    });
+  } catch (err) {
+    logger.error({ err }, 'send-otp error');
+    return res.status(500).json({ error: err.message || 'Failed to send OTP' });
+  }
+});
+
+// POST /api/verify-otp
+// Verifies OTP for a given phone+purpose. Returns a short-lived verified token
+// that the client must present when calling /register or /reset-pin.
+router.post('/verify-otp', otpVerifyLimiter, async (req, res) => {
+  const { phone, otp, purpose } = req.body;
+
+  if (!phone || !otp || !purpose) {
+    return res.status(400).json({ error: 'phone, otp, and purpose are required' });
+  }
+  if (!['register', 'forgot_pin'].includes(purpose)) {
+    return res.status(400).json({ error: 'purpose must be "register" or "forgot_pin"' });
+  }
+
+  const valid = await whatsapp.verifyOtp(phone, otp, purpose);
+  if (!valid) {
+    return res.status(400).json({ error: 'Invalid or expired OTP' });
+  }
+
+  // Issue a short-lived signed token so the next step (register / reset-pin)
+  // knows this phone was verified without storing extra session state.
+  // Its own derived key and a `typ`, like the store/order tokens: signed with
+  // ACCESS_SECRET and untyped, this verified cleanly as a staff access token.
+  const verifiedToken = jwt.sign(
+    { typ: 'otp', verified_phone: phone, purpose },
+    OTP_SECRET,
+    { expiresIn: '15m' }
+  );
+
+  return res.json({ success: true, verified_token: verifiedToken });
+});
+
+// POST /api/reset-pin
+// Resets the owner's PIN after OTP verification.
+// Requires the verified_token issued by /verify-otp with purpose=forgot_pin.
+router.post('/reset-pin', otpVerifyLimiter, async (req, res) => {
+  const { verified_token, new_pin } = req.body;
+
+  if (!verified_token || !new_pin) {
+    return res.status(400).json({ error: 'verified_token and new_pin are required' });
+  }
+  if (!/^\d{4}$/.test(new_pin)) {
+    return res.status(400).json({ error: 'PIN must be exactly 4 digits' });
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(verified_token, OTP_SECRET);
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired verification token' });
+  }
+
+  if (payload.typ !== 'otp' || payload.purpose !== 'forgot_pin' || !payload.verified_phone) {
+    return res.status(400).json({ error: 'Token is not valid for PIN reset' });
+  }
+
+  try {
+    await poolConnect;
+    const pinHash = await bcrypt.hash(new_pin, 10);
+
+    // A reset is what an owner does after a takeover, so it also ends every
+    // existing session: refresh tokens are revoked, and access tokens issued
+    // before now stop working (sessions_valid_after, read by requireAuth).
+    // The cut-off uses this server's clock, the same one that stamps `iat`.
+    const result = await pool.request()
+      .input('phone',    sql.NVarChar(20),  payload.verified_phone)
+      .input('pin_hash', sql.NVarChar(255), pinHash)
+      .input('now',      sql.DateTime2,     new Date())
+      .query(`
+        UPDATE users
+        SET pin_hash = @pin_hash, failed_attempts = 0, locked_until = NULL,
+            sessions_valid_after = @now
+        OUTPUT INSERTED.id
+        WHERE phone = @phone;
+
+        UPDATE rt SET revoked = 1
+        FROM refresh_tokens rt
+        JOIN users u ON u.id = rt.user_id
+        WHERE u.phone = @phone AND rt.revoked = 0;
+      `);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    for (const u of result.recordset) authState.forgetUser(u.id);
+
+    return res.json({ success: true, message: 'PIN reset successfully.' });
+  } catch (err) {
+    logger.error({ err }, 'reset-pin error');
+    return res.status(500).json({ error: 'PIN reset failed' });
+  }
+});
+
+// POST /api/login
+router.post('/login', loginIpFailLimiter, loginLimiter, async (req, res) => {
+  const { phone, pin } = req.body;
+
+  if (!phone || !pin) {
+    return res.status(400).json({ error: 'Phone and PIN are required' });
+  }
+
+  try {
+    await poolConnect;
+
+    // Look up user by phone (include lockout fields)
+    const userResult = await pool.request()
+      .input('phone', sql.NVarChar(20), phone)
+      .query(`
+        SELECT u.id, u.business_id, u.name, u.phone, u.pin_hash, u.role,
+               u.failed_attempts, u.locked_until, u.is_active,
+               b.name AS business_name, b.business_type, b.is_verified,
+               b.inventory_enabled, b.warranty_enabled, b.has_barcode_scanner, b.address,
+               b.phone AS business_phone,
+               b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
+               b.round_off_enabled, b.show_item_no, b.quotations_enabled, b.store_enabled, b.logo_url, b.print_logo,
+               b.bill_footer_note, b.bill_settings,
+               s.allow_mobile, s.allow_desktop, s.allow_online_store, s.allow_customers
+        FROM users u
+        JOIN businesses b ON u.business_id = b.id
+        LEFT JOIN subscriptions s ON s.business_id = u.business_id
+        WHERE u.phone = @phone
+        -- Deterministic until users.phone is unique (migration 071).
+        ORDER BY u.created_at
+      `);
+
+    // Unknown phone gets the same answer as a wrong PIN, after the same bcrypt
+    // work. A distinct 404 let anyone list which numbers have accounts, and
+    // then spray the commonest PINs at each one.
+    if (userResult.recordset.length === 0) {
+      await bcrypt.compare(pin, DUMMY_PIN_HASH);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const row = userResult.recordset[0];
+
+    // Check account lockout
+    if (row.locked_until && new Date(row.locked_until) > new Date()) {
+      const retryAfterSec = Math.ceil((new Date(row.locked_until) - Date.now()) / 1000);
+      res.set('Retry-After', retryAfterSec);
+      return res.status(423).json({
+        error: 'Account temporarily locked due to too many failed attempts.',
+        retry_after_seconds: retryAfterSec,
+      });
+    }
+
+    const pinMatch = await bcrypt.compare(pin, row.pin_hash);
+
+    if (!pinMatch) {
+      // Increment failure counter; lock on every LOCK_EVERY-th failure, for
+      // longer each time (see lockoutMs).
+      const newAttempts = (row.failed_attempts || 0) + 1;
+      const lockMs = lockoutMs(newAttempts);
+      const lockedUntil = lockMs ? new Date(Date.now() + lockMs) : null;
+
+      await pool.request()
+        .input('id', sql.UniqueIdentifier, row.id)
+        .input('failed_attempts', sql.Int, newAttempts)
+        .input('locked_until', sql.DateTime2, lockedUntil)
+        .query(`
+          UPDATE users
+          SET failed_attempts = @failed_attempts, locked_until = @locked_until
+          WHERE id = @id
+        `);
+
+      if (lockedUntil) {
+        audit.logUserLocked(row.business_id, row.id, row.name);
+        const retryAfterSec = Math.ceil(lockMs / 1000);
+        res.set('Retry-After', retryAfterSec);
+        return res.status(423).json({
+          error: `Account locked due to too many failed attempts. Try again in ${Math.round(lockMs / 60000)} minutes, or reset your PIN.`,
+          retry_after_seconds: retryAfterSec,
+        });
+      }
+
+      // No attempts_remaining: it told an attacker exactly how many guesses
+      // were left before the lock.
+      audit.logLoginFailed(row.business_id, phone);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Only someone who knows the PIN learns why they cannot get in — before,
+    // these answered any caller who merely knew the phone number.
+    //
+    // A disabled staff account: the owner revoked access, and "wrong PIN"
+    // would send them to reset it instead of asking why.
+    if (row.is_active === false || row.is_active === 0) {
+      return res.status(403).json({ error: 'account_disabled',
+        message: 'This account has been disabled. Please contact the owner.' });
+    }
+
+    if (!row.is_verified) {
+      return res.status(403).json({ error: 'Your account is pending verification. Please wait.' });
+    }
+
+    // PIN correct — reset lockout counters
+    await pool.request()
+      .input('id', sql.UniqueIdentifier, row.id)
+      .query(`UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = @id`);
+
+    const tokenPayload = {
+      user_id: row.id,
+      business_id: row.business_id,
+      role: row.role,
+    };
+    const accessToken = signAccessToken(tokenPayload);
+    const refreshToken = signRefreshToken(tokenPayload);
+
+    // Store hashed refresh token in DB — each login starts a new token family
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    await pool.request()
+      .input('user_id', sql.UniqueIdentifier, row.id)
+      .input('business_id', sql.UniqueIdentifier, row.business_id)
+      .input('token_hash', sql.NVarChar(64), tokenHash)
+      .input('expires_at', sql.DateTime2, expiresAt)
+      .query(`
+        INSERT INTO refresh_tokens (user_id, business_id, token_hash, family_id, expires_at)
+        VALUES (@user_id, @business_id, @token_hash, NEWID(), @expires_at)
+      `);
+
+    audit.logUserLogin(row.business_id, row.id, row.name);
+
+    // Record login history with client IP + device (fire-and-forget, never throws)
+    audit.logLoginToTable({
+      business_id: row.business_id,
+      user_id:     row.id,
+      user_name:   row.name,
+      phone:       row.phone,
+      ip_address:  req.ip,
+      user_agent:  req.get('user-agent'),
+    });
+
+    return res.json({
+      success: true,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      user: {
+        id: row.id,
+        name: row.name,
+        phone: row.phone,
+        role: row.role,
+      },
+      business: {
+        id: row.business_id,
+        name: row.business_name,
+        business_type: row.business_type,
+        address: row.address,
+        // The shop's own number, printed on receipts so a customer can call.
+        phone: row.business_phone ?? null,
+        inventory_enabled: !!row.inventory_enabled,
+        warranty_enabled: !!row.warranty_enabled,
+        has_barcode_scanner: !!row.has_barcode_scanner,
+        gst_enabled: !!row.gst_enabled,
+        gst_number: row.gst_number ?? null,
+        default_sac_code: row.default_sac_code ?? null,
+        fssai_number: row.fssai_number ?? null,
+        round_off_enabled: !!row.round_off_enabled,
+        show_item_no: !!row.show_item_no,
+        quotations_enabled: !!row.quotations_enabled,
+        // Shop logo + the owner's opt-in to print it, cached on every device
+        // (staff too) so receipts can carry it offline.
+        logo_url: row.logo_url ?? null,
+        print_logo: !!row.print_logo,
+        // What prints on a bill (Billing Setup) — same reason as the logo.
+        bill_footer_note: row.bill_footer_note ?? null,
+        bill_settings: billSettings.parse(row.bill_settings),
+        // Online store master switch. Sent at login so a CASHIER's shell knows
+        // whether to poll the order queue — the business profile that carries
+        // this is owner-only, so they could not find out any other way.
+        // ANDed with the admin entitlement (subscriptions.allow_online_store)
+        // so a revoked store never shows its tab, matching what /api/license
+        // sends on every later open/resume.
+        store_enabled: !!row.store_enabled &&
+          (row.allow_online_store == null ? true : !!row.allow_online_store),
+        // Device-access policy — surfaced at login so the client can enforce it
+        // immediately, without depending on a separate /license fetch that may
+        // fail on a flaky network. NULL (no subscription) defaults to allowed.
+        allow_mobile: row.allow_mobile == null ? true : !!row.allow_mobile,
+        allow_desktop: row.allow_desktop == null ? true : !!row.allow_desktop,
+        // Admin entitlement for the owner's Customers & campaigns screen
+        // (migration 048). NULL (no subscription row yet) reads as allowed.
+        allow_customers: row.allow_customers == null ? true : !!row.allow_customers,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'Login error');
+    return res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /api/refresh
+// Issues a new access token using the stored refresh token.
+// The refresh token itself is NOT rotated — it stays valid until it expires
+// (30 days). This prevents spurious logouts caused by race conditions,
+// interrupted saves, or app backgrounding mid-rotation.
+router.post('/refresh', refreshLimiter, async (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) {
+    return res.status(400).json({ error: 'refresh_token is required' });
+  }
+
+  let payload;
+  try {
+    payload = verifyRefreshToken(refresh_token);
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired refresh token' });
+  }
+
+  try {
+    await poolConnect;
+    const tokenHash = crypto.createHash('sha256').update(refresh_token).digest('hex');
+
+    const result = await pool.request()
+      .input('token_hash', sql.NVarChar(64), tokenHash)
+      .input('now', sql.DateTime2, new Date())
+      .query(`
+        SELECT id FROM refresh_tokens
+        WHERE token_hash = @token_hash
+          AND revoked = 0
+          AND expires_at > @now
+      `);
+
+    if (result.recordset.length === 0) {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    // The refresh token was minted at login and still carries that day's role;
+    // a disabled, deleted or demoted user must not be able to renew it into a
+    // fresh 8-hour token. Always a fresh read (refresh is rare, ~3x a day).
+    // null = DB state unknown → fall back to the token, as before.
+    const state = await authState.load(payload.user_id, payload.business_id);
+    if (state && !state.active) {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    // Issue a new access token — refresh token stays unchanged
+    const newAccessToken = signAccessToken({
+      user_id:     payload.user_id,
+      business_id: payload.business_id,
+      role:        (state && state.role) || payload.role,
+    });
+
+    return res.json({ access_token: newAccessToken });
+  } catch (err) {
+    logger.error({ err }, 'Refresh error');
+    return res.status(500).json({ error: 'Token refresh failed' });
+  }
+});
+
+// POST /api/logout
+// Revokes only the refresh token for this specific device/session.
+router.post('/logout', async (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) {
+    return res.status(400).json({ error: 'refresh_token is required' });
+  }
+
+  try {
+    await poolConnect;
+    const tokenHash = crypto.createHash('sha256').update(refresh_token).digest('hex');
+
+    await pool.request()
+      .input('token_hash', sql.NVarChar(64), tokenHash)
+      .query(`UPDATE refresh_tokens SET revoked = 1 WHERE token_hash = @token_hash`);
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Logout error');
+    return res.status(500).json({ error: 'Logout failed' });
+  }
+});
+
+// POST /api/logout-all
+// Revokes every active refresh token for the authenticated user.
+// Use this to sign out of all devices at once.
+router.post('/logout-all', requireAuth, async (req, res) => {
+  try {
+    await poolConnect;
+    // Revoke refresh tokens AND cut off access tokens already handed out —
+    // otherwise "sign out everywhere" left a stolen device working for 8 hours.
+    await pool.request()
+      .input('user_id', sql.UniqueIdentifier, req.user.user_id)
+      .input('now', sql.DateTime2, new Date())
+      .query(`
+        UPDATE refresh_tokens SET revoked = 1 WHERE user_id = @user_id AND revoked = 0;
+        UPDATE users SET sessions_valid_after = @now WHERE id = @user_id;
+      `);
+    authState.forgetUser(req.user.user_id);
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error({ err }, 'Logout-all error');
+    return res.status(500).json({ error: 'Logout failed' });
+  }
+});
+
+module.exports = router;

@@ -1,0 +1,591 @@
+/*
+ * SMSala WhatsApp Messaging Service
+ * Docs: https://api2.smsala.com
+ *
+ * Sends OTP messages via WhatsApp for business registration verification
+ * and forgot-PIN flow.
+ *
+ * Set WHATSAPP_ENABLED=true in .env to activate.
+ * Failures are logged but never throw — they must not break the main request flow.
+ *
+ * All sends (sent / failed / skipped) are recorded in whatsapp_otp_log.
+ */
+
+const https  = require('https')
+const crypto = require('crypto')
+const { pool, poolConnect, sql } = require('./db')
+const logger = require('./logger')
+
+const API_TOKEN           = process.env.WHATSAPP_API_TOKEN        || ''
+const ENABLED             = process.env.WHATSAPP_ENABLED === 'true'
+const OTP_TEMPLATE        = process.env.WHATSAPP_TPL_OTP           || ''
+const BILL_TEMPLATE       = process.env.WHATSAPP_TPL_BILL          || ''
+const ONBOARDING_TEMPLATE = process.env.WHATSAPP_TPL_ONBOARDING    || ''
+// Demo-request alert. Defaults to the approved template id rather than '' like
+// the others: this one is platform-level (one SMSala account, not per-shop), so
+// a missing env var would silently drop landing-page enquiries.
+const DEMO_TEMPLATE       = process.env.WHATSAPP_TPL_DEMO           || '677'
+const ADMIN_PHONE         = process.env.WHATSAPP_ADMIN_PHONE        || ''
+
+// OTP config
+const OTP_EXPIRY_MINUTES = 10
+const OTP_LENGTH         = 6
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP helper — POST to api2.smsala.com, JSON or form-encoded
+//
+// TIMEOUT: https.request has none by default, so a hung SMSala response used
+// to wait indefinitely — which is what made sending a bill over WhatsApp feel
+// like it could take forever, with no error and no way out. 10s is generous
+// for a single template send; anything slower fails fast so the caller can
+// show an error instead of leaving the cashier staring at a frozen action.
+//
+// Node's `timeout` option is an IDLE-socket timeout (no send/receive activity
+// for that long), not a hard cap on total request time — the right primitive
+// here since SMSala returns one JSON body in a single burst, not a stream.
+// destroy(err) below also fires the 'error' listener, so there is only one
+// reject path, not two racing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REQUEST_TIMEOUT_MS = 10000
+
+function httpPost(path, payload, contentType) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api2.smsala.com',
+      path,
+      method: 'POST',
+      headers: {
+        'Content-Type':   contentType,
+        'Content-Length': Buffer.byteLength(payload),
+      },
+      timeout: REQUEST_TIMEOUT_MS,
+    }
+    const req = https.request(options, res => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) }
+        catch { resolve({ raw: data }) }
+      })
+    })
+    req.on('timeout', () => {
+      req.destroy(new Error(`Request to ${path} timed out after ${REQUEST_TIMEOUT_MS}ms`))
+    })
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+function postJson(path, body) {
+  return httpPost(path, JSON.stringify(body), 'application/json')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phone normaliser — returns "91XXXXXXXXXX" or null
+// ─────────────────────────────────────────────────────────────────────────────
+
+function normalisePhone(raw) {
+  if (!raw) return null
+  const digits = String(raw).replace(/\D/g, '')
+  if (digits.length === 10)                                return `91${digits}`
+  if (digits.length === 12 && digits.startsWith('91'))     return digits
+  if (digits.length === 11 && digits.startsWith('0'))      return `91${digits.slice(1)}`
+  return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OTP generator
+// ─────────────────────────────────────────────────────────────────────────────
+
+function generateOtp() {
+  // Cryptographically random 6-digit OTP (000000 – 999999)
+  const buf = crypto.randomBytes(4)
+  const num = buf.readUInt32BE(0) % 1_000_000
+  return String(num).padStart(OTP_LENGTH, '0')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DB helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function saveOtp(phone, otpCode, purpose) {
+  await poolConnect
+  const otpHash  = crypto.createHash('sha256').update(otpCode).digest('hex')
+  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000)
+
+  // Invalidate any previous unused OTPs for this phone+purpose
+  await pool.request()
+    .input('phone',   sql.NVarChar(20), phone)
+    .input('purpose', sql.NVarChar(20), purpose)
+    .query(`
+      UPDATE whatsapp_otp_log
+      SET used = 1
+      WHERE phone = @phone AND purpose = @purpose AND used = 0
+    `)
+
+  await pool.request()
+    .input('phone',      sql.NVarChar(20),  phone)
+    .input('purpose',    sql.NVarChar(20),  purpose)
+    .input('otp_hash',   sql.NVarChar(64),  otpHash)
+    .input('expires_at', sql.DateTime2,     expiresAt)
+    .query(`
+      INSERT INTO whatsapp_otp_log (phone, purpose, otp_hash, expires_at)
+      VALUES (@phone, @purpose, @otp_hash, @expires_at)
+    `)
+}
+
+async function logSendResult(phone, purpose, status, campaignId, errorDetail) {
+  try {
+    await pool.request()
+      .input('phone',        sql.NVarChar(20),   phone        || null)
+      .input('purpose',      sql.NVarChar(20),   purpose      || null)
+      .input('status',       sql.NVarChar(20),   status       || 'sent')
+      .input('campaign_id',  sql.NVarChar(100),  campaignId   ? String(campaignId) : null)
+      .input('error_detail', sql.NVarChar(500),  errorDetail  || null)
+      .query(`
+        UPDATE TOP(1) whatsapp_otp_log
+        SET status = @status, campaign_id = @campaign_id, error_detail = @error_detail
+        WHERE phone = @phone AND purpose = @purpose
+          AND created_at = (
+            SELECT MAX(created_at) FROM whatsapp_otp_log
+            WHERE phone = @phone AND purpose = @purpose
+          )
+      `)
+  } catch (e) {
+    logger.warn({ err: e }, '[WhatsApp] DB log update failed')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendOtp — generates, stores, and delivers the OTP via WhatsApp
+//
+// purpose: 'register' | 'forgot_pin'
+// Returns: { sent: true } on success, throws on hard failure
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendOtp(phone, purpose) {
+  const normPhone = normalisePhone(phone)
+  if (!normPhone) throw new Error('Invalid phone number.')
+
+  if (!ENABLED) {
+    // In dev/test mode, still generate + store the OTP so verify works,
+    // just skip the actual WhatsApp delivery.
+    const otpCode = generateOtp()
+    await saveOtp(normPhone, otpCode, purpose)
+    logger.info(`[WhatsApp] Disabled — OTP for ${normPhone} (${purpose}): ${otpCode}`)
+    // Return the OTP in dev so it can be used without a real phone
+    // Only when NODE_ENV says development in so many words. "Anything but
+    // production" leaked the code to every caller of a misconfigured server —
+    // and with it a PIN reset of any account.
+    return { sent: false, dev_otp: process.env.NODE_ENV === 'development' ? otpCode : undefined }
+  }
+
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    throw new Error('WhatsApp API token not configured.')
+  }
+
+  const otpCode = generateOtp()
+  await saveOtp(normPhone, otpCode, purpose)
+
+  let result
+  try {
+    result = await postJson('/whatsapp/SendOtp', {
+      PhoneNumber: normPhone,
+      OtpCode:     otpCode,
+      ApiToken:    API_TOKEN,
+      TemplateId:  OTP_TEMPLATE || undefined,
+    })
+  } catch (err) {
+    await logSendResult(normPhone, purpose, 'failed', null, err.message)
+    throw new Error('Failed to send OTP. Please try again.')
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  await logSendResult(
+    normPhone, purpose,
+    success ? 'sent' : 'failed',
+    result.ReturnData,
+    success ? null : (result.ErrorDescription || JSON.stringify(result)),
+  )
+
+  if (!success) {
+    throw new Error(result.ErrorDescription || 'OTP delivery failed.')
+  }
+
+  logger.info(`[WhatsApp] OTP sent to ${normPhone} (${purpose}) — CampaignId: ${result.ReturnData}`)
+  return { sent: true }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// verifyOtp — checks OTP and marks it used on success
+//
+// Returns true if valid, false if wrong/expired/already-used
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Wrong guesses one OTP survives before it is retired (migration 069). The
+// per-IP verify limiter alone let guesses from many IPs add up against the same
+// 6-digit code; this caps the code itself.
+const MAX_OTP_ATTEMPTS = 5
+
+async function verifyOtp(phone, otpCode, purpose) {
+  const normPhone = normalisePhone(phone)
+  if (!normPhone) return false
+
+  await poolConnect
+  const otpHash = crypto.createHash('sha256').update(String(otpCode)).digest('hex')
+
+  // saveOtp retires older codes, so there is at most one live code per
+  // phone + purpose — the one every guess counts against.
+  const result = await pool.request()
+    .input('phone',      sql.NVarChar(20), normPhone)
+    .input('purpose',    sql.NVarChar(20), purpose)
+    .input('now',        sql.DateTime2,    new Date())
+    .query(`
+      SELECT TOP 1 id, otp_hash FROM whatsapp_otp_log
+      WHERE phone     = @phone
+        AND purpose   = @purpose
+        AND used      = 0
+        AND expires_at > @now
+      ORDER BY created_at DESC
+    `)
+
+  const live = result.recordset[0]
+  if (!live) return false
+
+  const match = live.otp_hash.length === otpHash.length &&
+    crypto.timingSafeEqual(Buffer.from(live.otp_hash), Buffer.from(otpHash))
+
+  if (!match) {
+    // Atomic count; the guess that reaches the cap also retires the code.
+    await pool.request()
+      .input('id',  sql.UniqueIdentifier, live.id)
+      .input('max', sql.Int,              MAX_OTP_ATTEMPTS)
+      .query(`
+        UPDATE whatsapp_otp_log
+        SET attempts = ISNULL(attempts, 0) + 1,
+            used = CASE WHEN ISNULL(attempts, 0) + 1 >= @max THEN 1 ELSE used END
+        WHERE id = @id AND used = 0
+      `)
+    return false
+  }
+
+  // Consume it — but only while still under the cap, so a burst of parallel
+  // wrong guesses that retired the code cannot be raced by a right one.
+  const used = await pool.request()
+    .input('id',  sql.UniqueIdentifier, live.id)
+    .input('max', sql.Int,              MAX_OTP_ATTEMPTS)
+    .query(`
+      UPDATE whatsapp_otp_log SET used = 1
+      WHERE id = @id AND used = 0 AND ISNULL(attempts, 0) < @max
+    `)
+
+  return used.rowsAffected[0] > 0
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Form-encoded POST (used by SendMessage) — shares httpPost's timeout above.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function postForm(path, body) {
+  const payload = Object.entries(body)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&')
+  return httpPost(path, payload, 'application/x-www-form-urlencoded')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendBillLink — sends a receipt URL to a customer via WhatsApp template
+//
+// Template variables: {1} shop_name  {2} bill_number  {3} receipt_url
+//
+// Never throws — failures are logged and returned as { sent: false, error }.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendBillLink({ phone, shopName, billNumber, receiptUrl }) {
+  const normPhone = normalisePhone(phone)
+  if (!normPhone) return { sent: false, error: 'Invalid phone number' }
+
+  if (!ENABLED) {
+    logger.info(`[WhatsApp] Disabled — would send receipt link for #${billNumber} to ${normPhone}`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] API token not configured — skipping bill send')
+    return { sent: false, error: 'API token not configured' }
+  }
+
+  if (!BILL_TEMPLATE || BILL_TEMPLATE.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] Bill template ID not configured — skipping')
+    return { sent: false, error: 'Bill template not configured' }
+  }
+
+  // Sample: comma-separated values matching template placeholders in order.
+  const clean = (v) => String(v).replace(/,/g, '')
+  const sample = [clean(shopName), clean(billNumber), receiptUrl].join(',')
+
+  let result
+  try {
+    result = await postForm('/whatsapp/SendMessage', {
+      ApiToken:     API_TOKEN,
+      TemplateId:   BILL_TEMPLATE,
+      QuickNumber:  normPhone,
+      Sample:       sample,
+      CampaignName: 'bill_receipt',
+    })
+  } catch (err) {
+    logger.error({ err }, `[WhatsApp] Network error sending receipt link for #${billNumber}`)
+    return { sent: false, error: err.message }
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  if (success) {
+    logger.info(`[WhatsApp] Receipt link for #${billNumber} sent to ${normPhone} — CampaignId: ${result.ReturnData}`)
+  } else {
+    logger.warn({ result }, `[WhatsApp] Receipt link send failed for #${billNumber}`)
+  }
+
+  return success
+    ? { sent: true, campaignId: result.ReturnData }
+    : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendOnboardingAlert — notifies admin when a new business registers
+//
+// Template variables: {1} business_name  {2} owner_name  {3} phone  {4} business_type
+//
+// Never throws — failures are only logged.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendOnboardingAlert({ businessName, ownerName, phone, businessType }) {
+  // Production only. This alert tells a real person that a real shop signed up,
+  // and it fires automatically on every registration — so a dev or staging box
+  // pointed at the live API token would page the admin for every test account.
+  // Gated on NODE_ENV rather than WHATSAPP_ENABLED because turning that off
+  // would also kill OTP, which dev needs to log in at all.
+  if (process.env.NODE_ENV !== 'production') {
+    logger.info(
+      `[WhatsApp] Non-production — onboarding alert for "${businessName}" skipped`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!ENABLED) {
+    logger.info(`[WhatsApp] Disabled — onboarding alert for "${businessName}" skipped`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] API token not configured — skipping onboarding alert')
+    return { sent: false, error: 'API token not configured' }
+  }
+
+  if (!ONBOARDING_TEMPLATE || ONBOARDING_TEMPLATE.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] Onboarding template ID not configured — skipping')
+    return { sent: false, error: 'Onboarding template not configured' }
+  }
+
+  const normAdmin = normalisePhone(ADMIN_PHONE)
+  if (!normAdmin) {
+    logger.warn('[WhatsApp] WHATSAPP_ADMIN_PHONE not set — skipping onboarding alert')
+    return { sent: false, error: 'Admin phone not configured' }
+  }
+
+  const clean = (v) => String(v).replace(/,/g, '')
+  const sample = [
+    clean(businessName),
+    clean(ownerName),
+    clean(phone),
+    clean(businessType),
+  ].join(',')
+
+  let result
+  try {
+    result = await postForm('/whatsapp/SendMessage', {
+      ApiToken:     API_TOKEN,
+      TemplateId:   ONBOARDING_TEMPLATE,
+      QuickNumber:  normAdmin,
+      Sample:       sample,
+      CampaignName: 'onboarding_alert',
+    })
+  } catch (err) {
+    logger.error({ err }, `[WhatsApp] Network error sending onboarding alert for "${businessName}"`)
+    return { sent: false, error: err.message }
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  if (success) {
+    logger.info(`[WhatsApp] Onboarding alert sent for "${businessName}" — CampaignId: ${result.ReturnData}`)
+  } else {
+    logger.warn({ result }, `[WhatsApp] Onboarding alert failed for "${businessName}"`)
+  }
+
+  return success
+    ? { sent: true, campaignId: result.ReturnData }
+    : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendDemoRequest — notifies admin when someone books a demo on the landing page
+//
+// Template 677 variables:
+//   {1} name  {2} mobile  {3} business_type  {4} date  {5} time  {6} current_software
+//
+// Same admin-alert shape as sendOnboardingAlert above, including the
+// non-production gate: this pages a real person, and the landing page runs
+// against the live API from a dev machine.
+//
+// Never throws — failures are only logged. A booking must still be recorded as
+// received even when the provider is down; chasing it is a human problem.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendDemoRequest({ name, mobile, businessType, date, time, currentSoftware }) {
+  if (process.env.NODE_ENV !== 'production') {
+    logger.info(`[WhatsApp] Non-production — demo request from "${name}" skipped`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!ENABLED) {
+    logger.info(`[WhatsApp] Disabled — demo request from "${name}" skipped`)
+    return { sent: false, skipped: true }
+  }
+
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    logger.warn('[WhatsApp] API token not configured — skipping demo request')
+    return { sent: false, error: 'API token not configured' }
+  }
+
+  const normAdmin = normalisePhone(ADMIN_PHONE)
+  if (!normAdmin) {
+    logger.warn('[WhatsApp] WHATSAPP_ADMIN_PHONE not set — skipping demo request')
+    return { sent: false, error: 'Admin phone not configured' }
+  }
+
+  // Sample is a COMMA-SEPARATED list, so a comma inside any value would shift
+  // every later variable into the wrong placeholder. Same guard the onboarding
+  // alert uses — these values are typed by the public, so it matters more here.
+  const clean = (v) => String(v ?? '').replace(/,/g, ' ').trim() || '-'
+  const sample = [
+    clean(name),
+    clean(mobile),
+    clean(businessType),
+    clean(date),
+    clean(time),
+    clean(currentSoftware),
+  ].join(',')
+
+  let result
+  try {
+    result = await postForm('/whatsapp/SendMessage', {
+      ApiToken:     API_TOKEN,
+      TemplateId:   DEMO_TEMPLATE,
+      QuickNumber:  normAdmin,
+      Sample:       sample,
+      CampaignName: 'demo_request',
+    })
+  } catch (err) {
+    logger.error({ err }, `[WhatsApp] Network error sending demo request from "${name}"`)
+    return { sent: false, error: err.message }
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  if (success) {
+    logger.info(`[WhatsApp] Demo request sent for "${name}" — CampaignId: ${result.ReturnData}`)
+  } else {
+    logger.warn({ result }, `[WhatsApp] Demo request failed for "${name}"`)
+  }
+
+  return success
+    ? { sent: true, campaignId: result.ReturnData }
+    : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendCampaignMessage — an owner's offer/announcement to one customer
+//
+// Template variables: {1} shop_name  {2} message  (a Meta-approved MARKETING
+// template, e.g. "Message from {1}: {2}" — set WHATSAPP_TPL_CAMPAIGN).
+//
+// Never throws — returns { sent, skipped?, error?, campaignId? } so the caller
+// can log every recipient.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Sample is comma-separated, so a comma inside the text would shift it into a
+// third variable; and Meta rejects newlines/tabs inside a template variable.
+// U+201A looks like a comma to a reader and is not one to the parser.
+function campaignText(v) {
+  return String(v ?? '')
+    .replace(/,/g, '‚')
+    .replace(/\s*[\r\n\t]+\s*/g, ' · ')
+    .replace(/ {4,}/g, '   ')
+    .trim()
+}
+
+async function sendCampaignMessage({ phone, shopName, message }) {
+  const CAMPAIGN_TEMPLATE = process.env.WHATSAPP_TPL_CAMPAIGN || ''
+  const normPhone = normalisePhone(phone)
+  if (!normPhone) return { sent: false, error: 'Invalid phone number' }
+
+  if (!ENABLED) {
+    logger.info(`[WhatsApp] Disabled — campaign message to ${normPhone} skipped`)
+    return { sent: false, skipped: true, error: 'WhatsApp sending is disabled' }
+  }
+  if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
+    return { sent: false, skipped: true, error: 'API token not configured' }
+  }
+  if (!CAMPAIGN_TEMPLATE || CAMPAIGN_TEMPLATE.startsWith('REPLACE')) {
+    return { sent: false, skipped: true, error: 'Campaign template not configured' }
+  }
+
+  let result
+  try {
+    result = await postForm('/whatsapp/SendMessage', {
+      ApiToken:     API_TOKEN,
+      TemplateId:   CAMPAIGN_TEMPLATE,
+      QuickNumber:  normPhone,
+      Sample:       [campaignText(shopName), campaignText(message)].join(','),
+      CampaignName: 'customer_campaign',
+    })
+  } catch (err) {
+    return { sent: false, error: err.message }
+  }
+
+  const success = result.IsSuccess === true || result.ErrorCode === 0
+  return success
+    ? { sent: true, campaignId: result.ReturnData }
+    : { sent: false, error: result.ErrorDescription || JSON.stringify(result) }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendReceiptLink — the one api/deeplink decision every "send receipt on
+// WhatsApp" endpoint shares (a bill, a credit settlement). Returns the HTTP
+// { status, body } for the route to send:
+//   'api'      (paid) — sent here via the template; failure is reported, with
+//                       NO deeplink fallback (paid tier is API-only).
+//   'deeplink' (free) — { mode:'deeplink', phone, message } for the app to
+//                       open the cashier's own WhatsApp with.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendReceiptLink({ whatsappMode, phone, shopName, billNumber, receiptUrl, message }) {
+  if (whatsappMode === 'api') {
+    const result = await sendBillLink({ phone, shopName, billNumber, receiptUrl })
+    if (result.sent) {
+      return { status: 200, body: { mode: 'api', sent: true, campaign_id: result.campaignId } }
+    }
+    if (result.skipped) {
+      return { status: 503, body: { mode: 'api', sent: false, error: 'WhatsApp API sending is disabled' } }
+    }
+    return {
+      status: 502,
+      body: { mode: 'api', sent: false, error: result.error || 'Failed to send WhatsApp message' },
+    }
+  }
+  return {
+    status: 200,
+    body: { mode: 'deeplink', phone: normalisePhone(phone), message, receipt_url: receiptUrl },
+  }
+}
+
+module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendReceiptLink, sendOnboardingAlert, sendDemoRequest, sendCampaignMessage, campaignText }
