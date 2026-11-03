@@ -348,4 +348,21 @@ const demoLimiter = rateLimit({
   handler: onLimitReached,
 });
 
-module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, purchaseScanLimiter, loginLimiter, loginIpFailLimiter, otpPhoneDailyLimiter, registerLimiter, registerAccountLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter, publicPageLimiter, pdfLimiter, adminLoginLimiter };
+// /internal/billing/* — the server-to-server surface the Invoice & Subscription
+// Portal uses to read Vittam's own paying customers (see routes/billingIntegration.js).
+// The bearer key is a long random secret, so no legitimate caller should ever
+// fail this check — which makes any failure worth throttling hard, same
+// reasoning as adminLoginLimiter. Counts only rejected (401) requests, so the
+// portal's normal traffic never spends this budget.
+const billingIntegrationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
+  message: 'Too many requests. Please try again later.',
+  handler: onLimitReached,
+  skipSuccessfulRequests: true,
+});
+
+module.exports = { globalLimiter, globalKey, globalMax, healthLimiter, whatsappLimiter, purchaseScanLimiter, loginLimiter, loginIpFailLimiter, otpPhoneDailyLimiter, registerLimiter, registerAccountLimiter, refreshLimiter, deletionLimiter, demoLimiter, otpSendLimiter, otpVerifyLimiter, publicPageLimiter, pdfLimiter, adminLoginLimiter, billingIntegrationLimiter };

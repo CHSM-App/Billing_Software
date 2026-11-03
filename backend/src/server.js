@@ -303,6 +303,10 @@ app.use('/api/fcm', require('./routes/fcm'));
 // Internal admin dashboard — MUST be above the SPA catch-all so /admin/* isn't
 // swallowed by index.html. Gated by ADMIN_URL_SLUG (page) + admin JWT (API).
 app.use('/admin', require('./routes/admin'));
+// Server-to-server surface for the Invoice & Subscription Portal — guards
+// itself with its own bearer key (BILLING_INTEGRATION_API_KEY), not the site
+// JWT. See routes/billingIntegration.js header comment.
+app.use('/internal/billing', require('./routes/billingIntegration'));
 
 // Unexpected middleware/route failures should stay JSON for API callers.
 app.use((err, req, res, next) => {
@@ -310,7 +314,7 @@ app.use((err, req, res, next) => {
 
   if (res.headersSent) return next(err);
 
-  if (req.originalUrl && req.originalUrl.startsWith('/api/')) {
+  if (req.originalUrl && (req.originalUrl.startsWith('/api/') || req.originalUrl.startsWith('/internal/'))) {
     const status = err.status || err.statusCode || (err instanceof SyntaxError ? 400 : 500);
     const message = status === 400
       ? 'Invalid request body.'
@@ -335,7 +339,7 @@ app.use('/{*path}', (req, res) => {
   res.status(404);
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
 
-  if (req.originalUrl.startsWith('/api/')) {
+  if (req.originalUrl.startsWith('/api/') || req.originalUrl.startsWith('/internal/')) {
     return res.json({ error: 'Not found.' });
   }
   if (req.method === 'HEAD') return res.end();
