@@ -14,6 +14,7 @@ import 'license_screen.dart';
 import '../services/license_service.dart';
 import '../services/notification_service.dart';
 import '../services/bill_settings.dart';
+import '../utils/platform_utils.dart' show isIOS;
 
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
@@ -675,32 +676,38 @@ class _LoginScreenState extends ConsumerState<_LoginView>
               ),
             ),
           ),
-          const SizedBox(height: AppSpacing.space16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Flexible(
-                child: Text(
-                  l10n.loginNoAccount,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
+          // Apple Guideline 3.1.1: our subscriptions are sold and managed
+          // outside the app, so new business/org account creation must not be
+          // reachable from the iOS build. Existing customers (registered via
+          // the website/sales team) still log in above.
+          if (!isIOS) ...[
+            const SizedBox(height: AppSpacing.space16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: Text(
+                    l10n.loginNoAccount,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                  ),
                 ),
-              ),
-              TextButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                TextButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(l10n.loginRegister),
                 ),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(l10n.loginRegister),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );

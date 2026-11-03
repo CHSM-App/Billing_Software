@@ -101,6 +101,21 @@ export const ROUTES = [
     noindex: false,
   },
   {
+    // Unlisted business sign-up form for iOS users (Guideline 3.1.1 — Apple
+    // doesn't allow in-app business account creation when subscriptions are
+    // managed outside the app). Shared manually by support, never linked from
+    // the site itself — noindex + excluded from the sitemap keeps it out of
+    // search results even though it's still a real, directly-loadable page.
+    path: '/signup-ios-7f3a',
+    file: 'signup-ios-7f3a.html',
+    title: 'Create Your Business Account – Vittam',
+    description:
+      'Set up your Vittam business account to start billing on iOS. Enter your shop and owner details, verify with an OTP, then log in from the app to get started.',
+    keywords: '',
+    noindex: true,
+    sitemap: false,
+  },
+  {
     path: '/404',
     file: '404.html',
     title: 'Page Not Found – Vittam',

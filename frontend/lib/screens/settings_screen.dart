@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/license_service.dart';
 import '../api.dart';
 import '../storage.dart';
+import '../utils/platform_utils.dart' show isIOS;
 import '../l10n/l10n_ext.dart';
 import '../providers.dart';
 import '../providers/open_drafts_provider.dart';
@@ -247,6 +248,210 @@ class _SettingsContentState extends State<_SettingsContent>
       context,
       MaterialPageRoute(builder: (_) => const LoginScreen()),
       (_) => false,
+    );
+  }
+
+  // iOS-only (see the `isIOS` gate at the call site): Apple Guideline
+  // 5.1.1(v) requires account deletion to be initiated from within the app —
+  // a link to a website is explicitly called out as insufficient — so this
+  // sheet mirrors the public landing-page flow (DeleteAccount.jsx) against
+  // the same unauthenticated, OTP-verified backend endpoints
+  // (backend/src/routes/account.js). It does not reuse OtpScreen/verifyOtp
+  // because /account/deletion/confirm verifies the OTP itself server-side —
+  // consuming it earlier via the generic /verify-otp call would invalidate
+  // it before confirm gets to check it.
+  Future<void> _showDeleteAccountSheet(String phone) async {
+    final l10n = context.l10n;
+    int step = 0; // 0 = warning + agree, 1 = OTP
+    bool agreed = false;
+    bool busy = false;
+    String? error;
+    final otpCtrl = TextEditingController();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setS) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            AppSpacing.space24,
+            AppSpacing.space12,
+            AppSpacing.space24,
+            AppSpacing.space24 + MediaQuery.of(sheetCtx).viewInsets.bottom,
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: AppSpacing.space16),
+                    decoration: BoxDecoration(
+                      color: AppColors.border,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.errorLight,
+                        borderRadius: BorderRadius.circular(AppRadius.small),
+                      ),
+                      child: const Icon(Icons.warning_amber_rounded,
+                          size: 18, color: AppColors.error),
+                    ),
+                    const SizedBox(width: AppSpacing.space12),
+                    Expanded(
+                      child: Text(l10n.deleteAccountWarningTitle,
+                          style: Theme.of(sheetCtx).textTheme.titleMedium),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.space16),
+                if (step == 0) ...[
+                  Text(
+                    l10n.deleteAccountWarningBody,
+                    style: Theme.of(sheetCtx).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                          height: 1.5,
+                        ),
+                  ),
+                  const SizedBox(height: AppSpacing.space16),
+                  InkWell(
+                    onTap: () => setS(() => agreed = !agreed),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Checkbox(
+                          value: agreed,
+                          onChanged: (v) => setS(() => agreed = v ?? false),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(
+                                top: AppSpacing.space12),
+                            child: Text(l10n.deleteAccountAgreeCheckbox,
+                                style: Theme.of(sheetCtx).textTheme.bodySmall),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  Text(
+                    l10n.deleteAccountOtpHint,
+                    style: Theme.of(sheetCtx).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                  ),
+                  const SizedBox(height: AppSpacing.space12),
+                  AppTextField(
+                    label: l10n.deleteAccountOtpLabel,
+                    controller: otpCtrl,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    prefixIcon: const Icon(Icons.key_outlined,
+                        size: 18, color: AppColors.textSecondary),
+                  ),
+                ],
+                if (error != null) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  Text(error!,
+                      style: const TextStyle(
+                          color: AppColors.error, fontSize: 13)),
+                ],
+                const SizedBox(height: AppSpacing.space24),
+                DestructiveButton(
+                  text: busy
+                      ? l10n.licenseChecking
+                      : step == 0
+                          ? l10n.deleteAccountSendOtp
+                          : l10n.deleteAccountConfirmButton,
+                  onPressed: busy || (step == 0 && !agreed)
+                      ? null
+                      : () async {
+                          setS(() {
+                            busy = true;
+                            error = null;
+                          });
+                          try {
+                            if (step == 0) {
+                              await requestAccountDeletion(phone);
+                              setS(() {
+                                step = 1;
+                                busy = false;
+                              });
+                              return;
+                            }
+                            final otp = otpCtrl.text.trim();
+                            if (!RegExp(r'^\d{6}$').hasMatch(otp)) {
+                              setS(() {
+                                error = l10n.deleteAccountOtpInvalid;
+                                busy = false;
+                              });
+                              return;
+                            }
+                            final result =
+                                await confirmAccountDeletion(phone, otp);
+                            if (sheetCtx.mounted) Navigator.pop(sheetCtx);
+                            if (!mounted) return;
+                            final scheduledFor = DateTime.tryParse(
+                                result['scheduled_for'] as String? ?? '');
+                            final dateText = scheduledFor != null
+                                ? DateFormat.yMMMd().format(scheduledFor)
+                                : '';
+                            await showDialog(
+                              context: context,
+                              builder: (_) => AlertDialog(
+                                title: Text(l10n.deleteAccountSuccessTitle),
+                                content: Text(
+                                    l10n.deleteAccountSuccessBody(dateText)),
+                                actions: [
+                                  PrimaryButton(
+                                    text: l10n.commonOk,
+                                    onPressed: () => Navigator.pop(context),
+                                  ),
+                                ],
+                              ),
+                            );
+                          } on ApiException catch (e) {
+                            setS(() {
+                              error = sanitizeUiErrorMessage(e,
+                                  fallback: step == 0
+                                      ? l10n.deleteAccountSendFailed
+                                      : l10n.deleteAccountConfirmFailed);
+                              busy = false;
+                            });
+                          } catch (_) {
+                            setS(() {
+                              error = step == 0
+                                  ? l10n.deleteAccountSendFailed
+                                  : l10n.deleteAccountConfirmFailed;
+                              busy = false;
+                            });
+                          }
+                        },
+                ),
+                const SizedBox(height: AppSpacing.space8),
+                TextButton(
+                  onPressed: () => Navigator.pop(sheetCtx),
+                  child: Text(l10n.commonCancel),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -642,7 +847,34 @@ class _SettingsContentState extends State<_SettingsContent>
                             ),
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.space16),
+                    // Fine print, not a Settings card — intentionally
+                    // low-visibility. iOS-only: Guideline 5.1.1(v) requires
+                    // deletion to be reachable from within the app, but that
+                    // requirement is Apple's, not Android's/desktop's, so the
+                    // web-form link-out (still fine off iOS) stays hidden
+                    // here to avoid duplicating the flow where it's not
+                    // required.
+                    if (isOwner && isIOS) ...[
+                      const SizedBox(height: AppSpacing.space8),
+                      Center(
+                        child: TextButton(
+                          onPressed: () => _showDeleteAccountSheet(session.userPhone),
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: Text(
+                            l10n.deleteAccountLinkText,
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.textDisabled,
+                                    ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    SizedBox(height: isOwner && isIOS ? AppSpacing.space8 : AppSpacing.space16),
                   ],
                 ),
               ),

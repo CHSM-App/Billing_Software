@@ -1970,6 +1970,84 @@ abstract class AppLocalizations {
   /// **'Reset failed. Try again.'**
   String get forgotPinResetFailed;
 
+  /// No description provided for @deleteAccountLinkText.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete my account'**
+  String get deleteAccountLinkText;
+
+  /// No description provided for @deleteAccountWarningTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Account'**
+  String get deleteAccountWarningTitle;
+
+  /// No description provided for @deleteAccountWarningBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This permanently deletes your business, all bills, inventory, staff accounts and reports 30 days after you confirm. This cannot be undone.'**
+  String get deleteAccountWarningBody;
+
+  /// No description provided for @deleteAccountAgreeCheckbox.
+  ///
+  /// In en, this message translates to:
+  /// **'I understand this will permanently delete all my data'**
+  String get deleteAccountAgreeCheckbox;
+
+  /// No description provided for @deleteAccountSendOtp.
+  ///
+  /// In en, this message translates to:
+  /// **'Send OTP'**
+  String get deleteAccountSendOtp;
+
+  /// No description provided for @deleteAccountSendFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to send OTP. Try again.'**
+  String get deleteAccountSendFailed;
+
+  /// No description provided for @deleteAccountOtpLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'6-digit OTP'**
+  String get deleteAccountOtpLabel;
+
+  /// No description provided for @deleteAccountOtpHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the OTP sent to your phone'**
+  String get deleteAccountOtpHint;
+
+  /// No description provided for @deleteAccountOtpInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'OTP must be 6 digits'**
+  String get deleteAccountOtpInvalid;
+
+  /// No description provided for @deleteAccountConfirmButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm Deletion'**
+  String get deleteAccountConfirmButton;
+
+  /// No description provided for @deleteAccountConfirmFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not process your request. Try again.'**
+  String get deleteAccountConfirmFailed;
+
+  /// No description provided for @deleteAccountSuccessTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Deletion Scheduled'**
+  String get deleteAccountSuccessTitle;
+
+  /// No description provided for @deleteAccountSuccessBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your account is scheduled for deletion on {date}. Contact support before then to cancel.'**
+  String deleteAccountSuccessBody(String date);
+
   /// No description provided for @otpTitle.
   ///
   /// In en, this message translates to:

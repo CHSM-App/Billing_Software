@@ -1076,6 +1076,50 @@ class AppLocalizationsEn extends AppLocalizations {
   String get forgotPinResetFailed => 'Reset failed. Try again.';
 
   @override
+  String get deleteAccountLinkText => 'Delete my account';
+
+  @override
+  String get deleteAccountWarningTitle => 'Delete Account';
+
+  @override
+  String get deleteAccountWarningBody =>
+      'This permanently deletes your business, all bills, inventory, staff accounts and reports 30 days after you confirm. This cannot be undone.';
+
+  @override
+  String get deleteAccountAgreeCheckbox =>
+      'I understand this will permanently delete all my data';
+
+  @override
+  String get deleteAccountSendOtp => 'Send OTP';
+
+  @override
+  String get deleteAccountSendFailed => 'Failed to send OTP. Try again.';
+
+  @override
+  String get deleteAccountOtpLabel => '6-digit OTP';
+
+  @override
+  String get deleteAccountOtpHint => 'Enter the OTP sent to your phone';
+
+  @override
+  String get deleteAccountOtpInvalid => 'OTP must be 6 digits';
+
+  @override
+  String get deleteAccountConfirmButton => 'Confirm Deletion';
+
+  @override
+  String get deleteAccountConfirmFailed =>
+      'Could not process your request. Try again.';
+
+  @override
+  String get deleteAccountSuccessTitle => 'Deletion Scheduled';
+
+  @override
+  String deleteAccountSuccessBody(String date) {
+    return 'Your account is scheduled for deletion on $date. Contact support before then to cancel.';
+  }
+
+  @override
   String get otpTitle => 'Verify your number';
 
   @override

@@ -9,5 +9,6 @@ Disallow: /order/
 Disallow: /receipt/
 Disallow: /uploads/
 Disallow: /downloads/
+Disallow: /signup-ios-7f3a
 
 Sitemap: https://vittam.vengurlatech.com/sitemap.xml

@@ -1071,6 +1071,51 @@ class AppLocalizationsMr extends AppLocalizations {
   String get forgotPinResetFailed => 'रीसेट अयशस्वी. पुन्हा प्रयत्न करा.';
 
   @override
+  String get deleteAccountLinkText => 'माझे खाते हटवा';
+
+  @override
+  String get deleteAccountWarningTitle => 'खाते हटवा';
+
+  @override
+  String get deleteAccountWarningBody =>
+      'पुष्टी केल्यानंतर 30 दिवसांनी तुमचा व्यवसाय, सर्व बिले, इन्व्हेंटरी, स्टाफ खाती आणि अहवाल कायमचे हटवले जातील. ही क्रिया पूर्ववत करता येणार नाही.';
+
+  @override
+  String get deleteAccountAgreeCheckbox =>
+      'माझा सर्व डेटा कायमचा हटवला जाईल हे मला समजले आहे';
+
+  @override
+  String get deleteAccountSendOtp => 'OTP पाठवा';
+
+  @override
+  String get deleteAccountSendFailed =>
+      'OTP पाठवण्यात अयशस्वी. पुन्हा प्रयत्न करा.';
+
+  @override
+  String get deleteAccountOtpLabel => '6-अंकी OTP';
+
+  @override
+  String get deleteAccountOtpHint => 'तुमच्या फोनवर पाठवलेला OTP टाका';
+
+  @override
+  String get deleteAccountOtpInvalid => 'OTP 6 अंकी असावा';
+
+  @override
+  String get deleteAccountConfirmButton => 'हटवण्याची पुष्टी करा';
+
+  @override
+  String get deleteAccountConfirmFailed =>
+      'तुमची विनंती पूर्ण करता आली नाही. पुन्हा प्रयत्न करा.';
+
+  @override
+  String get deleteAccountSuccessTitle => 'हटवणे नियोजित';
+
+  @override
+  String deleteAccountSuccessBody(String date) {
+    return 'तुमचे खाते $date रोजी हटवण्यासाठी नियोजित आहे. रद्द करण्यासाठी त्यापूर्वी सपोर्टशी संपर्क साधा.';
+  }
+
+  @override
   String get otpTitle => 'तुमचा नंबर पडताळा';
 
   @override

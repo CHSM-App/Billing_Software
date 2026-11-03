@@ -529,6 +529,36 @@ Future<Map<String, dynamic>> verifyOtp(String phone, String otp, String purpose)
   return _parse(response);
 }
 
+// ---------------------------------------------------------------------------
+// Account deletion — unauthenticated, identity proven via WhatsApp OTP, same
+// endpoints the public landing-page deletion form uses. See
+// backend/src/routes/account.js. Used by the iOS-only in-app deletion sheet
+// (Guideline 5.1.1(v) requires the request to be initiated inside the app).
+// ---------------------------------------------------------------------------
+
+/// Sends a deletion OTP to [phone]. Always "succeeds" server-side (no
+/// enumeration) even if the phone has no account.
+Future<Map<String, dynamic>> requestAccountDeletion(String phone) async {
+  final response = await _post(
+    Uri.parse('$baseUrl/account/deletion/request'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'phone': phone}),
+  );
+  return _parse(response);
+}
+
+/// Verifies [otp] and schedules the account for deletion (30-day grace
+/// period on the server). Returns `{ scheduled_for: '...' }` on success.
+Future<Map<String, dynamic>> confirmAccountDeletion(
+    String phone, String otp) async {
+  final response = await _post(
+    Uri.parse('$baseUrl/account/deletion/confirm'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'phone': phone, 'otp': otp}),
+  );
+  return _parse(response);
+}
+
 /// Sends a receipt link to the customer's WhatsApp for the given [billId].
 Future<Map<String, dynamic>> sendBillWhatsApp(String billId) async {
   final response = await _authPost(
