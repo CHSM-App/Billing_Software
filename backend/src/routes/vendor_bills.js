@@ -12,6 +12,7 @@ const {
   extractPurchaseBill, normalizeDraft, checkDraft, aliasText, vendorKey,
 } = require('../purchaseScan');
 const audit = require('../audit');
+const { logMovement } = require('../stockLedger');
 const logger = require('../logger');
 
 const router = express.Router();
@@ -120,16 +121,19 @@ async function resolveTargets(transaction, businessId, lines) {
  *
  * Free (scheme) goods are received too: 10 bought + 2 free puts 12 on the shelf.
  */
-async function applyLineStock(transaction, businessId, li, sign) {
+// `ctx` = { billId, date }: the purchase's invoice date, so a bill entered mid-day
+// (or backdated) lands on the day the goods are dated, not on entry time.
+async function applyLineStock(transaction, businessId, li, sign, ctx = {}) {
   const qty = sign * (Number(li.quantity) + (Number(li.free_quantity) || 0));
+  let r = null;
   if (li.variant_id) {
-    await transaction.request()
+    r = await transaction.request()
       .input('id', sql.UniqueIdentifier, li.variant_id)
       .input('qty', sql.Decimal(10, 2), qty)
       .query(`UPDATE item_variants SET stock_quantity = stock_quantity + @qty
               WHERE id = @id AND stock_quantity IS NOT NULL`);
   } else if (li.item_id) {
-    await transaction.request()
+    r = await transaction.request()
       .input('id', sql.UniqueIdentifier, li.item_id)
       .input('business_id', sql.UniqueIdentifier, businessId)
       .input('qty', sql.Decimal(10, 2), qty)
@@ -146,6 +150,12 @@ async function applyLineStock(transaction, businessId, li, sign) {
                 AND stock_quantity IS NOT NULL`);
   }
   // No target -> a service/freight line; nothing to move.
+  if (r && r.rowsAffected[0] > 0) {
+    await logMovement(transaction, {
+      businessId, itemId: li.item_id, variantId: li.variant_id,
+      qty, type: 'purchase', refId: ctx.billId, date: ctx.date,
+    });
+  }
 }
 
 const HEADER_COLS = `
@@ -835,7 +845,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
       if (flags.inventoryEnabled) {
         for (const li of totals.lines) {
-          await applyLineStock(transaction, req.user.business_id, li, +1);
+          await applyLineStock(transaction, req.user.business_id, li, +1, { billId, date: head.invoiceDate });
         }
       }
 
@@ -899,7 +909,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       // actually applied — inventory may have been off when it was created.
       if (before.stock_applied) {
         for (const li of before.lines) {
-          await applyLineStock(transaction, req.user.business_id, li, -1);
+          await applyLineStock(transaction, req.user.business_id, li, -1, { billId: req.params.id, date: before.invoice_date });
         }
       }
 
@@ -990,7 +1000,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
 
       if (flags.inventoryEnabled) {
         for (const li of totals.lines) {
-          await applyLineStock(transaction, req.user.business_id, li, +1);
+          await applyLineStock(transaction, req.user.business_id, li, +1, { billId: req.params.id, date: head.invoiceDate });
         }
       }
 
@@ -1041,7 +1051,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
       // correctable — but it is worth a log line when it happens.
       if (before.stock_applied && flags.inventoryEnabled) {
         for (const li of before.lines) {
-          await applyLineStock(transaction, req.user.business_id, li, -1);
+          await applyLineStock(transaction, req.user.business_id, li, -1, { billId: req.params.id, date: before.invoice_date });
         }
       }
 

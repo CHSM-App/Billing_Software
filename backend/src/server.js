@@ -292,6 +292,7 @@ app.use('/api/online-orders', require('./routes/online_orders'));
 app.use('/api/tables', require('./routes/tables'));
 app.use('/api/kitchen', require('./routes/kitchen'));
 app.use('/api/reports', require('./routes/reports'));
+app.use('/api/reports', require('./routes/stock_reports'));
 app.use('/api/expenses/recurring', require('./routes/recurring_expenses'));
 app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/vendor-bills', require('./routes/vendor_bills'));

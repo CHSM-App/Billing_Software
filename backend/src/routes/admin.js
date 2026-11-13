@@ -26,6 +26,7 @@ const path = require('path');
 const fs = require('fs');
 const { pool, poolConnect, sql } = require('../db');
 const logger = require('../logger');
+const { logAdjustment } = require('../stockLedger');
 const { validateNumber, validateText } = require('../validate');
 const { forgetCustomersAccess } = require('../customers');
 const authState = require('../authState');
@@ -616,8 +617,9 @@ router.post('/api/businesses/:id/items/import', requireAdmin, async (req, res) =
             VALUES (@business_id, @name, @barcode, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @low_stock_threshold)
           `);
         const itemId = ins.recordset[0].id;
+        await logAdjustment(tx, businessId, { itemId }, null, it.stock_quantity);
         for (const v of it.variants) {
-          await tx.request()
+          const vIns = await tx.request()
             .input('item_id', sql.UniqueIdentifier, itemId)
             .input('label', sql.NVarChar(50), v.label)
             .input('price', sql.Decimal(10, 2), v.price)
@@ -627,8 +629,10 @@ router.post('/api/businesses/:id/items/import', requireAdmin, async (req, res) =
             .input('sort_order', sql.Int, v.sort_order)
             .query(`
               INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, sort_order)
+              OUTPUT INSERTED.id
               VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @sort_order)
             `);
+          await logAdjustment(tx, businessId, { variantId: vIns.recordset[0].id }, null, v.stock_quantity);
           variantCount++;
         }
       }

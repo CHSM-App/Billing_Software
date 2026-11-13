@@ -12,6 +12,7 @@ const { broadcast } = require('../realtime');
 const { computeRoundOff, netUnitPrice } = require('../money');
 const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
 const { validateExtraData, isIndianMobile } = require('../validate');
+const { logMovement, REDATE_SALE_SQL, snapshotBillCosts } = require('../stockLedger');
 
 // "Retail & Warranty" shops: a finalized bill line sold against a
 // warranty-eligible item becomes a warranty record automatically (manual
@@ -449,7 +450,22 @@ async function loadRecipeMap(transaction, businessId, items) {
 // Atomically decrement stock for one line item. When the line references a
 // variant, the variant's stock is the target; otherwise the item's. Returns
 // true if a row was updated (or stock is untracked/NULL), false on shortfall.
-async function decrementLineStock(transaction, businessId, li, itemMap, variantMap) {
+// `ctx` = { billId, at } feeds the stock ledger (see stockLedger.js).
+async function decrementLineStock(transaction, businessId, li, itemMap, variantMap, ctx = {}) {
+  const ok = await decrementLineStockRow(transaction, businessId, li, itemMap, variantMap);
+  const tracked = li.variant_id
+    ? variantMap[li.variant_id]?.stock_quantity != null
+    : itemMap[li.item_id].stock_quantity != null;
+  if (ok && tracked) {
+    await logMovement(transaction, {
+      businessId, itemId: li.item_id, variantId: li.variant_id,
+      qty: -li.quantity, type: 'sale', refId: ctx.billId, at: ctx.at,
+    });
+  }
+  return ok;
+}
+
+async function decrementLineStockRow(transaction, businessId, li, itemMap, variantMap) {
   if (li.variant_id) {
     const variant = variantMap[li.variant_id];
     if (!variant || variant.stock_quantity == null) return true; // untracked
@@ -553,18 +569,26 @@ async function decrementRecipe(transaction, li, recipeMap) {
 // Restore stock for a line item (used when voiding/replacing bill items).
 // Mirrors decrementLineStock: variants restore the variant count, plain lines
 // the item count. Also restores any recipe raw materials consumed by the line.
-async function restoreLineStock(transaction, businessId, li) {
+async function restoreLineStock(transaction, businessId, li, ctx = {}) {
+  let r = null;
   if (li.variant_id) {
-    await transaction.request()
+    r = await transaction.request()
       .input('variant_id', sql.UniqueIdentifier, li.variant_id)
       .input('qty', sql.Decimal(10, 2), li.quantity)
       .query('UPDATE item_variants SET stock_quantity = stock_quantity + @qty WHERE id = @variant_id AND stock_quantity IS NOT NULL');
   } else if (li.item_id) {
-    await transaction.request()
+    r = await transaction.request()
       .input('item_id', sql.UniqueIdentifier, li.item_id)
       .input('business_id', sql.UniqueIdentifier, businessId)
       .input('qty', sql.Decimal(10, 2), li.quantity)
       .query('UPDATE items SET stock_quantity = stock_quantity + @qty WHERE id = @item_id AND business_id = @business_id AND stock_quantity IS NOT NULL');
+  }
+  if (r && r.rowsAffected[0] > 0) {
+    // 'void' = bill cancelled; 'sale' = a draft's old lines handed back on edit.
+    await logMovement(transaction, {
+      businessId, itemId: li.item_id, variantId: li.variant_id,
+      qty: Number(li.quantity), type: ctx.type || 'void', refId: ctx.billId,
+    });
   }
 
   // Restore recipe raw materials, if this line consumes any.
@@ -1089,7 +1113,7 @@ router.post('/', requireAuth, async (req, res) => {
       // consumed inventory between our read above and this write.
       if (inventoryEnabled) {
         for (const li of lineItems) {
-          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap);
+          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap, { billId, at: saleTime });
           if (!ok) {
             await transaction.rollback();
             return res.status(409).json({
@@ -1108,6 +1132,7 @@ router.post('/', requireAuth, async (req, res) => {
         }
       }
 
+      await snapshotBillCosts(transaction, req.user.business_id, billId);
       await transaction.commit();
       // Real-time: stock moved — billing screens re-read their item list.
       if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
@@ -1559,6 +1584,7 @@ async function finalizeWithTenders(billId, businessId, userId, { mode, split, co
       .input('credit_amount', sql.Decimal(10, 2), creditPart)
       .input('credit_collected', sql.Decimal(10, 2), collected > 0 ? collected : null)
       .input('finalized_by_user_id', sql.UniqueIdentifier, userId)
+      .input('business_id', sql.UniqueIdentifier, businessId)
       .query(`
         UPDATE bills
         SET status = 'finalized', finalized_at = SYSUTCDATETIME(),
@@ -1567,6 +1593,7 @@ async function finalizeWithTenders(billId, businessId, userId, { mode, split, co
             payment_status = @payment_status, credit_amount = @credit_amount,
             credit_collected = @credit_collected
         WHERE id = @id
+        ${REDATE_SALE_SQL}
       `);
     if (parts.length > 1) await insertPayments(transaction.request(), draft.id, parts);
     await recordCreditPayments(transaction, businessId, poured.rows, draft.id);
@@ -1637,6 +1664,8 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
           OUTPUT INSERTED.id, INSERTED.table_id, INSERTED.bill_number,
                  INSERTED.payment_mode, INSERTED.customer_name, INSERTED.customer_phone
           WHERE id = @id AND business_id = @business_id AND status = 'draft'
+          -- Stock left the shelf when the draft was created; re-date it too.
+          ${REDATE_SALE_SQL}
         `);
 
       if (result.rowsAffected[0] === 0) {
@@ -1884,7 +1913,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       // Atomic decrement — final concurrency guard.
       if (inventoryEnabled) {
         for (const li of lineItems) {
-          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap);
+          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap, { billId: req.params.id });
           if (!ok) {
             await transaction.rollback();
             return res.status(409).json({
@@ -1904,6 +1933,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
       }
 
       addedLineItems = lineItems;
+      await snapshotBillCosts(transaction, req.user.business_id, req.params.id);
       await transaction.commit();
       if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
 
@@ -2132,7 +2162,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       // restoreLineStock handles variants, plain items and recipes.
       if (inventoryEnabled) {
         for (const li of previousLineItems.filter((x) => x.item_id || x.variant_id)) {
-          await restoreLineStock(transaction, req.user.business_id, li);
+          await restoreLineStock(transaction, req.user.business_id, li, { billId: req.params.id, type: 'sale' });
         }
       }
 
@@ -2243,7 +2273,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       // Atomic decrement for new items — final concurrency guard.
       if (inventoryEnabled) {
         for (const li of lineItems) {
-          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap);
+          const ok = await decrementLineStock(transaction, req.user.business_id, li, itemMap, variantMap, { billId: req.params.id });
           if (!ok) {
             await transaction.rollback();
             return res.status(409).json({
@@ -2263,6 +2293,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       }
 
       replacementLineItems = lineItems;
+      await snapshotBillCosts(transaction, req.user.business_id, req.params.id);
       await transaction.commit();
       if (inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
     } catch (err) {
@@ -2371,7 +2402,7 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
           .query('SELECT item_id, variant_id, item_name, quantity FROM bill_items WHERE bill_id = @bill_id AND (item_id IS NOT NULL OR variant_id IS NOT NULL)');
 
         for (const li of lineItems.recordset) {
-          await restoreLineStock(transaction, req.user.business_id, li);
+          await restoreLineStock(transaction, req.user.business_id, li, { billId: req.params.id, type: 'void' });
         }
       }
 

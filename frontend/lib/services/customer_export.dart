@@ -99,6 +99,26 @@ class CustomerExport {
         landscape: true,
       );
 
+  /// The shared A4 table, for other exports (stock and profit reports).
+  static Future<Uint8List> tablePdf({
+    required String businessName,
+    required String title,
+    required String subtitle,
+    required List<List<Object?>> rows,
+    required List<double> widths,
+    bool landscape = false,
+    bool leftAlignNumbers = false,
+  }) =>
+      _pdf(
+        businessName: businessName,
+        title: title,
+        subtitle: subtitle,
+        rows: rows,
+        widths: widths,
+        landscape: landscape,
+        leftAlignNumbers: leftAlignNumbers,
+      );
+
   static const _fs = 8.5;
 
   /// A4 table of [rows] (header repeated on every page) under a small title
@@ -110,6 +130,7 @@ class CustomerExport {
     required List<List<Object?>> rows,
     required List<double> widths,
     required bool landscape,
+    bool leftAlignNumbers = false,
   }) async {
     // Marathi names/items: shape them into images up front (the pdf package
     // cannot shape Devanagari — see ShapedText), at the width of their column.
@@ -165,7 +186,8 @@ class CustomerExport {
                     pw.Padding(
                       padding: const pw.EdgeInsets.symmetric(
                           horizontal: 4, vertical: 3),
-                      child: _cell(v, header: r == 0, shaped: shaped),
+                      child: _cell(v,
+                          header: r == 0, shaped: shaped, left: leftAlignNumbers),
                     ),
                 ],
               ),
@@ -177,14 +199,14 @@ class CustomerExport {
   }
 
   static pw.Widget _cell(Object? v,
-      {required bool header, required ShapedText shaped}) {
+      {required bool header, required ShapedText shaped, bool left = false}) {
     if (header) {
       return pw.Text('$v',
           style: pw.TextStyle(fontSize: _fs, fontWeight: pw.FontWeight.bold));
     }
     if (v is num) {
       return pw.Align(
-        alignment: pw.Alignment.centerRight,
+        alignment: left ? pw.Alignment.centerLeft : pw.Alignment.centerRight,
         child: pw.Text(v is int ? '$v' : _moneyFmt.format(v),
             style: const pw.TextStyle(fontSize: _fs)),
       );

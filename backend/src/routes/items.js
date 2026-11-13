@@ -4,6 +4,7 @@ const path = require('path');
 const { pool, poolConnect, sql } = require('../db');
 const { requireAuth } = require('../auth');
 const logger = require('../logger');
+const { logAdjustment } = require('../stockLedger');
 const audit = require('../audit');
 const {
   MAX_DECIMAL_12_4,
@@ -465,6 +466,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       `);
 
     const created = result.recordset[0];
+    await logAdjustment(pool, req.user.business_id, { itemId: created.id }, null, created.stock_quantity);
     // A sized item's sizes are what get scanned; they get theirs as they're added.
     if (!sizedItem) await fillMissingBarcode('items', created);
 
@@ -653,6 +655,9 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     `);
 
     const updated = result.recordset[0];
+    if (stock_quantity !== undefined) {
+      await logAdjustment(pool, req.user.business_id, { itemId: updated.id }, before.stock_quantity, updated.stock_quantity);
+    }
     // An edit counts as a manual save too, so an old item without a code gets
     // one — and clearing the field resets it to the generated code.
     if (!sizedItem) await fillMissingBarcode('items', updated);
@@ -851,6 +856,7 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
       .query('UPDATE items SET stock_quantity = NULL, low_stock_threshold = NULL, pack_unit = NULL, pack_size = NULL WHERE id = @id');
 
     const created = result.recordset[0];
+    await logAdjustment(pool, req.user.business_id, { variantId: created.id }, null, created.stock_quantity);
     await fillMissingBarcode('item_variants', created);
     return res.status(201).json(created);
   } catch (err) {
@@ -936,7 +942,7 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
     const result = await request.query(`
       UPDATE item_variants
       SET ${sets.join(', ')}
-      OUTPUT ${VARIANT_OUTPUT}
+      OUTPUT ${VARIANT_OUTPUT}, DELETED.stock_quantity AS old_stock_quantity
       WHERE id = @id AND item_id = @item_id
     `);
 
@@ -944,6 +950,11 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
       return res.status(404).json({ error: 'Variant not found' });
     }
     const updated = result.recordset[0];
+    const oldStock = updated.old_stock_quantity;
+    delete updated.old_stock_quantity;
+    if (stock_quantity !== undefined) {
+      await logAdjustment(pool, req.user.business_id, { variantId: updated.id }, oldStock, updated.stock_quantity);
+    }
     await fillMissingBarcode('item_variants', updated);
     return res.json(updated);
   } catch (err) {

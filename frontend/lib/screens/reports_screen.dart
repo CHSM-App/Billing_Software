@@ -14,6 +14,7 @@ import '../l10n/l10n_ext.dart';
 import 'gstr1_screen.dart';
 import 'gstr2_screen.dart';
 import 'gstr3b_screen.dart';
+import 'stock_profit_screens.dart';
 
 final _amt = NumberFormat('#,##0');
 final _timeFmt = DateFormat('h:mm a');
@@ -113,6 +114,8 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                   ],
                   _buildPaymentSplit(l10n, summary),
                   const SizedBox(height: 16),
+                  _buildStockProfit(),
+                  const SizedBox(height: 16),
                   // GSTR-1 return — only meaningful once GST invoicing is on,
                   // since with the toggle off no bill carries tax.
                   if (ref.watch(gstEnabledProvider)) ...[
@@ -202,6 +205,31 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
+  }
+
+  Widget _buildStockProfit() {
+    return _SectionCard(
+      title: 'Stock & profit',
+      child: Column(children: [
+        _gstRow(
+          icon: Icons.inventory_2_outlined,
+          colour: const Color(0xFF0D9488),
+          title: 'Opening & closing stock',
+          subtitle: 'Per item: opening, purchased, sold, closing',
+          onTap: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const StockReportScreen())),
+        ),
+        const Divider(height: 20),
+        _gstRow(
+          icon: Icons.trending_up,
+          colour: const Color(0xFF16A34A),
+          title: 'Item-wise net profit',
+          subtitle: 'Sell price minus buying price, per item',
+          onTap: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const ItemProfitScreen())),
+        ),
+      ]),
+    );
   }
 
   /// Entry points to the GST returns. All three live in Reports rather than

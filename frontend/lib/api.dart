@@ -8,7 +8,7 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-// const String baseUrl = 'http://192.168.1.11:8000/api';
+// const String baseUrl = 'http://10.240.89.67:8000/api';
 const String baseUrl = 'https://vittam.vengurlatech.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
@@ -1290,6 +1290,37 @@ Future<Map<String, dynamic>> getGstr2Report(
 Future<Map<String, dynamic>> getGstr3bReport(
     {required String from, required String to}) async {
   final uri = Uri.parse('$baseUrl/reports/gstr3b')
+      .replace(queryParameters: {'from': from, 'to': to});
+  return Map<String, dynamic>.from(_parse(await _authGet(uri)) as Map);
+}
+
+/// Opening / closing stock per tracked item or size for [from]..[to].
+Future<Map<String, dynamic>> getStockSummary(
+    {required String from, required String to}) async {
+  final uri = Uri.parse('$baseUrl/reports/stock-summary')
+      .replace(queryParameters: {'from': from, 'to': to});
+  return Map<String, dynamic>.from(_parse(await _authGet(uri)) as Map);
+}
+
+/// One item (or size) day by day: opening, in, out, closing.
+Future<Map<String, dynamic>> getStockDaily(
+    {required String from,
+    required String to,
+    String? itemId,
+    String? variantId}) async {
+  final uri = Uri.parse('$baseUrl/reports/stock-daily').replace(queryParameters: {
+    'from': from,
+    'to': to,
+    if (itemId != null) 'item_id': itemId,
+    if (variantId != null) 'variant_id': variantId,
+  });
+  return Map<String, dynamic>.from(_parse(await _authGet(uri)) as Map);
+}
+
+/// Net profit per item or size (sell price minus purchase-bill cost).
+Future<Map<String, dynamic>> getItemProfit(
+    {required String from, required String to}) async {
+  final uri = Uri.parse('$baseUrl/reports/item-profit')
       .replace(queryParameters: {'from': from, 'to': to});
   return Map<String, dynamic>.from(_parse(await _authGet(uri)) as Map);
 }
