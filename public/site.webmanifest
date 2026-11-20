@@ -1,0 +1,12 @@
+{
+  "name": "Vittam – Smart Billing for Small Businesses",
+  "short_name": "Vittam",
+  "description": "Offline-first billing, inventory and expense management for Indian shops, cafes and restaurants.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0d1b3e",
+  "icons": [
+    { "src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
