@@ -6,6 +6,8 @@ const { requireAuth } = require('../auth');
 const logger = require('../logger');
 const { logAdjustment } = require('../stockLedger');
 const audit = require('../audit');
+const batches = require('../batches');
+const { broadcast } = require('../realtime');
 const {
   MAX_DECIMAL_12_4,
   validateNumber,
@@ -65,8 +67,8 @@ function inputPack(request, packUnit, packSize, off = false) {
 // anything under public/ can be clobbered on deploy. uploads/ lives beside it,
 // untouched by that flow, so customer photos persist across deploys.
 //
-// Photos are customer-facing only (shown on the QR order menu) — the staff
-// item/billing payloads never include them. See PUT/DELETE /:id/image below.
+// Photos show on the QR order menu, and on billing when the device's "Show
+// item photos" setting is on. See PUT/DELETE /:id/image below.
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'items');
 // Created at server startup too (server.js), but ensure it here so the route is
 // self-sufficient in tests that require this module directly.
@@ -166,7 +168,34 @@ async function itemNoConflict(businessId, itemNo, excludeId = null) {
 }
 
 
-async function attachVariants(businessId, itemRows) {
+/** A buying price as stored: a number, or null when blank. */
+const costOrNull = (v) => (v == null || v === '' ? null : parseFloat(v));
+
+/**
+ * A buying price was set: past sale lines of this item / size that still have
+ * no cost take it (only those — a line already costed keeps its snapshot).
+ * An item's price reaches its sizes' lines only where the size has none.
+ */
+async function fillMissingCost(businessId, { itemId, variantId }, buyingPrice) {
+  const r = pool.request()
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .input('cost', sql.Decimal(12, 4), costOrNull(buyingPrice));
+  if (variantId) {
+    await r.input('id', sql.UniqueIdentifier, variantId).query(`
+      UPDATE bi SET bi.unit_cost = @cost
+      FROM bill_items bi JOIN bills b ON b.id = bi.bill_id
+      WHERE b.business_id = @business_id AND bi.variant_id = @id AND bi.unit_cost IS NULL`);
+  } else {
+    await r.input('id', sql.UniqueIdentifier, itemId).query(`
+      UPDATE bi SET bi.unit_cost = @cost
+      FROM bill_items bi JOIN bills b ON b.id = bi.bill_id
+      LEFT JOIN item_variants v ON v.id = bi.variant_id
+      WHERE b.business_id = @business_id AND bi.item_id = @id AND bi.unit_cost IS NULL
+        AND (bi.variant_id IS NULL OR v.buying_price IS NULL)`);
+  }
+}
+
+async function attachVariants(businessId, itemRows, viewer = null) {
   if (itemRows.length === 0) return itemRows;
   const ids = itemRows.map((r) => r.id);
   const request = pool.request().input('business_id', sql.UniqueIdentifier, businessId);
@@ -176,7 +205,8 @@ async function attachVariants(businessId, itemRows) {
   });
   const result = await request.query(`
     SELECT v.id, v.item_id, v.label, v.price, v.barcode,
-           v.stock_quantity, v.low_stock_threshold, v.pack_unit, v.pack_size, v.unit, v.sort_order, v.is_active
+           v.stock_quantity, v.low_stock_threshold, v.pack_unit, v.pack_size, v.unit, v.sort_order, v.is_active,
+           v.buying_price
     FROM item_variants v
     JOIN items i ON i.id = v.item_id
     WHERE i.business_id = @business_id
@@ -190,6 +220,28 @@ async function attachVariants(businessId, itemRows) {
   }
   for (const row of itemRows) {
     row.variants = byItem[row.id] || [];
+  }
+
+  // Open stock batches, oldest first — the cashier sees each one's purchase
+  // cost while billing. Only a shop that maintains batches gets the key.
+  // Open batches and the average purchase cost (old stock) — only a shop that
+  // maintains batches gets them, so every other item list is as before.
+  const view = await batches.costView(() => pool.request(), businessId);
+  const key = (id) => String(id).toLowerCase();
+  if (view.on) {
+    for (const row of [...itemRows, ...itemRows.flatMap((r) => r.variants)]) {
+      const b = view.batches.get(key(row.id));
+      if (b) row.batches = b;
+      if (view.avg.has(key(row.id))) row.avg_cost = view.avg.get(key(row.id));
+    }
+  }
+  // Staff never see a cost the owner chose to hide.
+  if (viewer && viewer.role !== 'owner' && !view.staffSeeCost) {
+    for (const row of [...itemRows, ...itemRows.flatMap((r) => r.variants)]) {
+      delete row.buying_price;
+      delete row.avg_cost;
+      if (row.batches) row.batches = row.batches.map(({ unit_cost: _c, ...rest }) => rest);
+    }
   }
   return itemRows;
 }
@@ -220,8 +272,8 @@ router.get('/top-sold', requireAuth, async (req, res) => {
 
 // GET /api/items/with-images — owner-only list for the Menu Photos screen.
 // Defined before /:id so the literal path isn't swallowed by the id param.
-// This is the ONE staff route that returns image_url; the billing/items list
-// (GET /) deliberately omits it so photos never appear during billing.
+// GET / returns image_url too; billing shows the photos only when the
+// device's "Show item photos" setting is on.
 router.get('/with-images', requireAuth, ownerOnly, async (req, res) => {
   try {
     await poolConnect;
@@ -295,7 +347,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const result = await request.query(`
-      SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, warranty_eligible, default_warranty_months, is_active, created_at
+      SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, warranty_eligible, default_warranty_months, is_service, buying_price, is_active, created_at, image_url
       FROM items
       WHERE ${where}
       ORDER BY name ASC
@@ -315,7 +367,7 @@ router.get('/', requireAuth, async (req, res) => {
           SELECT TOP 1 i.id, i.business_id, i.name, i.barcode, i.item_no, i.major_category, i.category, i.price,
                  i.tax_rate, i.price_inclusive_tax, i.hsn_code, i.stock_quantity, i.low_stock_threshold, i.unit, i.pack_unit, i.pack_size,
                  i.warranty_eligible, i.default_warranty_months,
-                 i.is_active, i.created_at, v.id AS matched_variant_id
+                 i.is_active, i.created_at, i.image_url, v.id AS matched_variant_id
           FROM item_variants v
           JOIN items i ON i.id = v.item_id
           WHERE i.business_id = @business_id
@@ -330,15 +382,15 @@ router.get('/', requireAuth, async (req, res) => {
         const row = variantMatch.recordset[0];
         const matchedVariantId = row.matched_variant_id;
         delete row.matched_variant_id;
-        await attachVariants(req.user.business_id, [row]);
+        await attachVariants(req.user.business_id, [row], req.user);
         row.matched_variant_id = matchedVariantId;
         return res.json(row);
       }
-      await attachVariants(req.user.business_id, result.recordset);
+      await attachVariants(req.user.business_id, result.recordset, req.user);
       return res.json(result.recordset[0]);
     }
 
-    await attachVariants(req.user.business_id, result.recordset);
+    await attachVariants(req.user.business_id, result.recordset, req.user);
     return res.json(result.recordset);
   } catch (err) {
     logger.error({ err }, 'Get items error');
@@ -354,7 +406,7 @@ router.get('/:id', requireAuth, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query(`
-        SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, warranty_eligible, default_warranty_months, is_active, created_at, image_url
+        SELECT id, business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, low_stock_threshold, unit, pack_unit, pack_size, warranty_eligible, default_warranty_months, is_service, buying_price, is_active, created_at, image_url
         FROM items
         WHERE id = @id AND business_id = @business_id
       `);
@@ -375,7 +427,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
   const {
     name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code,
     stock_quantity, unit, low_stock_threshold, item_no, pack_unit, pack_size,
-    warranty_eligible, default_warranty_months,
+    warranty_eligible, default_warranty_months, is_service, buying_price,
     // Set by the client when the item is being created with sizes. The variants
     // themselves are POSTed separately straight after, so at INSERT time this is
     // the only signal that the missing price is intentional.
@@ -457,12 +509,16 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
       .input('warranty_eligible', sql.Bit, warrantyOn ? 1 : 0)
       .input('default_warranty_months', sql.Int,
         warrantyOn ? parseInt(default_warranty_months, 10) : null)
+      .input('is_service', sql.Bit, is_service ? 1 : 0)
+      .input('buying_price', sql.Decimal(12, 4), costOrNull(buying_price))
       .query(`
-        INSERT INTO items (business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, pack_unit, pack_size, low_stock_threshold, warranty_eligible, default_warranty_months)
+        INSERT INTO items (business_id, name, barcode, item_no, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit, pack_unit, pack_size, low_stock_threshold, warranty_eligible, default_warranty_months, is_service, buying_price)
         OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.item_no, INSERTED.major_category, INSERTED.category,
                INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.pack_unit, INSERTED.pack_size,
-               INSERTED.warranty_eligible, INSERTED.default_warranty_months, INSERTED.is_active, INSERTED.created_at
-        VALUES (@business_id, @name, @barcode, @item_no, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code, @stock_quantity, @unit, @pack_unit, @pack_size, @low_stock_threshold, @warranty_eligible, @default_warranty_months)
+               INSERTED.warranty_eligible, INSERTED.default_warranty_months, INSERTED.is_service, INSERTED.buying_price, INSERTED.is_active, INSERTED.created_at
+        VALUES (@business_id, @name, @barcode, @item_no, @major_category, @category, @price, @tax_rate, @price_inclusive_tax, @hsn_code,
+                CASE WHEN @is_service = 1 THEN NULL ELSE @stock_quantity END,
+                @unit, @pack_unit, @pack_size, @low_stock_threshold, @warranty_eligible, @default_warranty_months, @is_service, @buying_price)
       `);
 
     const created = result.recordset[0];
@@ -497,9 +553,10 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
   const {
     name, barcode, major_category, category, price, tax_rate, price_inclusive_tax, hsn_code, stock_quantity, unit,
     low_stock_threshold, item_no, pack_unit, pack_size, warranty_eligible, default_warranty_months,
+    is_service, buying_price,
   } = req.body;
 
-  if (!name && price === undefined && !major_category && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined && item_no === undefined && pack_unit === undefined && pack_size === undefined && warranty_eligible === undefined && default_warranty_months === undefined) {
+  if (!name && price === undefined && !major_category && !category && barcode === undefined && tax_rate === undefined && price_inclusive_tax === undefined && hsn_code === undefined && stock_quantity === undefined && unit === undefined && low_stock_threshold === undefined && item_no === undefined && pack_unit === undefined && pack_size === undefined && warranty_eligible === undefined && default_warranty_months === undefined && is_service === undefined && buying_price === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   const warrantyOn = warranty_eligible === true;
@@ -640,6 +697,19 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       sets.push('warranty_eligible = @warranty_eligible');
       request.input('warranty_eligible', sql.Bit, warrantyOn ? 1 : 0);
     }
+    // "Service (no stock)": a service carries no stock, so turning it on
+    // clears the count (a purchase will never start it again).
+    if (buying_price !== undefined) {
+      const bad = validateNumber(buying_price, 'Buying price');
+      if (bad) return res.status(400).json({ error: bad });
+      sets.push('buying_price = @buying_price');
+      request.input('buying_price', sql.Decimal(12, 4), costOrNull(buying_price));
+    }
+    if (is_service !== undefined) {
+      sets.push('is_service = @is_service');
+      request.input('is_service', sql.Bit, is_service ? 1 : 0);
+      if (is_service && stock_quantity === undefined) sets.push('stock_quantity = NULL');
+    }
     if (default_warranty_months !== undefined) {
       sets.push('default_warranty_months = @default_warranty_months');
       request.input('default_warranty_months', sql.Int,
@@ -650,13 +720,20 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
       SET ${sets.join(', ')}
       OUTPUT INSERTED.id, INSERTED.business_id, INSERTED.name, INSERTED.barcode, INSERTED.item_no, INSERTED.major_category, INSERTED.category,
              INSERTED.price, INSERTED.tax_rate, INSERTED.price_inclusive_tax, INSERTED.hsn_code, INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.unit, INSERTED.pack_unit, INSERTED.pack_size,
-             INSERTED.warranty_eligible, INSERTED.default_warranty_months, INSERTED.is_active, INSERTED.created_at
+             INSERTED.warranty_eligible, INSERTED.default_warranty_months, INSERTED.is_service, INSERTED.buying_price, INSERTED.is_active, INSERTED.created_at
       WHERE id = @id AND business_id = @business_id
     `);
 
     const updated = result.recordset[0];
-    if (stock_quantity !== undefined) {
+    if (buying_price != null) await fillMissingCost(req.user.business_id, { itemId: updated.id }, buying_price);
+    if (stock_quantity !== undefined || is_service) {
       await logAdjustment(pool, req.user.business_id, { itemId: updated.id }, before.stock_quantity, updated.stock_quantity);
+      // Batches may not hold more than is on the shelf. Counted down by hand
+      // is a write-off; no longer tracked (blank, or a service) just closes
+      // them — that stock wasn't lost.
+      await batches.trimExcess(() => pool.request(), req.user.business_id, { item_id: updated.id },
+        updated.stock_quantity == null ? 'closed' : 'lost');
+      broadcast(req.user.business_id, { type: 'stock' });
     }
     // An edit counts as a manual save too, so an old item without a code gets
     // one — and clearing the field resets it to the generated code.
@@ -673,8 +750,10 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     if (price !== undefined && parseFloat(price) !== parseFloat(before.price)) {
       audit.logItemPriceChanged(actor, updated, parseFloat(before.price), parseFloat(price));
     }
-    if (stock_quantity !== undefined && parseFloat(stock_quantity) !== parseFloat(before.stock_quantity)) {
-      audit.logItemStockAdjusted(actor, updated, before.stock_quantity, parseFloat(stock_quantity));
+    const newStock = stock_quantity == null ? null : parseFloat(stock_quantity);
+    const oldStock = before.stock_quantity == null ? null : parseFloat(before.stock_quantity);
+    if (stock_quantity !== undefined && newStock !== oldStock) {
+      audit.logItemStockAdjusted(actor, updated, before.stock_quantity, newStock);
     }
 
     return res.json(updated);
@@ -706,6 +785,8 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
       .input('id', sql.UniqueIdentifier, req.params.id)
       .input('business_id', sql.UniqueIdentifier, req.user.business_id)
       .query('UPDATE items SET is_active = 0 WHERE id = @id AND business_id = @business_id');
+    // Its batches close (not a loss): they would sit in "Open" forever.
+    await batches.trimExcess(() => pool.request(), req.user.business_id, { item_id: req.params.id }, 'closed', true);
 
     audit.logItemDeleted(
       { user_id: req.user.user_id, user_name: req.user.name || null },
@@ -720,9 +801,10 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Item photo (customer-facing only). The owner uploads a JPEG that the device
-// has already resized/compressed. We store it on disk and record its public URL
-// in items.image_url; the QR order menu serves it. Billing never sees photos.
+// Item photo. The owner uploads a JPEG that the device has already
+// resized/compressed. We store it on disk and record its public URL in
+// items.image_url; the QR order menu serves it, and billing shows it when the
+// device's "Show item photos" setting is on.
 // ---------------------------------------------------------------------------
 
 // Raw JPEG body, scoped to this route only so no other route pays the cost and
@@ -808,12 +890,13 @@ async function loadOwnedItem(itemId, businessId) {
 const VARIANT_OUTPUT =
   'INSERTED.id, INSERTED.item_id, INSERTED.label, INSERTED.price, INSERTED.barcode, ' +
   'INSERTED.stock_quantity, INSERTED.low_stock_threshold, INSERTED.pack_unit, INSERTED.pack_size, ' +
-  'INSERTED.unit, INSERTED.sort_order, INSERTED.is_active';
+  'INSERTED.unit, INSERTED.sort_order, INSERTED.is_active, INSERTED.buying_price';
 
 // POST /api/items/:id/variants
 router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
   const {
     label, price, barcode, stock_quantity, low_stock_threshold, sort_order, pack_unit, pack_size, unit,
+    buying_price,
   } = req.body;
 
   const invalid = validateText(label, 'Size name', 50, { required: true })
@@ -842,10 +925,11 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
       .input('sort_order', sql.Int, sort_order != null ? parseInt(sort_order, 10) : 0)
       // NULL = counted in the item's unit.
       .input('unit', sql.NVarChar(20), normUnit(unit))
+      .input('buying_price', sql.Decimal(12, 4), costOrNull(buying_price))
       .query(`
-        INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, pack_unit, pack_size, unit, sort_order)
+        INSERT INTO item_variants (item_id, label, price, barcode, stock_quantity, low_stock_threshold, pack_unit, pack_size, unit, sort_order, buying_price)
         OUTPUT ${VARIANT_OUTPUT}
-        VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @pack_unit, @pack_size, @unit, @sort_order)
+        VALUES (@item_id, @label, @price, @barcode, @stock_quantity, @low_stock_threshold, @pack_unit, @pack_size, @unit, @sort_order, @buying_price)
       `);
 
     // Once an item has sizes, its own stock is meaningless — stock is tracked
@@ -854,6 +938,8 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
     await pool.request()
       .input('id', sql.UniqueIdentifier, req.params.id)
       .query('UPDATE items SET stock_quantity = NULL, low_stock_threshold = NULL, pack_unit = NULL, pack_size = NULL WHERE id = @id');
+    // ...and so are the item's own batches: untracked stock closes them.
+    await batches.trimExcess(() => pool.request(), req.user.business_id, { item_id: req.params.id }, 'closed');
 
     const created = result.recordset[0];
     await logAdjustment(pool, req.user.business_id, { variantId: created.id }, null, created.stock_quantity);
@@ -874,11 +960,13 @@ router.post('/:id/variants', requireAuth, ownerOnly, async (req, res) => {
 router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) => {
   const {
     label, price, barcode, stock_quantity, low_stock_threshold, sort_order, pack_unit, pack_size, unit,
+    buying_price,
   } = req.body;
 
   if (label === undefined && price === undefined && barcode === undefined &&
       stock_quantity === undefined && low_stock_threshold === undefined && sort_order === undefined &&
-      pack_unit === undefined && pack_size === undefined && unit === undefined) {
+      pack_unit === undefined && pack_size === undefined && unit === undefined &&
+      buying_price === undefined) {
     return res.status(400).json({ error: 'Provide at least one field to update' });
   }
   // The same rules as create — this route had none, so an edit could set a
@@ -938,6 +1026,12 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
       sets.push('unit = @unit');
       request.input('unit', sql.NVarChar(20), normUnit(unit));
     }
+    if (buying_price !== undefined) {
+      const bad = validateNumber(buying_price, 'Buying price');
+      if (bad) return res.status(400).json({ error: bad });
+      sets.push('buying_price = @buying_price');
+      request.input('buying_price', sql.Decimal(12, 4), costOrNull(buying_price));
+    }
 
     const result = await request.query(`
       UPDATE item_variants
@@ -952,8 +1046,12 @@ router.put('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, res) 
     const updated = result.recordset[0];
     const oldStock = updated.old_stock_quantity;
     delete updated.old_stock_quantity;
+    if (buying_price != null) await fillMissingCost(req.user.business_id, { variantId: updated.id }, buying_price);
     if (stock_quantity !== undefined) {
       await logAdjustment(pool, req.user.business_id, { variantId: updated.id }, oldStock, updated.stock_quantity);
+      await batches.trimExcess(() => pool.request(), req.user.business_id, { variant_id: updated.id },
+        updated.stock_quantity == null ? 'closed' : 'lost');
+      broadcast(req.user.business_id, { type: 'stock' });
     }
     await fillMissingBarcode('item_variants', updated);
     return res.json(updated);
@@ -983,6 +1081,7 @@ router.delete('/:id/variants/:variantId', requireAuth, ownerOnly, async (req, re
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: 'Variant not found' });
     }
+    await batches.trimExcess(() => pool.request(), req.user.business_id, { variant_id: req.params.variantId }, 'closed', true);
     return res.json({ success: true });
   } catch (err) {
     logger.error({ err }, 'Delete variant error');

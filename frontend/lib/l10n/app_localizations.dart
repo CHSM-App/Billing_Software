@@ -362,6 +362,18 @@ abstract class AppLocalizations {
   /// **'Give customers a priced quote, then turn it into a bill later'**
   String get settingsQuotationsSubtitle;
 
+  /// No description provided for @settingsStaffEditPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff can edit prices & discounts'**
+  String get settingsStaffEditPrice;
+
+  /// No description provided for @settingsStaffEditPriceSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn off so only the owner can change item prices or give discounts. Price lists still work.'**
+  String get settingsStaffEditPriceSubtitle;
+
   /// No description provided for @quotationQuoteShort.
   ///
   /// In en, this message translates to:
@@ -1645,6 +1657,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Show the bill discount (% / ₹) on billing. Item discounts stay either way.'**
   String get settingsBillDiscountSubtitle;
+
+  /// No description provided for @settingsBillingImages.
+  ///
+  /// In en, this message translates to:
+  /// **'Show item photos'**
+  String get settingsBillingImages;
+
+  /// No description provided for @settingsBillingImagesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show each item\'s photo (from Menu Photos) on the billing page'**
+  String get settingsBillingImagesSubtitle;
 
   /// No description provided for @settingsLanguageSubtitle.
   ///
@@ -3230,6 +3254,18 @@ abstract class AppLocalizations {
   /// **'Extra details'**
   String get billSetupWarrantyDetails;
 
+  /// No description provided for @billSetupDetailLabels.
+  ///
+  /// In en, this message translates to:
+  /// **'Default details on every bill'**
+  String get billSetupDetailLabels;
+
+  /// No description provided for @billSetupDetailLabelsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Comma-separated, e.g. Vehicle No, KM reading'**
+  String get billSetupDetailLabelsHint;
+
   /// No description provided for @billSetupNoteSubtitle.
   ///
   /// In en, this message translates to:
@@ -4048,18 +4084,6 @@ abstract class AppLocalizations {
   /// **'Default warranty period (months)'**
   String get itemsWarrantyDefaultMonths;
 
-  /// No description provided for @itemsManageWarrantyFields.
-  ///
-  /// In en, this message translates to:
-  /// **'Manage warranty fields for this category'**
-  String get itemsManageWarrantyFields;
-
-  /// No description provided for @itemsWarrantyFieldsFor.
-  ///
-  /// In en, this message translates to:
-  /// **'Warranty fields for {category}'**
-  String itemsWarrantyFieldsFor(String category);
-
   /// No description provided for @itemsFieldItemNo.
   ///
   /// In en, this message translates to:
@@ -4083,6 +4107,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stock quantity'**
   String get itemsFieldStock;
+
+  /// No description provided for @itemsFieldStockHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave blank for services — no stock kept'**
+  String get itemsFieldStockHint;
 
   /// No description provided for @itemsFieldUnit.
   ///
@@ -6220,6 +6250,12 @@ abstract class AppLocalizations {
   /// **'80mm (3 inch thermal)'**
   String get printerSetupPaperSize80;
 
+  /// No description provided for @printerSetupPaperSize112.
+  ///
+  /// In en, this message translates to:
+  /// **'112mm (4 inch thermal)'**
+  String get printerSetupPaperSize112;
+
   /// No description provided for @printerSetupPaperSizeA5.
   ///
   /// In en, this message translates to:
@@ -6241,7 +6277,7 @@ abstract class AppLocalizations {
   /// No description provided for @printerSetupNoteThermal.
   ///
   /// In en, this message translates to:
-  /// **'58mm/80mm print to a thermal printer; A5/A4 make a PDF invoice'**
+  /// **'58/80/112mm print to a thermal printer; A5/A4 make a PDF invoice'**
   String get printerSetupNoteThermal;
 
   /// No description provided for @conflictQueuedForRetry.
@@ -6745,32 +6781,122 @@ abstract class AppLocalizations {
   /// No description provided for @purchaseScanWarnAmountMissing.
   ///
   /// In en, this message translates to:
-  /// **'Line {line}: amount couldn\'t be read — enter it from the bill.'**
-  String purchaseScanWarnAmountMissing(int line);
+  /// **'Amount couldn\'t be read — enter it from the bill.'**
+  String get purchaseScanWarnAmountMissing;
+
+  /// No description provided for @purchaseScanWarnQtyMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Quantity couldn\'t be read — enter it from the bill.'**
+  String get purchaseScanWarnQtyMissing;
+
+  /// No description provided for @purchaseScanWarnRateQty.
+  ///
+  /// In en, this message translates to:
+  /// **'Quantity × bill rate Rs. {rate} doesn\'t give the amount — the quantity is probably {qty}.'**
+  String purchaseScanWarnRateQty(String rate, String qty);
+
+  /// No description provided for @purchaseScanWarnRate.
+  ///
+  /// In en, this message translates to:
+  /// **'Quantity × bill rate Rs. {rate} doesn\'t give the amount. Check the quantity on the bill.'**
+  String purchaseScanWarnRate(String rate);
+
+  /// No description provided for @purchaseScanUseQty.
+  ///
+  /// In en, this message translates to:
+  /// **'Use {qty}'**
+  String purchaseScanUseQty(String qty);
+
+  /// No description provided for @purchaseScanWarnQtyMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Bill shows {printed} received in total; paid + free here is {computed}.'**
+  String purchaseScanWarnQtyMismatch(String printed, String computed);
 
   /// No description provided for @purchaseScanWarnLineTax.
   ///
   /// In en, this message translates to:
-  /// **'Line {line}: GST printed on the bill doesn\'t match its rate.'**
-  String purchaseScanWarnLineTax(int line);
+  /// **'GST printed on the bill doesn\'t match this rate.'**
+  String get purchaseScanWarnLineTax;
 
   /// No description provided for @purchaseScanWarnCgstSgst.
   ///
   /// In en, this message translates to:
-  /// **'Line {line}: CGST and SGST on the bill are different.'**
-  String purchaseScanWarnCgstSgst(int line);
+  /// **'CGST and SGST on the bill are different.'**
+  String get purchaseScanWarnCgstSgst;
 
   /// No description provided for @purchaseScanWarnTaxType.
   ///
   /// In en, this message translates to:
-  /// **'Line {line}: IGST / CGST+SGST doesn\'t match the bill\'s interstate setting.'**
-  String purchaseScanWarnTaxType(int line);
+  /// **'IGST / CGST+SGST doesn\'t match the bill\'s interstate setting.'**
+  String get purchaseScanWarnTaxType;
 
   /// No description provided for @purchaseScanWarnCess.
   ///
   /// In en, this message translates to:
-  /// **'Line {line}: cess is printed but not recorded. Add it as a separate line if needed.'**
-  String purchaseScanWarnCess(int line);
+  /// **'Cess is printed but not recorded. Add it as a separate line if needed.'**
+  String get purchaseScanWarnCess;
+
+  /// No description provided for @purchaseScanDuplicate.
+  ///
+  /// In en, this message translates to:
+  /// **'This bill looks already entered (invoice dated {date}). Check Purchases before saving.'**
+  String purchaseScanDuplicate(String date);
+
+  /// No description provided for @purchaseScanLinkedSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'{linked} of {total} lines linked to items'**
+  String purchaseScanLinkedSummary(int linked, int total);
+
+  /// No description provided for @purchaseScanNotLinked.
+  ///
+  /// In en, this message translates to:
+  /// **'Not linked to an item — stock won\'t change'**
+  String get purchaseScanNotLinked;
+
+  /// No description provided for @purchaseScanAiMatched.
+  ///
+  /// In en, this message translates to:
+  /// **'AI matched — please check'**
+  String get purchaseScanAiMatched;
+
+  /// No description provided for @purchaseScanLinkTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Link: {name}'**
+  String purchaseScanLinkTo(String name);
+
+  /// No description provided for @purchaseScanPromptTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Have the supplier\'s bill?'**
+  String get purchaseScanPromptTitle;
+
+  /// No description provided for @purchaseScanPromptBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan it and this form fills itself. You check everything before saving.'**
+  String get purchaseScanPromptBody;
+
+  /// No description provided for @purchaseScanPromptButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan bill'**
+  String get purchaseScanPromptButton;
+
+  /// No description provided for @purchaseViewBill.
+  ///
+  /// In en, this message translates to:
+  /// **'View bill'**
+  String get purchaseViewBill;
+
+  /// No description provided for @purchaseBillShowFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t show the bill.'**
+  String get purchaseBillShowFailed;
 
   /// No description provided for @purchaseScanWarnSubtotal.
   ///
@@ -7005,6 +7131,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Status'**
   String get purchaseFieldStatus;
+
+  /// No description provided for @purchaseFieldAmountPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount paid'**
+  String get purchaseFieldAmountPaid;
 
   /// No description provided for @purchaseTaxableValue.
   ///
@@ -7714,12 +7846,6 @@ abstract class AppLocalizations {
   /// **'Terms of Service'**
   String get termsConsentTos;
 
-  /// No description provided for @termsConsentAup.
-  ///
-  /// In en, this message translates to:
-  /// **'Acceptable Use Policy'**
-  String get termsConsentAup;
-
   /// No description provided for @termsConsentPrivacy.
   ///
   /// In en, this message translates to:
@@ -7773,12 +7899,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The agreement for using Vittam'**
   String get settingsTermsSubtitle;
-
-  /// No description provided for @settingsAupSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'What is not allowed on Vittam'**
-  String get settingsAupSubtitle;
 
   /// No description provided for @settingsBarcodeScanner.
   ///
@@ -7893,6 +8013,378 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Barcode number'**
   String get barcodesFieldCode;
+
+  /// No description provided for @settingsBatches.
+  ///
+  /// In en, this message translates to:
+  /// **'Maintain batches'**
+  String get settingsBatches;
+
+  /// No description provided for @settingsBatchesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Each purchase goes into a batch with its cost. Reports show real profit and the cart shows the purchase price.'**
+  String get settingsBatchesSubtitle;
+
+  /// No description provided for @batchCostLine.
+  ///
+  /// In en, this message translates to:
+  /// **'{code} · Cost ₹{cost}'**
+  String batchCostLine(String code, String cost);
+
+  /// No description provided for @batchPickTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Sell from batch'**
+  String get batchPickTitle;
+
+  /// No description provided for @batchLeftCost.
+  ///
+  /// In en, this message translates to:
+  /// **'{qty} left · Cost ₹{cost}'**
+  String batchLeftCost(String qty, String cost);
+
+  /// No description provided for @batchChip.
+  ///
+  /// In en, this message translates to:
+  /// **'Batch: {label}'**
+  String batchChip(String label);
+
+  /// No description provided for @batchNew.
+  ///
+  /// In en, this message translates to:
+  /// **'New batch'**
+  String get batchNew;
+
+  /// No description provided for @batchNoForItem.
+  ///
+  /// In en, this message translates to:
+  /// **'Batch no. for this item only (optional)'**
+  String get batchNoForItem;
+
+  /// No description provided for @batchAddTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to an existing batch (same rate only)'**
+  String get batchAddTo;
+
+  /// No description provided for @batchesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Batches'**
+  String get batchesTitle;
+
+  /// No description provided for @batchesOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get batchesOpen;
+
+  /// No description provided for @batchesSettled.
+  ///
+  /// In en, this message translates to:
+  /// **'Settled'**
+  String get batchesSettled;
+
+  /// No description provided for @batchesNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No batches here yet'**
+  String get batchesNone;
+
+  /// No description provided for @batchCardStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Bought {received} · Sold {sold} · Left {left}'**
+  String batchCardStock(String received, String sold, String left);
+
+  /// No description provided for @batchCardLost.
+  ///
+  /// In en, this message translates to:
+  /// **'Written off {qty}'**
+  String batchCardLost(String qty);
+
+  /// No description provided for @batchCardMoney.
+  ///
+  /// In en, this message translates to:
+  /// **'Sales ₹{sales} · Cost ₹{cost}'**
+  String batchCardMoney(String sales, String cost);
+
+  /// No description provided for @batchProfit.
+  ///
+  /// In en, this message translates to:
+  /// **'Profit ₹{amount}'**
+  String batchProfit(String amount);
+
+  /// No description provided for @batchLoss.
+  ///
+  /// In en, this message translates to:
+  /// **'Loss ₹{amount}'**
+  String batchLoss(String amount);
+
+  /// No description provided for @reportProfitTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Profit'**
+  String get reportProfitTitle;
+
+  /// No description provided for @reportCostedSales.
+  ///
+  /// In en, this message translates to:
+  /// **'Sales with known cost'**
+  String get reportCostedSales;
+
+  /// No description provided for @reportCostOfGoods.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost of goods'**
+  String get reportCostOfGoods;
+
+  /// No description provided for @reportGrossProfit.
+  ///
+  /// In en, this message translates to:
+  /// **'Gross profit'**
+  String get reportGrossProfit;
+
+  /// No description provided for @reportUncostedNote.
+  ///
+  /// In en, this message translates to:
+  /// **'₹{amount} of sales have no purchase cost (old stock or untracked items) and are not in profit.'**
+  String reportUncostedNote(String amount);
+
+  /// No description provided for @purchaseBillBatchNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Batch no. (blank = automatic)'**
+  String get purchaseBillBatchNo;
+
+  /// No description provided for @batchItemCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} items'**
+  String batchItemCount(String count);
+
+  /// No description provided for @batchEarlierNos.
+  ///
+  /// In en, this message translates to:
+  /// **'Earlier batch nos.'**
+  String get batchEarlierNos;
+
+  /// No description provided for @batchStatItems.
+  ///
+  /// In en, this message translates to:
+  /// **'Items'**
+  String get batchStatItems;
+
+  /// No description provided for @batchStatSales.
+  ///
+  /// In en, this message translates to:
+  /// **'Sales'**
+  String get batchStatSales;
+
+  /// No description provided for @batchStatCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost'**
+  String get batchStatCost;
+
+  /// No description provided for @batchStatProfit.
+  ///
+  /// In en, this message translates to:
+  /// **'Profit'**
+  String get batchStatProfit;
+
+  /// No description provided for @batchStatLoss.
+  ///
+  /// In en, this message translates to:
+  /// **'Loss'**
+  String get batchStatLoss;
+
+  /// No description provided for @batchStatBought.
+  ///
+  /// In en, this message translates to:
+  /// **'Bought'**
+  String get batchStatBought;
+
+  /// No description provided for @batchStatSold.
+  ///
+  /// In en, this message translates to:
+  /// **'Sold'**
+  String get batchStatSold;
+
+  /// No description provided for @batchStatLeft.
+  ///
+  /// In en, this message translates to:
+  /// **'Left'**
+  String get batchStatLeft;
+
+  /// No description provided for @batchStatCostUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost / unit'**
+  String get batchStatCostUnit;
+
+  /// No description provided for @batchNotSold.
+  ///
+  /// In en, this message translates to:
+  /// **'Not sold yet'**
+  String get batchNotSold;
+
+  /// No description provided for @itemsServiceNoStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Service (no stock)'**
+  String get itemsServiceNoStock;
+
+  /// No description provided for @itemsServiceNoStockHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchases never add stock for it — e.g. fitting, nitrogen filling'**
+  String get itemsServiceNoStockHint;
+
+  /// No description provided for @purchaseDeleteSoldNote.
+  ///
+  /// In en, this message translates to:
+  /// **'{qty} units from this bill are already sold — their cost stays on record.'**
+  String purchaseDeleteSoldNote(String qty);
+
+  /// No description provided for @itemsBuyingPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Buying price (optional)'**
+  String get itemsBuyingPrice;
+
+  /// No description provided for @itemsBuyingPriceHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Per unit, before GST — used for profit when you don\'t enter purchase bills'**
+  String get itemsBuyingPriceHint;
+
+  /// No description provided for @batchOldStock.
+  ///
+  /// In en, this message translates to:
+  /// **'Old stock'**
+  String get batchOldStock;
+
+  /// No description provided for @batchLeftOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'{qty} left'**
+  String batchLeftOnly(String qty);
+
+  /// No description provided for @batchStatHeld.
+  ///
+  /// In en, this message translates to:
+  /// **'Held'**
+  String get batchStatHeld;
+
+  /// No description provided for @batchPurchases.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} purchases'**
+  String batchPurchases(String count);
+
+  /// No description provided for @reportProfitNoCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter purchase bills, or set a Buying price on items, to see profit.'**
+  String get reportProfitNoCost;
+
+  /// No description provided for @settingsStaffSeeCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Staff see purchase cost'**
+  String get settingsStaffSeeCost;
+
+  /// No description provided for @settingsStaffSeeCostSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show each batch\'s cost to cashiers while billing. Off: only the owner sees it.'**
+  String get settingsStaffSeeCostSubtitle;
+
+  /// No description provided for @returnsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Returns'**
+  String get returnsTitle;
+
+  /// No description provided for @returnItemsAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Return items'**
+  String get returnItemsAction;
+
+  /// No description provided for @returnItemsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Return items · {bill}'**
+  String returnItemsTitle(String bill);
+
+  /// No description provided for @returnItemsHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose what came back. Stock goes back on the shelf and a credit note is made at this bill\'s prices.'**
+  String get returnItemsHint;
+
+  /// No description provided for @returnQtyLeft.
+  ///
+  /// In en, this message translates to:
+  /// **'{qty} can be returned'**
+  String returnQtyLeft(String qty);
+
+  /// No description provided for @returnRefundBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Refund by'**
+  String get returnRefundBy;
+
+  /// No description provided for @returnRefundCredit.
+  ///
+  /// In en, this message translates to:
+  /// **'Less from due'**
+  String get returnRefundCredit;
+
+  /// No description provided for @returnReason.
+  ///
+  /// In en, this message translates to:
+  /// **'Reason (optional)'**
+  String get returnReason;
+
+  /// No description provided for @returnChooseItems.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose items to return'**
+  String get returnChooseItems;
+
+  /// No description provided for @returnSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save credit note · {amount}'**
+  String returnSave(String amount);
+
+  /// No description provided for @returnSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Credit note {number} saved'**
+  String returnSaved(String number);
+
+  /// No description provided for @returnPrint.
+  ///
+  /// In en, this message translates to:
+  /// **'Print'**
+  String get returnPrint;
+
+  /// No description provided for @returnUndo.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo return'**
+  String get returnUndo;
+
+  /// No description provided for @returnUndoConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo credit note {number}? The goods come off stock again.'**
+  String returnUndoConfirm(String number);
 }
 
 class _AppLocalizationsDelegate

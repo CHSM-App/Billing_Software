@@ -6,6 +6,7 @@ jest.mock('@anthropic-ai/sdk', () => jest.fn(() => {
 
 const {
   normalizeDraft, checkDraft, sniffMediaType, countPdfPages, aliasText, vendorKey, BILL_SCHEMA,
+  pickMatches, shortlist,
 } = require('../../src/purchaseScan');
 
 describe('BILL_SCHEMA', () => {
@@ -44,6 +45,16 @@ describe('normalizeDraft', () => {
     expect(d.lines[0].vendor_text).toBe('Amul Butter 100g');
   });
 
+  test("the bill's context (brand heading) goes into the vendor wording", () => {
+    const d = normalizeDraft({ header: header(), lines: [
+      line({ name: 'Tyre 145/80 R12', full_description: 'Yokohama Tyre 145/80 R12' }),
+      line({ name: 'Tyre 145/80 R13', full_description: '  ' }),
+    ] });
+    expect(d.lines[0].name).toBe('Tyre 145/80 R12');
+    expect(d.lines[0].vendor_text).toBe('Yokohama Tyre 145/80 R12');
+    expect(d.lines[1].vendor_text).toBe('Tyre 145/80 R13');
+  });
+
   test('invalid GSTIN becomes null; spaced/lower-case valid one is cleaned', () => {
     expect(normalizeDraft({ header: header({ vendor_gstin: '27ABCDE1234' }) }).header.vendor_gstin).toBeNull();
     expect(normalizeDraft({ header: header({ vendor_gstin: ' 27abcde 1234f1z5 ' }) }).header.vendor_gstin)
@@ -79,14 +90,13 @@ describe('normalizeDraft', () => {
     expect(d.lines[0].tax_rate).toBeNull();
   });
 
-  test('drops lines with zero, negative or missing quantity, or no name', () => {
+  test('drops nameless lines; keeps an unreadable quantity as null', () => {
     const d = normalizeDraft({
       header: header(),
       lines: [line({ quantity: 0 }), line({ quantity: -3 }), line({ quantity: null }),
         line({ name: '  ' }), line({ quantity: '4' })],
     });
-    expect(d.lines).toHaveLength(1);
-    expect(d.lines[0].quantity).toBe(4);
+    expect(d.lines.map((l) => l.quantity)).toEqual([null, null, null, 4]);
   });
 
   test('keeps valid free quantity; negative free becomes 0', () => {
@@ -187,6 +197,35 @@ describe('checkDraft', () => {
     expect(checkDraft(d)).toEqual([]);
   });
 
+  test('a line without a quantity is flagged; totals still check by amount', () => {
+    const w = checkDraft(draft(header({ total: 600 }), [line({ quantity: null })]));
+    expect(w).toContainEqual({ code: 'line_quantity_missing', line: 0 });
+    expect(w).toContainEqual({ code: 'total_mismatch', printed: 600, computed: 560 });
+    expect(checkDraft(draft(header(), [line({ quantity: null })])))
+      .toEqual([{ code: 'line_quantity_missing', line: 0 }]);
+  });
+
+  test('flags a printed total quantity that is not paid + free', () => {
+    expect(checkDraft(draft(header(), [line({ free_quantity: 2, total_quantity: 12 })]))).toEqual([]);
+    expect(checkDraft(draft(header(), [line({ free_quantity: 2, total_quantity: 14 })])))
+      .toEqual([{ code: 'line_qty_mismatch', line: 0, printed: 14, computed: 12 }]);
+  });
+
+  test('flags quantity × printed rate that misses the amount, with the likely quantity', () => {
+    // Invoice 1478 line 2: "2" struck out, "4 Nos" written; 4 × 4,680 = 18,720.
+    const tyre = { name: 'Apollo 175/65 R15 GT Max', quantity: 2, rate: 4680, amount: 18720,
+      tax_rate: 18, cgst: null, sgst: null };
+    const h = { subtotal: 18720, total_tax: null, total: null };
+    expect(checkDraft(draft(header(h), [line(tyre)])))
+      .toEqual([{ code: 'line_rate_mismatch', line: 0, rate: 4680, computed_qty: 4 }]);
+    expect(checkDraft(draft(header(h), [line({ ...tyre, quantity: 4 })]))).toEqual([]);
+    // 18,720 / 5,000 is not a whole number: flagged, no quantity offered.
+    expect(checkDraft(draft(header(h), [line({ ...tyre, rate: 5000 })])))
+      .toEqual([{ code: 'line_rate_mismatch', line: 0, rate: 5000 }]);
+    // No printed rate: nothing to check.
+    expect(checkDraft(draft(header(h), [line({ ...tyre, rate: null })]))).toEqual([]);
+  });
+
   test('flags printed cess as unsupported', () => {
     const w = checkDraft(draft(header(), [line({ cess: 5 })]));
     expect(w.map((x) => x.code)).toContain('cess_not_supported');
@@ -206,6 +245,123 @@ describe('file checks', () => {
   test('counts PDF page objects, not the /Pages tree', () => {
     const pdf = Buffer.from('%PDF-1.4 /Type /Pages /Count 2 /Type /Page /Type/Page');
     expect(countPdfPages(pdf)).toBe(2);
+  });
+});
+
+describe('pickMatches', () => {
+  const labels = (n) => Array.from({ length: n }, (_, i) => `Item ${String.fromCharCode(65 + i)}`);
+  const lines = (...nums) => nums.map((line) => ({ line, text: 'Tyre 145/80 R12' }));
+
+  test('one ref is a match, two to four are choices, more is nothing', () => {
+    const m = pickMatches([
+      { line: 0, refs: [3] },
+      { line: 1, refs: [1, 2] },
+      { line: 2, refs: [1, 2, 3, 4, 5] },
+    ], lines(0, 1, 2), labels(10));
+    expect(m.get(0)).toEqual([2]);
+    expect(m.get(1)).toEqual([0, 1]);
+    expect(m.has(2)).toBe(false);
+  });
+
+  test('trusts nothing: unknown lines, out-of-range, non-integer and repeated refs', () => {
+    const m = pickMatches([
+      { line: 7, refs: [1] },
+      { line: 0, refs: [0, 11, 1.5, '2', 4, 4] },
+      { line: 0, refs: [5] },
+      null,
+      { line: 1, refs: 'all' },
+    ], lines(0, 1), labels(10));
+    expect([...m.keys()]).toEqual([0]);
+    expect(m.get(0)).toEqual([3]);
+  });
+
+  test('a non-array answer yields nothing', () => {
+    expect(pickMatches(undefined, lines(0), labels(5)).size).toBe(0);
+  });
+
+  test('drops choices whose size contradicts the line, however the unit is written', () => {
+    const cat = ['Table Salt > 1 kg', 'Table Salt > 5 kg', 'Tata Salt 1000g', 'Rava > 500 g',
+      'Rava > 1 kg', 'Fortune Oil 1L', 'Oil > 500 ml', 'Parle-G Biscuit'];
+    const m = pickMatches([
+      { line: 0, refs: [1, 2, 3] }, // SALT 1 KG: 5 kg goes, 1 kg and 1000g stay
+      { line: 1, refs: [4, 5] }, // SOOJI 1KG: only the 1 kg is left — a link
+      { line: 2, refs: [6, 7] }, // 1 LTR = 1L
+      { line: 3, refs: [8] }, // an entry with no size never conflicts
+      { line: 4, refs: [4] }, // a lone wrong-size pick is no match at all
+    ], [
+      { line: 0, text: 'SALT 1 KG' }, { line: 1, text: 'SOOJI 1KG' },
+      { line: 2, text: 'FORTUNE OIL 1 LTR' }, { line: 3, text: 'PARLE G 50G' },
+      { line: 4, text: 'RAVA 1 kgs' },
+    ], cat);
+    expect(m.get(0)).toEqual([0, 2]);
+    expect(m.get(1)).toEqual([4]);
+    expect(m.get(2)).toEqual([5]);
+    expect(m.get(3)).toEqual([7]);
+    expect(m.has(4)).toBe(false);
+  });
+
+  test('a line with no size, or tyre sizes, keeps every choice', () => {
+    const m = pickMatches([{ line: 0, refs: [1, 2] }, { line: 1, refs: [3, 4] }],
+      [{ line: 0, text: 'Toor Dal' }, { line: 1, text: 'Yokohama Tyre 175/70 R14' }],
+      ['Toor Dal > 500 g', 'Toor Dal > 1 kg', 'Yokohama 175/70 R14 > GT Max', 'Yokohama 175/70 R14 > Earth-1 Max']);
+    expect(m.get(0)).toEqual([0, 1]);
+    expect(m.get(1)).toEqual([2, 3]);
+  });
+
+  // A real scan (Sharma Tyre Service, invoice 1478): asked for these among 737
+  // tyres, the model answered other sizes.
+  test('drops a tyre of another size, however the size is written', () => {
+    const cat = ['Apollo Tyres 185/65 R15 > GT Max', 'Apollo Tyres 205/65 R16 > GT Max',
+      'Apollo Tyres 205/65 R16 > G057', 'Apollo Tyres 215/65 R16 > G055'];
+    const m = pickMatches([
+      { line: 0, refs: [1] }, // 205/65 R16 GT-Max → answered 185/65 R15
+      { line: 1, refs: [3] }, // 215/65 R16 GOSS → answered 205/65 R16 G057
+      { line: 2, refs: [2] }, // written without the space
+    ], [
+      { line: 0, text: 'Apollo 205/65 R16 GT-Max' },
+      { line: 1, text: 'Apollo 215/65 R16 GOSS' },
+      { line: 2, text: 'APOLLO 205/65R16 GT MAX' },
+    ], cat);
+    expect(m.has(0)).toBe(false);
+    expect(m.has(1)).toBe(false);
+    expect(m.get(2)).toEqual([1]);
+  });
+
+  test('a lone pick slips to the same-size sibling the line actually names', () => {
+    const cat = ['Apollo Tyres 175/65 R15 > Earth-1 Max', 'Apollo Tyres 175/65 R15 > GT Max',
+      'Apollo Tyres 215/65 R16 > G055', 'Apollo Tyres 215/65 R16 > G015'];
+    const m = pickMatches([
+      { line: 0, refs: [1] }, // answered Earth-1 Max; the line says GT Max
+      { line: 1, refs: [3] }, // GOSS matches neither code: the model's G055 stands
+      { line: 2, refs: [2] }, // already right
+    ], [
+      { line: 0, text: 'Apollo 175/65 R15 GT Max' },
+      { line: 1, text: 'Apollo 215/65 R16 GOSS' },
+      { line: 2, text: 'Apollo 175/65 R15 GT-Max' },
+    ], cat);
+    expect(m.get(0)).toEqual([1]);
+    expect(m.get(1)).toEqual([2]);
+    expect(m.get(2)).toEqual([1]);
+  });
+});
+
+describe('shortlist', () => {
+  const cat = ['Services > Air Pressure Check', 'Apollo Tyres 175/65 R15 > Earth-1 Max',
+    'Apollo Tyres 175/65 R15 > GT Max', 'Apollo Tyres 175/60 R15 > GT Max',
+    'Apollo Tyres 215/65 R16 > G055', 'Apollo Tyres 215/65 R16 > G015', 'Amul Butter 100g'];
+
+  test('leaves out entries of other sizes; entries with no size always go', () => {
+    const idx = shortlist([{ text: 'Apollo 175/65 R15 GT Max' }, { text: 'Apollo 215/65R16 GOSS' }], cat);
+    expect(idx).toEqual([0, 1, 2, 4, 5]);
+  });
+
+  test('any line without a size needs the whole list', () => {
+    const idx = shortlist([{ text: 'Apollo 175/65 R15 GT Max' }, { text: 'Valve tube' }], cat);
+    expect(idx).toEqual(cat.map((_, i) => i));
+  });
+
+  test('weights count as sizes too', () => {
+    expect(shortlist([{ text: 'AMUL BUTTER 100 GM' }], cat)).toEqual([0, 6]);
   });
 });
 

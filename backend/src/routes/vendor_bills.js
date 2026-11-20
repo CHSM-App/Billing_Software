@@ -10,9 +10,12 @@ const {
   PRIVATE_DIR, EXT, MAX_IMAGE_BYTES, MONTH_START_UTC_SQL,
   scanConfig, sniffMediaType, countPdfPages,
   extractPurchaseBill, normalizeDraft, checkDraft, aliasText, vendorKey,
+  matchLines, pickMatches, shortlist,
 } = require('../purchaseScan');
 const audit = require('../audit');
-const { logMovement } = require('../stockLedger');
+const { logMovement, snapshotBillCosts } = require('../stockLedger');
+const batches = require('../batches');
+const { broadcast } = require('../realtime');
 const logger = require('../logger');
 
 const router = express.Router();
@@ -62,6 +65,9 @@ function validateLines(lines) {
       if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
         return `${at}: GST rate must be between 0 and 100`;
       }
+    }
+    if (l.batch_id != null && l.batch_id !== '' && !UUID_RE.test(String(l.batch_id))) {
+      return `${at}: unknown batch`;
     }
     // Scheme goods ("10 + 2 free"): received into stock, never charged.
     if (l.free_quantity != null && l.free_quantity !== '') {
@@ -123,23 +129,38 @@ async function resolveTargets(transaction, businessId, lines) {
  */
 // `ctx` = { billId, date }: the purchase's invoice date, so a bill entered mid-day
 // (or backdated) lands on the day the goods are dated, not on entry time.
+//
+// `ctx.startTracking` (receiving, in a shop that maintains batches): an
+// untracked item or size starts tracking at what was received, so it can be
+// batched — maintaining batches means counting the stock. Never the parent of
+// a sized item: its stock lives on each size.
 async function applyLineStock(transaction, businessId, li, sign, ctx = {}) {
   const qty = sign * (Number(li.quantity) + (Number(li.free_quantity) || 0));
+  const start = !!ctx.startTracking && sign > 0;
   let r = null;
   if (li.variant_id) {
     r = await transaction.request()
       .input('id', sql.UniqueIdentifier, li.variant_id)
       .input('qty', sql.Decimal(10, 2), qty)
-      .query(`UPDATE item_variants SET stock_quantity = stock_quantity + @qty
-              WHERE id = @id AND stock_quantity IS NOT NULL`);
+      .query(start
+        ? `UPDATE item_variants SET stock_quantity = ISNULL(stock_quantity, 0) + @qty
+           WHERE id = @id AND (stock_quantity IS NOT NULL OR NOT EXISTS (
+             SELECT 1 FROM items i WHERE i.id = item_variants.item_id AND i.is_service = 1))`
+        : `UPDATE item_variants SET stock_quantity = stock_quantity + @qty
+           WHERE id = @id AND stock_quantity IS NOT NULL`);
   } else if (li.item_id) {
     r = await transaction.request()
       .input('id', sql.UniqueIdentifier, li.item_id)
       .input('business_id', sql.UniqueIdentifier, businessId)
       .input('qty', sql.Decimal(10, 2), qty)
-      .query(`UPDATE items SET stock_quantity = stock_quantity + @qty
-              WHERE id = @id AND business_id = @business_id
-                AND stock_quantity IS NOT NULL`);
+      .query(start
+        ? `UPDATE items SET stock_quantity = ISNULL(stock_quantity, 0) + @qty
+           WHERE id = @id AND business_id = @business_id
+             AND (stock_quantity IS NOT NULL OR (is_service = 0 AND NOT EXISTS (
+               SELECT 1 FROM item_variants v WHERE v.item_id = items.id AND v.is_active = 1)))`
+        : `UPDATE items SET stock_quantity = stock_quantity + @qty
+           WHERE id = @id AND business_id = @business_id
+             AND stock_quantity IS NOT NULL`);
   } else if (li.raw_material_id) {
     await transaction.request()
       .input('id', sql.UniqueIdentifier, li.raw_material_id)
@@ -201,8 +222,13 @@ function shapeHeader(row) {
   };
 }
 
-async function fetchVendorBill(id, businessId) {
-  const head = await pool.request()
+/**
+ * With [lock] (inside a transaction), the bill row is held (UPDLOCK, HOLDLOCK)
+ * until it ends, so two edits/deletes of one bill queue instead of both
+ * reversing the same old lines.
+ */
+async function fetchVendorBill(id, businessId, newRequest = () => pool.request(), lock = false) {
+  const head = await newRequest()
     .input('id', sql.UniqueIdentifier, id)
     .input('business_id', sql.UniqueIdentifier, businessId)
     .query(`SELECT ${HEADER_COLS}, u.name AS created_by_name,
@@ -210,18 +236,20 @@ async function fetchVendorBill(id, businessId) {
                     FROM purchase_scans ps
                     WHERE ps.id = vb.scan_id AND ps.business_id = vb.business_id
                    ) AS has_attachment
-            FROM vendor_bills vb
+            FROM vendor_bills vb ${lock ? 'WITH (UPDLOCK, HOLDLOCK)' : ''}
             LEFT JOIN users u ON u.id = vb.created_by_user_id
             WHERE vb.id = @id AND vb.business_id = @business_id`);
   if (!head.recordset.length) return null;
 
-  const lines = await pool.request()
+  const lines = await newRequest()
     .input('id', sql.UniqueIdentifier, id)
-    .query(`SELECT id, item_id, variant_id, raw_material_id, item_name,
-                   quantity, free_quantity, unit, unit_price, tax_rate, hsn_code,
-                   line_total, sort_order
-            FROM vendor_bill_items
-            WHERE vendor_bill_id = @id ORDER BY sort_order`);
+    .query(`SELECT vbi.id, vbi.item_id, vbi.variant_id, vbi.raw_material_id, vbi.item_name,
+                   vbi.quantity, vbi.free_quantity, vbi.unit, vbi.unit_price, vbi.tax_rate,
+                   vbi.hsn_code, vbi.line_total, vbi.sort_order,
+                   vbi.batch_id, sb.batch_no, sb.qty_sold AS batch_sold
+            FROM vendor_bill_items vbi
+            LEFT JOIN stock_batches sb ON sb.id = vbi.batch_id
+            WHERE vbi.vendor_bill_id = @id ORDER BY vbi.sort_order`);
 
   return {
     ...shapeHeader(head.recordset[0]),
@@ -239,6 +267,9 @@ async function fetchVendorBill(id, businessId) {
       hsn_code: l.hsn_code,
       line_total: parseFloat(l.line_total),
       sort_order: l.sort_order,
+      batch_id: l.batch_id ?? null,
+      batch_code: l.batch_no ?? null,
+      batch_sold: l.batch_sold != null ? parseFloat(l.batch_sold) : 0,
     })),
   };
 }
@@ -248,11 +279,13 @@ async function fetchVendorBill(id, businessId) {
 async function readBusinessFlags(transaction, businessId) {
   const r = await transaction.request()
     .input('business_id', sql.UniqueIdentifier, businessId)
-    .query(`SELECT inventory_enabled, gst_enabled, gst_number, state
+    .query(`SELECT inventory_enabled, gst_enabled, gst_number, state, batch_tracking_enabled
             FROM businesses WHERE id = @business_id`);
   const b = r.recordset[0] || {};
   return {
     inventoryEnabled: !!b.inventory_enabled,
+    // Batches only split tracked stock: off whenever inventory is.
+    batchesEnabled: !!b.inventory_enabled && !!b.batch_tracking_enabled,
     gstEnabled: !!b.gst_enabled,
     gstin: b.gst_number || '',
     state: b.state || '',
@@ -356,6 +389,92 @@ function readHeader(body) {
     itcEligible: body.itc_eligible === undefined ? true : !!body.itc_eligible,
     reverseCharge: !!body.reverse_charge,
   };
+}
+
+/** Save a bill's lines, each with the stock batch it went into (or none). */
+async function insertLines(transaction, billId, lines, batchIds = []) {
+  // mssql requests are single-use: a fresh one per statement.
+  for (let i = 0; i < lines.length; i++) {
+    const li = lines[i];
+    await transaction.request()
+      .input('vendor_bill_id', sql.UniqueIdentifier, billId)
+      .input('item_id', sql.UniqueIdentifier, li.item_id)
+      .input('variant_id', sql.UniqueIdentifier, li.variant_id)
+      .input('raw_material_id', sql.UniqueIdentifier, li.raw_material_id)
+      .input('item_name', sql.NVarChar(200), li.item_name)
+      .input('quantity', sql.Decimal(10, 2), li.quantity)
+      .input('free_quantity', sql.Decimal(10, 2), li.free_quantity)
+      .input('unit', sql.NVarChar(20), li.unit)
+      .input('unit_price', sql.Decimal(12, 4), li.unit_price)
+      .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
+      .input('hsn_code', sql.NVarChar(10), li.hsn_code)
+      .input('line_total', sql.Decimal(12, 2), li.line_total)
+      .input('sort_order', sql.Int, li.sort_order)
+      .input('batch_id', sql.UniqueIdentifier, batchIds[i] || null)
+      .query(`
+        INSERT INTO vendor_bill_items (
+          vendor_bill_id, item_id, variant_id, raw_material_id, item_name,
+          quantity, free_quantity, unit, unit_price, tax_rate, hsn_code,
+          line_total, sort_order, batch_id)
+        VALUES (
+          @vendor_bill_id, @item_id, @variant_id, @raw_material_id, @item_name,
+          @quantity, @free_quantity, @unit, @unit_price, @tax_rate, @hsn_code,
+          @line_total, @sort_order, @batch_id)`);
+  }
+}
+
+/**
+ * Put the bill's stock into batches when the shop maintains them. Returns
+ * { ids } (per line, [] when off) or { error } for a 400.
+ */
+function receiveBatches(transaction, businessId, billId, head, flags, totals, prevLines = []) {
+  if (!flags.batchesEnabled) return { ids: [] };
+  // Lines with no item, size or raw material are freight / other charges:
+  // what was paid for them lands on the goods, spread by value.
+  const chargesNet = totals.lines
+    .filter((l) => !l.item_id && !l.variant_id && !l.raw_material_id)
+    .reduce((s, l) => s + l._net, 0);
+  const goodsNet = totals.subtotal - chargesNet;
+  return batches.receive(transaction, businessId, billId, head.invoiceDate, totals.lines, {
+    // An edit's lines that already sat in a batch (see the rate split).
+    prevBatchIds: new Set(prevLines.map((l) => l.batch_id).filter(Boolean)
+      .map((id) => String(id).toLowerCase())),
+    // Everything paid before GST (after the bill discount, freight included)
+    // spread over the goods: (subtotal − discount) / goods value.
+    costFactor: goodsNet > 0 ? (totals.subtotal - totals.discount) / goodsNet : 1,
+    // GST is a cost only when this shop can't claim it back.
+    gstIsCost: !(head.itcEligible && flags.gstEnabled),
+  });
+}
+
+/**
+ * After a purchase edit/delete: drop batches the old lines left empty, and
+ * (when the shop maintains batches) keep every touched item's batches within
+ * its stock total.
+ */
+async function settleBatches(transaction, businessId, flags, oldLines, touched) {
+  await batches.dropEmpty(transaction, businessId, oldLines.map((l) => l.batch_id));
+  if (!flags.batchesEnabled) return;
+  const seen = new Set();
+  for (const li of touched) {
+    const t = batches.targetOf(li);
+    if (!t || seen.has(String(t.id).toLowerCase())) continue;
+    seen.add(String(t.id).toLowerCase());
+    await batches.trimExcess(() => transaction.request(), businessId, li);
+  }
+}
+
+/**
+ * What was paid, from the status: all of it, none of it, or the owner's
+ * figure for a part payment. Returns { amount } or { error }.
+ */
+function paidAmount(head, total) {
+  if (head.paymentStatus === 'paid') return { amount: total };
+  if (head.paymentStatus === 'unpaid') return { amount: 0 };
+  if (!(head.amountPaid > 0 && head.amountPaid < total)) {
+    return { error: 'Amount paid must be more than 0 and less than the bill total' };
+  }
+  return { amount: head.amountPaid };
 }
 
 /** True when a duplicate-key violation tripped the unique invoice index. */
@@ -493,6 +612,49 @@ async function finishScan(scanId, status, { usage = {}, reason = null, keepFile 
               ${keepFile ? '' : ', file_path = NULL'}
             WHERE id = @id`);
 }
+
+/** Add the item-matching call's tokens to its scan — same scan, same quota slot. */
+async function addScanUsage(businessId, scanId, usage) {
+  await pool.request()
+    .input('id', sql.UniqueIdentifier, scanId)
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .input('input_tokens', sql.Int, usage.input_tokens || 0)
+    .input('output_tokens', sql.Int, usage.output_tokens || 0)
+    .query(`UPDATE purchase_scans SET input_tokens = input_tokens + @input_tokens,
+              output_tokens = output_tokens + @output_tokens
+            WHERE id = @id AND business_id = @business_id`);
+}
+
+/**
+ * What a purchase can be received into, as the app's buildStockTargets lists
+ * it: a restaurant's raw materials, else each item — one entry per size once
+ * it has sizes. `label` is the shop's own category path; names only, never
+ * prices or stock, since it is sent to the AI.
+ */
+async function loadCatalogue(businessId) {
+  const req = () => pool.request().input('business_id', sql.UniqueIdentifier, businessId);
+  const b = await req().query('SELECT business_type FROM businesses WHERE id = @business_id');
+  const type = b.recordset[0]?.business_type;
+  if (type === 'restaurant_with_tables' || type === 'restaurant_no_tables') {
+    const r = await req().query(`SELECT id, name FROM raw_materials
+      WHERE business_id = @business_id AND is_active = 1 ORDER BY name`);
+    return r.recordset.map((m) => ({ ids: { raw_material_id: m.id }, label: m.name }));
+  }
+  const r = await req().query(`
+    SELECT i.id AS item_id, v.id AS variant_id, i.major_category, i.category, i.name, v.label
+    FROM items i
+    LEFT JOIN item_variants v ON v.item_id = i.id AND v.is_active = 1
+    WHERE i.business_id = @business_id AND i.is_active = 1
+    ORDER BY i.name, v.sort_order`);
+  return r.recordset.map((x) => ({
+    ids: x.variant_id ? { variant_id: x.variant_id } : { item_id: x.item_id },
+    label: [x.major_category, x.category, x.name, x.label].filter(Boolean).join(' > '),
+  }));
+}
+
+// ponytail: the whole catalogue goes in one call; shortlist candidates first
+// if a shop grows past this.
+const MAX_MATCH_CATALOGUE = 3000;
 
 // GET /api/vendor-bills/scan/status — whether to offer "Scan bill", and usage.
 router.get('/scan/status', requireAuth, ownerOnly, async (req, res) => {
@@ -633,6 +795,88 @@ router.post('/scan', requireAuth, ownerOnly, purchaseScanLimiter, scanBody, asyn
       logger.error({ err }, 'purchase scan alias lookup failed');
     }
 
+    // ── Lines no saved mapping covers: which of the shop's items are they? ─
+    // Best effort too. The AI only answers with numbers from the list sent;
+    // the ids come from that list (this business's own rows), never the model.
+    // One ref links the line; 2..4 become one-tap choices for the owner.
+    try {
+      const catalogue = await loadCatalogue(businessId);
+      const live = new Set(catalogue.flatMap((c) => Object.values(c.ids))
+        .map((id) => String(id).toUpperCase()));
+      // An alias to a since-deleted item is no match: let the AI try instead.
+      for (const l of draft.lines) {
+        const m = l.match;
+        if (m && ![m.item_id, m.variant_id, m.raw_material_id]
+          .some((id) => id && live.has(String(id).toUpperCase()))) delete l.match;
+      }
+      const todo = draft.lines
+        .map((l, i) => ({ line: i, text: l.vendor_text || l.name, unit: l.unit, l }))
+        .filter((x) => !x.l.match);
+      // Only the entries of the sizes on the bill when every line names one;
+      // [sent] maps the numbers the AI sees back to catalogue rows.
+      const sent = todo.length ? shortlist(todo, catalogue.map((c) => c.label)) : [];
+      if (sent.length && sent.length <= MAX_MATCH_CATALOGUE) {
+        const labels = sent.map((n) => catalogue[n].label);
+        const { results, usage } = await matchLines(todo, labels);
+        addScanUsage(businessId, scanId, usage)
+          .catch((e) => logger.error({ err: e }, 'purchase scan usage update failed'));
+        const picked = pickMatches(results, todo, labels);
+        for (const [i, refs] of picked) {
+          const rows = refs.map((n) => catalogue[sent[n]]);
+          if (rows.length === 1) {
+            draft.lines[i].match = {
+              item_id: null, variant_id: null, raw_material_id: null,
+              ...rows[0].ids, in_packs: false, source: 'ai',
+            };
+          } else {
+            draft.lines[i].suggest = rows.map((c) => c.ids);
+          }
+        }
+        // Counts only — no names or prices — so "why didn't it link?" can be
+        // answered from the log next time.
+        logger.info({
+          scanId, catalogue: catalogue.length, sent: sent.length,
+          refs: todo.map((t) => picked.get(t.line)?.length ?? 0),
+        }, 'purchase scan item matching');
+      }
+    } catch (err) {
+      if (err.usage) {
+        addScanUsage(businessId, scanId, err.usage)
+          .catch((e) => logger.error({ err: e }, 'purchase scan usage update failed'));
+      }
+      logger.warn({ err, scanId }, 'purchase scan item matching failed');
+    }
+
+    // ── Already entered? ──────────────────────────────────────────────────
+    // Warn now rather than after the owner reviews every line. Same key as
+    // UQ_vendor_bills_invoice when the GSTIN is known; by name otherwise (the
+    // index can't catch those, so this is the only check they get). Save still
+    // enforces the index. Best effort, like the alias lookup.
+    try {
+      const { vendor_gstin: g, vendor_name: name, invoice_number: inv } = draft.header;
+      if (inv && (g || name)) {
+        const r = await pool.request()
+          .input('business_id', sql.UniqueIdentifier, businessId)
+          .input('invoice_number', sql.NVarChar(50), inv)
+          .input('gstin', sql.NVarChar(20), g)
+          .input('vendor_name', sql.NVarChar(200), name)
+          .query(`SELECT TOP 1 id AS duplicate_id, invoice_date FROM vendor_bills
+                  WHERE business_id = @business_id AND invoice_number = @invoice_number
+                    AND ${g ? 'vendor_gstin = @gstin' : 'LOWER(vendor_name) = LOWER(@vendor_name)'}`);
+        const dup = r.recordset[0];
+        if (dup) {
+          warnings.unshift({
+            code: 'duplicate_invoice',
+            bill_id: dup.duplicate_id,
+            invoice_date: dup.invoice_date instanceof Date
+              ? dup.invoice_date.toISOString().slice(0, 10) : String(dup.invoice_date).slice(0, 10),
+          });
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'purchase scan duplicate check failed');
+    }
+
     return res.json({
       scan_id: scanId,
       draft,
@@ -770,6 +1014,12 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
         roundOff: req.body.round_off,
       });
 
+      const paid = paidAmount(head, totals.total);
+      if (paid.error) {
+        await transaction.rollback();
+        return res.status(400).json({ error: paid.error });
+      }
+
       const inserted = await transaction.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .input('vendor_name', sql.NVarChar(200), head.vendorName)
@@ -790,7 +1040,7 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
         .input('reverse_charge', sql.Bit, head.reverseCharge ? 1 : 0)
         .input('payment_mode', sql.NVarChar(20), head.paymentMode)
         .input('payment_status', sql.NVarChar(20), head.paymentStatus)
-        .input('amount_paid', sql.Decimal(12, 2), head.amountPaid)
+        .input('amount_paid', sql.Decimal(12, 2), paid.amount)
         .input('notes', sql.NVarChar(500), head.notes)
         .input('stock_applied', sql.Bit, flags.inventoryEnabled ? 1 : 0)
         .input('created_by_user_id', sql.UniqueIdentifier, req.user.user_id)
@@ -816,42 +1066,28 @@ router.post('/', requireAuth, ownerOnly, async (req, res) => {
 
       const billId = inserted.recordset[0].id;
 
-      // mssql requests are single-use: a fresh one per statement.
-      for (const li of totals.lines) {
-        await transaction.request()
-          .input('vendor_bill_id', sql.UniqueIdentifier, billId)
-          .input('item_id', sql.UniqueIdentifier, li.item_id)
-          .input('variant_id', sql.UniqueIdentifier, li.variant_id)
-          .input('raw_material_id', sql.UniqueIdentifier, li.raw_material_id)
-          .input('item_name', sql.NVarChar(200), li.item_name)
-          .input('quantity', sql.Decimal(10, 2), li.quantity)
-          .input('free_quantity', sql.Decimal(10, 2), li.free_quantity)
-          .input('unit', sql.NVarChar(20), li.unit)
-          .input('unit_price', sql.Decimal(12, 4), li.unit_price)
-          .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
-          .input('hsn_code', sql.NVarChar(10), li.hsn_code)
-          .input('line_total', sql.Decimal(12, 2), li.line_total)
-          .input('sort_order', sql.Int, li.sort_order)
-          .query(`
-            INSERT INTO vendor_bill_items (
-              vendor_bill_id, item_id, variant_id, raw_material_id, item_name,
-              quantity, free_quantity, unit, unit_price, tax_rate, hsn_code,
-              line_total, sort_order)
-            VALUES (
-              @vendor_bill_id, @item_id, @variant_id, @raw_material_id, @item_name,
-              @quantity, @free_quantity, @unit, @unit_price, @tax_rate, @hsn_code,
-              @line_total, @sort_order)`);
-      }
-
+      // Stock before batches: a batch shop's purchase may start tracking an
+      // item here, and the batch needs that tracked stock.
       if (flags.inventoryEnabled) {
         for (const li of totals.lines) {
-          await applyLineStock(transaction, req.user.business_id, li, +1, { billId, date: head.invoiceDate });
+          await applyLineStock(transaction, req.user.business_id, li, +1,
+            { billId, date: head.invoiceDate, startTracking: flags.batchesEnabled });
         }
       }
+
+      const got = await receiveBatches(transaction, req.user.business_id, billId, head, flags, totals);
+      if (got.error) {
+        await transaction.rollback();
+        return res.status(400).json({ error: got.error });
+      }
+
+      await insertLines(transaction, billId, totals.lines, got.ids);
 
       await saveVendorAliases(transaction, req.user.business_id, head, req.body.lines);
 
       await transaction.commit();
+      // Real-time: stock and batches moved — billing screens re-read items.
+      if (flags.inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
 
       const bill = await fetchVendorBill(billId, req.user.business_id);
       audit.logVendorBillCreated(
@@ -889,12 +1125,17 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
     const lineError = validateLines(req.body.lines);
     if (lineError) return res.status(400).json({ error: lineError });
 
-    const before = await fetchVendorBill(req.params.id, req.user.business_id);
-    if (!before) return res.status(404).json({ error: 'Vendor bill not found' });
-
     const transaction = pool.transaction();
     await transaction.begin();
     try {
+      // Read under a row lock: a second edit waits, then sees this one's lines.
+      const before = await fetchVendorBill(
+        req.params.id, req.user.business_id, () => transaction.request(), true);
+      if (!before) {
+        await transaction.rollback();
+        return res.status(404).json({ error: 'Vendor bill not found' });
+      }
+
       const flags = await readBusinessFlags(transaction, req.user.business_id);
 
       const targetError = await resolveTargets(
@@ -912,6 +1153,9 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
           await applyLineStock(transaction, req.user.business_id, li, -1, { billId: req.params.id, date: before.invoice_date });
         }
       }
+      // And what it put into batches — always, so a shop that has since
+      // switched batches off still gets a consistent history.
+      await batches.unreceive(transaction, req.user.business_id, before.lines);
 
       await transaction.request()
         .input('id', sql.UniqueIdentifier, req.params.id)
@@ -928,6 +1172,12 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
         discountAmount: req.body.discount_amount,
         roundOff: req.body.round_off,
       });
+
+      const paid = paidAmount(head, totals.total);
+      if (paid.error) {
+        await transaction.rollback();
+        return res.status(400).json({ error: paid.error });
+      }
 
       await transaction.request()
         .input('id', sql.UniqueIdentifier, req.params.id)
@@ -950,7 +1200,7 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
         .input('reverse_charge', sql.Bit, head.reverseCharge ? 1 : 0)
         .input('payment_mode', sql.NVarChar(20), head.paymentMode)
         .input('payment_status', sql.NVarChar(20), head.paymentStatus)
-        .input('amount_paid', sql.Decimal(12, 2), head.amountPaid)
+        .input('amount_paid', sql.Decimal(12, 2), paid.amount)
         .input('notes', sql.NVarChar(500), head.notes)
         .input('stock_applied', sql.Bit, flags.inventoryEnabled ? 1 : 0)
         .input('scan_id', sql.UniqueIdentifier, req.body.scan_id || null)
@@ -972,41 +1222,35 @@ router.put('/:id', requireAuth, ownerOnly, async (req, res) => {
             updated_at = GETUTCDATE()
           WHERE id = @id AND business_id = @business_id`);
 
-      for (const li of totals.lines) {
-        await transaction.request()
-          .input('vendor_bill_id', sql.UniqueIdentifier, req.params.id)
-          .input('item_id', sql.UniqueIdentifier, li.item_id)
-          .input('variant_id', sql.UniqueIdentifier, li.variant_id)
-          .input('raw_material_id', sql.UniqueIdentifier, li.raw_material_id)
-          .input('item_name', sql.NVarChar(200), li.item_name)
-          .input('quantity', sql.Decimal(10, 2), li.quantity)
-          .input('free_quantity', sql.Decimal(10, 2), li.free_quantity)
-          .input('unit', sql.NVarChar(20), li.unit)
-          .input('unit_price', sql.Decimal(12, 4), li.unit_price)
-          .input('tax_rate', sql.Decimal(5, 2), li.tax_rate)
-          .input('hsn_code', sql.NVarChar(10), li.hsn_code)
-          .input('line_total', sql.Decimal(12, 2), li.line_total)
-          .input('sort_order', sql.Int, li.sort_order)
-          .query(`
-            INSERT INTO vendor_bill_items (
-              vendor_bill_id, item_id, variant_id, raw_material_id, item_name,
-              quantity, free_quantity, unit, unit_price, tax_rate, hsn_code,
-              line_total, sort_order)
-            VALUES (
-              @vendor_bill_id, @item_id, @variant_id, @raw_material_id, @item_name,
-              @quantity, @free_quantity, @unit, @unit_price, @tax_rate, @hsn_code,
-              @line_total, @sort_order)`);
-      }
-
+      // Stock before batches, as in POST.
       if (flags.inventoryEnabled) {
         for (const li of totals.lines) {
-          await applyLineStock(transaction, req.user.business_id, li, +1, { billId: req.params.id, date: head.invoiceDate });
+          await applyLineStock(transaction, req.user.business_id, li, +1,
+            { billId: req.params.id, date: head.invoiceDate, startTracking: flags.batchesEnabled });
         }
       }
+
+      // A line that keeps its batch (the form sends it back) keeps its id.
+      const got = await receiveBatches(
+        transaction, req.user.business_id, req.params.id, head, flags, totals, before.lines);
+      if (got.error) {
+        await transaction.rollback();
+        return res.status(400).json({ error: got.error });
+      }
+
+      await insertLines(transaction, req.params.id, totals.lines, got.ids);
+      if (got.recosted && got.recosted.length) {
+        await batches.recostBatches(transaction, req.user.business_id, got.recosted, snapshotBillCosts);
+      }
+
+      await settleBatches(transaction, req.user.business_id, flags,
+        before.lines, [...before.lines, ...totals.lines]);
 
       await saveVendorAliases(transaction, req.user.business_id, head, req.body.lines);
 
       await transaction.commit();
+      // Real-time: stock and batches moved — billing screens re-read items.
+      if (flags.inventoryEnabled) broadcast(req.user.business_id, { type: 'stock' });
 
       const after = await fetchVendorBill(req.params.id, req.user.business_id);
       audit.logVendorBillUpdated(
@@ -1038,21 +1282,35 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
   try {
     await poolConnect;
 
-    const before = await fetchVendorBill(req.params.id, req.user.business_id);
-    if (!before) return res.status(404).json({ error: 'Vendor bill not found' });
-
     const transaction = pool.transaction();
     await transaction.begin();
     try {
-      const flags = await readBusinessFlags(transaction, req.user.business_id);
+      // Under a row lock, as in PUT: two deletes can't both reverse the stock.
+      const before = await fetchVendorBill(
+        req.params.id, req.user.business_id, () => transaction.request(), true);
+      if (!before) {
+        await transaction.rollback();
+        return res.status(404).json({ error: 'Vendor bill not found' });
+      }
 
+      // Reverse whatever this bill added, even if inventory is off now — the
+      // same rule as PUT. Otherwise the stock stays inflated and is wrong the
+      // moment inventory is switched back on.
+      //
       // Reversal can drive stock negative when the goods were already sold.
       // That is allowed on purpose — a purchase entered in error must stay
-      // correctable — but it is worth a log line when it happens.
-      if (before.stock_applied && flags.inventoryEnabled) {
+      // correctable.
+      if (before.stock_applied) {
         for (const li of before.lines) {
           await applyLineStock(transaction, req.user.business_id, li, -1, { billId: req.params.id, date: before.invoice_date });
         }
+      }
+      // Batch data only exists once the shop has maintained batches; the
+      // flags are read only then, so other shops' deletes are unchanged.
+      if (before.lines.some((l) => l.batch_id)) {
+        await batches.unreceive(transaction, req.user.business_id, before.lines);
+        const flags = await readBusinessFlags(transaction, req.user.business_id);
+        await settleBatches(transaction, req.user.business_id, flags, before.lines, before.lines);
       }
 
       const del = await transaction.request()
@@ -1067,6 +1325,7 @@ router.delete('/:id', requireAuth, ownerOnly, async (req, res) => {
       }
 
       await transaction.commit();
+      if (before.stock_applied) broadcast(req.user.business_id, { type: 'stock' });
 
       // The original invoice file goes with the bill (its scan row stays as
       // the usage record). After commit: a failed delete must keep its file.

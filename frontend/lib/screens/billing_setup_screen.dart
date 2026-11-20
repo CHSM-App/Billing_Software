@@ -37,6 +37,8 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
   final _altPhone = TextEditingController();
   final _altPhoneLabel = TextEditingController();
   final _note = TextEditingController();
+  // Comma-separated default "+ Add detail" labels ("Vehicle No, KM reading").
+  final _detailLabels = TextEditingController();
   final _upiId = TextEditingController();
   final _bank = {for (final k in BillSettings.bankKeys) k: TextEditingController()};
 
@@ -72,6 +74,7 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
     _altPhone.dispose();
     _altPhoneLabel.dispose();
     _note.dispose();
+    _detailLabels.dispose();
     _upiId.dispose();
     for (final c in _bank.values) {
       c.dispose();
@@ -93,6 +96,7 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
         _altPhone.text = s.altPhone;
         _altPhoneLabel.text = s.altPhoneLabel;
         _note.text = s.note;
+        _detailLabels.text = s.detailLabels.join(', ');
         // The online store's UPI ID, if the shop already set one there.
         _upiId.text = s.upiId.isNotEmpty
             ? s.upiId
@@ -140,6 +144,10 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
         ..['alt_phone'] = _altPhone.text.trim()
         ..['alt_phone_label'] = _altPhoneLabel.text.trim()
         ..['note'] = _note.text.trim()
+        ..['detail_labels'] = [
+          for (final l in _detailLabels.text.split(','))
+            if (l.trim().isNotEmpty) l.trim(),
+        ]
         ..['upi_id'] = _upiId.text.trim()
         ..['bank'] = {
           for (final k in BillSettings.bankKeys) k: _bank[k]!.text.trim(),
@@ -152,6 +160,7 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
       // This device prints right away with the new choice; others pick it
       // up from /license on their next open.
       await BillSettings.sync(result);
+      ref.invalidate(billSettingsProvider);
       if (_hasLogo) {
         await syncBusinessLogo(result['logo_url'] as String?, _printLogo);
       }
@@ -331,6 +340,16 @@ class _BillingSetupScreenState extends ConsumerState<BillingSetupScreen> {
           _card([
             _check('show_warranty_details', s.showWarrantyDetails,
                 Icons.verified_outlined, l10n.billSetupWarrantyDetails),
+            if (s.showWarrantyDetails)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(AppSpacing.space16, 0,
+                    AppSpacing.space16, AppSpacing.space12),
+                child: AppTextField(
+                  label: l10n.billSetupDetailLabels,
+                  hint: l10n.billSetupDetailLabelsHint,
+                  controller: _detailLabels,
+                ),
+              ),
           ]),
           _card([
             _check('show_upi_qr', s.showUpiQr, Icons.qr_code_2,

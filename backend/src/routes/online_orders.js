@@ -232,10 +232,10 @@ router.post('/:id/accept', requireAuth, canDecide, async (req, res) => {
         .query(`
           INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity,
                                   unit_price, tax_rate, line_total, kitchen_status,
-                                  source, diner_phone, diner_name)
+                                  source, diner_phone, diner_name, stock_taken)
           VALUES (@bill_id, @item_id, @variant_id, @item_name, @quantity,
                   @unit_price, @tax_rate, @line_total, 'pending',
-                  'customer', @diner_phone, @diner_name)
+                  'customer', @diner_phone, @diner_name, 0)
         `);
     }
 

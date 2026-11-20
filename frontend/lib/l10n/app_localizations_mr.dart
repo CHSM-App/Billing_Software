@@ -144,6 +144,13 @@ class AppLocalizationsMr extends AppLocalizations {
       'ग्राहकाला किंमतीचे कोटेशन द्या, नंतर त्याचे बिल करा';
 
   @override
+  String get settingsStaffEditPrice => 'कर्मचारी किंमत व सूट बदलू शकतात';
+
+  @override
+  String get settingsStaffEditPriceSubtitle =>
+      'बंद केल्यास फक्त मालकच किंमत बदलू किंवा सूट देऊ शकतो. प्राइस लिस्ट चालू राहतील.';
+
+  @override
   String get quotationQuoteShort => 'कोटेशन';
 
   @override
@@ -890,6 +897,13 @@ class AppLocalizationsMr extends AppLocalizations {
   @override
   String get settingsBillDiscountSubtitle =>
       'बिलिंगवर बिलाची सूट (% / ₹) दाखवा. वस्तूवरील सूट तशीच राहील.';
+
+  @override
+  String get settingsBillingImages => 'वस्तूंचे फोटो दाखवा';
+
+  @override
+  String get settingsBillingImagesSubtitle =>
+      'बिलिंगवर प्रत्येक वस्तूचा फोटो (मेनू फोटोमधून) दाखवा';
 
   @override
   String get settingsLanguageSubtitle => 'तुमची अ‍ॅप भाषा निवडा';
@@ -1769,6 +1783,13 @@ class AppLocalizationsMr extends AppLocalizations {
   String get billSetupWarrantyDetails => 'अतिरिक्त तपशील';
 
   @override
+  String get billSetupDetailLabels => 'प्रत्येक बिलावरील डीफॉल्ट तपशील';
+
+  @override
+  String get billSetupDetailLabelsHint =>
+      'स्वल्पविरामाने वेगळे करा, उदा. वाहन क्रमांक, KM रीडिंग';
+
+  @override
   String get billSetupNoteSubtitle => 'प्रत्येक बिलावर छापला जाणारा संदेश';
 
   @override
@@ -2243,15 +2264,6 @@ class AppLocalizationsMr extends AppLocalizations {
   String get itemsWarrantyDefaultMonths => 'डिफॉल्ट वॉरंटी कालावधी (महिने)';
 
   @override
-  String get itemsManageWarrantyFields =>
-      'या श्रेणीसाठी वॉरंटी फील्ड व्यवस्थापित करा';
-
-  @override
-  String itemsWarrantyFieldsFor(String category) {
-    return '$category साठी वॉरंटी फील्ड';
-  }
-
-  @override
   String get itemsFieldItemNo => 'आयटम क्र. (ऐच्छिक)';
 
   @override
@@ -2263,6 +2275,10 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get itemsFieldStock => 'स्टॉक संख्या';
+
+  @override
+  String get itemsFieldStockHint =>
+      'सेवेसाठी रिकामे ठेवा — स्टॉक ठेवला जात नाही';
 
   @override
   String get itemsFieldUnit => 'एकक';
@@ -3481,6 +3497,9 @@ class AppLocalizationsMr extends AppLocalizations {
   String get printerSetupPaperSize80 => '८० मिमी (३ इंच थर्मल)';
 
   @override
+  String get printerSetupPaperSize112 => '११२ मिमी (४ इंच थर्मल)';
+
+  @override
   String get printerSetupPaperSizeA5 => 'A5 (PDF बिल)';
 
   @override
@@ -3492,7 +3511,7 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get printerSetupNoteThermal =>
-      '५८/८० मिमी थर्मल प्रिंटरवर छापतात; A5/A4 PDF बिल तयार करतात';
+      '५८/८०/११२ मिमी थर्मल प्रिंटरवर छापतात; A5/A4 PDF बिल तयार करतात';
 
   @override
   String get conflictQueuedForRetry => 'बिल पुन्हा प्रयत्नासाठी रांगेत ठेवले';
@@ -3825,29 +3844,84 @@ class AppLocalizationsMr extends AppLocalizations {
   }
 
   @override
-  String purchaseScanWarnAmountMissing(int line) {
-    return 'ओळ $line: रक्कम वाचता आली नाही — बिलावरून भरा.';
+  String get purchaseScanWarnAmountMissing =>
+      'रक्कम वाचता आली नाही — बिलावरून भरा.';
+
+  @override
+  String get purchaseScanWarnQtyMissing => 'नग वाचता आले नाहीत — बिलावरून भरा.';
+
+  @override
+  String purchaseScanWarnRateQty(String rate, String qty) {
+    return 'नग × बिलावरील दर रु. $rate ही रक्कम येत नाही — नग बहुधा $qty आहेत.';
   }
 
   @override
-  String purchaseScanWarnLineTax(int line) {
-    return 'ओळ $line: बिलावरील GST त्याच्या दराशी जुळत नाही.';
+  String purchaseScanWarnRate(String rate) {
+    return 'नग × बिलावरील दर रु. $rate ही रक्कम येत नाही. बिलावरील नग तपासा.';
   }
 
   @override
-  String purchaseScanWarnCgstSgst(int line) {
-    return 'ओळ $line: बिलावरील CGST आणि SGST वेगवेगळे आहेत.';
+  String purchaseScanUseQty(String qty) {
+    return '$qty वापरा';
   }
 
   @override
-  String purchaseScanWarnTaxType(int line) {
-    return 'ओळ $line: IGST / CGST+SGST बिलाच्या आंतरराज्य सेटिंगशी जुळत नाही.';
+  String purchaseScanWarnQtyMismatch(String printed, String computed) {
+    return 'बिलावर एकूण $printed मिळाले असे आहे; येथे विकत + मोफत $computed आहे.';
   }
 
   @override
-  String purchaseScanWarnCess(int line) {
-    return 'ओळ $line: सेस छापलेला आहे पण नोंदवला जात नाही. गरज असल्यास वेगळी ओळ जोडा.';
+  String get purchaseScanWarnLineTax => 'बिलावरील GST या दराशी जुळत नाही.';
+
+  @override
+  String get purchaseScanWarnCgstSgst =>
+      'बिलावरील CGST आणि SGST वेगवेगळे आहेत.';
+
+  @override
+  String get purchaseScanWarnTaxType =>
+      'IGST / CGST+SGST बिलाच्या आंतरराज्य सेटिंगशी जुळत नाही.';
+
+  @override
+  String get purchaseScanWarnCess =>
+      'सेस छापलेला आहे पण नोंदवला जात नाही. गरज असल्यास वेगळी ओळ जोडा.';
+
+  @override
+  String purchaseScanDuplicate(String date) {
+    return 'हे बिल आधीच नोंदवलेले दिसते (बिल दिनांक $date). सेव्ह करण्यापूर्वी खरेदी तपासा.';
   }
+
+  @override
+  String purchaseScanLinkedSummary(int linked, int total) {
+    return '$total पैकी $linked ओळी वस्तूंशी जोडल्या';
+  }
+
+  @override
+  String get purchaseScanNotLinked =>
+      'वस्तूशी जोडलेले नाही — स्टॉक बदलणार नाही';
+
+  @override
+  String get purchaseScanAiMatched => 'AI ने जोडले — कृपया तपासा';
+
+  @override
+  String purchaseScanLinkTo(String name) {
+    return 'जोडा: $name';
+  }
+
+  @override
+  String get purchaseScanPromptTitle => 'पुरवठादाराचे बिल आहे?';
+
+  @override
+  String get purchaseScanPromptBody =>
+      'ते स्कॅन करा, हा फॉर्म आपोआप भरेल. सेव्ह करण्यापूर्वी तुम्ही सर्व तपासा.';
+
+  @override
+  String get purchaseScanPromptButton => 'बिल स्कॅन करा';
+
+  @override
+  String get purchaseViewBill => 'बिल पहा';
+
+  @override
+  String get purchaseBillShowFailed => 'बिल दाखवता आले नाही.';
 
   @override
   String purchaseScanWarnSubtotal(String printed, String computed) {
@@ -3986,6 +4060,9 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get purchaseFieldStatus => 'स्थिती';
+
+  @override
+  String get purchaseFieldAmountPaid => 'भरलेली रक्कम';
 
   @override
   String get purchaseTaxableValue => 'करपात्र मूल्य';
@@ -4385,9 +4462,6 @@ class AppLocalizationsMr extends AppLocalizations {
   String get termsConsentTos => 'Terms of Service';
 
   @override
-  String get termsConsentAup => 'Acceptable Use Policy';
-
-  @override
   String get termsConsentPrivacy => 'Privacy Policy';
 
   @override
@@ -4417,9 +4491,6 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get settingsTermsSubtitle => 'The agreement for using Vittam';
-
-  @override
-  String get settingsAupSubtitle => 'What is not allowed on Vittam';
 
   @override
   String get settingsBarcodeScanner => 'बारकोड स्कॅनर';
@@ -4487,4 +4558,232 @@ class AppLocalizationsMr extends AppLocalizations {
 
   @override
   String get barcodesFieldCode => 'बारकोड नंबर';
+
+  @override
+  String get settingsBatches => 'बॅच ठेवा';
+
+  @override
+  String get settingsBatchesSubtitle =>
+      'प्रत्येक खरेदी तिच्या किमतीसह बॅचमध्ये जाते. अहवालात खरा नफा आणि बिलिंगमध्ये खरेदी किंमत दिसते.';
+
+  @override
+  String batchCostLine(String code, String cost) {
+    return '$code · खरेदी ₹$cost';
+  }
+
+  @override
+  String get batchPickTitle => 'कोणत्या बॅचमधून विकायचे';
+
+  @override
+  String batchLeftCost(String qty, String cost) {
+    return '$qty शिल्लक · खरेदी ₹$cost';
+  }
+
+  @override
+  String batchChip(String label) {
+    return 'बॅच: $label';
+  }
+
+  @override
+  String get batchNew => 'नवीन बॅच';
+
+  @override
+  String get batchNoForItem => 'फक्त या वस्तूसाठी बॅच नं. (ऐच्छिक)';
+
+  @override
+  String get batchAddTo => 'जुन्या बॅचमध्ये जोडा (त्याच दरानेच)';
+
+  @override
+  String get batchesTitle => 'बॅच';
+
+  @override
+  String get batchesOpen => 'चालू';
+
+  @override
+  String get batchesSettled => 'संपलेले';
+
+  @override
+  String get batchesNone => 'इथे अजून बॅच नाहीत';
+
+  @override
+  String batchCardStock(String received, String sold, String left) {
+    return 'घेतले $received · विकले $sold · शिल्लक $left';
+  }
+
+  @override
+  String batchCardLost(String qty) {
+    return 'घट $qty';
+  }
+
+  @override
+  String batchCardMoney(String sales, String cost) {
+    return 'विक्री ₹$sales · खर्च ₹$cost';
+  }
+
+  @override
+  String batchProfit(String amount) {
+    return 'नफा ₹$amount';
+  }
+
+  @override
+  String batchLoss(String amount) {
+    return 'तोटा ₹$amount';
+  }
+
+  @override
+  String get reportProfitTitle => 'नफा';
+
+  @override
+  String get reportCostedSales => 'खरेदी किंमत माहीत असलेली विक्री';
+
+  @override
+  String get reportCostOfGoods => 'मालाची किंमत';
+
+  @override
+  String get reportGrossProfit => 'एकूण नफा';
+
+  @override
+  String reportUncostedNote(String amount) {
+    return '₹$amount च्या विक्रीची खरेदी किंमत माहीत नाही (जुना माल किंवा स्टॉक न ठेवलेल्या वस्तू), ती नफ्यात धरलेली नाही.';
+  }
+
+  @override
+  String get purchaseBillBatchNo => 'बॅच नं. (रिकामे = आपोआप)';
+
+  @override
+  String batchItemCount(String count) {
+    return '$count वस्तू';
+  }
+
+  @override
+  String get batchEarlierNos => 'आधीचे बॅच नं.';
+
+  @override
+  String get batchStatItems => 'वस्तू';
+
+  @override
+  String get batchStatSales => 'विक्री';
+
+  @override
+  String get batchStatCost => 'खर्च';
+
+  @override
+  String get batchStatProfit => 'नफा';
+
+  @override
+  String get batchStatLoss => 'तोटा';
+
+  @override
+  String get batchStatBought => 'घेतले';
+
+  @override
+  String get batchStatSold => 'विकले';
+
+  @override
+  String get batchStatLeft => 'शिल्लक';
+
+  @override
+  String get batchStatCostUnit => 'खरेदी / नग';
+
+  @override
+  String get batchNotSold => 'अजून विक्री नाही';
+
+  @override
+  String get itemsServiceNoStock => 'सेवा (स्टॉक नाही)';
+
+  @override
+  String get itemsServiceNoStockHint =>
+      'खरेदीने याचा स्टॉक कधीच वाढत नाही — उदा. फिटिंग, नायट्रोजन';
+
+  @override
+  String purchaseDeleteSoldNote(String qty) {
+    return 'या बिलातील $qty नग आधीच विकले आहेत — त्यांची खरेदी किंमत नोंदीत राहील.';
+  }
+
+  @override
+  String get itemsBuyingPrice => 'खरेदी किंमत (ऐच्छिक)';
+
+  @override
+  String get itemsBuyingPriceHint =>
+      'प्रति नग, GST आधी — खरेदी बिले न टाकल्यास नफ्यासाठी वापरली जाते';
+
+  @override
+  String get batchOldStock => 'जुना माल';
+
+  @override
+  String batchLeftOnly(String qty) {
+    return '$qty शिल्लक';
+  }
+
+  @override
+  String get batchStatHeld => 'राखीव';
+
+  @override
+  String batchPurchases(String count) {
+    return '$count खरेदी';
+  }
+
+  @override
+  String get reportProfitNoCost =>
+      'नफा पाहण्यासाठी खरेदी बिले टाका, किंवा वस्तूंवर खरेदी किंमत लिहा.';
+
+  @override
+  String get settingsStaffSeeCost => 'कर्मचाऱ्यांना खरेदी किंमत दिसावी';
+
+  @override
+  String get settingsStaffSeeCostSubtitle =>
+      'बिलिंग करताना कॅशियरला प्रत्येक बॅचची किंमत दाखवा. बंद: फक्त मालकाला दिसेल.';
+
+  @override
+  String get returnsTitle => 'परतावे';
+
+  @override
+  String get returnItemsAction => 'माल परत';
+
+  @override
+  String returnItemsTitle(String bill) {
+    return 'माल परत · $bill';
+  }
+
+  @override
+  String get returnItemsHint =>
+      'परत आलेला माल निवडा. स्टॉक परत जमा होईल आणि या बिलाच्या दराने क्रेडिट नोट बनेल.';
+
+  @override
+  String returnQtyLeft(String qty) {
+    return '$qty परत करता येईल';
+  }
+
+  @override
+  String get returnRefundBy => 'परतावा';
+
+  @override
+  String get returnRefundCredit => 'बाकीतून कमी';
+
+  @override
+  String get returnReason => 'कारण (ऐच्छिक)';
+
+  @override
+  String get returnChooseItems => 'परत करायचा माल निवडा';
+
+  @override
+  String returnSave(String amount) {
+    return 'क्रेडिट नोट जतन करा · $amount';
+  }
+
+  @override
+  String returnSaved(String number) {
+    return 'क्रेडिट नोट $number जतन झाली';
+  }
+
+  @override
+  String get returnPrint => 'प्रिंट';
+
+  @override
+  String get returnUndo => 'परतावा रद्द करा';
+
+  @override
+  String returnUndoConfirm(String number) {
+    return 'क्रेडिट नोट $number रद्द करायची? माल पुन्हा स्टॉकमधून कमी होईल.';
+  }
 }

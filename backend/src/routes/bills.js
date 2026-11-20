@@ -5,10 +5,11 @@ const { whatsappLimiter } = require('../middleware/rateLimiter');
 const logger = require('../logger');
 const audit = require('../audit');
 const { isValidDateString, todayUtc, dayRange, dateRange, addMonths } = require('../dateUtils');
-const { sendBillLink, normalisePhone, sendReceiptLink } = require('../whatsapp');
+const { sendBillLink, normalisePhone, sendReceiptLink, logWhatsappSend } = require('../whatsapp');
 const { generateReceiptToken, RECEIPT_BASE } = require('../receiptToken');
 const { sendLowStockNotification, sendBillVoidedNotification } = require('../fcm');
 const { broadcast } = require('../realtime');
+const batches = require('../batches');
 const { computeRoundOff, netUnitPrice } = require('../money');
 const { BILL_ITEMS_JOIN, BILL_ITEMS_ORDER } = require('../billItemsOrder');
 const { validateExtraData, isIndianMobile } = require('../validate');
@@ -38,6 +39,8 @@ async function autoCreateWarranties(businessId, billId, userId) {
           -- Shop switched warranty tracking off (Settings): items keep their
           -- flag for when it comes back on, but no new records are made.
           AND bz.warranty_enabled = 1
+          -- Restaurants don't track warranties (the app hides the option).
+          AND bz.business_type NOT IN ('restaurant_with_tables', 'restaurant_no_tables')
           AND i.warranty_eligible = 1
           AND NOT EXISTS (SELECT 1 FROM warranties w WHERE w.bill_item_id = bi.id)
       `);
@@ -193,7 +196,7 @@ const { stripBillPrefix } = require('../billNumber');
 const { parseAdditionalCharges, serializeCharges, attachCharges } = require('../charges');
 const {
   round2, parseCollections, checkCollections, pourIntoModes, recordCreditPayments,
-  reverseCollections, attachCreditInfo,
+  reverseCollections, attachCreditInfo, DUE,
 } = require('../creditPayments');
 const { upsertCustomer, syncCustomers, canonicalPhone, billPhoneMatch } = require('../customers');
 
@@ -359,10 +362,65 @@ function resolveNetPriceAndRate(dbItem, variant, gstEnabled) {
 // taxable = qty × unit_price query (reports, GST summary, receipts) follows the
 // edit with no change; discount_amount is kept alongside for display.
 //
-// `allowed` is true only for an owner or cashier (canReprice). Anyone else gets
-// `carried` — a draft's existing values (update-items) — in place of the
-// request's, so a waiter neither changes nor wipes the cashier's edits.
+// `access` (repriceAccess) decides whose values stand:
+//   'full'  — the request's. The owner always; a cashier while the owner lets
+//             staff edit prices (businesses.staff_can_edit_price, migration 076).
+//   'lists' — a cashier the owner has locked. The request's price stands only
+//             where it is one of the owner's price-list prices or what the line
+//             already `carried` (an owner's edit on a held bill); its discount
+//             only where it is the carried one. Anything else bills at catalog.
+//   'none'  — anyone else gets `carried` — a draft's existing values
+//             (update-items) — in place of the request's, so a waiter neither
+//             changes nor wipes the cashier's edits.
 const canReprice = (user) => user.role === 'owner' || user.role === 'cashier';
+function repriceAccess(user, staffCanEditPrice) {
+  if (user.role === 'owner') return 'full';
+  if (user.role !== 'cashier') return 'none';
+  return staffCanEditPrice ? 'full' : 'lists';
+}
+
+// The business's active price lists, read only for a locked cashier ('lists'):
+// each list's adjust_pct and its fixed prices keyed by recipeKey(item, size).
+async function loadPriceLists(transaction, businessId) {
+  const r = await transaction.request()
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .query(`
+      SELECT pl.id, pl.adjust_pct, pli.item_id, pli.variant_id, pli.price
+      FROM price_lists pl
+      LEFT JOIN price_list_items pli ON pli.price_list_id = pl.id
+      WHERE pl.business_id = @business_id AND pl.is_active = 1
+    `);
+  const byId = new Map();
+  for (const row of r.recordset) {
+    let list = byId.get(row.id);
+    if (!list) {
+      list = { adjustPct: row.adjust_pct == null ? null : parseFloat(row.adjust_pct), fixed: {} };
+      byId.set(row.id, list);
+    }
+    if (row.item_id) list.fixed[recipeKey(row.item_id, row.variant_id)] = parseFloat(row.price);
+  }
+  return [...byId.values()];
+}
+
+// The NET rates [lists] bill this line at: a list's fixed price, else the
+// catalog price moved by its adjust_pct (to paise) — PriceList.priceFor in the
+// app's models.dart. A size never borrows its item's fixed price.
+function listNetsFor(lists, dbItem, variant, taxRate) {
+  if (!lists) return [];
+  const inclusive = dbItem.price_inclusive_tax === true || dbItem.price_inclusive_tax === 1;
+  const base = resolveUnitPrice(dbItem, variant);
+  const nets = [];
+  for (const list of lists) {
+    let gross = list.fixed[recipeKey(dbItem.id, variant ? variant.id : null)];
+    if (gross == null && base != null && list.adjustPct) {
+      gross = parseFloat((base * (1 + list.adjustPct / 100)).toFixed(2));
+    }
+    if (gross != null) nets.push(netUnitPrice(gross, taxRate, inclusive));
+  }
+  return nets;
+}
+
+const near = (a, b) => Math.abs(a - b) < 0.01;
 
 // The price list a bill was opened with (migration 059). Pricing never reads it
 // — list prices arrive as each line's price_override — it only lets a held bill
@@ -387,8 +445,20 @@ async function resolvePriceList(req) {
   if (found.recordset.length === 0) return { error: 'Price list not found' };
   return { set: true, id };
 }
-function applyLineOverrides(i, resolvedNet, qty, allowed, carried) {
-  const src = allowed ? i : (carried || {});
+function applyLineOverrides(i, resolvedNet, qty, access, carried, listNets = []) {
+  let src = carried || {};
+  if (access === 'full') {
+    src = i;
+  } else if (access === 'lists') {
+    const p = parseFloat(i.price_override);
+    const d = parseFloat(i.discount_amount);
+    const priorP = parseFloat(src.price_override);
+    const priorD = parseFloat(src.discount_amount);
+    src = {
+      price_override: listNets.some((n) => near(n, p)) || near(priorP, p) ? p : undefined,
+      discount_amount: near(priorD, d) ? d : undefined,
+    };
+  }
   const p = parseFloat(src.price_override);
   const net = Number.isFinite(p) && p >= 0 ? p : resolvedNet;
   const d = parseFloat(src.discount_amount);
@@ -446,6 +516,11 @@ async function loadRecipeMap(transaction, businessId, items) {
   }
   return map;
 }
+
+/** A line's preferred stock batch, if it names a well-formed one. Anything
+ *  else means "oldest first" — a bad pick never fails a sale (batches.js). */
+const preferredBatch = (v) => (typeof v === 'string'
+  && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? v : null);
 
 // Atomically decrement stock for one line item. When the line references a
 // variant, the variant's stock is the target; otherwise the item's. Returns
@@ -700,8 +775,16 @@ async function fetchBill(billId, businessId) {
   const itemsResult = await pool.request()
     .input('bill_id', sql.UniqueIdentifier, billId)
     .query(`
-      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount,
-             bi.kitchen_status, bi.kitchen_done_at
+      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount, bi.batch_id,
+             bi.kitchen_status, bi.kitchen_done_at,
+             -- What this bill already holds from each batch (a reopened held
+             -- bill adds it back when the cart works out its cost).
+             (SELECT a.batch_id, SUM(a.quantity) AS qty
+              FROM stock_batch_allocations a
+              WHERE a.bill_id = bi.bill_id AND a.item_id = bi.item_id
+                AND ((bi.variant_id IS NULL AND a.variant_id IS NULL) OR a.variant_id = bi.variant_id)
+              GROUP BY a.batch_id
+              FOR JSON PATH) AS held_batches
       FROM bill_items bi
       ${BILL_ITEMS_JOIN}
       WHERE bi.bill_id = @bill_id
@@ -841,13 +924,19 @@ router.post('/', requireAuth, async (req, res) => {
       // consistent with the stock update that follows (no TOCTOU gap).
       const bizResult = await transaction.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
-        .query('SELECT inventory_enabled, round_off_enabled, gst_enabled FROM businesses WHERE id = @business_id');
+        .query('SELECT inventory_enabled, round_off_enabled, gst_enabled, staff_can_edit_price, batch_tracking_enabled FROM businesses WHERE id = @business_id');
       const inventoryEnabled = bizResult.recordset[0]?.inventory_enabled;
+      const batchesOn = !!inventoryEnabled && !!bizResult.recordset[0]?.batch_tracking_enabled;
       const roundOffEnabled = !!bizResult.recordset[0]?.round_off_enabled;
       // When GST is disabled for the business, tax is ignored entirely — even if
       // an item still carries a leftover tax_rate from when GST was on. Every
       // line's tax becomes 0 and no tax_amount accrues.
       const gstEnabled = !!bizResult.recordset[0]?.gst_enabled;
+      // Price / discount edits — see applyLineOverrides. A locked cashier gives
+      // no bill discount either.
+      const access = repriceAccess(req.user, bizResult.recordset[0]?.staff_can_edit_price !== false);
+      const priceLists = access === 'lists'
+        ? await loadPriceLists(transaction, req.user.business_id) : null;
 
       const { clause: itemClause, bind: bindItems } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems(transaction.request())
@@ -901,7 +990,8 @@ router.post('/', requireAuth, async (req, res) => {
         const { unitPrice: catalogNet, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
         if (catalogNet == null) throw new PricelessLineError(dbItem.name);
         const { unitPrice, discount } = applyLineOverrides(
-          i, catalogNet, qty, canReprice(req.user));
+          i, catalogNet, qty, access, null,
+          listNetsFor(priceLists, dbItem, variant, taxRate));
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         const lineTotal = qty * unitPrice + lineTax;
@@ -917,6 +1007,8 @@ router.post('/', requireAuth, async (req, res) => {
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat(lineTotal.toFixed(2)),
           discount_amount: discount,
+          // The cashier's batch pick (batches.js); NULL = oldest first.
+          batch_id: preferredBatch(i.batch_id),
         };
       });
       subtotal = parseFloat(subtotal.toFixed(2));
@@ -926,7 +1018,7 @@ router.post('/', requireAuth, async (req, res) => {
       // tax in proportion (bill-level: tax × discountedNet / subtotal). total is
       // subtotal + the discounted tax, so payable (total − discount) equals
       // discountedNet + discountedTax — the identity round-off/payable rely on.
-      const discountAmount = parseFloat(Math.min(
+      const discountAmount = access === 'lists' ? 0 : parseFloat(Math.min(
         Math.max(parseFloat(discount_amount) || 0, 0),
         subtotal,
       ).toFixed(2));
@@ -1085,11 +1177,12 @@ router.post('/', requireAuth, async (req, res) => {
             .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
             .input(`discount_amount${i}`, sql.Decimal(10, 2), li.discount_amount || 0)
+            .input(`batch_id${i}`, sql.UniqueIdentifier, li.batch_id || null)
             .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i})`;
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i}, @batch_id${i})`;
         });
         await insertReq.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount, batch_id)
           VALUES ${rows.join(', ')}
         `);
       }
@@ -1129,6 +1222,8 @@ router.post('/', requireAuth, async (req, res) => {
               items: [{ item_name: li.item_name, item_id: li.item_id }],
             });
           }
+          // Which batches the stock came from (oldest first, or the pick).
+          if (batchesOn) await batches.allocate(transaction, req.user.business_id, billId, li);
         }
       }
 
@@ -1237,7 +1332,11 @@ router.get('/', requireAuth, async (req, res) => {
     }
     if (search) {
       request.input('search', sql.NVarChar(100), `%${search}%`);
-      where += ' AND (b.bill_number LIKE @search OR b.customer_phone LIKE @search OR b.customer_name LIKE @search)';
+      // warranty_extra_data is a JSON [{label, value}] array; a plain LIKE over
+      // it matches both label names and values (no OPENJSON — see migration 050).
+      // ponytail: searching the literal words "label"/"value" matches every bill
+      // with extra fields; strip the JSON keys if that ever bites.
+      where += ' AND (b.bill_number LIKE @search OR b.customer_phone LIKE @search OR b.customer_name LIKE @search OR b.warranty_extra_data LIKE @search)';
     }
 
     const billsResult = await request.query(`
@@ -1260,7 +1359,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount,
+      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount, bi.batch_id,
              bi.kitchen_status, bi.kitchen_done_at
       FROM bill_items bi
       ${BILL_ITEMS_JOIN}
@@ -1326,7 +1425,7 @@ router.get('/drafts', requireAuth, async (req, res) => {
 
     const { clause: billClause, bind: bindBills } = inParams(billsResult.recordset.map((b) => b.id));
     const itemsResult = await bindBills(pool.request()).query(`
-      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount,
+      SELECT bi.id, bi.bill_id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity, bi.unit_price, bi.tax_rate, bi.hsn_code, bi.line_total, bi.discount_amount, bi.batch_id,
              bi.kitchen_status, bi.kitchen_done_at
       FROM bill_items bi
       ${BILL_ITEMS_JOIN}
@@ -1576,7 +1675,7 @@ async function finalizeWithTenders(billId, businessId, userId, { mode, split, co
       return fail(400, 'Customer name and phone are required for a credit bill');
     }
 
-    await transaction.request()
+    const settled = await transaction.request()
       .input('id', sql.UniqueIdentifier, draft.id)
       .input('payment_mode', sql.NVarChar(20), billMode)
       .input('payment_status', sql.NVarChar(20),
@@ -1594,14 +1693,80 @@ async function finalizeWithTenders(billId, businessId, userId, { mode, split, co
             credit_collected = @credit_collected
         WHERE id = @id
         ${REDATE_SALE_SQL}
+        ${HELD_STOCK_SQL}
       `);
     if (parts.length > 1) await insertPayments(transaction.request(), draft.id, parts);
     await recordCreditPayments(transaction, businessId, poured.rows, draft.id);
     await transaction.commit();
-    return { row: { ...draft, payment_mode: billMode }, creditPart, collected };
+    return { row: { ...draft, payment_mode: billMode }, creditPart, collected,
+      takeHeld: wantsHeldStock(settled) };
   } catch (err) {
     try { await transaction.rollback(); } catch (_) {}
     throw err;
+  }
+}
+
+// Appended to the finalize statement: does this bill hold online/QR lines that
+// took no stock, in a shop that maintains batches? Same batch, no extra trip.
+const HELD_STOCK_SQL = `
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM bill_items WHERE bill_id = @id AND stock_taken = 0
+                             AND (item_id IS NOT NULL OR variant_id IS NOT NULL))
+               AND EXISTS (SELECT 1 FROM businesses WHERE id = @business_id
+                             AND inventory_enabled = 1 AND batch_tracking_enabled = 1)
+              THEN 1 ELSE 0 END AS take_held;`;
+const wantsHeldStock = (result) =>
+  (result && result.recordsets || []).some((rs) => rs && rs[0] && rs[0].take_held === 1);
+
+/**
+ * After a bill is settled: in a shop that maintains batches, take the stock
+ * its online/QR lines never took (stock_taken = 0), so the sale is costed
+ * from batches like any other. Runs after the finalize, in its own
+ * transaction, and NEVER fails it: a line that is short (or untracked) is
+ * skipped and stays stock_taken = 0 — settling works exactly as before.
+ * Each line is all-or-nothing under its own savepoint (stock + recipe).
+ */
+async function takeHeldStock(businessId, billId) {
+  try {
+    const lines = (await pool.request()
+      .input('bill_id', sql.UniqueIdentifier, billId)
+      .query(`SELECT id, item_id, variant_id, item_name, quantity, batch_id FROM bill_items
+              WHERE bill_id = @bill_id AND stock_taken = 0
+                AND (item_id IS NOT NULL OR variant_id IS NOT NULL)`)).recordset;
+    if (!lines.length) return;
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const recipeMap = await loadRecipeMap(tx, businessId, lines);
+      let took = 0;
+      for (const li of lines) {
+        const item = (await tx.request().input('id', sql.UniqueIdentifier, li.item_id)
+          .query('SELECT id, stock_quantity FROM items WHERE id = @id')).recordset[0];
+        const variant = li.variant_id ? (await tx.request().input('id', sql.UniqueIdentifier, li.variant_id)
+          .query('SELECT id, stock_quantity FROM item_variants WHERE id = @id')).recordset[0] : null;
+        const itemMap = { [li.item_id]: item || { stock_quantity: null } };
+        const variantMap = li.variant_id ? { [li.variant_id]: variant } : {};
+        await tx.request().query('SAVE TRANSACTION held_line');
+        const ok = await decrementLineStock(tx, businessId, li, itemMap, variantMap, { billId })
+          && await decrementRecipe(tx, li, recipeMap);
+        if (!ok) {
+          await tx.request().query('ROLLBACK TRANSACTION held_line');
+          continue;
+        }
+        await batches.allocate(tx, businessId, billId, li);
+        await tx.request().input('id', sql.UniqueIdentifier, li.id)
+          .query('UPDATE bill_items SET stock_taken = 1 WHERE id = @id');
+        took++;
+      }
+      if (took) await snapshotBillCosts(tx, businessId, billId);
+      await tx.commit();
+      if (took) broadcast(businessId, { type: 'stock' });
+    } catch (err) {
+      try { await tx.rollback(); } catch (_) {}
+      throw err;
+    }
+  } catch (err) {
+    logger.error({ err, billId }, 'take held stock at finalize failed');
   }
 }
 
@@ -1633,11 +1798,13 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
   try {
     await poolConnect;
     let finalizedRow;
+    let takeHeld = false;
     if (split || collections.list.length) {
       tendered = await finalizeWithTenders(req.params.id, req.user.business_id,
         req.user.user_id, { mode: payment_mode, split, collections: collections.list });
       if (tendered.error) return res.status(tendered.status).json({ error: tendered.error });
       finalizedRow = tendered.row;
+      takeHeld = tendered.takeHeld;
     } else {
       // The app finalizes a bill in two steps: create as draft, then finalize.
       // So the credit → unpaid decision has to happen HERE, not only at create.
@@ -1666,12 +1833,14 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
           WHERE id = @id AND business_id = @business_id AND status = 'draft'
           -- Stock left the shelf when the draft was created; re-date it too.
           ${REDATE_SALE_SQL}
+          ${HELD_STOCK_SQL}
         `);
 
       if (result.rowsAffected[0] === 0) {
         return res.status(404).json({ error: 'Draft bill not found' });
       }
       finalizedRow = result.recordset[0];
+      takeHeld = wantsHeldStock(result);
     }
 
     // A credit finalize with no customer is unrecoverable in the Credit tab
@@ -1705,6 +1874,8 @@ router.put('/:id/finalize', requireAuth, cashierOrOwner, async (req, res) => {
           WHERE id = @id AND business_id = @business_id
         `);
     }
+
+    if (takeHeld) await takeHeldStock(req.user.business_id, req.params.id);
 
     const bill = await fetchBill(req.params.id, req.user.business_id);
 
@@ -1760,7 +1931,7 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         .input('id', sql.UniqueIdentifier, req.params.id)
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled, bs.gst_enabled
+          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled, bs.gst_enabled, bs.staff_can_edit_price, bs.batch_tracking_enabled
           FROM bills b
           JOIN businesses bs ON bs.id = b.business_id
           WHERE b.id = @id AND b.business_id = @business_id
@@ -1775,9 +1946,14 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         return res.status(409).json({ error: 'Can only add items to a draft bill' });
       }
       const inventoryEnabled = billCheck.recordset[0].inventory_enabled;
+      const batchesOn = !!inventoryEnabled && !!billCheck.recordset[0].batch_tracking_enabled;
       const roundOffEnabled = !!billCheck.recordset[0].round_off_enabled;
       // GST off → tax ignored entirely, even for items with a leftover tax_rate.
       const gstEnabled = !!billCheck.recordset[0].gst_enabled;
+      // Price / discount edits — see applyLineOverrides.
+      const access = repriceAccess(req.user, billCheck.recordset[0].staff_can_edit_price !== false);
+      const priceLists = access === 'lists'
+        ? await loadPriceLists(transaction, req.user.business_id) : null;
 
       const { clause: itemClause2, bind: bindItems2 } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems2(transaction.request())
@@ -1824,7 +2000,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
         const { unitPrice: catalogNet, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
         if (catalogNet == null) throw new PricelessLineError(dbItem.name);
         const { unitPrice, discount } = applyLineOverrides(
-          i, catalogNet, qty, canReprice(req.user));
+          i, catalogNet, qty, access, null,
+          listNetsFor(priceLists, dbItem, variant, taxRate));
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
@@ -1837,6 +2014,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
           discount_amount: discount,
+          // The cashier's batch pick (batches.js); NULL = oldest first.
+          batch_id: preferredBatch(i.batch_id),
         };
       });
 
@@ -1868,11 +2047,12 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
             .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
             .input(`discount_amount${i}`, sql.Decimal(10, 2), li.discount_amount || 0)
+            .input(`batch_id${i}`, sql.UniqueIdentifier, li.batch_id || null)
             .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i})`;
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i}, @batch_id${i})`;
         });
         await insertReq2.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount, batch_id)
           VALUES ${rows2.join(', ')}
         `);
       }
@@ -1929,6 +2109,8 @@ router.put('/:id/add-items', requireAuth, async (req, res) => {
               items: [{ item_name: li.item_name, item_id: li.item_id }],
             });
           }
+          // Which batches the stock came from (oldest first, or the pick).
+          if (batchesOn) await batches.allocate(transaction, req.user.business_id, req.params.id, li);
         }
       }
 
@@ -1990,7 +2172,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
   const setCustomerPhone = Object.prototype.hasOwnProperty.call(req.body, 'customer_phone');
   const setCustomerAddress = Object.prototype.hasOwnProperty.call(req.body, 'customer_address');
   const setCustomerGstin = Object.prototype.hasOwnProperty.call(req.body, 'customer_gstin');
-  const setDiscount = Object.prototype.hasOwnProperty.call(req.body, 'discount_amount');
+  let setDiscount = Object.prototype.hasOwnProperty.call(req.body, 'discount_amount');
   // additional_charges: sending the key replaces the whole list (an empty array
   // clears it); omitting it keeps whatever the draft already carries.
   const setCharges = Object.prototype.hasOwnProperty.call(req.body, 'additional_charges');
@@ -2018,7 +2200,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         .input('id', sql.UniqueIdentifier, req.params.id)
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .query(`
-          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled, bs.gst_enabled
+          SELECT b.id, b.status, bs.inventory_enabled, bs.round_off_enabled, bs.gst_enabled, bs.staff_can_edit_price, bs.batch_tracking_enabled
           FROM bills b
           JOIN businesses bs ON bs.id = b.business_id
           WHERE b.id = @id AND b.business_id = @business_id
@@ -2033,9 +2215,16 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         return res.status(409).json({ error: 'Can only update items on a draft bill' });
       }
       const inventoryEnabled = billCheck.recordset[0].inventory_enabled;
+      const batchesOn = !!inventoryEnabled && !!billCheck.recordset[0].batch_tracking_enabled;
       const roundOffEnabled = !!billCheck.recordset[0].round_off_enabled;
       // GST off → tax ignored entirely, even for items with a leftover tax_rate.
       const gstEnabled = !!billCheck.recordset[0].gst_enabled;
+      // Price / discount edits — see applyLineOverrides. A locked cashier keeps
+      // the bill discount already on the draft and cannot change it.
+      const access = repriceAccess(req.user, billCheck.recordset[0].staff_can_edit_price !== false);
+      const priceLists = access === 'lists'
+        ? await loadPriceLists(transaction, req.user.business_id) : null;
+      if (access === 'lists') setDiscount = false;
 
       const { clause: itemClause3, bind: bindItems3 } = inParams(items.map((i) => i.item_id));
       const itemsData = await bindItems3(transaction.request())
@@ -2081,7 +2270,7 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
       // price/discount over (see applyLineOverrides).
       const oldItemsResult = await transaction.request()
         .input('bill_id', sql.UniqueIdentifier, req.params.id)
-        .query('SELECT item_id, variant_id, item_name, quantity, unit_price, discount_amount, kitchen_status, kitchen_done_at FROM bill_items WHERE bill_id = @bill_id');
+        .query('SELECT item_id, variant_id, item_name, quantity, unit_price, discount_amount, kitchen_status, kitchen_done_at, stock_taken FROM bill_items WHERE bill_id = @bill_id');
       previousLineItems = oldItemsResult.recordset;
 
       // ponytail: first prior row per item+variant wins; a dish split across
@@ -2106,8 +2295,9 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         const { unitPrice: catalogNet, taxRate } = resolveNetPriceAndRate(dbItem, variant, gstEnabled);
         if (catalogNet == null) throw new PricelessLineError(dbItem.name);
         const { unitPrice, discount } = applyLineOverrides(
-          i, catalogNet, qty, canReprice(req.user),
-          priorOverrides[`${i.item_id || ''}|${i.variant_id || ''}`]);
+          i, catalogNet, qty, access,
+          priorOverrides[`${i.item_id || ''}|${i.variant_id || ''}`],
+          listNetsFor(priceLists, dbItem, variant, taxRate));
         const itemName = variant ? `${dbItem.name} (${variant.label})` : dbItem.name;
         const lineTax = taxRate ? qty * unitPrice * (taxRate / 100) : 0;
         return {
@@ -2120,6 +2310,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
           hsn_code: dbItem.hsn_code || null,
           line_total: parseFloat((qty * unitPrice + lineTax).toFixed(2)),
           discount_amount: discount,
+          // The cashier's batch pick (batches.js); NULL = oldest first.
+          batch_id: preferredBatch(i.batch_id),
         };
       });
 
@@ -2158,10 +2350,15 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
         return { kitchen_status: 'pending', kitchen_done_at: null };
       };
 
+      // Give back what the old lines took from batches — always, so a shop
+      // that switched batches off keeps a consistent history.
+      await batches.returnBill(transaction, req.user.business_id, req.params.id);
+
       // Restore inventory for old items — increment is always safe, no guard needed.
       // restoreLineStock handles variants, plain items and recipes.
       if (inventoryEnabled) {
-        for (const li of previousLineItems.filter((x) => x.item_id || x.variant_id)) {
+        // Online/QR lines never took stock (stock_taken 0): nothing to give back.
+        for (const li of previousLineItems.filter((x) => (x.item_id || x.variant_id) && x.stock_taken !== false)) {
           await restoreLineStock(transaction, req.user.business_id, li, { billId: req.params.id, type: 'sale' });
         }
       }
@@ -2188,13 +2385,14 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
             .input(`tax_rate${i}`, sql.Decimal(5, 2), li.tax_rate)
             .input(`hsn_code${i}`, sql.NVarChar(10), li.hsn_code || null)
             .input(`discount_amount${i}`, sql.Decimal(10, 2), li.discount_amount || 0)
+            .input(`batch_id${i}`, sql.UniqueIdentifier, li.batch_id || null)
             .input(`line_total${i}`, sql.Decimal(10, 2), li.line_total)
             .input(`kitchen_status${i}`, sql.NVarChar(20), k.kitchen_status)
             .input(`kitchen_done_at${i}`, sql.DateTime2, k.kitchen_done_at);
-          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i}, @kitchen_status${i}, @kitchen_done_at${i})`;
+          return `(@bill_id, @item_id${i}, @variant_id${i}, @item_name${i}, @quantity${i}, @unit_price${i}, @tax_rate${i}, @hsn_code${i}, @line_total${i}, @discount_amount${i}, @batch_id${i}, @kitchen_status${i}, @kitchen_done_at${i})`;
         });
         await insertReq3.query(`
-          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount, kitchen_status, kitchen_done_at)
+          INSERT INTO bill_items (bill_id, item_id, variant_id, item_name, quantity, unit_price, tax_rate, hsn_code, line_total, discount_amount, batch_id, kitchen_status, kitchen_done_at)
           VALUES ${rows3.join(', ')}
         `);
       }
@@ -2289,6 +2487,8 @@ router.put('/:id/update-items', requireAuth, async (req, res) => {
               items: [{ item_name: li.item_name, item_id: li.item_id }],
             });
           }
+          // Which batches the stock came from (oldest first, or the pick).
+          if (batchesOn) await batches.allocate(transaction, req.user.business_id, req.params.id, li);
         }
       }
 
@@ -2396,10 +2596,11 @@ router.delete('/:id', requireAuth, cashierOrOwner, async (req, res) => {
       // Restore stock — only runs when the status flip above succeeded,
       // so it is impossible for stock to be restored more than once per bill.
       // Variant lines restore the variant's stock; plain lines the item's.
+      await batches.returnBill(transaction, req.user.business_id, req.params.id);
       if (bill.inventory_enabled) {
         const lineItems = await transaction.request()
           .input('bill_id', sql.UniqueIdentifier, req.params.id)
-          .query('SELECT item_id, variant_id, item_name, quantity FROM bill_items WHERE bill_id = @bill_id AND (item_id IS NOT NULL OR variant_id IS NOT NULL)');
+          .query('SELECT item_id, variant_id, item_name, quantity FROM bill_items WHERE bill_id = @bill_id AND (item_id IS NOT NULL OR variant_id IS NOT NULL) AND stock_taken = 1');
 
         for (const li of lineItems.recordset) {
           await restoreLineStock(transaction, req.user.business_id, li, { billId: req.params.id, type: 'void' });
@@ -2497,6 +2698,11 @@ router.post('/send-whatsapp', requireAuth, whatsappLimiter, async (req, res) => 
       shopName:   shop_name,
       billNumber: stripBillPrefix(bill_number),
       receiptUrl,
+    });
+    await logWhatsappSend({
+      businessId: req.user.business_id, billId: bill_id, mode: 'api',
+      status: result.sent ? 'sent' : result.skipped ? 'skipped' : 'failed',
+      campaignId: result.campaignId, error: result.error,
     });
 
     if (result.sent) {
@@ -2640,6 +2846,8 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
       billNumber: displayNumber,
       receiptUrl,
       message,
+      businessId: req.user.business_id,
+      billId: req.params.id,
     });
     return res.status(out.status).json(out.body);
   } catch (err) {
@@ -2649,5 +2857,325 @@ router.post('/:id/whatsapp', requireAuth, whatsappLimiter, async (req, res) => {
 });
 
 // Receipt page — see routes/receipt.js (mounted at /receipt in server.js)
+
+// ---------------------------------------------------------------------------
+// Sales returns — credit notes (migration 082)
+//
+// A customer brings back some items, or part of a quantity, from a settled
+// bill. The return is valued at the bill's own prices and discount, with GST
+// at each line's rate (CGST/SGST = halves, as on the bill). Stock and batch
+// quantities come back; "credit" takes it off what a credit bill still owes;
+// reports and GST returns are net of it (routes/reports.js).
+// ---------------------------------------------------------------------------
+
+const RETURN_MODES = ['cash', 'upi', 'card', 'other', 'credit'];
+const RETURN_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const cents2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+/** A bill's credit notes, each with its lines, oldest first. */
+async function fetchReturns(request, businessId, billId) {
+  const r = await request
+    .input('business_id', sql.UniqueIdentifier, businessId)
+    .input('bill_id', sql.UniqueIdentifier, billId)
+    .query(`SELECT sr.id, sr.return_number, sr.returned_at, sr.reason, sr.refund_mode,
+                   sr.subtotal, sr.tax_amount, sr.total, u.name AS created_by_name,
+                   sri.bill_item_id, sri.item_name, sri.quantity, sri.unit_price,
+                   sri.tax_rate, sri.hsn_code, sri.net_amount, sri.tax_amount AS line_tax
+            FROM sales_returns sr
+            JOIN sales_return_items sri ON sri.return_id = sr.id
+            LEFT JOIN users u ON u.id = sr.created_by_user_id
+            WHERE sr.business_id = @business_id AND sr.bill_id = @bill_id
+            ORDER BY sr.return_seq, sri.item_name`);
+  const byId = new Map();
+  for (const row of r.recordset) {
+    const key = String(row.id).toLowerCase();
+    if (!byId.has(key)) {
+      byId.set(key, {
+        id: row.id,
+        return_number: row.return_number,
+        returned_at: row.returned_at,
+        reason: row.reason ?? null,
+        refund_mode: row.refund_mode,
+        subtotal: Number(row.subtotal),
+        tax_amount: Number(row.tax_amount),
+        total: Number(row.total),
+        created_by_name: row.created_by_name ?? null,
+        items: [],
+      });
+    }
+    byId.get(key).items.push({
+      bill_item_id: row.bill_item_id,
+      item_name: row.item_name,
+      quantity: Number(row.quantity),
+      unit_price: Number(row.unit_price),
+      tax_rate: row.tax_rate != null ? Number(row.tax_rate) : null,
+      hsn_code: row.hsn_code ?? null,
+      net_amount: Number(row.net_amount),
+      tax_amount: Number(row.line_tax),
+    });
+  }
+  return [...byId.values()];
+}
+
+// GET /api/bills/:id/returns — the bill's credit notes.
+router.get('/:id/returns', requireAuth, async (req, res) => {
+  if (!RETURN_UUID.test(req.params.id)) return res.status(404).json({ error: 'Bill not found' });
+  try {
+    await poolConnect;
+    return res.json(await fetchReturns(pool.request(), req.user.business_id, req.params.id));
+  } catch (err) {
+    logger.error({ err }, 'List returns error');
+    return res.status(500).json({ error: 'Failed to load returns' });
+  }
+});
+
+// POST /api/bills/:id/returns — body { lines: [{ bill_item_id, quantity }],
+// refund_mode, reason? }. Settled bills only.
+router.post('/:id/returns', requireAuth, cashierOrOwner, async (req, res) => {
+  const { lines, refund_mode: refundMode, reason } = req.body || {};
+  if (!RETURN_UUID.test(req.params.id)) return res.status(404).json({ error: 'Bill not found' });
+  if (!Array.isArray(lines) || lines.length === 0) {
+    return res.status(400).json({ error: 'Choose at least one item to return' });
+  }
+  if (!RETURN_MODES.includes(refundMode)) {
+    return res.status(400).json({ error: `Refund mode must be one of: ${RETURN_MODES.join(', ')}` });
+  }
+  // One entry per bill line (a line sent twice adds up).
+  const wanted = new Map();
+  for (const l of lines) {
+    const id = String(l && l.bill_item_id || '');
+    const qty = Number(l && l.quantity);
+    if (!RETURN_UUID.test(id) || !(qty > 0)) {
+      return res.status(400).json({ error: 'Each return line needs an item and a quantity above 0' });
+    }
+    wanted.set(id.toLowerCase(), (wanted.get(id.toLowerCase()) || 0) + qty);
+  }
+  const businessId = req.user.business_id;
+  const billId = req.params.id;
+  try {
+    await poolConnect;
+    const tx = pool.transaction();
+    await tx.begin();
+    const fail = async (status, error) => {
+      await tx.rollback();
+      return res.status(status).json({ error });
+    };
+    try {
+      // The bill, locked: two returns of one bill queue rather than both
+      // returning the same last unit.
+      const bill = (await tx.request()
+        .input('id', sql.UniqueIdentifier, billId)
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .query(`SELECT b.id, b.status, b.subtotal, b.discount_amount, b.tax_amount,
+                       b.payment_status, bs.inventory_enabled
+                FROM bills b WITH (UPDLOCK, ROWLOCK)
+                JOIN businesses bs ON bs.id = b.business_id
+                WHERE b.id = @id AND b.business_id = @business_id`)).recordset[0];
+      if (!bill) return fail(404, 'Bill not found');
+      if (bill.status !== 'finalized') return fail(409, 'Only a settled bill can take a return');
+
+      const billLines = (await tx.request()
+        .input('bill_id', sql.UniqueIdentifier, billId)
+        .query(`SELECT bi.id, bi.item_id, bi.variant_id, bi.item_name, bi.quantity,
+                       bi.unit_price, bi.tax_rate, bi.hsn_code, bi.unit_cost, bi.stock_taken,
+                       (SELECT ISNULL(SUM(sri.quantity), 0) FROM sales_return_items sri
+                        WHERE sri.bill_item_id = bi.id) AS returned
+                FROM bill_items bi WHERE bi.bill_id = @bill_id`)).recordset;
+      const byId = new Map(billLines.map((l) => [String(l.id).toLowerCase(), l]));
+
+      // The bill's own prices: the line net rate, less its share of the
+      // bill discount; GST at the line's rate when the bill charged GST.
+      const subtotalBill = Number(bill.subtotal) || 0;
+      const ratio = subtotalBill > 0 ? (subtotalBill - (Number(bill.discount_amount) || 0)) / subtotalBill : 1;
+      const taxed = Number(bill.tax_amount) > 0;
+      const out = [];
+      for (const [id, qty] of wanted) {
+        const l = byId.get(id);
+        if (!l) return fail(400, 'That item is not on this bill');
+        const left = Number(l.quantity) - Number(l.returned);
+        if (qty > left + 0.001) {
+          return fail(400, `${l.item_name}: only ${cents2(left)} can be returned`);
+        }
+        const net = cents2(qty * Number(l.unit_price) * ratio);
+        const tax = taxed && l.tax_rate ? cents2(net * Number(l.tax_rate) / 100) : 0;
+        out.push({ l, qty, net, tax });
+      }
+      const subtotal = cents2(out.reduce((s, o) => s + o.net, 0));
+      const taxAmount = cents2(out.reduce((s, o) => s + o.tax, 0));
+      const total = cents2(subtotal + taxAmount);
+
+      // "Credit": taken off what this credit bill still owes.
+      if (refundMode === 'credit') {
+        if (bill.payment_status !== 'unpaid') {
+          return fail(400, 'Nothing is owing on this bill; refund it another way');
+        }
+        const due = Number((await tx.request()
+          .input('id', sql.UniqueIdentifier, billId)
+          .query(`SELECT ${DUE} AS due FROM bills b WHERE b.id = @id`)).recordset[0]?.due) || 0;
+        if (total > due + 0.01) {
+          return fail(400, `Only Rs. ${cents2(due).toFixed(2)} is owing on this bill; refund the rest another way`);
+        }
+      }
+
+      // CN-0001, numbered per business; HOLDLOCK keeps two from sharing one.
+      const seq = (await tx.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .query(`SELECT ISNULL(MAX(return_seq), 0) + 1 AS seq
+                FROM sales_returns WITH (UPDLOCK, HOLDLOCK)
+                WHERE business_id = @business_id`)).recordset[0].seq;
+      const returnNumber = `CN-${String(seq).padStart(4, '0')}`;
+      const ins = await tx.request()
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .input('bill_id', sql.UniqueIdentifier, billId)
+        .input('return_seq', sql.Int, seq)
+        .input('return_number', sql.NVarChar(30), returnNumber)
+        .input('reason', sql.NVarChar(200), reason ? String(reason).trim().slice(0, 200) || null : null)
+        .input('refund_mode', sql.NVarChar(20), refundMode)
+        .input('subtotal', sql.Decimal(12, 2), subtotal)
+        .input('tax_amount', sql.Decimal(12, 2), taxAmount)
+        .input('total', sql.Decimal(12, 2), total)
+        .input('created_by_user_id', sql.UniqueIdentifier, req.user.user_id)
+        .query(`INSERT INTO sales_returns (business_id, bill_id, return_seq, return_number,
+                  reason, refund_mode, subtotal, tax_amount, total, created_by_user_id)
+                OUTPUT INSERTED.id
+                VALUES (@business_id, @bill_id, @return_seq, @return_number,
+                  @reason, @refund_mode, @subtotal, @tax_amount, @total, @created_by_user_id)`);
+      const returnId = ins.recordset[0].id;
+
+      for (const { l, qty, net, tax } of out) {
+        await tx.request()
+          .input('return_id', sql.UniqueIdentifier, returnId)
+          .input('bill_item_id', sql.UniqueIdentifier, l.id)
+          .input('item_id', sql.UniqueIdentifier, l.item_id || null)
+          .input('variant_id', sql.UniqueIdentifier, l.variant_id || null)
+          .input('item_name', sql.NVarChar(200), l.item_name)
+          .input('quantity', sql.Decimal(10, 2), qty)
+          .input('unit_price', sql.Decimal(12, 4), l.unit_price)
+          .input('tax_rate', sql.Decimal(5, 2), l.tax_rate)
+          .input('hsn_code', sql.NVarChar(10), l.hsn_code || null)
+          .input('net_amount', sql.Decimal(12, 2), net)
+          .input('tax_amount', sql.Decimal(12, 2), tax)
+          .input('unit_cost', sql.Decimal(12, 4), l.unit_cost)
+          .query(`INSERT INTO sales_return_items (return_id, bill_item_id, item_id, variant_id,
+                    item_name, quantity, unit_price, tax_rate, hsn_code, net_amount, tax_amount, unit_cost)
+                  VALUES (@return_id, @bill_item_id, @item_id, @variant_id,
+                    @item_name, @quantity, @unit_price, @tax_rate, @hsn_code, @net_amount, @tax_amount, @unit_cost)`);
+        // The goods come back on the shelf — only if the sale took them off.
+        if (bill.inventory_enabled && l.stock_taken !== false && (l.item_id || l.variant_id)) {
+          const li = { item_id: l.item_id, variant_id: l.variant_id, quantity: qty };
+          await restoreLineStock(tx, businessId, li, { billId, type: 'return' });
+          await batches.returnPart(tx, businessId, billId, li, qty);
+        }
+        // Fully returned: its warranty goes too.
+        if (Number(l.returned) + qty >= Number(l.quantity) - 0.001) {
+          await tx.request()
+            .input('bill_item_id', sql.UniqueIdentifier, l.id)
+            .input('business_id', sql.UniqueIdentifier, businessId)
+            .query('DELETE FROM warranties WHERE bill_item_id = @bill_item_id AND business_id = @business_id');
+        }
+      }
+
+      // Credit taken off a credit bill can settle it.
+      if (refundMode === 'credit') {
+        await tx.request()
+          .input('id', sql.UniqueIdentifier, billId)
+          .query(`UPDATE b SET b.payment_status = 'paid', b.settled_at = GETUTCDATE()
+                  FROM bills b
+                  WHERE b.id = @id AND b.payment_status = 'unpaid' AND ${DUE} <= 0.004`);
+      }
+
+      await tx.commit();
+      if (bill.inventory_enabled) broadcast(businessId, { type: 'stock' });
+      const all = await fetchReturns(pool.request(), businessId, billId);
+      return res.status(201).json(all.find((x) => String(x.id).toLowerCase() === String(returnId).toLowerCase()));
+    } catch (err) {
+      try { await tx.rollback(); } catch (_) {}
+      throw err;
+    }
+  } catch (err) {
+    logger.error({ err }, 'Create return error');
+    return res.status(500).json({ error: 'Failed to save the return' });
+  }
+});
+
+// DELETE /api/bills/:id/returns/:returnId — undo a return made by mistake.
+// Owner only, and only on the day it was made. The stock goes back out (409
+// when it has already been sold again) and a credit refund owes again.
+router.delete('/:id/returns/:returnId', requireAuth, async (req, res) => {
+  if (req.user.role !== 'owner') {
+    return res.status(403).json({ error: 'Only the owner can undo a return' });
+  }
+  if (!RETURN_UUID.test(req.params.id) || !RETURN_UUID.test(req.params.returnId)) {
+    return res.status(404).json({ error: 'Return not found' });
+  }
+  const businessId = req.user.business_id;
+  const billId = req.params.id;
+  try {
+    await poolConnect;
+    const tx = pool.transaction();
+    await tx.begin();
+    const fail = async (status, error) => {
+      await tx.rollback();
+      return res.status(status).json({ error });
+    };
+    try {
+      const ret = (await tx.request()
+        .input('id', sql.UniqueIdentifier, req.params.returnId)
+        .input('bill_id', sql.UniqueIdentifier, billId)
+        .input('business_id', sql.UniqueIdentifier, businessId)
+        .query(`SELECT sr.id, sr.returned_at, sr.refund_mode, bs.inventory_enabled, bs.batch_tracking_enabled
+                FROM sales_returns sr WITH (UPDLOCK)
+                JOIN businesses bs ON bs.id = sr.business_id
+                WHERE sr.id = @id AND sr.bill_id = @bill_id AND sr.business_id = @business_id`)).recordset[0];
+      if (!ret) return fail(404, 'Return not found');
+      if (new Date(ret.returned_at) < dayRange(todayUtc()).start) {
+        return fail(409, "Only today's returns can be undone");
+      }
+      const items = (await tx.request()
+        .input('return_id', sql.UniqueIdentifier, ret.id)
+        .query(`SELECT sri.item_id, sri.variant_id, sri.item_name, sri.quantity, bi.stock_taken
+                FROM sales_return_items sri
+                JOIN bill_items bi ON bi.id = sri.bill_item_id
+                WHERE sri.return_id = @return_id`)).recordset;
+      if (ret.inventory_enabled) {
+        const recipeMap = await loadRecipeMap(tx, businessId, items.filter((i) => i.item_id));
+        for (const it of items) {
+          if (it.stock_taken === false || !(it.item_id || it.variant_id)) continue;
+          const li = { item_id: it.item_id, variant_id: it.variant_id, item_name: it.item_name, quantity: Number(it.quantity) };
+          const item = (await tx.request().input('id', sql.UniqueIdentifier, li.item_id)
+            .query('SELECT id, stock_quantity FROM items WHERE id = @id')).recordset[0];
+          const variant = li.variant_id ? (await tx.request().input('id', sql.UniqueIdentifier, li.variant_id)
+            .query('SELECT id, stock_quantity FROM item_variants WHERE id = @id')).recordset[0] : null;
+          const ok = await decrementLineStock(tx, businessId, li,
+            { [li.item_id]: item || { stock_quantity: null } },
+            li.variant_id ? { [li.variant_id]: variant } : {}, { billId })
+            && await decrementRecipe(tx, li, recipeMap);
+          if (!ok) return fail(409, `${it.item_name}: not enough stock left to undo the return`);
+          if (ret.batch_tracking_enabled) await batches.allocate(tx, businessId, billId, li);
+        }
+      }
+      await tx.request()
+        .input('id', sql.UniqueIdentifier, ret.id)
+        .query('DELETE FROM sales_returns WHERE id = @id');
+      // A credit refund undone: the bill owes again.
+      if (ret.refund_mode === 'credit') {
+        await tx.request()
+          .input('id', sql.UniqueIdentifier, billId)
+          .query(`UPDATE b SET b.payment_status = 'unpaid', b.settled_at = NULL
+                  FROM bills b
+                  WHERE b.id = @id AND b.payment_status = 'paid' AND ${DUE} > 0.004`);
+      }
+      await tx.commit();
+      if (ret.inventory_enabled) broadcast(businessId, { type: 'stock' });
+      return res.json({ ok: true });
+    } catch (err) {
+      try { await tx.rollback(); } catch (_) {}
+      throw err;
+    }
+  } catch (err) {
+    logger.error({ err }, 'Undo return error');
+    return res.status(500).json({ error: 'Failed to undo the return' });
+  }
+});
 
 module.exports = router;

@@ -166,6 +166,53 @@ class Business {
       );
 }
 
+/// One open stock batch (backend/src/batches.js): stock bought in one purchase
+/// at one cost. Only present while the shop has "Maintain batches" on.
+class StockBatch {
+  final String id;
+  /// The batch no.: the purchase's automatic "B-0001" or one the owner typed
+  /// (the supplier's own batch number). Shared by every item of a purchase.
+  final String code;
+  /// Purchase cost of one unit. NaN when it isn't known here (the owner
+  /// hides cost from staff, or old stock with no purchase / buying price).
+  final double unitCost;
+  final double remaining;
+
+  const StockBatch({
+    required this.id,
+    required this.code,
+    required this.unitCost,
+    required this.remaining,
+  });
+
+  factory StockBatch.fromJson(Map<String, dynamic> j) => StockBatch(
+        id: j['id'].toString(),
+        code: j['code'].toString(),
+        unitCost: (j['unit_cost'] as num?)?.toDouble() ?? double.nan,
+        remaining: (j['remaining'] as num).toDouble(),
+      );
+
+  /// Old stock from before batches (it sells first): no batch, [cost] its
+  /// average purchase cost or buying price when known.
+  factory StockBatch.oldStock(double qty, double? cost) => StockBatch(
+      id: '', code: '', unitCost: cost ?? double.nan, remaining: qty);
+
+  bool get isOldStock => id.isEmpty;
+
+  /// For the offline item cache; a hidden cost is stored as null.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'code': code,
+        'unit_cost': unitCost.isNaN ? null : unitCost,
+        'remaining': remaining,
+      };
+  bool get costKnown => !unitCost.isNaN;
+
+  static List<StockBatch> listFrom(Object? raw) => (raw as List? ?? [])
+      .map((b) => StockBatch.fromJson(Map<String, dynamic>.from(b as Map)))
+      .toList();
+}
+
 /// A sellable variant of an item (e.g. a size S/M/L/XL) with its own stock and
 /// optional price. When [price] is null the parent item's price applies.
 class ItemVariant {
@@ -187,6 +234,14 @@ class ItemVariant {
   final int sortOrder;
   final bool isActive;
 
+  /// This size's open stock batches, oldest first (empty when batches are off).
+  final List<StockBatch> batches;
+
+  /// The owner's buying price per unit before GST (optional), and the
+  /// average purchase cost (batch shops; the cost of old stock).
+  final double? buyingPrice;
+  final double? avgCost;
+
   ItemVariant({
     required this.id,
     required this.itemId,
@@ -200,6 +255,9 @@ class ItemVariant {
     this.unit,
     this.sortOrder = 0,
     this.isActive = true,
+    this.batches = const [],
+    this.buyingPrice,
+    this.avgCost,
   });
 
   factory ItemVariant.fromJson(Map<String, dynamic> j) => ItemVariant(
@@ -219,6 +277,9 @@ class ItemVariant {
         unit: j['unit'] as String?,
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         isActive: j['is_active'] == true || j['is_active'] == 1,
+        batches: StockBatch.listFrom(j['batches']),
+        buyingPrice: (j['buying_price'] as num?)?.toDouble(),
+        avgCost: (j['avg_cost'] as num?)?.toDouble(),
       );
 
   bool get isLowStock =>
@@ -284,9 +345,21 @@ class Item {
   /// auto-create a warranty record (routes/bills.js' auto-create hook).
   final bool warrantyEligible;
 
+  /// "Service (no stock)": a purchase never starts tracking stock for it.
+  final bool isService;
+
+  /// The owner's buying price per unit before GST (optional) — the profit
+  /// cost for shops without purchase bills — and the average purchase cost.
+  final double? buyingPrice;
+  final double? avgCost;
+
   /// The warranty period (months) seeded onto an auto-created record. Null
   /// when [warrantyEligible] is false.
   final int? defaultWarrantyMonths;
+
+  /// The item's open stock batches, oldest first (empty when batches are off,
+  /// and on a sized item — each size carries its own).
+  final List<StockBatch> batches;
 
   Item({
     required this.id,
@@ -310,6 +383,10 @@ class Item {
     this.imageUrl,
     this.warrantyEligible = false,
     this.defaultWarrantyMonths,
+    this.batches = const [],
+    this.isService = false,
+    this.buyingPrice,
+    this.avgCost,
   });
 
   factory Item.fromJson(Map<String, dynamic> j) => Item(
@@ -341,6 +418,10 @@ class Item {
         warrantyEligible:
             j['warranty_eligible'] == true || j['warranty_eligible'] == 1,
         defaultWarrantyMonths: (j['default_warranty_months'] as num?)?.toInt(),
+        batches: StockBatch.listFrom(j['batches']),
+        isService: j['is_service'] == true || j['is_service'] == 1,
+        buyingPrice: (j['buying_price'] as num?)?.toDouble(),
+        avgCost: (j['avg_cost'] as num?)?.toDouble(),
       );
 
   /// Whether this item is sold by a divisible measure (kg, g, litre, ...)
@@ -381,6 +462,10 @@ class Item {
         imageUrl: imageUrl,
         warrantyEligible: warrantyEligible,
         defaultWarrantyMonths: defaultWarrantyMonths,
+        batches: batches,
+        isService: isService,
+        buyingPrice: buyingPrice,
+        avgCost: avgCost,
       );
 
   bool get isLowStock =>
@@ -483,6 +568,18 @@ class RecipeRow {
       );
 }
 
+/// held_batches arrives as a JSON string (SQL FOR JSON) or a list:
+/// [{batch_id, qty}] → {id: qty}.
+Map<String, double> _heldBatches(Object? raw) {
+  final list = raw is String ? (raw.isEmpty ? const [] : jsonDecode(raw)) : raw;
+  if (list is! List) return const {};
+  return {
+    for (final e in list)
+      if (e is Map && e['batch_id'] != null)
+        e['batch_id'].toString(): (e['qty'] as num?)?.toDouble() ?? 0,
+  };
+}
+
 class BillItem {
   final String id;
   final String billId;
@@ -501,6 +598,12 @@ class BillItem {
   /// draft-bill responses carry it; null elsewhere (and on offline drafts).
   final String? kitchenStatus;
 
+  /// The stock batch the cashier picked for this line (null = oldest first).
+  final String? batchId;
+
+  /// What this (held) bill already took from each batch: batch id → qty.
+  final Map<String, double> heldBatches;
+
   BillItem({
     required this.id,
     required this.billId,
@@ -514,6 +617,8 @@ class BillItem {
     required this.lineTotal,
     this.discountAmount = 0,
     this.kitchenStatus,
+    this.batchId,
+    this.heldBatches = const {},
   });
 
   /// Customer-facing line name: notes the item discount, e.g.
@@ -546,6 +651,8 @@ class BillItem {
         discountAmount:
             double.tryParse((j['discount_amount'] ?? 0).toString()) ?? 0.0,
         kitchenStatus: j['kitchen_status'] as String?,
+        batchId: j['batch_id'] as String?,
+        heldBatches: _heldBatches(j['held_batches']),
       );
 
   /// The keys [BillItem.fromJson] reads — see [Bill.toSnapshotJson].
@@ -1226,8 +1333,8 @@ class Customer {
       );
 }
 
-/// One labeled value on a [Warranty] record — either filled from a
-/// [WarrantyFieldTemplate] field or typed ad-hoc by staff. The backend stores
+/// One labeled value on a [Warranty] record — either one of the shop's
+/// default detail labels or typed ad-hoc by staff. The backend stores
 /// both the same way (routes/warranties.js), so the app never needs to tell
 /// them apart.
 class WarrantyExtraField {
@@ -1311,48 +1418,6 @@ class Warranty {
             .toList(),
         notes: j['notes'] as String?,
       );
-}
-
-/// The extra fields a business wants to ask for on every warranty record in
-/// one item category (migration 063) — e.g. "KM Reading"/"Vehicle Number" for
-/// Tyres, "Serial Number"/"IMEI" for Electronics.
-class WarrantyFieldTemplate {
-  final String category;
-  final List<WarrantyTemplateField> fields;
-
-  WarrantyFieldTemplate({required this.category, required this.fields});
-
-  factory WarrantyFieldTemplate.fromJson(Map<String, dynamic> j) =>
-      WarrantyFieldTemplate(
-        category: j['category'] as String,
-        fields: (j['fields'] as List? ?? [])
-            .map((f) => WarrantyTemplateField.fromJson(f))
-            .toList(),
-      );
-}
-
-/// One field definition within a [WarrantyFieldTemplate]. [type] is a UI
-/// rendering hint only (text/number/date) — the value is always stored as a
-/// string on the record itself.
-class WarrantyTemplateField {
-  final String key;
-  final String label;
-  final String type;
-
-  WarrantyTemplateField({
-    required this.key,
-    required this.label,
-    required this.type,
-  });
-
-  factory WarrantyTemplateField.fromJson(Map<String, dynamic> j) =>
-      WarrantyTemplateField(
-        key: j['key'] as String,
-        label: j['label'] as String,
-        type: (j['type'] as String?) ?? 'text',
-      );
-
-  Map<String, dynamic> toJson() => {'key': key, 'label': label, 'type': type};
 }
 
 class Expense {
@@ -1458,6 +1523,17 @@ class ReportSummary {
   /// the day the money came in, separate from the period's sales.
   final Map<String, double> creditCollected;
 
+  /// Real profit from stock batches (pre-tax): sales whose purchase cost is
+  /// known, what those goods cost, the difference, and the sales left out
+  /// because their cost is unknown. All 0 for a shop without batches.
+  final double costedRevenue;
+  final double costOfGoods;
+  final double grossProfit;
+  final double uncostedRevenue;
+
+  /// Credit notes (sales returns) in the period; sales above are already net of them.
+  final double returnsTotal;
+
   ReportSummary({
     required this.from,
     required this.to,
@@ -1474,6 +1550,11 @@ class ReportSummary {
     this.topItems = const [],
     this.recentBills = const [],
     this.creditCollected = const {},
+    this.costedRevenue = 0,
+    this.costOfGoods = 0,
+    this.grossProfit = 0,
+    this.uncostedRevenue = 0,
+    this.returnsTotal = 0,
   });
 
   /// Net sales for the period. total_revenue is already net of discount from
@@ -1514,6 +1595,12 @@ class ReportSummary {
           .toList(),
       creditCollected: (j['credit_collected'] as Map? ?? const {}).map(
           (k, v) => MapEntry('$k', double.tryParse('$v') ?? 0.0)),
+      // Absent on an older backend: read as 0.
+      costedRevenue: (j['costed_revenue'] as num?)?.toDouble() ?? 0,
+      costOfGoods: (j['cost_of_goods'] as num?)?.toDouble() ?? 0,
+      grossProfit: (j['gross_profit'] as num?)?.toDouble() ?? 0,
+      uncostedRevenue: (j['uncosted_revenue'] as num?)?.toDouble() ?? 0,
+      returnsTotal: (j['returns_total'] as num?)?.toDouble() ?? 0,
     );
   }
 }

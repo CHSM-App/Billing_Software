@@ -1,7 +1,7 @@
 # Advocate review checklist: Vittam legal documents
 
 **For:** the licensed Indian advocate reviewing Vittam's legal documents before publication.
-**Documents under review:** `TERMS_OF_SERVICE.md`, `ACCEPTABLE_USE_POLICY.md`, `CUSTOMER_ORDERING_TERMS.md`, and, for consistency, the existing Privacy Policy at https://vittam.vengurlatech.com/privacy.
+**Documents under review:** `TERMS_OF_SERVICE.md` (the Acceptable Use Policy is now its section 12, merged on 5 November 2026), `CUSTOMER_ORDERING_TERMS.md`, and, for consistency, the existing Privacy Policy at https://vittam.vengurlatech.com/privacy.
 **Prepared:** 27 October 2026. The drafts were prepared with software assistance and have not been legally reviewed. Every `[[PENDING: …]]` marker in them is either a business decision (`LEGAL_DECISIONS_PENDING.md`) or one of the questions below.
 
 ## Product summary (as verified in the code)
@@ -15,14 +15,14 @@ Vittam is billing and business-management software for Indian retailers and rest
 - **Offline use.** Billing works offline, with a cap on how long the app can stay offline before it must check its licence.
 - **Online store and table QR ordering.** These are public web pages where a shop's customers order, verify their phone by WhatsApp OTP, and may pay by UPI **directly to the shop**. We never handle the money.
 - **Messaging.** WhatsApp is used for bills and OTPs; push notifications go through Firebase.
-- **Consent.** The consent flow is built but switched off. Owners will tick one unticked box beside the sentence "I have read and agree to the Terms of Service, Acceptable Use Policy and Privacy Policy", where each document name links to the full text. The server records the user, the bundle version, a timestamp, the IP address and the source (sign-up or re-acceptance) in an insert-only table, plus an audit-log entry. Existing owners get a full-page re-acceptance screen when the version changes. Staff are not asked.
+- **Consent.** The consent flow is built but switched off. Owners will tick one unticked box beside the sentence "I have read and agree to the Terms of Service and Privacy Policy", where each document name links to the full text. The server records the user, the bundle version, a timestamp, the IP address and the source (sign-up or re-acceptance) in an insert-only table, plus an audit-log entry. Existing owners get a full-page re-acceptance screen when the version changes. Staff are not asked.
 
 ## Questions
 
 ### Parties and formation
 1. **Contracting entity.** Confirm the exact name of the entity, the details that must appear (CIN, registered office), and its authority to contract.
-2. **Electronic contract formation.** Under the IT Act, 2000 (s.10A) and the Indian Contract Act, 1872, is the flow above (one unticked box covering all three linked documents, then Create Account / Agree, logged on the server) enough to form a binding contract? Should we record anything else?
-3. **Who must accept.** Is it enough that the Owner accepts for the business, or must Staff also accept something (for example the AUP)?
+2. **Electronic contract formation.** Under the IT Act, 2000 (s.10A) and the Indian Contract Act, 1872, is the flow above (one unticked box covering both linked documents, then Create Account / Agree, logged on the server) enough to form a binding contract? Should we record anything else?
+3. **Who must accept.** Is it enough that the Owner accepts for the business, or must Staff also accept something (for example the acceptable use rules in ToS §12)?
 4. **Keeping the acceptance record.** May we, or must we, keep the acceptance record (including the IP address) after an account is deleted, and for how long? Is logging the IP at acceptance proportionate? It is already logged at sign-in and disclosed in the Privacy Policy.
 
 ### Liability and risk allocation (ToS §§10, 13, 14, 16, 17)
@@ -31,7 +31,7 @@ Vittam is billing and business-management software for Indian retailers and rest
 7. **Exceptions to the cap.** Confirm the list (fraud, wilful misconduct, gross negligence, death or personal injury, non-excludable liability) and add anything mandatory.
 8. **GST disclaimer.** Is the balance in §10 right: the owner checks outputs and files returns, but we are not excused for our own software defects where the law forbids it? Any risk in how we describe ourselves (not a tax adviser, not a GST Suvidha Provider)?
 9. **Warranty disclaimer.** Is the capitalised disclaimer in §14 appropriate in Indian practice, and does it need changes for B2B?
-10. **Indemnity.** Are the scope (third-party claims from the owner's content, sales, data misuse and AUP breaches) and the procedure in §17 appropriate?
+10. **Indemnity.** Are the scope (third-party claims from the owner's content, sales, data misuse and breaches of §12 (acceptable use)) and the procedure in §17 appropriate?
 11. **Backups.** With best-effort backups and no guarantee (§13.3), is this wording acceptable? Does it conflict with the Privacy Policy's statement that backups "age out on their normal rotation"?
 
 ### Disputes (ToS §20)
@@ -40,7 +40,7 @@ Vittam is billing and business-management software for Indian retailers and rest
 
 ### Consumer protection and e-commerce (ToS §11, Ordering Terms)
 14. **E-commerce status.** Customers of our business users order through Vittam-hosted public pages. Is Vengurla Tech an "e-commerce entity" (or any other regulated role) under the Consumer Protection Act, 2019 and the Consumer Protection (E-Commerce) Rules, 2020? If so, what must the pages show, and what duties follow (for example a grievance officer, or seller details)?
-15. **The ordering notice.** Is the notice next to "Place Order" adequate as written? ("By placing this order, you agree to the shop's applicable ordering policies and Vittam's Customer Ordering Terms.") Shops currently have no place to publish their own policies; see `LEGAL_DECISIONS_PENDING.md` #18.
+15. **The ordering notice.** Is the notice next to "Place Order" adequate as written? ("By placing this order, you agree to Vittam's Customer Ordering Terms. Ask the shop about its cancellation and refund rules.") Shops have no place in Vittam to publish their own policies, so the notice no longer refers to them; see `LEGAL_DECISIONS_PENDING.md` #18.
 16. Is anything in the Ordering Terms at risk of being read as waiving statutory consumer rights?
 
 ### Intermediary and grievance obligations
@@ -50,11 +50,11 @@ Vittam is billing and business-management software for Indian retailers and rest
 18. **DPDP compliance.** Under the Digital Personal Data Protection Act, 2023 and the DPDP Rules, 2025, are the roles in ToS §9 correctly described? There, the business decides what customer and staff data to collect, and we process it on its instructions.
 19. **Phased commencement.** Given the phased commencement of the DPDP Rules, which obligations apply on our planned effective date? Is the Privacy Policy compliant for that date?
 20. **Retention and deletion.** How long must data be kept after deletion, for example under GST record-keeping rules and for limitation periods? Today, deletion is scheduled 30 days after a request and then carried out by hand; see `CODEBASE_AUDIT.md`.
-20a. **AI bill scanning (added November 2026).** An owner can photograph a supplier invoice; the image or PDF is sent to Anthropic (a US AI provider) to extract a draft vendor bill, which the owner reviews before saving. The Privacy Policy now names Anthropic as a provider, adds the purpose, and states that a scanned file is kept with its saved vendor bill and deleted after 7 days if never saved. Is this disclosure sufficient under DPDP (including the cross-border transfer), and does it need consent at the point of scanning rather than only in the policy? Anthropic's API data-retention and training terms should be checked against this wording before launch. The feature is off for every business until the admin enables it.
+20a. **AI bill scanning (added November 2026).** An owner can photograph a supplier invoice; the image or PDF is sent to Anthropic (a US AI provider) to extract a draft vendor bill, which the owner reviews before saving. For bill lines the shop has not linked before, the shop's item names and category names (not prices, stock or customer data) are also sent, so the AI can suggest which item each line is. The Privacy Policy now names Anthropic as a provider, adds the purpose, and states that a scanned file is kept with its saved vendor bill and deleted after 7 days if never saved. Is this disclosure sufficient under DPDP (including the cross-border transfer), and does it need consent at the point of scanning rather than only in the policy? Anthropic's API data-retention and training terms should be checked against this wording before launch. The feature is off for every business until the admin enables it.
 
 ### Commercial terms
-21. **Refunds.** Case-by-case review is the preference. What minimum process or statutory rights must the refund section state?
-22. **Suspension and termination.** Are the grounds, notice and review steps in ToS §15 and AUP §2 fair and enforceable? Is immediate suspension for security or illegality acceptable?
+21. **Refunds.** The business has chosen no refunds once a Subscription is activated, except for duplicate or wrong-amount payments (ToS §7). The free 30-day Trial is offered as the way to try first. Is this enforceable for B2B customers, and what statutory rights must the section still state? Separately, must §19.4 offer a pro-rata refund to an owner who rejects a material change?
+22. **Suspension and termination.** Are the grounds, notice and review steps in ToS §12.11 to §12.13 and §15 fair and enforceable? Is immediate suspension for security or illegality acceptable?
 23. **Changes to the Terms.** Is the process in §19 sound: material changes are re-accepted in the app, and continued use is not treated as agreement?
 
 ### Distribution and notices
@@ -62,6 +62,6 @@ Vittam is billing and business-management software for Indian retailers and rest
 25. **Mandatory disclosures.** Do Google Play or the Windows distribution channel require anything further? (Google Play needs a privacy policy URL, which we already have, and may expect a Terms URL.)
 
 ## What the advocate will receive
-- The three drafts plus the current Privacy Policy.
+- The two drafts plus the current Privacy Policy.
 - `LEGAL_DECISIONS_PENDING.md`, so the business decisions are visible.
 - `CODEBASE_AUDIT.md`, which records where the product's actual behaviour differs from the existing policy wording.

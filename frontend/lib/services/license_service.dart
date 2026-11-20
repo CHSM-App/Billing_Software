@@ -197,6 +197,17 @@ class LicenseService {
       if (data['quotations_enabled'] is bool) {
         await updateQuotationsEnabled(data['quotations_enabled'] as bool);
       }
+      // The owner's staff price/discount lock, same reason.
+      if (data['staff_can_edit_price'] is bool) {
+        await updateStaffCanEditPrice(data['staff_can_edit_price'] as bool);
+      }
+      // The owner's "Maintain batches" switch, same reason.
+      if (data['batch_tracking_enabled'] is bool) {
+        await updateBatchTracking(data['batch_tracking_enabled'] as bool);
+      }
+      if (data['staff_see_cost'] is bool) {
+        await updateStaffSeeCost(data['staff_see_cost'] as bool);
+      }
       // Billing Setup, same reason. No key (older backend) = left alone.
       await BillSettings.sync(data);
 

@@ -61,6 +61,63 @@ const MODE_SUMS = `
             ISNULL(SUM(CASE WHEN mode = 'credit' THEN amt ELSE 0 END), 0) AS credit,
             ISNULL(SUM(CASE WHEN mode = 'other'  THEN amt ELSE 0 END), 0) AS other`;
 
+// Sales returns (credit notes, migration 082) made in [@from_dt, @to_dt):
+// per day (UTC date, as the daily sales) and refund mode, with what they give
+// back in taxable value, GST and cost (profit).
+const RETURNS_IN_RANGE = `
+  SELECT CAST(sr.returned_at AS DATE) AS day, sr.refund_mode,
+         COUNT(*) AS cnt, SUM(sr.total) AS total, SUM(sr.subtotal) AS subtotal,
+         SUM(sr.tax_amount) AS tax, SUM(c.costed_net) AS costed_net, SUM(c.cost) AS cost
+  FROM sales_returns sr
+  OUTER APPLY (
+    SELECT SUM(CASE WHEN sri.unit_cost IS NOT NULL THEN sri.net_amount END) AS costed_net,
+           SUM(sri.quantity * sri.unit_cost) AS cost
+    FROM sales_return_items sri WHERE sri.return_id = sr.id
+  ) c
+  WHERE sr.business_id = @business_id
+    AND sr.returned_at >= @from_dt AND sr.returned_at < @to_dt
+  GROUP BY CAST(sr.returned_at AS DATE), sr.refund_mode`;
+
+/** RETURNS_IN_RANGE rows → totals, per refund mode and per day. */
+function foldReturns(rows) {
+  const n = (v) => parseFloat(v) || 0;
+  const out = { count: 0, total: 0, subtotal: 0, tax: 0, costedNet: 0, cost: 0, byMode: {}, byDay: {} };
+  for (const r of rows || []) {
+    out.count += Number(r.cnt) || 0;
+    out.total += n(r.total);
+    out.subtotal += n(r.subtotal);
+    out.tax += n(r.tax);
+    out.costedNet += n(r.costed_net);
+    out.cost += n(r.cost);
+    out.byMode[r.refund_mode] = (out.byMode[r.refund_mode] || 0) + n(r.total);
+    const day = r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10);
+    out.byDay[day] = (out.byDay[day] || 0) + n(r.total);
+  }
+  return out;
+}
+
+const minus2 = (a, b) => parseFloat(((parseFloat(a) || 0) - (b || 0)).toFixed(2));
+
+function dailyWithReturns(rows, byDay) {
+  const key = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
+  const left = { ...byDay };
+  const out = rows.map((r) => {
+    const day = key(r.day);
+    const back = left[day] || 0;
+    delete left[day];
+    return {
+      day,
+      revenue:  minus2(r.revenue, back),
+      expenses: parseFloat(r.expenses),
+      profit:   minus2(r.profit, back),
+    };
+  });
+  for (const [day, back] of Object.entries(left)) {
+    out.push({ day, revenue: minus2(0, back), expenses: 0, profit: minus2(0, back) });
+  }
+  return out.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+}
+
 function ownerOnly(req, res, next) {
   if (req.user.role !== 'owner') {
     return res.status(403).json({ error: 'Only owners can access reports' });
@@ -88,7 +145,7 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
 
     const { start, end } = dayRange(dateStr);
 
-    const [billResult, expenseResult, collectedResult] = await Promise.all([
+    const [billResult, expenseResult, collectedResult, returnsResult] = await Promise.all([
       // Sargable range on DATETIME2 — no CAST() wrapping the column.
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -125,10 +182,17 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
         .input('from_dt',     sql.DateTime2,        start)
         .input('to_dt',       sql.DateTime2,        end)
         .query(CREDIT_COLLECTED),
+      // Goods returned today come off today's sales and the money by mode.
+      pool.request()
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('from_dt',     sql.DateTime2,        start)
+        .input('to_dt',       sql.DateTime2,        end)
+        .query(RETURNS_IN_RANGE),
     ]);
 
+    const ret       = foldReturns(returnsResult.recordset);
     const bill      = billResult.recordset[0];
-    const revenue   = parseFloat(bill.total_revenue);
+    const revenue   = minus2(bill.total_revenue, ret.total);
     const discount  = parseFloat(bill.total_discount);
     const roundOff  = parseFloat(bill.total_round_off);
     const expenses  = parseFloat(expenseResult.recordset[0].total_expenses);
@@ -143,12 +207,14 @@ router.get('/today', requireAuth, ownerOnly, async (req, res) => {
       total_round_off: roundOff,
       total_expenses:  expenses,
       net_profit:      parseFloat((netRevenue - expenses).toFixed(2)),
+      returns_total:   parseFloat(ret.total.toFixed(2)),
+      returns_count:   ret.count,
       by_payment_mode: {
-        cash:   parseFloat(bill.cash),
-        upi:    parseFloat(bill.upi),
-        card:   parseFloat(bill.card),
-        credit: parseFloat(bill.credit),
-        other:  parseFloat(bill.other),
+        cash:   minus2(bill.cash, ret.byMode.cash),
+        upi:    minus2(bill.upi, ret.byMode.upi),
+        card:   minus2(bill.card, ret.byMode.card),
+        credit: minus2(bill.credit, ret.byMode.credit),
+        other:  minus2(bill.other, ret.byMode.other),
       },
       // Old credit paid off today, per mode — today's money, not today's sales.
       credit_collected: creditCollected(collectedResult.recordset),
@@ -180,7 +246,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
 
     const { start: fromDt, end: toDt } = dateRange(fromStr, toStr);
 
-    const [billResult, expenseResult, dailyResult, expCatResult, payModeResult, topItemsResult, recentBillsResult, collectedResult] = await Promise.all([
+    const [billResult, expenseResult, dailyResult, expCatResult, payModeResult, topItemsResult, recentBillsResult, collectedResult, costResult, returnsResult] = await Promise.all([
       // Sargable DATETIME2 range for bills.finalized_at
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
@@ -328,12 +394,51 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
         .input('from_dt',     sql.DateTime2,        fromDt)
         .input('to_dt',       sql.DateTime2,        toDt)
         .query(CREDIT_COLLECTED),
+      // What the goods sold cost: each line's cost snapshot
+      // (bill_items.unit_cost, stockLedger.snapshotBillCosts) — its batch cost,
+      // else the purchase average, else the item's buying price. The same
+      // number the item-wise profit report reads, for every shop, batches or
+      // not. Sales are net of GST and of both discounts (the top-items rule),
+      // with the bill's round-off spread the same way. A line with no cost is
+      // reported as uncosted, never as all profit.
+      pool.request()
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('from_dt',     sql.DateTime2,        fromDt)
+        .input('to_dt',       sql.DateTime2,        toDt)
+        .query(`
+          SELECT ISNULL(SUM(l.net), 0) AS net_sales,
+                 ISNULL(SUM(CASE WHEN l.unit_cost IS NOT NULL THEN l.net END), 0) AS costed_revenue,
+                 ISNULL(SUM(l.quantity * l.unit_cost), 0) AS cost_of_goods
+          FROM (
+            SELECT bi.quantity, bi.unit_cost,
+                   bi.quantity * bi.unit_price
+                     * CASE WHEN b.subtotal > 0
+                            THEN (b.subtotal - ISNULL(b.discount_amount, 0) + ISNULL(b.round_off, 0)) / b.subtotal
+                            ELSE 1 END AS net
+            FROM bill_items bi
+            JOIN bills b ON b.id = bi.bill_id
+            WHERE b.business_id = @business_id AND b.status = 'finalized'
+              AND b.finalized_at >= @from_dt AND b.finalized_at < @to_dt
+          ) l
+        `),
+      // Goods returned in the period (credit notes) come off sales, tax, the
+      // money by mode, each day, and profit (their cost comes back too).
+      pool.request()
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('from_dt',     sql.DateTime2,        fromDt)
+        .input('to_dt',       sql.DateTime2,        toDt)
+        .query(RETURNS_IN_RANGE),
     ]);
 
+    const ret       = foldReturns(returnsResult.recordset);
     const bill      = billResult.recordset[0];
+    const costs     = costResult.recordset[0] || {};
+    const r2 = (n) => parseFloat((parseFloat(n) || 0).toFixed(2));
+    const costedRevenue = r2(r2(costs.costed_revenue) - ret.costedNet);
+    const costOfGoods   = r2(r2(costs.cost_of_goods) - ret.cost);
     // total_revenue is the money collected: SUM(total - discount + round_off),
     // so the payment split below sums exactly to it.
-    const netRevenue = parseFloat(bill.total_revenue);
+    const netRevenue = minus2(bill.total_revenue, ret.total);
     const revenue    = netRevenue;
     const discount   = parseFloat(bill.total_discount);
     const expenses   = parseFloat(expenseResult.recordset[0].total_expenses);
@@ -345,22 +450,26 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
       total_revenue:   revenue,
       total_discount:  discount,
       total_round_off: parseFloat(bill.total_round_off),
-      total_tax:       parseFloat(bill.total_tax),
+      total_tax:       minus2(bill.total_tax, ret.tax),
       total_expenses:  expenses,
+      returns_total:   r2(ret.total),
+      returns_count:   ret.count,
       net_profit:      parseFloat((netRevenue - expenses).toFixed(2)),
+      // Real profit, from stock batches. Pre-tax and only for the sales whose
+      // purchase cost is known; uncosted_revenue is the rest, NOT in profit.
+      // net_profit above keeps its old meaning for older apps and exports.
+      costed_revenue:   costedRevenue,
+      cost_of_goods:    costOfGoods,
+      gross_profit:     r2(costedRevenue - costOfGoods),
+      uncosted_revenue: r2(r2(costs.net_sales) - ret.subtotal - costedRevenue),
       by_payment_mode: {
-        cash:   parseFloat(bill.cash),
-        upi:    parseFloat(bill.upi),
-        card:   parseFloat(bill.card),
-        credit: parseFloat(bill.credit),
-        other:  parseFloat(bill.other),
+        cash:   minus2(bill.cash, ret.byMode.cash),
+        upi:    minus2(bill.upi, ret.byMode.upi),
+        card:   minus2(bill.card, ret.byMode.card),
+        credit: minus2(bill.credit, ret.byMode.credit),
+        other:  minus2(bill.other, ret.byMode.other),
       },
-      daily: dailyResult.recordset.map((r) => ({
-        day:      r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day),
-        revenue:  parseFloat(r.revenue),
-        expenses: parseFloat(r.expenses),
-        profit:   parseFloat(r.profit),
-      })),
+      daily: dailyWithReturns(dailyResult.recordset, ret.byDay),
       expenses_by_category: expCatResult.recordset.map((r) => ({
         category: r.category,
         total:    parseFloat(r.total),
@@ -370,7 +479,7 @@ router.get('/summary', requireAuth, ownerOnly, async (req, res) => {
       revenue_by_payment_mode: payModeResult.recordset.map((r) => ({
         mode:  r.payment_mode,
         count: r.count,
-        total: parseFloat(r.total),
+        total: minus2(r.total, ret.byMode[r.payment_mode]),
       })),
       top_items: topItemsResult.recordset.map((r) => ({
         item_name: r.item_name,
@@ -532,7 +641,7 @@ router.get('/gstr1', requireAuth, ownerOnly, async (req, res) => {
       GROUP BY tax_rate, hsn_code
     `;
 
-    const [linesResult, billsResult, profileResult] = await Promise.all([
+    const [linesResult, billsResult, profileResult, retLinesResult, creditNotesResult] = await Promise.all([
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)
         .input('from_dt',     sql.DateTime2,        fromDt)
@@ -562,6 +671,40 @@ router.get('/gstr1', requireAuth, ownerOnly, async (req, res) => {
           SELECT name, gst_number, state, default_sac_code
           FROM businesses WHERE id = @business_id
         `),
+      // Credit notes (sales returns, migration 082) issued in the period, by
+      // rate and HSN — they come off the outward supplies above.
+      pool.request()
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('from_dt',     sql.DateTime2,        fromDt)
+        .input('to_dt',       sql.DateTime2,        toDt)
+        .query(`
+          SELECT sri.tax_rate, sri.hsn_code, SUM(sri.quantity) AS qty,
+                 SUM(sri.net_amount) AS taxable, SUM(sri.tax_amount) AS tax
+          FROM sales_return_items sri
+          INNER JOIN sales_returns sr ON sr.id = sri.return_id
+          INNER JOIN businesses bs ON bs.id = sr.business_id
+          WHERE sr.business_id = @business_id
+            AND sr.returned_at >= @from_dt AND sr.returned_at <= @to_dt
+            AND ISNULL(bs.gst_enabled, 0) = 1
+            AND sri.tax_rate IS NOT NULL AND sri.tax_rate > 0
+          GROUP BY sri.tax_rate, sri.hsn_code
+        `),
+      // The credit notes themselves, against the invoice each one corrects.
+      pool.request()
+        .input('business_id', sql.UniqueIdentifier, req.user.business_id)
+        .input('from_dt',     sql.DateTime2,        fromDt)
+        .input('to_dt',       sql.DateTime2,        toDt)
+        .query(`
+          SELECT sr.return_number, sr.returned_at, sr.subtotal, sr.tax_amount, sr.total,
+                 b.bill_number, b.finalized_at, b.customer_name, b.customer_gstin
+          FROM sales_returns sr
+          INNER JOIN bills b ON b.id = sr.bill_id AND b.business_id = sr.business_id
+          INNER JOIN businesses bs ON bs.id = sr.business_id
+          WHERE sr.business_id = @business_id
+            AND sr.returned_at >= @from_dt AND sr.returned_at <= @to_dt
+            AND ISNULL(bs.gst_enabled, 0) = 1 AND sr.tax_amount > 0
+          ORDER BY sr.return_seq
+        `),
     ]);
 
     const profile = profileResult.recordset[0] || {};
@@ -569,12 +712,17 @@ router.get('/gstr1', requireAuth, ownerOnly, async (req, res) => {
     const r2 = (n) => Math.round(Number(n) * 100) / 100;
 
     // --- B2CS: consolidated by rate -----------------------------------------
+    // Invoices add, credit notes (sign -1) take away.
+    const lineRows = [
+      ...linesResult.recordset.map((r) => ({ ...r, sign: 1 })),
+      ...retLinesResult.recordset.map((r) => ({ ...r, sign: -1 })),
+    ];
     const byRate = new Map();
-    for (const row of linesResult.recordset) {
+    for (const row of lineRows) {
       const rate = Number(row.tax_rate);
       const g = byRate.get(rate) || { rate, taxable: 0, tax: 0 };
-      g.taxable += Number(row.taxable);
-      g.tax     += Number(row.tax);
+      g.taxable += row.sign * Number(row.taxable);
+      g.tax     += row.sign * Number(row.tax);
       byRate.set(rate, g);
     }
     const b2cs = [...byRate.values()]
@@ -594,14 +742,14 @@ router.get('/gstr1', requireAuth, ownerOnly, async (req, res) => {
 
     // --- HSN summary: by HSN/SAC then rate -----------------------------------
     const byHsn = new Map();
-    for (const row of linesResult.recordset) {
+    for (const row of lineRows) {
       const code = row.hsn_code || defaultSac || '';
       const rate = Number(row.tax_rate);
       const key = `${code}|${rate}`;
       const g = byHsn.get(key) || { hsn: code, rate, qty: 0, taxable: 0, tax: 0 };
-      g.qty     += Number(row.qty);
-      g.taxable += Number(row.taxable);
-      g.tax     += Number(row.tax);
+      g.qty     += row.sign * Number(row.qty);
+      g.taxable += row.sign * Number(row.taxable);
+      g.tax     += row.sign * Number(row.tax);
       byHsn.set(key, g);
     }
     const hsn = [...byHsn.values()]
@@ -640,9 +788,30 @@ router.get('/gstr1', requireAuth, ownerOnly, async (req, res) => {
         cgst: r2(b2cs.reduce((s, r) => s + r.cgst, 0)),
         sgst: r2(b2cs.reduce((s, r) => s + r.sgst, 0)),
         total_tax: totalTax,
+        credit_note_count: creditNotesResult.recordset.length,
+        credit_note_value: r2(creditNotesResult.recordset.reduce((sum, c) => sum + Number(c.total), 0)),
       },
       b2cs,
       hsn,
+      // Credit notes in the period (already netted out of b2cs and hsn).
+      // CGST/SGST are the halves of the tax, as on the invoice.
+      credit_notes: creditNotesResult.recordset.map((c) => {
+        const paise = Math.round(Number(c.tax_amount) * 100);
+        const iso = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d || '').slice(0, 10));
+        return {
+          note_number: c.return_number,
+          note_date: iso(c.returned_at),
+          invoice_number: c.bill_number,
+          invoice_date: iso(c.finalized_at),
+          customer_name: c.customer_name || null,
+          customer_gstin: c.customer_gstin || null,
+          taxable_value: r2(c.subtotal),
+          cgst: r2(((paise + 1) >> 1) / 100),
+          sgst: r2((paise >> 1) / 100),
+          total_tax: r2(c.tax_amount),
+          note_value: r2(c.total),
+        };
+      }),
     });
   } catch (err) {
     logger.error({ err }, 'gstr1 report failed');
@@ -1185,10 +1354,23 @@ router.get('/gstr3b', requireAuth, ownerOnly, async (req, res) => {
               AND ISNULL(bs.gst_enabled, 0) = 1
               AND bi.tax_rate IS NOT NULL AND bi.tax_rate > 0
           )
+          -- Net of credit notes (sales returns) issued in the period, the
+          -- same basis /gstr1 nets them on.
+          , ret AS (
+            SELECT ISNULL(SUM(sri.net_amount), 0) AS taxable,
+                   ISNULL(SUM(sri.tax_amount), 0) AS tax
+            FROM sales_return_items sri
+            INNER JOIN sales_returns sr ON sr.id = sri.return_id
+            INNER JOIN businesses bs ON bs.id = sr.business_id
+            WHERE sr.business_id = @business_id
+              AND sr.returned_at >= @from_dt AND sr.returned_at <= @to_dt
+              AND ISNULL(bs.gst_enabled, 0) = 1
+              AND sri.tax_rate IS NOT NULL AND sri.tax_rate > 0
+          )
           SELECT
-            ISNULL(SUM(quantity * unit_price * ratio), 0)                AS taxable,
-            ISNULL(SUM((line_total - quantity * unit_price) * ratio), 0) AS tax
-          FROM scoped`),
+            ISNULL(SUM(quantity * unit_price * ratio), 0) - MAX(ret.taxable) AS taxable,
+            ISNULL(SUM((line_total - quantity * unit_price) * ratio), 0) - MAX(ret.tax) AS tax
+          FROM scoped CROSS JOIN ret`),
       // Inward: claimable ITC only - registered vendor, eligible, not RCM.
       pool.request()
         .input('business_id', sql.UniqueIdentifier, req.user.business_id)

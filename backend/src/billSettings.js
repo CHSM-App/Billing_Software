@@ -50,6 +50,15 @@ const BANK_MAX = {
   note: 200,
 };
 
+// Shop-wide "+ Add detail" labels prefilled on every bill ("Vehicle No").
+const DETAIL_LABELS_MAX = 10;
+const DETAIL_LABEL_MAX = 100;
+
+/** Trimmed, non-empty, de-duplicated strings from [v]; non-strings dropped. */
+function cleanLabels(v) {
+  return [...new Set(v.filter((l) => typeof l === 'string').map((l) => l.trim()).filter(Boolean))];
+}
+
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const ACCOUNT_NO_RE = /^[0-9]{6,20}$/;
 // What prints before the alternate number ("GPay", "WhatsApp"); empty = none.
@@ -60,7 +69,7 @@ const UPI_RE = /^[a-zA-Z0-9._-]{2,64}@[a-zA-Z][a-zA-Z0-9.]{1,30}$/;
 function defaults() {
   const bank = {};
   for (const k of Object.keys(BANK_MAX)) bank[k] = '';
-  return { ...FLAGS, alt_phone: '', alt_phone_label: '', note: '', upi_id: '', bank };
+  return { ...FLAGS, alt_phone: '', alt_phone_label: '', note: '', upi_id: '', detail_labels: [], bank };
 }
 
 /** Column text → full settings object. Never throws; bad JSON = defaults. */
@@ -76,6 +85,7 @@ function parse(text) {
   if (typeof raw.alt_phone_label === 'string') out.alt_phone_label = raw.alt_phone_label;
   if (typeof raw.note === 'string') out.note = raw.note;
   if (typeof raw.upi_id === 'string') out.upi_id = raw.upi_id;
+  if (Array.isArray(raw.detail_labels)) out.detail_labels = cleanLabels(raw.detail_labels);
   const bank = raw.bank && typeof raw.bank === 'object' ? raw.bank : {};
   for (const k of Object.keys(BANK_MAX)) {
     if (typeof bank[k] === 'string') out.bank[k] = bank[k];
@@ -122,6 +132,18 @@ function normalize(input) {
     if (typeof input.upi_id !== 'string') return { error: 'bill_settings.upi_id must be text' };
     out.upi_id = input.upi_id.trim();
     if (out.upi_id && !UPI_RE.test(out.upi_id)) return { error: 'Invalid UPI ID (e.g. shopname@okhdfcbank)' };
+  }
+  if (input.detail_labels != null) {
+    if (!Array.isArray(input.detail_labels) || input.detail_labels.some((l) => typeof l !== 'string')) {
+      return { error: 'bill_settings.detail_labels must be a list of text' };
+    }
+    out.detail_labels = cleanLabels(input.detail_labels);
+    if (out.detail_labels.length > DETAIL_LABELS_MAX) {
+      return { error: `At most ${DETAIL_LABELS_MAX} bill details are allowed` };
+    }
+    if (out.detail_labels.some((l) => l.length > DETAIL_LABEL_MAX)) {
+      return { error: `Each bill detail must be ${DETAIL_LABEL_MAX} characters or less` };
+    }
   }
   if (out.show_upi_qr && !out.upi_id) return { error: 'Enter a UPI ID to print the payment QR' };
   const bank = input.bank ?? {};

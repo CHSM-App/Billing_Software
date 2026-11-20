@@ -34,7 +34,7 @@ class BillFilterState {
       BillFilterState(
         from: from ?? this.from,
         to: to ?? this.to,
-        search: search,
+        search: search ?? this.search,
         preset: preset ?? this.preset,
       );
 }
@@ -86,39 +86,49 @@ class BillFilterNotifier extends Notifier<BillFilterState> {
         preset: BillDatePreset.custom,
       );
 
-  void setSearch(String? query) =>
-      state = state.copyWith(
-        from: state.from,
-        to: state.to,
-        preset: state.preset,
-        search: (query == null || query.isEmpty) ? null : query,
-      );
+  void setSearch(String query) => state = state.copyWith(search: query);
+}
+
+/// History search, run on the already-loaded list: bill number, customer
+/// name/phone, and the extra fields' labels and values.
+bool billMatchesSearch(Bill b, String? search) {
+  final q = search?.trim().toLowerCase() ?? '';
+  if (q.isEmpty) return true;
+  final hay = [
+    b.billNumber,
+    b.customerName ?? '',
+    b.customerPhone ?? '',
+    for (final e in b.warrantyExtraData) '${e.label} ${e.value}',
+  ].join(' ').toLowerCase();
+  return hay.contains(q);
 }
 
 final billFilterProvider =
     NotifierProvider<BillFilterNotifier, BillFilterState>(BillFilterNotifier.new);
 
 // ---------------------------------------------------------------------------
-// Bills list — auto-refetches when filter changes
+// Bills list — auto-refetches when the date range changes. Search is applied
+// to the loaded list by the screen ([billMatchesSearch]), so typing never
+// waits on the network.
 // ---------------------------------------------------------------------------
 
 class BillsNotifier extends AsyncNotifier<List<Bill>> {
   @override
   Future<List<Bill>> build() async {
-    final filter = ref.watch(billFilterProvider);
+    final (from, to) =
+        ref.watch(billFilterProvider.select((f) => (f.from, f.to)));
     final fmt = DateFormat('yyyy-MM-dd');
 
     // Offline bills queued on this device (INV-<tag>-####), not yet synced. They must
     // show in history immediately — both while offline and after reconnect,
     // until the server copy replaces them (the row is deleted on successful
-    // sync). Filtered to the same date window + search as the server query.
-    final offline = await _offlineBillsInRange(filter);
+    // sync). Filtered to the same date window as the server query.
+    final offline = await _offlineBillsInRange(from, to);
 
     try {
       final data = await api.getBills(
-        from: fmt.format(filter.from),
-        to: fmt.format(filter.to),
-        search: filter.search,
+        from: fmt.format(from),
+        to: fmt.format(to),
       );
       final server = data.map((j) => Bill.fromJson(j)).toList();
       // Mirror server bills locally so history still works after the network
@@ -141,7 +151,7 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
       // full picture — not just the sales this device happened to queue.
       if (api.isNetworkError(e) ||
           (e is api.ApiException && e.statusCode >= 500)) {
-        final cached = await _cachedServerBillsInRange(filter);
+        final cached = await _cachedServerBillsInRange(from, to);
         final offlineIds = offline.map((b) => b.id).toSet();
         return _newestFirst([
           ...offline,
@@ -165,48 +175,31 @@ class BillsNotifier extends AsyncNotifier<List<Bill>> {
         .cacheServerBills(businessId, 'bill', data.cast<Map<String, dynamic>>());
   }
 
-  /// Cached server bills narrowed to the filter's date window and search term,
-  /// mirroring what the server query would have returned.
-  Future<List<Bill>> _cachedServerBillsInRange(BillFilterState filter) async {
+  /// Cached server bills narrowed to the filter's date window, mirroring what
+  /// the server query would have returned.
+  Future<List<Bill>> _cachedServerBillsInRange(DateTime from, DateTime to) async {
     final businessId = await getBusinessId();
     if (businessId == null || businessId.isEmpty) return const [];
     final rows =
         await OfflineService.instance.getCachedServerBills(businessId, 'bill');
-    final start = DateTime(filter.from.year, filter.from.month, filter.from.day);
-    final end = DateTime(filter.to.year, filter.to.month, filter.to.day)
-        .add(const Duration(days: 1));
-    final q = filter.search?.trim().toLowerCase();
+    final start = DateTime(from.year, from.month, from.day);
+    final end = DateTime(to.year, to.month, to.day).add(const Duration(days: 1));
     return rows.map((j) => Bill.fromJson(j)).where((b) {
       if (b.billDate.isBefore(start) || !b.billDate.isBefore(end)) return false;
-      if (q != null && q.isNotEmpty) {
-        final hay = '${b.billNumber} ${b.customerName ?? ''} '
-                '${b.customerPhone ?? ''}'
-            .toLowerCase();
-        if (!hay.contains(q)) return false;
-      }
       return true;
     }).toList();
   }
 
-  /// Finalized offline bills for this business within the filter's date range,
-  /// matching the search term (bill number / customer). Newest first.
-  Future<List<Bill>> _offlineBillsInRange(BillFilterState filter) async {
+  /// Finalized offline bills for this business within the filter's date range.
+  Future<List<Bill>> _offlineBillsInRange(DateTime from, DateTime to) async {
     final businessId = await getBusinessId();
     if (businessId == null || businessId.isEmpty) return const [];
     final all = await OfflineService.instance.getAllBills(businessId);
     // Inclusive day range: [from 00:00, to+1day 00:00).
-    final start = DateTime(filter.from.year, filter.from.month, filter.from.day);
-    final end = DateTime(filter.to.year, filter.to.month, filter.to.day)
-        .add(const Duration(days: 1));
-    final q = filter.search?.trim().toLowerCase();
+    final start = DateTime(from.year, from.month, from.day);
+    final end = DateTime(to.year, to.month, to.day).add(const Duration(days: 1));
     return all.where((b) {
       if (b.billDate.isBefore(start) || !b.billDate.isBefore(end)) return false;
-      if (q != null && q.isNotEmpty) {
-        final hay = '${b.billNumber} ${b.customerName ?? ''} '
-                '${b.customerPhone ?? ''}'
-            .toLowerCase();
-        if (!hay.contains(q)) return false;
-      }
       return true;
     }).toList();
   }

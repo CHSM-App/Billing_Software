@@ -216,6 +216,40 @@ describe('PUT /api/businesses/logo', () => {
 });
 
 // ------------------------------------------------------------------
+// staff_can_edit_price — owner's lock on staff price edits / discounts
+// ------------------------------------------------------------------
+describe('PUT /api/businesses/profile — staff_can_edit_price', () => {
+  test.each([
+    [false, 0],
+    [true, 1],
+  ])('staff_can_edit_price %p is stored as BIT %p and returned as a boolean', async (sent, bit) => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [oldRow({ staff_can_edit_price: !bit })], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [oldRow({ staff_can_edit_price: bit })], rowsAffected: [1] });
+
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader({ role: 'owner' }))
+      .send({ staff_can_edit_price: sent });
+
+    expect(res.status).toBe(200);
+    expect(mockRequest.inputs.staff_can_edit_price).toBe(bit);
+    const updateSql = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /UPDATE businesses/.test(s));
+    expect(updateSql).toMatch(/staff_can_edit_price = @staff_can_edit_price/);
+    expect(res.body.staff_can_edit_price).toBe(!!bit);
+  });
+
+  test('only the owner can change it', async () => {
+    const res = await request(app)
+      .put('/api/businesses/profile')
+      .set(authHeader({ role: 'cashier' }))
+      .send({ staff_can_edit_price: true });
+    expect(res.status).toBe(403);
+  });
+});
+
+// ------------------------------------------------------------------
 // show_item_no — shop-wide "(101) Masala Dosa" on the billing page
 // ------------------------------------------------------------------
 describe('PUT /api/businesses/profile — show_item_no', () => {
@@ -299,4 +333,56 @@ describe('PUT /api/businesses/profile — bill_settings', () => {
     expect(res.body.bill_settings.show_cashier).toBe(true);
     expect(res.body.bill_settings.show_bank).toBe(false);
   });
+});
+
+// ------------------------------------------------------------------
+// batch_tracking_enabled — "Maintain batches" (batches.js)
+// ------------------------------------------------------------------
+describe('PUT /api/businesses/profile — batch_tracking_enabled', () => {
+  const put = (body) => request(app).put('/api/businesses/profile')
+    .set(authHeader({ role: 'owner' })).send(body);
+
+  test('cannot be turned on while inventory is off', async () => {
+    mockRequest.query.mockResolvedValueOnce({
+      recordset: [oldRow({ inventory_enabled: false, batch_tracking_enabled: false })], rowsAffected: [1] });
+    const res = await put({ batch_tracking_enabled: true });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/inventory/);
+  });
+
+  test('turning it on stores it and trims stale batches to the stock on hand', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [oldRow({ inventory_enabled: true, batch_tracking_enabled: false })], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [oldRow({ inventory_enabled: true, batch_tracking_enabled: true })], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }); // reconcile: no open batches
+    const res = await put({ batch_tracking_enabled: true });
+    expect(res.status).toBe(200);
+    expect(res.body.batch_tracking_enabled).toBe(true);
+    const sqls = mockRequest.query.mock.calls.map((c) => c[0]);
+    expect(sqls.find((s) => /UPDATE businesses/.test(s))).toMatch(/batch_tracking_enabled = @batch_tracking_enabled/);
+    expect(sqls.some((s) => /SELECT DISTINCT item_id, variant_id FROM stock_batches/.test(s))).toBe(true);
+  });
+
+  test('saving other settings never runs the reconcile', async () => {
+    mockRequest.query
+      .mockResolvedValueOnce({ recordset: [oldRow({ batch_tracking_enabled: true })], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] })
+      .mockResolvedValueOnce({ recordset: [oldRow({ batch_tracking_enabled: true })], rowsAffected: [1] });
+    const res = await put({ show_item_no: true });
+    expect(res.status).toBe(200);
+    expect(mockRequest.query.mock.calls.some((c) => /stock_batches/.test(c[0]))).toBe(false);
+  });
+});
+
+test('switching inventory off also switches batches off', async () => {
+  mockRequest.query
+    .mockResolvedValueOnce({ recordset: [oldRow({ inventory_enabled: true, batch_tracking_enabled: true })], rowsAffected: [1] })
+    .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] })
+    .mockResolvedValueOnce({ recordset: [oldRow({ inventory_enabled: false, batch_tracking_enabled: false })], rowsAffected: [1] });
+  const res = await request(app).put('/api/businesses/profile')
+    .set(authHeader({ role: 'owner' })).send({ inventory_enabled: false });
+  expect(res.status).toBe(200);
+  const upd = mockRequest.query.mock.calls.map((c) => c[0]).find((s) => /UPDATE businesses/.test(s));
+  expect(upd).toMatch(/batch_tracking_enabled = @batch_tracking_enabled/);
 });

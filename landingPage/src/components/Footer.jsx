@@ -15,7 +15,6 @@ const LINKS = {
   ],
   Legal: [
     { label: 'Terms of Service', href: '/terms' },
-    { label: 'Acceptable Use', href: '/acceptable-use' },
     { label: 'Ordering Terms', href: '/ordering-terms' },
     { label: 'Privacy Policy', href: '/privacy' },
     { label: 'Delete Account', href: '/delete-account' },
@@ -107,7 +106,7 @@ export default function Footer() {
           style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
         >
           <p className="text-xs text-white/25">
-            © 2026 Vittam. All rights reserved. Made with ♥ for Indian businesses.
+            © 2026 Vengurla Tech Private Limited. All rights reserved. Made with ♥ for Indian businesses.
           </p>
           <div className="flex items-center gap-2 text-xs text-white/25">
             <span className="w-1.5 h-1.5 rounded-full bg-teal inline-block" />

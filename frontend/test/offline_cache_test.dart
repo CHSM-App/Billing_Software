@@ -200,7 +200,7 @@ void main() {
     final db = await databaseFactory.openDatabase(path);
     final cols = await db.rawQuery('PRAGMA table_info(cached_items)');
     expect(cols.map((c) => c['name']), containsAll(['item_no', 'pack_unit', 'pack_size']));
-    expect(await db.getVersion(), 18);
+    expect(await db.getVersion(), 19);
 
     // And the cache works end to end on the upgraded table.
     await OfflineService.instance.replaceItemCache([
@@ -256,7 +256,7 @@ void main() {
     await OfflineService.instance.init();
 
     final db = await databaseFactory.openDatabase(path);
-    expect(await db.getVersion(), 18);
+    expect(await db.getVersion(), 19);
     final cols = (await db.rawQuery('PRAGMA table_info(offline_bills)'))
         .map((c) => c['name']);
     expect(cols, containsAll(['customer_address', 'customer_gstin']));
@@ -289,7 +289,7 @@ void main() {
     await OfflineService.instance.init();
 
     final db = await databaseFactory.openDatabase(path);
-    expect(await db.getVersion(), 18);
+    expect(await db.getVersion(), 19);
     final cols = (await db.rawQuery('PRAGMA table_info(cached_variants)'))
         .map((c) => c['name']);
     expect(cols, contains('unit'));
@@ -312,5 +312,25 @@ void main() {
         .variants;
     expect(sizes.firstWhere((v) => v.id == 'bag').unit, 'bag');
     expect(sizes.firstWhere((v) => v.id == 'loose').unit, isNull);
+  });
+
+
+  // v19: stock batches and old-stock cost travel with the item cache, so the
+  // cart shows purchase cost offline too.
+  test('the item cache keeps batches and old-stock cost', () async {
+    await OfflineService.instance.init();
+    await OfflineService.instance.replaceItemCache([
+      Item(
+        id: 'tyre', businessId: 'biz-1', name: 'Tyre', isActive: true,
+        stockQuantity: 6, avgCost: 4500, buyingPrice: 4400,
+        batches: const [StockBatch(id: 'b1', code: 'B-0001', unitCost: 4680, remaining: 4)],
+      ),
+    ], 'biz-1');
+    final item = (await OfflineService.instance.getCachedItemsWithStatus('biz-1'))
+        .items.single;
+    expect(item.batches.single.code, 'B-0001');
+    expect(item.batches.single.unitCost, 4680);
+    expect(item.avgCost, 4500);
+    expect(item.buyingPrice, 4400);
   });
 }

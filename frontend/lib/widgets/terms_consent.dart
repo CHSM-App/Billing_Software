@@ -8,7 +8,6 @@ import '../theme/app_theme.dart';
 /// one source for the sign-up screen, the updated-terms screen and Settings.
 /// The server records ONE version for the bundle (backend src/legal.js).
 const termsUrl = 'https://vittam.vengurlatech.com/terms';
-const acceptableUseUrl = 'https://vittam.vengurlatech.com/acceptable-use';
 const privacyUrl = 'https://vittam.vengurlatech.com/privacy';
 
 /// Opens a legal page in the browser; a snackbar if it can't.
@@ -23,9 +22,8 @@ Future<void> openLegalUrl(BuildContext context, String url) async {
   }
 }
 
-/// Consent: ONE checkbox — "I have read and agree to the Terms of Service,
-/// Acceptable Use Policy and Privacy Policy" — each document name a link to
-/// its page. Starts UNTICKED: a pre-ticked box is weak proof of consent.
+/// Consent: ONE checkbox — "I have read and agree to the Terms of Service
+/// and Privacy Policy" — each document name a link to its page. Starts UNTICKED: a pre-ticked box is weak proof of consent.
 /// [onChanged] reports whether it is ticked.
 class TermsConsent extends StatefulWidget {
   final ValueChanged<bool> onChanged;
@@ -42,7 +40,7 @@ class _TermsConsentState extends State<TermsConsent> {
   @override
   void initState() {
     super.initState();
-    _links = [termsUrl, acceptableUseUrl, privacyUrl]
+    _links = [termsUrl, privacyUrl]
         .map((url) => TapGestureRecognizer()..onTap = () => openLegalUrl(context, url))
         .toList();
   }
@@ -84,10 +82,8 @@ class _TermsConsentState extends State<TermsConsent> {
                 TextSpan(style: base, children: [
                   TextSpan(text: '${l10n.termsConsentLead} '),
                   TextSpan(text: l10n.termsConsentTos, style: link, recognizer: _links[0]),
-                  const TextSpan(text: ', '),
-                  TextSpan(text: l10n.termsConsentAup, style: link, recognizer: _links[1]),
                   TextSpan(text: ' ${l10n.termsConsentAnd} '),
-                  TextSpan(text: l10n.termsConsentPrivacy, style: link, recognizer: _links[2]),
+                  TextSpan(text: l10n.termsConsentPrivacy, style: link, recognizer: _links[1]),
                   const TextSpan(text: '.'),
                 ]),
               ),

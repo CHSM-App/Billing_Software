@@ -157,6 +157,41 @@ class CartNotifier extends Notifier<List<CartEntry>> {
     ];
   }
 
+  /// The stock batch to sell this line from; null = oldest first. Built
+  /// directly because copyWith can't set a field back to null.
+  void setLineBatch(String key, String? batchId) {
+    state = [
+      for (final e in state)
+        e.key == key
+            ? CartEntry(
+                item: e.item,
+                variant: e.variant,
+                quantity: e.quantity,
+                priceOverride: e.priceOverride,
+                discountPct: e.discountPct,
+                discountAmt: e.discountAmt,
+                priceList: e.priceList,
+                batchId: batchId,
+                held: e.held,
+                heldQty: e.heldQty)
+            : e
+    ];
+  }
+
+  /// Back to catalog (or the line's price list) with no line discounts — for
+  /// staff the owner stopped editing prices, opening a quotation. The server
+  /// bills such a cashier's hand-typed prices at catalog anyway (bills.js
+  /// applyLineOverrides), so the cart must show what will be billed.
+  void dropHandEdits() {
+    state = [
+      for (final e in state)
+        e.copyWith(
+            clearOverrides: true,
+            priceOverride: e.priceList == null ? null : e.priceOverride,
+            priceList: e.priceList),
+    ];
+  }
+
   /// Whether [list] prices [e]'s item at [price] (a list without its own
   /// price for the item bills it at catalog). False when there is no list.
   static bool _billsAt(CartEntry e, PriceList? list, double price) =>
@@ -253,7 +288,12 @@ class CartNotifier extends Notifier<List<CartEntry>> {
           item: catalogItem,
           variant: variant,
           quantity: bi.quantity,
-          discountAmt: bi.discountAmount);
+          discountAmt: bi.discountAmount,
+          // A held bill keeps the cashier's batch pick, and what it already
+          // took from each batch counts back when the cart works out cost.
+          batchId: bi.batchId,
+          held: bi.heldBatches,
+          heldQty: bi.heldBatches.isEmpty ? 0 : bi.quantity);
       // Priced off-catalog on the order card → restore it as an override, in
       // the same form the cashier typed it (gross for an MRP item). A catalog
       // price changed since the draft was saved also lands here, keeping the

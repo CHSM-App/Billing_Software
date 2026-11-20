@@ -55,7 +55,8 @@ router.get('/stock-summary', requireAuth, ownerOnly, async (req, res) => {
             SUM(CASE WHEN movement_date < @from OR movement_type = 'opening' THEN qty ELSE 0 END) AS opening,
             SUM(CASE WHEN movement_date >= @from AND movement_type = 'purchase' THEN qty ELSE 0 END) AS purchased,
             -SUM(CASE WHEN movement_date >= @from AND movement_type = 'sale' THEN qty ELSE 0 END) AS sold,
-            SUM(CASE WHEN movement_date >= @from AND movement_type = 'void' THEN qty ELSE 0 END) AS returned,
+            -- Back on the shelf: voided bills and sales returns (credit notes).
+            SUM(CASE WHEN movement_date >= @from AND movement_type IN ('void', 'return') THEN qty ELSE 0 END) AS returned,
             SUM(CASE WHEN movement_date >= @from AND movement_type = 'adjust' THEN qty ELSE 0 END) AS adjusted,
             SUM(qty) AS closing
           FROM stock_movements
@@ -150,10 +151,10 @@ router.get('/stock-daily', requireAuth, ownerOnly, async (req, res) => {
     for (let d = new Date(`${r.from}T00:00:00Z`); day(d) <= r.to; d.setUTCDate(d.getUTCDate() + 1)) {
       const rows = byDay[day(d)] || [];
       const sum = (t) => rows.filter((x) => x.t === t).reduce((a, x) => a + num(x.qty), 0);
-      // Sold is net of voided bills (a cancelled bill is not a sale), same as
+      // Sold is net of voided bills and returns (neither is a sale), same as
       // the summary. Manual corrections move the closing but are not a column.
       const purchased = sum('purchase');
-      const sold = -sum('sale') - sum('void');
+      const sold = -sum('sale') - sum('void') - sum('return');
       const opening = running;
       running += purchased - sold + sum('adjust');
       days.push({ date: day(d), opening, purchased, sold, closing: running });
@@ -192,6 +193,15 @@ router.get('/item-profit', requireAuth, ownerOnly, async (req, res) => {
           WHERE b.business_id = @business_id AND b.status = 'finalized'
             AND b.finalized_at >= DATEADD(MINUTE, @shift, @from_dt)
             AND b.finalized_at <  DATEADD(MINUTE, @shift, @to_dt)
+          -- Goods returned in the range (credit notes) come off: less sold,
+          -- less sales, and their cost back.
+          UNION ALL
+          SELECT sri.item_id, sri.variant_id, sri.item_name, -sri.quantity, sri.unit_cost,
+                 -sri.net_amount
+          FROM sales_return_items sri JOIN sales_returns sr ON sr.id = sri.return_id
+          WHERE sr.business_id = @business_id
+            AND sr.returned_at >= DATEADD(MINUTE, @shift, @from_dt)
+            AND sr.returned_at <  DATEADD(MINUTE, @shift, @to_dt)
         )
         SELECT MAX(item_name) AS name, item_id, variant_id,
                SUM(quantity) AS qty, SUM(net) AS sales,

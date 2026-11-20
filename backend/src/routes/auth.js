@@ -496,7 +496,7 @@ router.post('/login', loginIpFailLimiter, loginLimiter, async (req, res) => {
                b.inventory_enabled, b.warranty_enabled, b.has_barcode_scanner, b.address,
                b.phone AS business_phone,
                b.gst_enabled, b.gst_number, b.default_sac_code, b.fssai_number,
-               b.round_off_enabled, b.show_item_no, b.quotations_enabled, b.store_enabled, b.logo_url, b.print_logo,
+               b.round_off_enabled, b.show_item_no, b.quotations_enabled, b.staff_can_edit_price, b.batch_tracking_enabled, b.staff_see_cost, b.store_enabled, b.logo_url, b.print_logo,
                b.bill_footer_note, b.bill_settings,
                s.allow_mobile, s.allow_desktop, s.allow_online_store, s.allow_customers
         FROM users u
@@ -641,6 +641,9 @@ router.post('/login', loginIpFailLimiter, loginLimiter, async (req, res) => {
         round_off_enabled: !!row.round_off_enabled,
         show_item_no: !!row.show_item_no,
         quotations_enabled: !!row.quotations_enabled,
+        staff_can_edit_price: !!row.staff_can_edit_price,
+        batch_tracking_enabled: !!row.batch_tracking_enabled,
+        staff_see_cost: row.staff_see_cost !== false && row.staff_see_cost !== 0,
         // Shop logo + the owner's opt-in to print it, cached on every device
         // (staff too) so receipts can carry it offline.
         logo_url: row.logo_url ?? null,

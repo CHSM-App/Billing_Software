@@ -5,13 +5,13 @@ Everything ships **switched off**. While `backend/src/legal.js` has `TERMS_VERSI
 - `GET /license` never asks anyone and never queries `terms_acceptances`;
 - `POST /api/account/accept-terms` answers 409.
 
-The app's consent block still appears on the register screen (an unticked box gating Create Account) and its links point to `/terms`, `/acceptable-use` and `/privacy`. **So do not release an app build with this change before the legal pages are live.**
+The app's consent block still appears on the register screen (an unticked box gating Create Account) and its links point to `/terms` and `/privacy`. **So do not release an app build with this change before the legal pages are live.**
 
 ## Prerequisites (none can be skipped)
 
 1. The business decisions in `LEGAL_DECISIONS_PENDING.md` have been made, and the `[[PENDING]]` markers filled in.
 2. A licensed advocate has reviewed and approved the final text (`ADVOCATE_REVIEW_CHECKLIST.md`).
-3. The "DRAFT. Not in force." banner has been removed from the three documents, and the version and effective date set in their headers.
+3. The "DRAFT. Not in force." banner has been removed from the two documents, and the version and effective date set in their headers.
 
 ## Release order
 
@@ -23,7 +23,7 @@ The app's consent block still appears on the register screen (an unticked box ga
    ```
    It is safe to run while the flow is off; nothing writes to the new table until a version is set.
 2. **Set the version:** in `backend/src/legal.js`, set `TERMS_VERSION` to the version printed in the approved `TERMS_OF_SERVICE.md` header (e.g. `'2026-11-01'`, max 20 characters).
-3. **Merge and deploy** the backend and landing site (CI builds `landingPage` into `backend/public`). Check that https://vittam.vengurlatech.com/terms, `/acceptable-use` and `/ordering-terms` load and show the approved text. The order and store pages now show the notice.
+3. **Merge and deploy** the backend and landing site (CI builds `landingPage` into `backend/public`). Check that https://vittam.vengurlatech.com/terms and `/ordering-terms` load and show the approved text, and that `/acceptable-use` redirects to `/terms`. The order and store pages now show the notice.
 4. **Release the app** (Android + Windows) built from the same branch. On next open, owners on the new build see the full-page consent screen; staff never do.
 5. **Distribution pages:** add the Terms URL to the Google Play listing (and any Windows download page).
 6. **Enforce at sign-up (later):** once builds without the consent block have aged out (check `users.app_version` on the admin dashboard), set `REQUIRE_TERMS_ACCEPT=true` in the backend `.env` and restart. Older builds then get "Please accept the Terms of Service to continue" at registration.

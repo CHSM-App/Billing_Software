@@ -110,6 +110,8 @@ app.use((req, res, next) => {
 // ---------------------------------------------------------------------------
 const path = require('path');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+// The Acceptable Use Policy is now section 12 of the Terms; app builds still link the old page.
+app.get('/acceptable-use', (req, res) => res.redirect(301, '/terms'));
 app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
 
 // Customer-uploaded item photos live in backend/uploads (OUTSIDE public/, which
@@ -296,6 +298,7 @@ app.use('/api/reports', require('./routes/stock_reports'));
 app.use('/api/expenses/recurring', require('./routes/recurring_expenses'));
 app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/vendor-bills', require('./routes/vendor_bills'));
+app.use('/api/stock-batches', require('./routes/stock_batches'));
 app.use('/api/audit', require('./routes/audit'));
 app.use('/api/license', require('./routes/license'));
 app.use('/api/account', require('./routes/account'));

@@ -243,6 +243,7 @@ class _Gstr1ScreenState extends ConsumerState<Gstr1Screen> {
     final totals = Map<String, dynamic>.from(r['totals'] ?? {});
     final b2cs = (r['b2cs'] as List? ?? []);
     final hsn = (r['hsn'] as List? ?? []);
+    final notes = (r['credit_notes'] as List? ?? []);
 
     return Column(children: [
       _Card(
@@ -258,6 +259,26 @@ class _Gstr1ScreenState extends ConsumerState<Gstr1Screen> {
           _kv('Total tax', _money.format(_n(totals['total_tax'])), bold: true),
         ]),
       ),
+      // Sales returns: already netted out of B2CS and HSN below.
+      if (notes.isNotEmpty) ...[
+        const SizedBox(height: 16),
+        _Card(
+          title: 'Credit notes (netted below)',
+          child: _table(
+            headers: const ['Note', 'Date', 'Invoice', 'Taxable', 'Tax'],
+            rows: [
+              for (final e in notes)
+                [
+                  '${(e as Map)['note_number']}',
+                  '${e['note_date']}',
+                  '${e['invoice_number']}',
+                  _money.format(_n(e['taxable_value'])),
+                  _money.format(_n(e['total_tax'])),
+                ]
+            ],
+          ),
+        ),
+      ],
       const SizedBox(height: 16),
       _Card(
         title: 'B2CS — rate-wise',

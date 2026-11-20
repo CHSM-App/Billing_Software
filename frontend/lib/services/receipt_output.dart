@@ -22,7 +22,7 @@ class ReceiptPreview {
 
 /// Single decision point for emitting a bill's receipt/invoice according to the
 /// user's chosen paper size:
-///   • 'mm58' / 'mm80' → thermal ESC/POS via [PrinterService.printBills]
+///   • 'mm58' / 'mm80' / 'mm112' → thermal ESC/POS via [PrinterService.printBills]
 ///   • 'a5'   / 'a4'   → an A5/A4 PDF invoice opened in the OS print dialog
 ///
 /// All three billing callsites (finalize, history reprint, credit settle)

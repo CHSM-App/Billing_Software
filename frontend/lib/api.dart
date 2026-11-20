@@ -8,8 +8,8 @@ import 'storage.dart';
 import 'models/models.dart' show ChargeSuggestion;
 import 'providers/connectivity_provider.dart';
 
-// const String baseUrl = 'http://10.240.89.67:8000/api';
-const String baseUrl = 'https://vittam.vengurlatech.com/api';
+// const String baseUrl = 'https://vittam.vengurlatech.com/api';
+const String baseUrl = 'https://zones-windsor-slowly-seeker.trycloudflare.com/api';
 
 const String _genericApiErrorMessage = 'Something went wrong';
 
@@ -650,8 +650,8 @@ Future<String?> getItemImageUrl(String id) async =>
     _parse(await _authGet(Uri.parse('$baseUrl/items/$id')))['image_url'] as String?;
 
 /// Owner-only list of items with their current [image_url]. Used by the Menu
-/// Photos screen. The regular [getItems] omits image_url so photos never load
-/// during billing.
+/// Photos screen. [getItems] also carries image_url, for billing thumbnails
+/// (Settings → "Show item photos").
 Future<List<dynamic>> getItemsWithImages() async {
   return _parse(await _authGet(Uri.parse('$baseUrl/items/with-images')));
 }
@@ -1096,27 +1096,6 @@ Future<void> deleteWarranty(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/warranties/$id')));
 }
 
-/// Every category's custom warranty fields for this business.
-Future<List<dynamic>> getWarrantyFieldTemplates() async {
-  final data = _parse(await _authGet(Uri.parse('$baseUrl/warranty-field-templates')));
-  return data as List;
-}
-
-/// Replaces the field list for [category] wholesale. [fields] is
-/// `[{key, label, type}]`.
-Future<void> putWarrantyFieldTemplate(
-    String category, List<Map<String, String>> fields) async {
-  _parse(await _authPut(
-    Uri.parse('$baseUrl/warranty-field-templates/${Uri.encodeComponent(category)}'),
-    body: jsonEncode({'fields': fields}),
-  ));
-}
-
-Future<void> deleteWarrantyFieldTemplate(String category) async {
-  _parse(await _authDelete(
-      Uri.parse('$baseUrl/warranty-field-templates/${Uri.encodeComponent(category)}')));
-}
-
 /// Marks the given credit bills paid in one settlement with [paymentMode].
 /// Returns the settled bills (with items) for building a merged receipt.
 /// Pays credit bills from the Credit tab, all in [paymentMode]. [amounts] is
@@ -1220,6 +1199,19 @@ const _keepPriceList = Object();
 
 Future<void> voidBill(String id) async {
   _parse(await _authDelete(Uri.parse('$baseUrl/bills/$id')));
+}
+
+// Sales returns (credit notes) on a settled bill.
+Future<List<Map<String, dynamic>>> getReturns(String billId) async =>
+    List<Map<String, dynamic>>.from(
+        _parse(await _authGet(Uri.parse('$baseUrl/bills/$billId/returns'))) as List);
+
+Future<Map<String, dynamic>> createReturn(String billId, Map<String, dynamic> data) async =>
+    _parse(await _authPost(Uri.parse('$baseUrl/bills/$billId/returns'), body: jsonEncode(data)))
+        as Map<String, dynamic>;
+
+Future<void> deleteReturn(String billId, String returnId) async {
+  _parse(await _authDelete(Uri.parse('$baseUrl/bills/$billId/returns/$returnId')));
 }
 
 // ---------------------------------------------------------------------------
@@ -1386,6 +1378,31 @@ Future<Map<String, dynamic>> createVendorBill(Map<String, dynamic> data) async =
     Map<String, dynamic>.from(_parse(await _authPost(
         Uri.parse('$baseUrl/vendor-bills'), body: jsonEncode(data))) as Map);
 
+/// A size's (or plain item's) open stock batches, oldest first — the
+/// purchase form's "add to batch" picker.
+Future<List<Map<String, dynamic>>> getStockBatches(
+    {String? itemId, String? variantId}) async {
+  final uri = Uri.parse('$baseUrl/stock-batches').replace(queryParameters: {
+    if (variantId != null) 'variant_id': variantId else 'item_id': itemId!,
+  });
+  return (_parse(await _authGet(uri)) as List)
+      .map((e) => Map<String, dynamic>.from(e as Map))
+      .toList();
+}
+
+/// Batch nos. used before, newest first: {code, received_date, items, open}.
+Future<List<Map<String, dynamic>>> getBatchCodes() async =>
+    (_parse(await _authGet(Uri.parse('$baseUrl/stock-batches/codes'))) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
+/// Per-batch profit (owner): [status] 'open', 'settled' or 'all'.
+Future<List<Map<String, dynamic>>> getStockBatchReport(String status) async =>
+    (_parse(await _authGet(
+            Uri.parse('$baseUrl/stock-batches/report?status=$status'))) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
 Future<Map<String, dynamic>> updateVendorBill(
         String id, Map<String, dynamic> data) async =>
     Map<String, dynamic>.from(_parse(await _authPut(
@@ -1418,9 +1435,11 @@ Future<Map<String, dynamic>> scanPurchaseBill(
   final response = await _withAutoRefresh((h) async {
     final headers = Map<String, String>.from(h)..['Content-Type'] = contentType;
     _logRequest('POST', uri, headers, body: '<${bytes.length} bytes>');
+    // Above the server's worst case (2 AI attempts × 90 s, purchaseScan.js):
+    // giving up first would show an error for a scan the server still counts.
     final r = await http
         .post(uri, headers: headers, body: bytes)
-        .timeout(const Duration(minutes: 2));
+        .timeout(const Duration(minutes: 4));
     dev.log('${r.statusCode} POST ${uri.path}', name: 'API');
     return r;
   });

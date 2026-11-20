@@ -152,3 +152,18 @@ describe('admin — AI bill scanning per business', () => {
     expect(mockRequest.inputs.purchase_scan_limit).toBe(30);
   });
 });
+
+describe('admin — WhatsApp receipts per business', () => {
+  test('list shows this month\'s sent / failed / deeplink counts', async () => {
+    mockRequest.recordset = [row({ wa_sent_month: 41, wa_failed_month: 3, wa_deeplink_month: 7 })];
+    const res = await request(app).get('/admin/api/businesses').set(adminAuth());
+    expect(res.body.businesses[0]).toMatchObject({ wa_sent_month: 41, wa_failed_month: 3, wa_deeplink_month: 7 });
+    expect(mockRequest.query.mock.calls[0][0]).toMatch(/w\.status = 'sent'[\s\S]*AS wa_sent_month/);
+  });
+
+  test('a business with no log rows reads 0, not null', async () => {
+    mockRequest.recordset = [row()];
+    const res = await request(app).get('/admin/api/businesses').set(adminAuth());
+    expect(res.body.businesses[0]).toMatchObject({ wa_sent_month: 0, wa_failed_month: 0, wa_deeplink_month: 0 });
+  });
+});

@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:Vittam/models/models.dart';
 import 'package:Vittam/services/bill_settings.dart';
+import 'package:Vittam/widgets/warranty_extra_fields_editor.dart';
 
 void main() {
   test('no settings (older backend / never synced) = the bill as before', () {
@@ -73,5 +74,21 @@ void main() {
     expect(s.shopPhones(null), '02366-262626');
     expect(const BillSettings().shopPhones('9876500000'), '9876500000');
     expect(const BillSettings().shopPhones(''), isNull);
+  });
+
+  test('default bill detail labels round-trip, prefill once, print only when filled', () {
+    final s = BillSettings.fromJson({'detail_labels': ['Vehicle No', 5, 'KM reading']});
+    expect(s.detailLabels, ['Vehicle No', 'KM reading']);
+    expect(BillSettings.fromJson(s.toJson()).detailLabels, s.detailLabels);
+    expect(BillSettings.fromJson(null).detailLabels, isEmpty);
+
+    final rows = <WarrantyExtraRow>[];
+    addDefaultDetailRows(rows, s.detailLabels);
+    rows.first.valueCtrl.text = 'MH07 AB 1234';
+    addDefaultDetailRows(rows, s.detailLabels); // re-applying keeps the typed value
+    expect(rows.length, 2);
+    expect(warrantyRowsPayload(rows), [
+      {'label': 'Vehicle No', 'value': 'MH07 AB 1234'},
+    ]);
   });
 }

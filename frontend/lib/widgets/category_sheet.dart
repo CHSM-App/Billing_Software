@@ -60,6 +60,10 @@ class CategoryChipStrip extends StatelessWidget {
   final ScrollController controller;
   final Map<String, GlobalKey> chipKeys;
 
+  /// When set, a chip can be long-pressed and dropped onto another chip to
+  /// take its place — called with (dragged, target). Null = fixed order.
+  final void Function(String dragged, String target)? onReorder;
+
   const CategoryChipStrip({
     super.key,
     required this.categories,
@@ -68,6 +72,7 @@ class CategoryChipStrip extends StatelessWidget {
     required this.onTap,
     required this.controller,
     required this.chipKeys,
+    this.onReorder,
   });
 
   /// Same side inset as the sheet's column header and rows beneath it.
@@ -97,17 +102,51 @@ class CategoryChipStrip extends StatelessWidget {
             viewportWidth: viewport,
             horizontalGap: _chipGap,
             verticalGap: _rowGap,
-            children: [for (final cat in categories) _chip(cat)],
+            children: [
+              for (final cat in categories)
+                onReorder == null ? _chip(cat) : _draggableChip(cat),
+            ],
           ),
         );
       }),
     );
   }
 
-  Widget _chip(String cat) {
+  /// Long-press picks the chip up; dropping it on another chip moves it there.
+  /// A plain tap still jumps — the long press is a separate gesture.
+  Widget _draggableChip(String cat) {
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (d) => d.data != cat,
+      onAcceptWithDetails: (d) => onReorder!(d.data, cat),
+      builder: (context, candidates, _) => LongPressDraggable<String>(
+        data: cat,
+        // The overlay copy is up at the same time as the strip's own chip,
+        // so it must not carry the chip's GlobalKey.
+        feedback: Material(
+          color: Colors.transparent,
+          elevation: 6,
+          child: _chip(cat, keyed: false),
+        ),
+        childWhenDragging: Opacity(opacity: 0.3, child: _chip(cat)),
+        // Drawn over the chip, so the drop-target ring never resizes it.
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            border: candidates.isEmpty
+                ? null
+                : Border.all(color: AppColors.primary, width: 2),
+            borderRadius: BorderRadius.circular(AppRadius.small),
+          ),
+          child: _chip(cat),
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(String cat, {bool keyed = true}) {
     final selected = active == cat;
     return FilterChip(
-      key: chipKeys.putIfAbsent(cat, GlobalKey.new),
+      key: keyed ? chipKeys.putIfAbsent(cat, GlobalKey.new) : null,
       // Center shrink-wraps under the flow's unbounded measuring pass but
       // expands when the flow widens the chip to its grid column, so the
       // chip fills the column with its name centred.

@@ -18,7 +18,8 @@
 
 const { sql } = require('./db');
 
-const TYPES = ['opening', 'purchase', 'sale', 'void', 'adjust'];
+// 'return': goods a customer brought back (sales returns, migration 082).
+const TYPES = ['opening', 'purchase', 'sale', 'void', 'adjust', 'return'];
 
 // SQL expression for the business date of instant @at (UTC; null = now).
 const BUSINESS_DATE_SQL = `
@@ -62,16 +63,16 @@ async function logMovement(runner, o) {
 
 /**
  * A manual stock figure was typed in (item/size created with stock, or the
- * owner overwrote the count): log the difference. Untracked (null) new stock
- * logs nothing — the report only lists tracked items.
+ * owner overwrote the count): log the difference. Going untracked (a service)
+ * logs -old, so re-tracking later doesn't start on a phantom balance.
  * ponytail: delta uses the pre-read old value; a sale landing between that read
  * and the write is covered by the report's drift correction, not here.
  */
 async function logAdjustment(runner, businessId, target, oldStock, newStock) {
-  if (newStock == null) return;
+  if (newStock == null && oldStock == null) return;
   await logMovement(runner, {
     businessId, itemId: target.itemId, variantId: target.variantId,
-    qty: Number(newStock) - Number(oldStock ?? 0), type: 'adjust',
+    qty: Number(newStock ?? 0) - Number(oldStock ?? 0), type: 'adjust',
   });
 }
 
@@ -94,12 +95,22 @@ const REDATE_SALE_SQL = `
  * never purchased — profit then reports "cost missing" instead of guessing.
  * Only fills lines that have no snapshot yet, so re-running is harmless.
  */
+//
+// A shop that maintains stock batches (batches.js) knows the exact cost of
+// what the sale took: the batches it was allocated from. That wins; only the
+// part that came from un-batched (opening) stock falls back to the weighted
+// average, so this snapshot and the batch report agree. Allocations are per
+// bill + item/size, so every row of the same item on a bill gets one cost.
 async function snapshotBillCosts(runner, businessId, billId) {
   await runner.request()
     .input('business_id', sql.UniqueIdentifier, businessId)
     .input('bill_id', sql.UniqueIdentifier, billId)
     .query(`
-      UPDATE bi SET unit_cost = c.cost
+      UPDATE bi SET unit_cost = COALESCE(
+          (a.cost + CASE WHEN q.qty > a.qty
+                         THEN (q.qty - a.qty) * COALESCE(c.cost, bp.cost, a.cost / NULLIF(a.qty, 0))
+                         ELSE 0 END) / NULLIF(q.qty, 0),
+          c.cost, bp.cost)
       FROM bill_items bi
       OUTER APPLY (
         SELECT SUM(v.unit_price * v.quantity)
@@ -110,6 +121,25 @@ async function snapshotBillCosts(runner, businessId, billId) {
           AND ((bi.variant_id IS NOT NULL AND v.variant_id = bi.variant_id)
             OR (bi.variant_id IS NULL AND v.item_id = bi.item_id))
       ) c
+      OUTER APPLY (
+        SELECT SUM(al.quantity) AS qty, SUM(al.quantity * sb.unit_cost) AS cost
+        FROM stock_batch_allocations al
+        JOIN stock_batches sb ON sb.id = al.batch_id
+        WHERE al.bill_id = bi.bill_id AND al.business_id = @business_id
+          AND al.item_id = bi.item_id
+          AND ((bi.variant_id IS NULL AND al.variant_id IS NULL) OR al.variant_id = bi.variant_id)
+      ) a
+      OUTER APPLY (
+        SELECT SUM(x.quantity) AS qty FROM bill_items x
+        WHERE x.bill_id = bi.bill_id AND x.item_id = bi.item_id
+          AND ((bi.variant_id IS NULL AND x.variant_id IS NULL) OR x.variant_id = bi.variant_id)
+      ) q
+      -- Never purchased: the owner's buying price (the size's, else the item's).
+      OUTER APPLY (
+        SELECT COALESCE(
+          (SELECT v.buying_price FROM item_variants v WHERE v.id = bi.variant_id),
+          (SELECT i.buying_price FROM items i WHERE i.id = bi.item_id)) AS cost
+      ) bp
       WHERE bi.bill_id = @bill_id AND bi.unit_cost IS NULL
         AND (bi.item_id IS NOT NULL OR bi.variant_id IS NOT NULL)`);
 }

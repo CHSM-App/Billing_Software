@@ -44,7 +44,7 @@ import 'store_settings_screen.dart';
 import '../services/notification_service.dart';
 import '../services/offline_service.dart';
 import '../services/realtime_service.dart';
-import '../widgets/terms_consent.dart' show termsUrl, acceptableUseUrl;
+import '../widgets/terms_consent.dart' show termsUrl;
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -824,15 +824,6 @@ class _SettingsContentState extends State<_SettingsContent>
                       subtitle: l10n.settingsTermsSubtitle,
                       onTap: () => _openUrl(context, termsUrl),
                     ),
-                    const SizedBox(height: AppSpacing.space8),
-                    _buildNavCard(
-                      context,
-                      icon: Icons.gavel_outlined,
-                      iconColor: const Color(0xFF64748B),
-                      title: l10n.termsConsentAup,
-                      subtitle: l10n.settingsAupSubtitle,
-                      onTap: () => _openUrl(context, acceptableUseUrl),
-                    ),
 
                     const SizedBox(height: AppSpacing.space32),
                     _buildLogoutButton(),
@@ -1390,6 +1381,17 @@ class _BusinessFlagToggleState extends ConsumerState<_BusinessFlagToggle> {
       } else if (widget.field == 'round_off_enabled') {
         await updateRoundOffEnabled(value);
         await ref.read(sessionProvider.notifier).refresh();
+      } else if (widget.field == 'staff_can_edit_price') {
+        await updateStaffCanEditPrice(value);
+        await ref.read(sessionProvider.notifier).refresh();
+      } else if (widget.field == 'batch_tracking_enabled') {
+        await updateBatchTracking(value);
+        await ref.read(sessionProvider.notifier).refresh();
+        // The item list carries batches (and their cost) only while on.
+        ref.invalidate(itemsProvider);
+      } else if (widget.field == 'staff_see_cost') {
+        await updateStaffSeeCost(value);
+        await ref.read(sessionProvider.notifier).refresh();
       }
     } on ApiException catch (e) {
       if (mounted) {
@@ -1595,15 +1597,18 @@ class _TogglesScreen extends ConsumerWidget {
             children: [
               _sectionLabel(context, l10n.settingsGroupBilling),
               const SizedBox(height: AppSpacing.space8),
-              // Warranty tracking — any business type. Turns on the Warranty
-              // tab and each item's "Carries warranty" fields.
-              _BusinessFlagToggle(
-                field: 'warranty_enabled',
-                icon: Icons.verified_user_outlined,
-                title: l10n.settingsWarranty,
-                subtitle: l10n.settingsWarrantySubtitle,
-              ),
-              const SizedBox(height: AppSpacing.space8),
+              // Warranty tracking — shops only, never a restaurant. Turns on
+              // the Warranty tab and each item's "Carries warranty" fields.
+              if (businessType != 'restaurant_with_tables' &&
+                  businessType != 'restaurant_no_tables') ...[
+                _BusinessFlagToggle(
+                  field: 'warranty_enabled',
+                  icon: Icons.verified_user_outlined,
+                  title: l10n.settingsWarranty,
+                  subtitle: l10n.settingsWarrantySubtitle,
+                ),
+                const SizedBox(height: AppSpacing.space8),
+              ],
               // GST tax invoices — off by default. When on, items gain a
               // tax rate + HSN/SAC field and receipts show CGST/SGST.
               _BusinessFlagToggle(
@@ -1639,6 +1644,15 @@ class _TogglesScreen extends ConsumerWidget {
                 icon: Icons.request_quote_outlined,
                 title: l10n.settingsQuotations,
                 subtitle: l10n.settingsQuotationsSubtitle,
+              ),
+              // Staff price edits — on by default. When off, only the owner
+              // can retype a price or give a discount; price lists still work.
+              const SizedBox(height: AppSpacing.space8),
+              _BusinessFlagToggle(
+                field: 'staff_can_edit_price',
+                icon: Icons.price_change_outlined,
+                title: l10n.settingsStaffEditPrice,
+                subtitle: l10n.settingsStaffEditPriceSubtitle,
               ),
               // The "are you sure?" before Settle — per device, on by default.
               const SizedBox(height: AppSpacing.space8),
@@ -1691,6 +1705,31 @@ class _TogglesScreen extends ConsumerWidget {
                   subtitle: Text(l10n.settingsBillDiscountSubtitle),
                 ),
               ),
+              // Item photos on the billing rows — per device, off by default.
+              const SizedBox(height: AppSpacing.space8),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.medium),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: SwitchListTile(
+                  value: ref.watch(billingImagesProvider),
+                  onChanged: (v) => ref.read(billingImagesProvider.notifier).set(v),
+                  secondary: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
+                    child: const Icon(Icons.image_outlined,
+                        color: AppColors.primary, size: 20),
+                  ),
+                  title: Text(l10n.settingsBillingImages),
+                  subtitle: Text(l10n.settingsBillingImagesSubtitle),
+                ),
+              ),
 
               const SizedBox(height: AppSpacing.space24),
               _sectionLabel(context, l10n.settingsGroupStock),
@@ -1703,6 +1742,28 @@ class _TogglesScreen extends ConsumerWidget {
                 title: l10n.settingsInventory,
                 subtitle: l10n.settingsInventorySubtitle,
               ),
+              // Stock batches — off by default, and only offered while
+              // inventory is on (batches split tracked stock). When on,
+              // purchases go into costed batches and the cart shows cost.
+              if (ref.watch(inventoryEnabledProvider)) ...[
+                const SizedBox(height: AppSpacing.space8),
+                _BusinessFlagToggle(
+                  field: 'batch_tracking_enabled',
+                  icon: Icons.layers_outlined,
+                  title: l10n.settingsBatches,
+                  subtitle: l10n.settingsBatchesSubtitle,
+                ),
+                // Whether staff see purchase cost on the billing cart.
+                if (ref.watch(batchTrackingProvider)) ...[
+                  const SizedBox(height: AppSpacing.space8),
+                  _BusinessFlagToggle(
+                    field: 'staff_see_cost',
+                    icon: Icons.visibility_outlined,
+                    title: l10n.settingsStaffSeeCost,
+                    subtitle: l10n.settingsStaffSeeCostSubtitle,
+                  ),
+                ],
+              ],
 
               // Customer QR self-ordering — restaurants only.
               if (businessType == 'restaurant_with_tables') ...[

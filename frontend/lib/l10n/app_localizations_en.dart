@@ -144,6 +144,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Give customers a priced quote, then turn it into a bill later';
 
   @override
+  String get settingsStaffEditPrice => 'Staff can edit prices & discounts';
+
+  @override
+  String get settingsStaffEditPriceSubtitle =>
+      'Turn off so only the owner can change item prices or give discounts. Price lists still work.';
+
+  @override
   String get quotationQuoteShort => 'Quote';
 
   @override
@@ -896,6 +903,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsBillDiscountSubtitle =>
       'Show the bill discount (% / ₹) on billing. Item discounts stay either way.';
+
+  @override
+  String get settingsBillingImages => 'Show item photos';
+
+  @override
+  String get settingsBillingImagesSubtitle =>
+      'Show each item\'s photo (from Menu Photos) on the billing page';
 
   @override
   String get settingsLanguageSubtitle => 'Choose your app language';
@@ -1772,6 +1786,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get billSetupWarrantyDetails => 'Extra details';
 
   @override
+  String get billSetupDetailLabels => 'Default details on every bill';
+
+  @override
+  String get billSetupDetailLabelsHint =>
+      'Comma-separated, e.g. Vehicle No, KM reading';
+
+  @override
   String get billSetupNoteSubtitle => 'A message printed on every bill';
 
   @override
@@ -2246,15 +2267,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get itemsWarrantyDefaultMonths => 'Default warranty period (months)';
 
   @override
-  String get itemsManageWarrantyFields =>
-      'Manage warranty fields for this category';
-
-  @override
-  String itemsWarrantyFieldsFor(String category) {
-    return 'Warranty fields for $category';
-  }
-
-  @override
   String get itemsFieldItemNo => 'Item No (optional)';
 
   @override
@@ -2265,6 +2277,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get itemsFieldStock => 'Stock quantity';
+
+  @override
+  String get itemsFieldStockHint => 'Leave blank for services — no stock kept';
 
   @override
   String get itemsFieldUnit => 'Unit';
@@ -3480,6 +3495,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get printerSetupPaperSize80 => '80mm (3 inch thermal)';
 
   @override
+  String get printerSetupPaperSize112 => '112mm (4 inch thermal)';
+
+  @override
   String get printerSetupPaperSizeA5 => 'A5 (PDF invoice)';
 
   @override
@@ -3491,7 +3509,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get printerSetupNoteThermal =>
-      '58mm/80mm print to a thermal printer; A5/A4 make a PDF invoice';
+      '58/80/112mm print to a thermal printer; A5/A4 make a PDF invoice';
 
   @override
   String get conflictQueuedForRetry => 'Bill queued for retry';
@@ -3823,29 +3841,86 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String purchaseScanWarnAmountMissing(int line) {
-    return 'Line $line: amount couldn\'t be read — enter it from the bill.';
+  String get purchaseScanWarnAmountMissing =>
+      'Amount couldn\'t be read — enter it from the bill.';
+
+  @override
+  String get purchaseScanWarnQtyMissing =>
+      'Quantity couldn\'t be read — enter it from the bill.';
+
+  @override
+  String purchaseScanWarnRateQty(String rate, String qty) {
+    return 'Quantity × bill rate Rs. $rate doesn\'t give the amount — the quantity is probably $qty.';
   }
 
   @override
-  String purchaseScanWarnLineTax(int line) {
-    return 'Line $line: GST printed on the bill doesn\'t match its rate.';
+  String purchaseScanWarnRate(String rate) {
+    return 'Quantity × bill rate Rs. $rate doesn\'t give the amount. Check the quantity on the bill.';
   }
 
   @override
-  String purchaseScanWarnCgstSgst(int line) {
-    return 'Line $line: CGST and SGST on the bill are different.';
+  String purchaseScanUseQty(String qty) {
+    return 'Use $qty';
   }
 
   @override
-  String purchaseScanWarnTaxType(int line) {
-    return 'Line $line: IGST / CGST+SGST doesn\'t match the bill\'s interstate setting.';
+  String purchaseScanWarnQtyMismatch(String printed, String computed) {
+    return 'Bill shows $printed received in total; paid + free here is $computed.';
   }
 
   @override
-  String purchaseScanWarnCess(int line) {
-    return 'Line $line: cess is printed but not recorded. Add it as a separate line if needed.';
+  String get purchaseScanWarnLineTax =>
+      'GST printed on the bill doesn\'t match this rate.';
+
+  @override
+  String get purchaseScanWarnCgstSgst =>
+      'CGST and SGST on the bill are different.';
+
+  @override
+  String get purchaseScanWarnTaxType =>
+      'IGST / CGST+SGST doesn\'t match the bill\'s interstate setting.';
+
+  @override
+  String get purchaseScanWarnCess =>
+      'Cess is printed but not recorded. Add it as a separate line if needed.';
+
+  @override
+  String purchaseScanDuplicate(String date) {
+    return 'This bill looks already entered (invoice dated $date). Check Purchases before saving.';
   }
+
+  @override
+  String purchaseScanLinkedSummary(int linked, int total) {
+    return '$linked of $total lines linked to items';
+  }
+
+  @override
+  String get purchaseScanNotLinked =>
+      'Not linked to an item — stock won\'t change';
+
+  @override
+  String get purchaseScanAiMatched => 'AI matched — please check';
+
+  @override
+  String purchaseScanLinkTo(String name) {
+    return 'Link: $name';
+  }
+
+  @override
+  String get purchaseScanPromptTitle => 'Have the supplier\'s bill?';
+
+  @override
+  String get purchaseScanPromptBody =>
+      'Scan it and this form fills itself. You check everything before saving.';
+
+  @override
+  String get purchaseScanPromptButton => 'Scan bill';
+
+  @override
+  String get purchaseViewBill => 'View bill';
+
+  @override
+  String get purchaseBillShowFailed => 'Couldn\'t show the bill.';
 
   @override
   String purchaseScanWarnSubtotal(String printed, String computed) {
@@ -3983,6 +4058,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get purchaseFieldStatus => 'Status';
+
+  @override
+  String get purchaseFieldAmountPaid => 'Amount paid';
 
   @override
   String get purchaseTaxableValue => 'Taxable value';
@@ -4382,9 +4460,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get termsConsentTos => 'Terms of Service';
 
   @override
-  String get termsConsentAup => 'Acceptable Use Policy';
-
-  @override
   String get termsConsentPrivacy => 'Privacy Policy';
 
   @override
@@ -4414,9 +4489,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsTermsSubtitle => 'The agreement for using Vittam';
-
-  @override
-  String get settingsAupSubtitle => 'What is not allowed on Vittam';
 
   @override
   String get settingsBarcodeScanner => 'Barcode Scanner';
@@ -4485,4 +4557,232 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get barcodesFieldCode => 'Barcode number';
+
+  @override
+  String get settingsBatches => 'Maintain batches';
+
+  @override
+  String get settingsBatchesSubtitle =>
+      'Each purchase goes into a batch with its cost. Reports show real profit and the cart shows the purchase price.';
+
+  @override
+  String batchCostLine(String code, String cost) {
+    return '$code · Cost ₹$cost';
+  }
+
+  @override
+  String get batchPickTitle => 'Sell from batch';
+
+  @override
+  String batchLeftCost(String qty, String cost) {
+    return '$qty left · Cost ₹$cost';
+  }
+
+  @override
+  String batchChip(String label) {
+    return 'Batch: $label';
+  }
+
+  @override
+  String get batchNew => 'New batch';
+
+  @override
+  String get batchNoForItem => 'Batch no. for this item only (optional)';
+
+  @override
+  String get batchAddTo => 'Add to an existing batch (same rate only)';
+
+  @override
+  String get batchesTitle => 'Batches';
+
+  @override
+  String get batchesOpen => 'Open';
+
+  @override
+  String get batchesSettled => 'Settled';
+
+  @override
+  String get batchesNone => 'No batches here yet';
+
+  @override
+  String batchCardStock(String received, String sold, String left) {
+    return 'Bought $received · Sold $sold · Left $left';
+  }
+
+  @override
+  String batchCardLost(String qty) {
+    return 'Written off $qty';
+  }
+
+  @override
+  String batchCardMoney(String sales, String cost) {
+    return 'Sales ₹$sales · Cost ₹$cost';
+  }
+
+  @override
+  String batchProfit(String amount) {
+    return 'Profit ₹$amount';
+  }
+
+  @override
+  String batchLoss(String amount) {
+    return 'Loss ₹$amount';
+  }
+
+  @override
+  String get reportProfitTitle => 'Profit';
+
+  @override
+  String get reportCostedSales => 'Sales with known cost';
+
+  @override
+  String get reportCostOfGoods => 'Cost of goods';
+
+  @override
+  String get reportGrossProfit => 'Gross profit';
+
+  @override
+  String reportUncostedNote(String amount) {
+    return '₹$amount of sales have no purchase cost (old stock or untracked items) and are not in profit.';
+  }
+
+  @override
+  String get purchaseBillBatchNo => 'Batch no. (blank = automatic)';
+
+  @override
+  String batchItemCount(String count) {
+    return '$count items';
+  }
+
+  @override
+  String get batchEarlierNos => 'Earlier batch nos.';
+
+  @override
+  String get batchStatItems => 'Items';
+
+  @override
+  String get batchStatSales => 'Sales';
+
+  @override
+  String get batchStatCost => 'Cost';
+
+  @override
+  String get batchStatProfit => 'Profit';
+
+  @override
+  String get batchStatLoss => 'Loss';
+
+  @override
+  String get batchStatBought => 'Bought';
+
+  @override
+  String get batchStatSold => 'Sold';
+
+  @override
+  String get batchStatLeft => 'Left';
+
+  @override
+  String get batchStatCostUnit => 'Cost / unit';
+
+  @override
+  String get batchNotSold => 'Not sold yet';
+
+  @override
+  String get itemsServiceNoStock => 'Service (no stock)';
+
+  @override
+  String get itemsServiceNoStockHint =>
+      'Purchases never add stock for it — e.g. fitting, nitrogen filling';
+
+  @override
+  String purchaseDeleteSoldNote(String qty) {
+    return '$qty units from this bill are already sold — their cost stays on record.';
+  }
+
+  @override
+  String get itemsBuyingPrice => 'Buying price (optional)';
+
+  @override
+  String get itemsBuyingPriceHint =>
+      'Per unit, before GST — used for profit when you don\'t enter purchase bills';
+
+  @override
+  String get batchOldStock => 'Old stock';
+
+  @override
+  String batchLeftOnly(String qty) {
+    return '$qty left';
+  }
+
+  @override
+  String get batchStatHeld => 'Held';
+
+  @override
+  String batchPurchases(String count) {
+    return '$count purchases';
+  }
+
+  @override
+  String get reportProfitNoCost =>
+      'Enter purchase bills, or set a Buying price on items, to see profit.';
+
+  @override
+  String get settingsStaffSeeCost => 'Staff see purchase cost';
+
+  @override
+  String get settingsStaffSeeCostSubtitle =>
+      'Show each batch\'s cost to cashiers while billing. Off: only the owner sees it.';
+
+  @override
+  String get returnsTitle => 'Returns';
+
+  @override
+  String get returnItemsAction => 'Return items';
+
+  @override
+  String returnItemsTitle(String bill) {
+    return 'Return items · $bill';
+  }
+
+  @override
+  String get returnItemsHint =>
+      'Choose what came back. Stock goes back on the shelf and a credit note is made at this bill\'s prices.';
+
+  @override
+  String returnQtyLeft(String qty) {
+    return '$qty can be returned';
+  }
+
+  @override
+  String get returnRefundBy => 'Refund by';
+
+  @override
+  String get returnRefundCredit => 'Less from due';
+
+  @override
+  String get returnReason => 'Reason (optional)';
+
+  @override
+  String get returnChooseItems => 'Choose items to return';
+
+  @override
+  String returnSave(String amount) {
+    return 'Save credit note · $amount';
+  }
+
+  @override
+  String returnSaved(String number) {
+    return 'Credit note $number saved';
+  }
+
+  @override
+  String get returnPrint => 'Print';
+
+  @override
+  String get returnUndo => 'Undo return';
+
+  @override
+  String returnUndoConfirm(String number) {
+    return 'Undo credit note $number? The goods come off stock again.';
+  }
 }

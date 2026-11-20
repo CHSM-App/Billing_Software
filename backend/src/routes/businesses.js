@@ -6,6 +6,7 @@ const { requireAuth } = require('../auth');
 const audit = require('../audit');
 const logger = require('../logger');
 const billSettings = require('../billSettings');
+const batches = require('../batches');
 const { isBusinessPhone } = require('../validate');
 const {
   uniqueStoreToken, validateSlug, isSlugAvailable, looksAutoDerived,
@@ -23,6 +24,8 @@ const PROFILE_COLUMNS = `
   city, state, pincode, logo_url, print_logo,
   bill_prefix, bill_footer_note, bill_settings,
   gst_enabled, default_sac_code, round_off_enabled, show_item_no, quotations_enabled,
+  staff_can_edit_price,
+  batch_tracking_enabled, staff_see_cost,
   store_enabled, store_token, store_delivery_enabled,
   store_delivery_charge, store_payment_qr_url, store_upi_id,
   store_advance_percent, store_payment_required,
@@ -71,6 +74,8 @@ router.get('/profile', requireAuth, ownerOnly, async (req, res) => {
           b.bill_prefix, b.bill_footer_note, b.bill_settings,
           b.gst_enabled, b.default_sac_code,
           b.round_off_enabled, b.show_item_no, b.quotations_enabled,
+          b.staff_can_edit_price,
+          b.batch_tracking_enabled, b.staff_see_cost,
           b.store_enabled, b.store_token,
           b.store_delivery_enabled, b.store_delivery_charge,
           b.store_payment_qr_url, b.store_upi_id,
@@ -158,6 +163,9 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     round_off_enabled,
     show_item_no,
     quotations_enabled,
+    staff_can_edit_price,
+    batch_tracking_enabled,
+    staff_see_cost,
     store_enabled,
     store_delivery_enabled,
     store_delivery_charge,
@@ -275,6 +283,9 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     round_off_enabled,
     show_item_no,
     quotations_enabled,
+    staff_can_edit_price,
+    batch_tracking_enabled,
+    staff_see_cost,
     store_enabled,
     store_delivery_enabled,
     store_delivery_charge,
@@ -304,6 +315,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           city, state, pincode, gst_number, pan_number, fssai_number,
           logo_url, print_logo, bill_prefix, bill_footer_note, bill_settings,
           gst_enabled, default_sac_code, round_off_enabled, show_item_no, quotations_enabled,
+          staff_can_edit_price,
+          inventory_enabled, batch_tracking_enabled,
           store_enabled, store_delivery_enabled,
           store_delivery_charge, store_advance_percent, store_payment_required,
           store_upi_id,
@@ -318,6 +331,19 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
     }
 
     const old = oldResult.recordset[0];
+
+    // Batches split tracked stock, so there is nothing to batch without it.
+    const inventoryOn = inventory_enabled !== undefined
+      ? !!inventory_enabled : !!old.inventory_enabled;
+    if (batch_tracking_enabled === true && !inventoryOn) {
+      return res.status(400).json({ error: 'Turn on inventory before maintaining batches' });
+    }
+    // Batches split tracked stock: inventory going off takes them with it, so
+    // they don't sit "on" but dead. Only touches a shop that had them on.
+    if (inventory_enabled === false && old.batch_tracking_enabled
+        && !fields.some(([k]) => k === 'batch_tracking_enabled')) {
+      fields.push(['batch_tracking_enabled', false]);
+    }
 
     // Check GSTIN uniqueness (only when changing it)
     if (gst_number !== undefined && gst_number !== null && gst_number !== '' &&
@@ -413,6 +439,8 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
           key === 'inventory_enabled' || key === 'warranty_enabled' || key === 'has_barcode_scanner' ||
           key === 'gst_enabled' || key === 'round_off_enabled' ||
           key === 'show_item_no' || key === 'quotations_enabled' ||
+          key === 'staff_can_edit_price' || key === 'batch_tracking_enabled' ||
+          key === 'staff_see_cost' ||
           key === 'store_enabled' || key === 'store_delivery_enabled' ||
           key === 'store_payment_required';
       const normalised = isBit
@@ -434,6 +462,12 @@ router.put('/profile', requireAuth, ownerOnly, async (req, res) => {
       .query(`SELECT ${PROFILE_COLUMNS} FROM businesses WHERE id = @id`);
 
     const newBusiness = _formatBusiness(updated.recordset[0]);
+
+    // Switched on again after a spell off: sales in between took no batch
+    // stock, so trim every batch back to what is really on the shelf.
+    if (newBusiness.batch_tracking_enabled && !old.batch_tracking_enabled) {
+      await batches.reconcile(() => pool.request(), req.user.business_id);
+    }
 
     // Audit — only the changed fields
     const oldSnapshot = {};
@@ -595,6 +629,10 @@ function _formatBusiness(row) {
     round_off_enabled:   !!row.round_off_enabled,
     show_item_no:        !!row.show_item_no,
     quotations_enabled:  !!row.quotations_enabled,
+    staff_can_edit_price: !!row.staff_can_edit_price,
+    batch_tracking_enabled: !!row.batch_tracking_enabled,
+    // Absent (older row) = allowed, today's behaviour.
+    staff_see_cost: row.staff_see_cost !== false && row.staff_see_cost !== 0,
     // Online store. store_token is never settable from the profile payload —
     // the server derives it from the business name (see src/storeToken.js) at
     // sign-up and again whenever the name changes.
@@ -638,6 +676,9 @@ function _sqlTypeFor(key) {
     round_off_enabled: sql.Bit,
     show_item_no:      sql.Bit,
     quotations_enabled: sql.Bit,
+    staff_can_edit_price: sql.Bit,
+    batch_tracking_enabled: sql.Bit,
+    staff_see_cost: sql.Bit,
     store_enabled:          sql.Bit,
     store_delivery_enabled: sql.Bit,
     store_delivery_charge:  sql.Decimal(10, 2),

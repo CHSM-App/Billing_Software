@@ -375,6 +375,8 @@ router.post('/settlements/:id/whatsapp', requireAuth, whatsappLimiter, async (re
       billNumber: numbers.join(' '),
       receiptUrl,
       message,
+      businessId: req.user.business_id,
+      settlementId: req.params.id,
     });
     return res.status(out.status).json(out.body);
   } catch (err) {

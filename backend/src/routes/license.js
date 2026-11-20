@@ -55,6 +55,9 @@ router.get('/', requireAuth, async (req, res) => {
         s.updated_at,
         b.store_enabled,
         b.quotations_enabled,
+        b.staff_can_edit_price,
+        b.batch_tracking_enabled,
+        b.staff_see_cost,
         b.logo_url,
         b.print_logo,
         b.bill_footer_note,
@@ -141,6 +144,12 @@ router.get('/', requireAuth, async (req, res) => {
       print_logo: !!sub.print_logo,
       // Quotations switch — how an owner turning it on reaches staff devices.
       quotations_enabled: !!sub.quotations_enabled,
+      // Price/discount lock for staff — reaches their devices the same way.
+      staff_can_edit_price: !!sub.staff_can_edit_price,
+      // Batch switch — staff devices show batch costs only while it is on.
+      batch_tracking_enabled: !!sub.batch_tracking_enabled,
+      // May staff see purchase cost while billing — reaches their devices too.
+      staff_see_cost: sub.staff_see_cost !== false && sub.staff_see_cost !== 0,
       // Billing Setup — reaches staff devices the same way.
       bill_footer_note: sub.bill_footer_note ?? null,
       bill_settings: billSettings.parse(sub.bill_settings),

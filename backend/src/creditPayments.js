@@ -17,7 +17,10 @@ const { pool, sql } = require('./db');
 const CREDIT_PART = 'ISNULL(b.credit_amount, b.total - b.discount_amount + ISNULL(b.round_off, 0))';
 const PAID_SO_FAR = '(SELECT ISNULL(SUM(cp.amount), 0) FROM credit_payments cp WHERE cp.bill_id = b.id)';
 /** SQL for what bill `b` still owes. */
-const DUE = `(${CREDIT_PART} - ${PAID_SO_FAR})`;
+// Goods returned against the bill with refund mode "credit" (migration 082)
+// come off what it owes.
+const RETURNED_CREDIT = "(SELECT ISNULL(SUM(sr.total), 0) FROM sales_returns sr WHERE sr.bill_id = b.id AND sr.refund_mode = 'credit')";
+const DUE = `(${CREDIT_PART} - ${PAID_SO_FAR} - ${RETURNED_CREDIT})`;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_COLLECTIONS = 50;

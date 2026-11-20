@@ -123,3 +123,32 @@ describe('sendBillLink — API token missing', () => {
     expect(typeof sendBillLink).toBe('function');
   });
 });
+
+// ------------------------------------------------------------------
+// sendReceiptLink — every send is logged per business (migration 077)
+// ------------------------------------------------------------------
+describe('sendReceiptLink — whatsapp_bill_log', () => {
+  const { sendReceiptLink } = require('../../src/whatsapp');
+  const BIZ = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  const base = { phone: '9876543210', shopName: 'Shop', billNumber: '1', receiptUrl: 'u', message: 'm' };
+  const logged = () => mockRequest.query.mock.calls.some(([q]) => /INSERT INTO whatsapp_bill_log/.test(q));
+
+  test('a deeplink send logs one "opened" row for the bill', async () => {
+    const out = await sendReceiptLink({ ...base, whatsappMode: 'deeplink', businessId: BIZ, billId: 'b1' });
+    expect(out.status).toBe(200);
+    expect(logged()).toBe(true);
+    expect(mockRequest.inputs).toMatchObject({ business_id: BIZ, bill_id: 'b1', mode: 'deeplink', status: 'opened' });
+  });
+
+  test('an api send with WhatsApp disabled logs "skipped"', async () => {
+    const out = await sendReceiptLink({ ...base, whatsappMode: 'api', businessId: BIZ, settlementId: 's1' });
+    expect(out.status).toBe(503);
+    expect(mockRequest.inputs).toMatchObject({ settlement_id: 's1', bill_id: null, mode: 'api', status: 'skipped' });
+  });
+
+  test('a failed log write never fails the send', async () => {
+    mockRequest.query.mockRejectedValueOnce(new Error('db down'));
+    const out = await sendReceiptLink({ ...base, whatsappMode: 'deeplink', businessId: BIZ, billId: 'b1' });
+    expect(out.status).toBe(200);
+  });
+});

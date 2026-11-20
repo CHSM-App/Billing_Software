@@ -220,6 +220,9 @@ class SyncService {
         if (li['price_override'] != null) 'price_override': li['price_override'],
         if (li['discount_amount'] != null)
           'discount_amount': li['discount_amount'],
+        // The cashier's stock-batch pick; the server falls back to oldest
+        // first when it is gone by the time this syncs.
+        if (li['batch_id'] != null) 'batch_id': li['batch_id'],
       };
 
   /// `additional_charges` entry for a sync payload, decoded from the JSON the

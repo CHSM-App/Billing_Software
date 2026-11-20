@@ -70,16 +70,6 @@ export const ROUTES = [
     keywords: 'Vittam terms of service, billing software terms, terms and conditions',
   },
   {
-    path: '/acceptable-use',
-    file: 'acceptable-use.html',
-    changefreq: 'yearly',
-    priority: '0.3',
-    title: 'Acceptable Use Policy – Vittam',
-    description:
-      'What is not allowed on Vittam: illegal sales, fake GST invoices, content you have no rights to, spam, misuse of customer data, and attacks on the service.',
-    keywords: 'Vittam acceptable use policy, prohibited use, billing software rules',
-  },
-  {
     path: '/ordering-terms',
     file: 'ordering-terms.html',
     changefreq: 'yearly',

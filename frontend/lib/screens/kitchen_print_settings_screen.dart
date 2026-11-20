@@ -234,6 +234,7 @@ class _KitchenPrintSettingsScreenState
                   child: Column(children: [
                     _sizeTile(PaperSizes.mm58, '58 mm', 'Narrow roll'),
                     _sizeTile(PaperSizes.mm80, '80 mm', 'Standard roll'),
+                    _sizeTile(PaperSizes.mm112, '112 mm', 'Wide roll (4 inch)'),
                   ]),
                 ),
                 const SizedBox(height: AppSpacing.space4),

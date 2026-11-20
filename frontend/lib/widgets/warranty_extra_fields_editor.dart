@@ -5,9 +5,9 @@ import '../storage.dart';
 import '../theme/app_theme.dart';
 import 'app_widgets.dart';
 
-/// One label+value row in a [WarrantyExtraFieldsEditor] — either filled from
-/// a category's [WarrantyFieldTemplate] (its label stays read-only, via
-/// [templateKey]) or added ad-hoc by staff on the spot.
+/// One label+value row in a [WarrantyExtraFieldsEditor] — either one of the
+/// shop's default labels (read-only, via [templateKey]; see
+/// [addDefaultDetailRows]) or added ad-hoc by staff on the spot.
 class WarrantyExtraRow {
   final TextEditingController labelCtrl;
   final TextEditingController valueCtrl;
@@ -30,39 +30,28 @@ class WarrantyExtraRow {
   }
 }
 
-/// Appends a row for every field of [category]'s template not already
-/// present in [rows] (by [WarrantyExtraRow.templateKey]) — so re-applying a
-/// template (e.g. after picking a different item of the same category)
-/// never wipes a value staff already typed for a field the two share.
-/// Mutates [rows] in place; returns true when anything was added, so the
-/// caller knows whether a `setState` is actually needed.
-bool applyWarrantyFieldTemplate(
-  List<WarrantyExtraRow> rows,
-  String? category,
-  Map<String, WarrantyFieldTemplate>? templates,
-) {
-  if (category == null || category.trim().isEmpty) return false;
-  final template = templates?[category];
-  if (template == null) return false;
-  final existingKeys = rows.map((r) => r.templateKey).toSet();
-  var added = false;
-  for (final f in template.fields) {
-    if (existingKeys.contains(f.key)) continue;
+/// Appends a read-only-label row for each of the shop's default [labels]
+/// (Billing Setup → `detail_labels`) not already in [rows], so re-applying
+/// never wipes a value staff already typed. Mutates [rows] in place.
+void addDefaultDetailRows(List<WarrantyExtraRow> rows, List<String> labels) {
+  final existing = rows.map((r) => r.templateKey).toSet();
+  for (final l in labels) {
+    if (existing.contains(l)) continue;
     rows.add(WarrantyExtraRow(
-      labelCtrl: TextEditingController(text: f.label),
+      labelCtrl: TextEditingController(text: l),
       valueCtrl: TextEditingController(),
-      templateKey: f.key,
+      templateKey: l,
     ));
-    added = true;
   }
-  return added;
 }
 
 /// Turns [rows] into the `extra_data` shape the API expects, dropping any
-/// row whose label was left blank.
+/// row whose label or value was left blank — an unfilled default
+/// "Vehicle No" must not print an empty line on every bill.
 List<Map<String, String>> warrantyRowsPayload(List<WarrantyExtraRow> rows) => [
       for (final r in rows)
-        if (r.labelCtrl.text.trim().isNotEmpty)
+        if (r.labelCtrl.text.trim().isNotEmpty &&
+            r.valueCtrl.text.trim().isNotEmpty)
           {'label': r.labelCtrl.text.trim(), 'value': r.valueCtrl.text.trim()},
     ];
 
@@ -74,22 +63,9 @@ List<String> adHocWarrantyLabels(List<WarrantyExtraRow> rows) => [
           r.labelCtrl.text.trim(),
     ];
 
-/// Every field label already defined across every category's warranty
-/// template (e.g. another item's "Vehicle" or "IMEI" field) — offered as
-/// [WarrantyLabelField] suggestions alongside locally-remembered ad-hoc
-/// labels, so a label predefined for one item is reused for others instead
-/// of being retyped.
-List<String> allTemplateLabels(Map<String, WarrantyFieldTemplate>? templates) =>
-    templates == null
-        ? const []
-        : {
-            for (final t in templates.values)
-              for (final f in t.fields) f.label,
-          }.toList();
-
-/// The dynamic "category template + ad-hoc rows" editor shared by the
+/// The dynamic "shop default labels + ad-hoc rows" editor shared by the
 /// Warranty tab's add/edit form and the billing screen's "Warranty Details"
-/// section — one label+value field pair per row, template rows read-only on
+/// section — one label+value field pair per row, default rows read-only on
 /// their label, plus an "add detail" action for anything ad-hoc.
 ///
 /// Styled to match the cart panel's "Additional Charges" section exactly
@@ -107,11 +83,6 @@ class WarrantyExtraFieldsEditor extends StatelessWidget {
   /// Optional heading above the rows — omit when the caller already labels
   /// this section itself (e.g. a collapsible section title).
   final String? title;
-  /// Labels already defined on OTHER categories' templates (see
-  /// [allTemplateLabels]) — offered as suggestions alongside locally
-  /// remembered ad-hoc labels, so a label predefined for one item is reused
-  /// for others instead of being retyped.
-  final List<String> extraSuggestions;
 
   const WarrantyExtraFieldsEditor({
     super.key,
@@ -119,7 +90,6 @@ class WarrantyExtraFieldsEditor extends StatelessWidget {
     required this.onAddRow,
     required this.onRemoveRow,
     this.title,
-    this.extraSuggestions = const [],
   });
 
   @override
@@ -172,7 +142,6 @@ class WarrantyExtraFieldsEditor extends StatelessWidget {
             _AdHocRow(
               row: row,
               onRemove: () => onRemoveRow(row),
-              extraSuggestions: extraSuggestions,
             ),
         if (title == null)
           Padding(
@@ -201,12 +170,10 @@ class WarrantyExtraFieldsEditor extends StatelessWidget {
 class _AdHocRow extends StatelessWidget {
   final WarrantyExtraRow row;
   final VoidCallback onRemove;
-  final List<String> extraSuggestions;
 
   const _AdHocRow({
     required this.row,
     required this.onRemove,
-    this.extraSuggestions = const [],
   });
 
   @override
@@ -226,7 +193,6 @@ class _AdHocRow extends StatelessWidget {
             label: l10n.warrantyDetailLabel,
             controller: row.labelCtrl,
             focusNode: row.labelFocus,
-            extraSuggestions: extraSuggestions,
           ),
         ),
         const SizedBox(width: AppSpacing.space8),
@@ -262,17 +228,12 @@ class WarrantyLabelField extends StatefulWidget {
   final String label;
   final TextEditingController controller;
   final FocusNode? focusNode;
-  /// Labels already defined on other categories' templates — merged with
-  /// the locally-remembered ad-hoc labels loaded internally, so a label
-  /// predefined for one item is suggested for others too.
-  final List<String> extraSuggestions;
 
   const WarrantyLabelField({
     super.key,
     required this.label,
     required this.controller,
     this.focusNode,
-    this.extraSuggestions = const [],
   });
 
   @override
@@ -288,15 +249,13 @@ class _WarrantyLabelFieldState extends State<WarrantyLabelField> {
   // the only way this reliably picks up labels saved moments earlier.
   List<String> _localSuggestions = const [];
 
-  /// Locally-remembered ad-hoc labels plus [WarrantyLabelField.extraSuggestions]
-  /// (other categories' predefined template labels), deduped case-insensitively.
+  /// Locally-remembered ad-hoc labels, deduped case-insensitively.
   List<String> get _suggestions {
     final seen = <String>{};
-    final merged = <String>[];
-    for (final s in [..._localSuggestions, ...widget.extraSuggestions]) {
-      if (seen.add(s.toLowerCase())) merged.add(s);
-    }
-    return merged;
+    return [
+      for (final s in _localSuggestions)
+        if (seen.add(s.toLowerCase())) s,
+    ];
   }
 
   @override

@@ -350,6 +350,8 @@ class PrinterService {
   // Column layout depends on paper width (see _ColProfile):
   //   80mm → 46 chars: Name(14)|Qty(4)|Price(8)|GST%(6)|Total(10)
   //   58mm → 32 chars: Name(13)|Qty(3)|Price(6)|Total(7)
+  //  112mm → 66 chars: Name(34)|Qty(4)|Price(8)|GST%(6)|Total(10)
+  //          (4 inch roll, 104mm print area = 832 dots → up to 69 chars)
   // The 58mm price/total are 7 wide (not 6) so their padLeft keeps a leading
   // space — otherwise "220.00" fills the field and columns visually collide.
   // 58mm has gstCols: 0 — the narrow paper has no room for a fifth column, so
@@ -364,6 +366,7 @@ class PrinterService {
   // ('|' between each pair), so a full item row lands exactly on the paper
   // edge: 80mm → 14+4+8+6+10 = 42, +4 separators = 46.
   //        58mm → 13+3+6+0+7 = 29, +3 separators = 32.
+  //       112mm → 34+4+8+6+10 = 62, +4 separators = 66.
   static const _ColProfile _cols80 = _ColProfile(
       cols: 46,
       nameCols: 14,
@@ -378,9 +381,18 @@ class PrinterService {
       priceCols: 6,
       gstCols: 0,
       totalCols: 7);
+  static const _ColProfile _cols112 = _ColProfile(
+      cols: 66,
+      nameCols: 34,
+      qtyCols: 4,
+      priceCols: 8,
+      gstCols: 6,
+      totalCols: 10);
 
-  /// Resolve the column profile for a printable dot-width (384 → 58mm, else 80mm).
-  static _ColProfile _profileForDots(int dots) => dots <= 384 ? _cols58 : _cols80;
+  /// Resolve the column profile for a printable dot-width
+  /// (384 → 58mm, 576 → 80mm, wider → 112mm).
+  static _ColProfile _profileForDots(int dots) =>
+      dots <= 384 ? _cols58 : dots <= 576 ? _cols80 : _cols112;
 
   /// Fit the item-table columns to what this particular bill actually contains.
   ///
@@ -1244,7 +1256,7 @@ class PrinterService {
   /// Build an on-screen PNG preview of [bill]'s thermal receipt — the exact
   /// layout that would print, rendered through the same raster pipeline. Does
   /// NOT touch the printer, so it works with no printer paired. [paperDots]
-  /// selects the width (384 → 58mm, else 80mm).
+  /// selects the width (384 → 58mm, 576 → 80mm, 832 → 112mm).
   Future<Uint8List> buildReceiptPreviewPng(Bill bill,
       {String? businessName,
       String? businessPhone,
@@ -1287,7 +1299,7 @@ class PrinterService {
   }
 
   /// Print one Credit-tab payment as a single Payment Receipt (raster, like a
-  /// bill). [paperDots] selects the width (384 → 58mm, else 80mm).
+  /// bill). [paperDots] selects the width (384 → 58mm, 576 → 80mm, 832 → 112mm).
   Future<void> printSettlement(CreditSettlement settlement,
       {String? businessName,
       String? businessPhone,
@@ -1347,7 +1359,7 @@ class PrinterService {
     if (printer == null) throw PrinterException('No printer configured');
 
     // Column profile (ASCII path) and raster width both follow the paper width:
-    // 384 dots → 58mm, otherwise 80mm.
+    // 384 dots → 58mm, 576 → 80mm, wider → 112mm.
     final profile = _profileForDots(paperDots);
 
     // Building the ASCII lines is only needed by the commented-out text path

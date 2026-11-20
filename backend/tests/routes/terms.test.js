@@ -191,3 +191,11 @@ describe('POST /api/account/accept-terms', () => {
     expect(res.body.success).toBeUndefined();
   });
 });
+
+describe('GET /acceptable-use', () => {
+  test('redirects to the Terms, which now contain it as section 12', async () => {
+    const res = await request(app).get('/acceptable-use');
+    expect(res.status).toBe(301);
+    expect(res.headers.location).toBe('/terms');
+  });
+});

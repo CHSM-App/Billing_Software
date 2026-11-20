@@ -2,7 +2,7 @@
 
 /**
  * legal.js — the one authoritative version of the legal bundle a business owner
- * agrees to: Terms of Service + Acceptable Use Policy + Privacy Policy
+ * agrees to: Terms of Service (acceptable use is its section 12) + Privacy Policy
  * (docs/legal/). Recorded in terms_acceptances (migration 072).
  *
  * null = the consent flow is OFF: /register records nothing, /license never

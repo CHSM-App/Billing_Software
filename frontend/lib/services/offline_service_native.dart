@@ -97,7 +97,9 @@ class OfflineService {
       // 16: pack_unit / pack_size on cached_items and cached_variants.
       // 17: customer_address / customer_gstin on offline_bills and offline_drafts.
       // 18: cached_variants.unit — a size's own unit.
-      version: 18,
+      // 19: batches_json / avg_cost / buying_price on cached_items and
+      //     cached_variants — the cart shows purchase cost offline too.
+      version: 19,
       onCreate: _createSchema,
       onUpgrade: _migrateSchema,
       // Self-heal: _createSchema is all IF NOT EXISTS, so this is a no-op on a
@@ -218,6 +220,11 @@ class OfflineService {
         -- "1 box = 15 bottle"; display only, mirrors items.pack_unit/pack_size.
         pack_unit      TEXT,
         pack_size      REAL,
+        -- Stock batches (JSON list) and old-stock cost, for the cart's cost
+        -- line; only filled for a shop that maintains batches.
+        batches_json   TEXT,
+        avg_cost       REAL,
+        buying_price   REAL,
         is_active      INTEGER NOT NULL DEFAULT 1,
         cached_at      INTEGER NOT NULL
       )
@@ -247,6 +254,9 @@ class OfflineService {
         pack_unit           TEXT,
         pack_size           REAL,
         unit                TEXT,
+        batches_json        TEXT,
+        avg_cost            REAL,
+        buying_price        REAL,
         sort_order          INTEGER NOT NULL DEFAULT 0,
         is_active           INTEGER NOT NULL DEFAULT 1
       )
@@ -397,6 +407,18 @@ class OfflineService {
         await db.execute('ALTER TABLE cached_variants ADD COLUMN unit TEXT');
       }
     }
+    if (oldVersion < 19) {
+      // v18 → v19: batches and old-stock cost (migrations 079/081). Additive;
+      // the next item sync fills them in. Guarded: a rebuilt table has them.
+      for (final table in ['cached_items', 'cached_variants']) {
+        final cols = await db.rawQuery('PRAGMA table_info($table)');
+        if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'batches_json')) {
+          await db.execute('ALTER TABLE $table ADD COLUMN batches_json TEXT');
+          await db.execute('ALTER TABLE $table ADD COLUMN avg_cost REAL');
+          await db.execute('ALTER TABLE $table ADD COLUMN buying_price REAL');
+        }
+      }
+    }
   }
 
   /// Cache of bills and drafts fetched FROM the server.
@@ -458,6 +480,9 @@ class OfflineService {
           'unit': item.unit,
           'pack_unit': item.packUnit,
           'pack_size': item.packSize,
+          'batches_json': _batchesJson(item.batches),
+          'avg_cost': item.avgCost,
+          'buying_price': item.buyingPrice,
           'is_active': item.isActive ? 1 : 0,
           'cached_at': now,
         });
@@ -474,6 +499,9 @@ class OfflineService {
             'pack_unit': v.packUnit,
             'pack_size': v.packSize,
             'unit': v.unit,
+            'batches_json': _batchesJson(v.batches),
+            'avg_cost': v.avgCost,
+            'buying_price': v.buyingPrice,
             'sort_order': v.sortOrder,
             'is_active': v.isActive ? 1 : 0,
           });
@@ -709,8 +737,19 @@ class OfflineService {
       packUnit: row['pack_unit'] as String?,
       packSize: (row['pack_size'] as num?)?.toDouble(),
       isActive: (row['is_active'] as int) == 1,
+      batches: _batchesFrom(row['batches_json']),
+      avgCost: (row['avg_cost'] as num?)?.toDouble(),
+      buyingPrice: (row['buying_price'] as num?)?.toDouble(),
     );
   }
+
+  /// Batches as cached: a JSON list, or null when there are none.
+  static String? _batchesJson(List<StockBatch> batches) => batches.isEmpty
+      ? null
+      : jsonEncode(batches.map((b) => b.toJson()).toList());
+
+  static List<StockBatch> _batchesFrom(Object? raw) =>
+      raw is String && raw.isNotEmpty ? StockBatch.listFrom(jsonDecode(raw)) : const [];
 
   ItemVariant _rowToVariant(Map<String, dynamic> row) {
     return ItemVariant(
@@ -730,6 +769,9 @@ class OfflineService {
       unit: row['unit'] as String?,
       sortOrder: (row['sort_order'] as int?) ?? 0,
       isActive: (row['is_active'] as int) == 1,
+      batches: _batchesFrom(row['batches_json']),
+      avgCost: (row['avg_cost'] as num?)?.toDouble(),
+      buyingPrice: (row['buying_price'] as num?)?.toDouble(),
     );
   }
 

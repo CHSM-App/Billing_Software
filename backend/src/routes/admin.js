@@ -182,6 +182,17 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
         (SELECT COUNT(*) FROM purchase_scans ps
            WHERE ps.business_id = b.id AND ps.status = 'failed'
              AND ps.created_at >= ${MONTH_START_UTC_SQL}) AS scans_failed_month,
+        -- WhatsApp receipts this (IST) month (migration 077). 'opened' is a
+        -- deeplink tap on the cashier's own WhatsApp — free, and unconfirmed.
+        (SELECT COUNT(*) FROM whatsapp_bill_log w
+           WHERE w.business_id = b.id AND w.status = 'sent'
+             AND w.created_at >= ${MONTH_START_UTC_SQL}) AS wa_sent_month,
+        (SELECT COUNT(*) FROM whatsapp_bill_log w
+           WHERE w.business_id = b.id AND w.status = 'failed'
+             AND w.created_at >= ${MONTH_START_UTC_SQL}) AS wa_failed_month,
+        (SELECT COUNT(*) FROM whatsapp_bill_log w
+           WHERE w.business_id = b.id AND w.status = 'opened'
+             AND w.created_at >= ${MONTH_START_UTC_SQL}) AS wa_deeplink_month,
         (SELECT COUNT(*) FROM users su
            WHERE su.business_id = b.id
              AND su.role IN (${MANAGED_ROLES_SQL})) AS staff_count,
@@ -252,6 +263,9 @@ router.get('/api/businesses', requireAdmin, async (req, res) => {
       },
       scans_month:        r.scans_month ?? 0,
       scans_failed_month: r.scans_failed_month ?? 0,
+      wa_sent_month:      r.wa_sent_month ?? 0,
+      wa_failed_month:    r.wa_failed_month ?? 0,
+      wa_deeplink_month:  r.wa_deeplink_month ?? 0,
       // Shown as the placeholder when a business has no limit of its own.
       default_scan_limit: defaultScanLimit,
       staff_count:       r.staff_count,

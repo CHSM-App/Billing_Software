@@ -11,6 +11,7 @@ jest.mock('../../src/db', () => mockPool);
 // Mock whatsapp module to avoid real API calls
 jest.mock('../../src/whatsapp', () => ({
   sendBillLink: jest.fn(),
+  logWhatsappSend: jest.fn(() => Promise.resolve()),
   normalisePhone: jest.fn((p) => p),
 }));
 
@@ -33,7 +34,7 @@ jest.mock('../../src/audit', () => ({
 
 const app = require('../../src/server');
 const { authHeader } = require('../helpers/auth');
-const { sendBillLink, normalisePhone } = require('../../src/whatsapp');
+const { sendBillLink, normalisePhone, logWhatsappSend } = require('../../src/whatsapp');
 
 const BUSINESS_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const BILL_ID     = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
@@ -850,6 +851,9 @@ describe('POST /api/bills/send-whatsapp', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.campaign_id).toBe('camp-1');
+    expect(logWhatsappSend).toHaveBeenCalledWith(expect.objectContaining({
+      businessId: BUSINESS_ID, billId: BILL_ID, mode: 'api', status: 'sent', campaignId: 'camp-1',
+    }));
   });
 
   test('returns skipped when WhatsApp is disabled', async () => {
@@ -1216,7 +1220,7 @@ describe('order-card line overrides', () => {
   // Routes every transaction query by its SQL so one mock serves POST,
   // add-items and update-items. lines() = inputs bound to the bill_items
   // INSERT, bill() = inputs bound to the bills INSERT.
-  function routeTx({ biz = {}, items = [sampleItem], oldLines = [] } = {}) {
+  function routeTx({ biz = {}, items = [sampleItem], oldLines = [], lists = [] } = {}) {
     const calls = [];
     const flags = { inventory_enabled: false, round_off_enabled: false, gst_enabled: false, ...biz };
     mockTransaction.request.mockImplementation(() => {
@@ -1229,6 +1233,7 @@ describe('order-card line overrides', () => {
           const ok = (rs = []) => Promise.resolve({ recordset: rs, rowsAffected: [rs.length || 1] });
           if (/COUNT\(\*\) AS cnt/.test(sqlText)) return ok([{ cnt: 0 }]);
           if (/INSERT INTO bills/.test(sqlText)) return ok([{ id: BILL_ID }]);
+          if (/FROM price_lists pl/.test(sqlText)) return ok(lists);
           if (/FROM bills b/.test(sqlText)) return ok([{ id: BILL_ID, status: 'draft', ...flags }]);
           if (/FROM businesses/.test(sqlText)) return ok([flags]);
           if (/^\s*SELECT[\s\S]*FROM items\b/.test(sqlText)) return ok(items);
@@ -1341,7 +1346,7 @@ describe('order-card line overrides', () => {
       expect(res.status).toBe(200);
       expect(tx.lines().unit_price0).toBeCloseTo(unit, 4);
       expect(tx.lines()).toMatchObject({ discount_amount0: disc, line_total0: total });
-      expect(tx.sql(/INSERT INTO bill_items/)).toMatch(/line_total, discount_amount\)/);
+      expect(tx.sql(/INSERT INTO bill_items/)).toMatch(/line_total, discount_amount[,)]/);
     });
   });
 
@@ -1407,6 +1412,76 @@ describe('order-card line overrides', () => {
     });
   });
 
+  // Migration 076: the owner can stop staff editing prices / giving discounts.
+  describe('staff_can_edit_price off', () => {
+    const locked = { staff_can_edit_price: false };
+    const LIST = '12345678-1234-4234-8234-123456789abc';
+    const update = (role, lines, body = {}) => request(app)
+      .put(`/api/bills/${BILL_ID}/update-items`)
+      .set(authHeader({ role }))
+      .send({ items: lines, ...body });
+
+    test('a cashier bills at catalog with no line or bill discount', async () => {
+      const tx = routeTx({ biz: locked });
+      const res = await post('cashier', { price_override: 60, discount_amount: 5 }, { discount_amount: 10 });
+      expect(res.status).toBe(201);
+      expect(tx.lines()).toMatchObject({ unit_price0: 50, discount_amount0: 0, line_total0: 100 });
+      expect(tx.bill().discount_amount).toBe(0);
+    });
+
+    test('the owner is never locked', async () => {
+      const tx = routeTx({ biz: locked });
+      await post('owner', { price_override: 60 }, { discount_amount: 10 });
+      expect(tx.lines()).toMatchObject({ unit_price0: 60, line_total0: 120 });
+      expect(tx.bill().discount_amount).toBe(10);
+    });
+
+    test("a cashier may bill at a list's fixed price, nothing else", async () => {
+      const lists = [{ id: LIST, adjust_pct: null, item_id: ITEM_ID, variant_id: null, price: 40 }];
+      let tx = routeTx({ biz: locked, lists });
+      await post('cashier', { price_override: 40 });
+      expect(tx.lines()).toMatchObject({ unit_price0: 40, line_total0: 80 });
+      tx = routeTx({ biz: locked, lists });
+      await post('cashier', { price_override: 41 });
+      expect(tx.lines()).toMatchObject({ unit_price0: 50, line_total0: 100 });
+    });
+
+    test("a cashier may bill at a % list's price", async () => {
+      const tx = routeTx({ biz: locked,
+        lists: [{ id: LIST, adjust_pct: 10, item_id: null, variant_id: null, price: null }] });
+      await post('cashier', { price_override: 55 });
+      expect(tx.lines()).toMatchObject({ unit_price0: 55, line_total0: 110 });
+    });
+
+    test('lists are not read when staff may edit', async () => {
+      const tx = routeTx();
+      await post('cashier', { price_override: 60 });
+      expect(tx.sql(/FROM price_lists pl/)).toBeUndefined();
+    });
+
+    // The owner held this draft at 22 less ₹8 (stored as 18/unit + 8).
+    const priced = [{ item_id: ITEM_ID, variant_id: null, item_name: 'Rice', quantity: 2,
+      unit_price: 18, discount_amount: 8, kitchen_status: 'pending', kitchen_done_at: null }];
+
+    test("update-items keeps the owner's price and discount on a held draft", async () => {
+      const tx = routeTx({ biz: locked, oldLines: priced });
+      await update('cashier', [{ item_id: ITEM_ID, quantity: 2, price_override: 22, discount_amount: 8 }]);
+      expect(tx.lines()).toMatchObject({ unit_price0: 18, discount_amount0: 8, line_total0: 36 });
+    });
+
+    test("update-items won't take a cashier's own price or discount", async () => {
+      const tx = routeTx({ biz: locked, oldLines: priced });
+      await update('cashier', [{ item_id: ITEM_ID, quantity: 2, price_override: 40, discount_amount: 10 }]);
+      expect(tx.lines()).toMatchObject({ unit_price0: 50, discount_amount0: 0, line_total0: 100 });
+    });
+
+    test('update-items leaves the bill discount alone', async () => {
+      const tx = routeTx({ biz: locked });
+      await update('cashier', [{ item_id: ITEM_ID, quantity: 2 }], { discount_amount: 15 });
+      expect(tx.sql(/@discount_amount\b/)).toBeUndefined();
+    });
+  });
+
   // Migration 059: the bill remembers which price list it was opened with.
   describe('price_list_id', () => {
     const LIST_ID = '12345678-1234-4234-8234-123456789abc';
@@ -1451,7 +1526,8 @@ describe('order-card line overrides', () => {
     test('update-items sets the list when a cashier sends it', async () => {
       const tx = routeTx();
       await update('cashier', { price_list_id: LIST_ID });
-      expect(tx.sql(/UPDATE b SET/)).toMatch(/price_list_id = @price_list_id/);
+      // (?!…): not batches.returnBill's UPDATE b, which runs first.
+      expect(tx.sql(/UPDATE b SET\s+(?!b\.qty_sold)/)).toMatch(/price_list_id = @price_list_id/);
     });
 
     test('update-items leaves the list alone when the key is missing or a waiter sends it', async () => {
@@ -1539,5 +1615,144 @@ describe('"Billed by"', () => {
       .set(authHeader({ role: 'server' }));
     expect(res.status).toBe(403);
     expect(mockRequest.inputs.finalized_by_user_id).toBeUndefined();
+  });
+});
+
+// ------------------------------------------------------------------
+// Stock batches (batches.js): which batches a sale takes its stock from
+// ------------------------------------------------------------------
+describe('stock batches on sales', () => {
+  const A = 'aaaaaaaa-0000-0000-0000-00000000000a';
+  const B = 'bbbbbbbb-0000-0000-0000-00000000000b';
+
+  // [stockAfter]: the item's stock once this sale took its share, so
+  // old (pre-batch) stock = stockAfter + qty − what the batches hold.
+  function batchTx({ on = true, open = [], stockAfter = 3 } = {}) {
+    const calls = [];
+    const flags = { inventory_enabled: true, round_off_enabled: false, gst_enabled: false, batch_tracking_enabled: on };
+    mockTransaction.request.mockImplementation(() => {
+      const inputs = {};
+      const r = {
+        input: jest.fn((k, _t, v) => { inputs[k] = v; return r; }),
+        query: jest.fn((sqlText) => {
+          calls.push({ sqlText, inputs });
+          const ok = (rs = []) => Promise.resolve({ recordset: rs, rowsAffected: [rs.length || 1] });
+          if (/COUNT\(\*\) AS cnt/.test(sqlText)) return ok([{ cnt: 0 }]);
+          if (/INSERT INTO bills/.test(sqlText)) return ok([{ id: BILL_ID }]);
+          if (/FROM bills b/.test(sqlText)) {
+            return ok([{ id: BILL_ID, status: 'draft', table_id: null, ...flags }]);
+          }
+          if (/FROM businesses/.test(sqlText)) return ok([flags]);
+          if (/FROM stock_batches WITH \(UPDLOCK\)/.test(sqlText)) return ok(open);
+          if (/SELECT stock_quantity FROM items WHERE id = @id/.test(sqlText)) return ok([{ stock_quantity: stockAfter }]);
+          if (/^\s*SELECT[\s\S]*FROM items\b/.test(sqlText)) return ok([sampleItem]);
+          if (/^\s*SELECT[\s\S]*FROM bill_items/.test(sqlText)) {
+            return ok([{ item_id: ITEM_ID, variant_id: null, item_name: 'Rice', quantity: 2, unit_price: 50 }]);
+          }
+          return ok();
+        }),
+      };
+      return r;
+    });
+    mockRequest.query.mockImplementation(() =>
+      Promise.resolve({ recordset: [{ ...sampleBill }], rowsAffected: [1] }));
+    const of = (re) => calls.filter((c) => re.test(c.sqlText));
+    return {
+      calls,
+      of,
+      taken: () => of(/SET qty_sold = qty_sold \+ @qty/).map((c) => [c.inputs.id, c.inputs.qty]),
+      lines: () => of(/INSERT INTO bill_items/).pop().inputs,
+    };
+  }
+
+  const sell = (line) => request(app).post('/api/bills').set(authHeader())
+    .send({ items: [{ item_id: ITEM_ID, quantity: 7, ...line }], payment_mode: 'cash' });
+  const twoBatches = [{ id: A, qty_remaining: 5 }, { id: B, qty_remaining: 5 }];
+
+  test('with batches off, a sale runs no batch statements', async () => {
+    const tx = batchTx({ on: false, open: twoBatches });
+    const res = await sell({});
+    expect(res.status).toBe(201);
+    // The ledger's cost snapshot reads allocations inside its one existing
+    // statement (it finds none); nothing else touches batches.
+    expect(tx.of(/stock_batch/).filter((c) => !/UPDATE bi SET unit_cost/.test(c.sqlText)))
+      .toHaveLength(0);
+    expect(tx.lines().batch_id0).toBeNull();
+  });
+
+  test('takes the oldest batch first and records each allocation', async () => {
+    const tx = batchTx({ open: twoBatches });
+    const res = await sell({});
+    expect(res.status).toBe(201);
+    expect(tx.taken()).toEqual([[A, 5], [B, 2]]);
+    const allocs = tx.of(/INSERT INTO stock_batch_allocations/).map((c) => c.inputs);
+    expect(allocs).toHaveLength(2);
+    expect(allocs[0]).toMatchObject({ bill_id: BILL_ID, batch_id: A, item_id: ITEM_ID, qty: 5 });
+  });
+
+  test("the ledger's cost snapshot runs after the allocations, so it can use them", async () => {
+    const tx = batchTx({ open: twoBatches });
+    await sell({});
+    const sqls = tx.calls.map((c) => c.sqlText);
+    const lastAlloc = sqls.map((s) => /INSERT INTO stock_batch_allocations/.test(s)).lastIndexOf(true);
+    const snapshot = sqls.findIndex((s) => /UPDATE bi SET unit_cost/.test(s));
+    expect(snapshot).toBeGreaterThan(lastAlloc);
+    expect(sqls[snapshot]).toMatch(/FROM stock_batch_allocations al/);
+  });
+
+  test("the cashier's batch goes first and is saved on the line", async () => {
+    const tx = batchTx({ open: twoBatches });
+    const res = await sell({ batch_id: B.toLowerCase() });
+    expect(res.status).toBe(201);
+    expect(tx.taken()).toEqual([[B, 5], [A, 2]]);
+    expect(tx.lines().batch_id0).toBe(B.toLowerCase());
+  });
+
+  test('a malformed pick is ignored, never a failed sale', async () => {
+    const tx = batchTx({ open: twoBatches });
+    const res = await sell({ batch_id: 'nope' });
+    expect(res.status).toBe(201);
+    expect(tx.lines().batch_id0).toBeNull();
+    expect(tx.taken()).toEqual([[A, 5], [B, 2]]);
+  });
+
+  test('old (pre-batch) stock sells first, then the oldest batch', async () => {
+    // Batches hold 10 and 2 are old: selling 7 leaves 5 → 2 old, then 5 from A.
+    const tx = batchTx({ open: twoBatches, stockAfter: 5 });
+    const res = await sell({});
+    expect(res.status).toBe(201);
+    expect(tx.taken()).toEqual([[A, 5]]);
+  });
+
+  test('beyond every batch the rest is opening stock, not a rejection', async () => {
+    const tx = batchTx({ open: [{ id: A, qty_remaining: 3 }], stockAfter: 0 });
+    const res = await sell({});
+    expect(res.status).toBe(201);
+    expect(tx.taken()).toEqual([[A, 3]]);
+  });
+
+  test('update-items gives the old allocations back before re-selling', async () => {
+    const tx = batchTx({ open: twoBatches });
+    const res = await request(app).put(`/api/bills/${BILL_ID}/update-items`).set(authHeader())
+      .send({ items: [{ item_id: ITEM_ID, quantity: 7 }] });
+    expect(res.status).toBe(200);
+    const sqls = tx.calls.map((c) => c.sqlText);
+    const giveBack = sqls.findIndex((s) => /SET b\.qty_sold = b\.qty_sold - a\.qty/.test(s));
+    const forget = sqls.findIndex((s) => /DELETE FROM stock_batch_allocations/.test(s));
+    const take = sqls.findIndex((s) => /SET qty_sold = qty_sold \+ @qty/.test(s));
+    expect(giveBack).toBeGreaterThan(-1);
+    expect(forget).toBeGreaterThan(giveBack);
+    expect(take).toBeGreaterThan(forget);
+  });
+
+  test('a void gives its allocations back', async () => {
+    const tx = batchTx({ open: twoBatches });
+    mockRequest.query.mockImplementation(() => Promise.resolve({
+      recordset: [{ ...sampleBill, status: 'finalized', inventory_enabled: true }], rowsAffected: [1],
+    }));
+    const res = await request(app).delete(`/api/bills/${BILL_ID}`).set(authHeader());
+    expect(res.status).toBe(200);
+    const all = [...tx.calls.map((c) => c.sqlText), ...mockRequest.query.mock.calls.map((c) => c[0])];
+    expect(all.some((s) => /SET b\.qty_sold = b\.qty_sold - a\.qty/.test(s))).toBe(true);
   });
 });

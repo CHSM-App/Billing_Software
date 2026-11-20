@@ -9,15 +9,18 @@ import 'package:image/image.dart' as img;
 /// the server only ever receives JPEG — which is all its upload routes accept.
 ///
 /// The CPU-heavy encode runs in a background isolate so the UI stays smooth.
-Future<Uint8List> compressToJpeg(Uint8List bytes) => compute(compressJpegSync, bytes);
+/// Purchase-bill scans pass a larger [maxEdge] so small print stays legible.
+Future<Uint8List> compressToJpeg(Uint8List bytes,
+        {int maxEdge = 1000, int quality = 80}) =>
+    compute(compressJpegSync, (bytes, maxEdge, quality));
 
-/// Decode, resize to max 1000px on the long edge, and JPEG-encode at ~80%.
+/// Decode, resize to max [maxEdge] on the long edge, and JPEG-encode.
 ///
 /// Must stay a top-level function: [compute] cannot take a closure.
-Uint8List compressJpegSync(Uint8List bytes) {
+Uint8List compressJpegSync((Uint8List, int, int) args) {
+  final (bytes, maxEdge, quality) = args;
   final decoded = img.decodeImage(bytes);
   if (decoded == null) return bytes; // not decodable — send as-is, server validates
-  const maxEdge = 1000;
   img.Image out = decoded;
   // JPEG has no alpha: transparent pixels (a PNG logo's background) would
   // encode as black. Flatten onto white first.
@@ -35,5 +38,5 @@ Uint8List compressJpegSync(Uint8List bytes) {
       out = img.copyResize(out, height: maxEdge);
     }
   }
-  return img.encodeJpg(out, quality: 80);
+  return img.encodeJpg(out, quality: quality);
 }

@@ -8,22 +8,26 @@ import 'services/secure_store_backup_stub.dart'
     if (dart.library.io) 'services/secure_store_backup_io.dart' as backup;
 
 /// Print paper-size options and helpers. The stored value is one of these
-/// string constants; `mm58`/`mm80` print thermal ESC/POS, `a5`/`a4` generate a
-/// PDF invoice via the OS print dialog.
+/// string constants; `mm58`/`mm80`/`mm112` print thermal ESC/POS, `a5`/`a4`
+/// generate a PDF invoice via the OS print dialog.
 class PaperSizes {
-  static const String mm58 = 'mm58';
-  static const String mm80 = 'mm80';
-  static const String a5   = 'a5';
-  static const String a4   = 'a4';
+  static const String mm58  = 'mm58';
+  static const String mm80  = 'mm80';
+  static const String mm112 = 'mm112';
+  static const String a5    = 'a5';
+  static const String a4    = 'a4';
 
-  static const List<String> all = [mm58, mm80, a5, a4];
+  static const List<String> all = [mm58, mm80, mm112, a5, a4];
 
   /// True for the ESC/POS thermal roll sizes (as opposed to the PDF page sizes).
-  static bool isThermal(String size) => size == mm58 || size == mm80;
+  static bool isThermal(String size) =>
+      size == mm58 || size == mm80 || size == mm112;
 
-  /// Printable dot-width for a thermal size (58mm = 384, 80mm = 576 @ 203dpi).
-  /// Defaults to 80mm for any non-thermal value.
-  static int thermalDots(String size) => size == mm58 ? 384 : 576;
+  /// Printable dot-width for a thermal size @ 203dpi: 58mm = 384, 80mm = 576,
+  /// 112mm (4 inch, 104mm print area) = 832. Defaults to 80mm for any
+  /// non-thermal value.
+  static int thermalDots(String size) =>
+      size == mm58 ? 384 : size == mm112 ? 832 : 576;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +145,14 @@ class AuthStorage {
   static const _keyRoundOffEnabled  = 'round_off_enabled';
   static const _keyShowItemNo       = 'show_item_no';
   static const _keyQuotationsEnabled = 'quotations_enabled';
+  // Owner's lock (migration 076): false = only the owner may edit a line's
+  // price or give a discount. Absent (sessions saved before it) = allowed.
+  static const _keyStaffCanEditPrice = 'staff_can_edit_price';
+  // "Maintain batches" (migration 079): purchase cost per lot, shown while
+  // billing. Absent (sessions saved before it) = off.
+  static const _keyBatchTracking = 'batch_tracking_enabled';
+  // May staff see purchase cost while billing? Absent = yes (as before).
+  static const _keyStaffSeeCost = 'staff_see_cost';
   // Online store master switch. Cached in the session so the shell knows
   // whether to poll the online-order queue at all, without a profile fetch
   // (which is owner-only — a cashier could never answer the question).
@@ -171,8 +183,8 @@ class AuthStorage {
   // so it must be globally unique — the device tag guarantees that.
   static const _keyDeviceTag        = 'offline_device_tag';
   static const _keyOfflineSeq       = 'offline_bill_seq';
-  // Chosen print paper size: 'mm58' | 'mm80' | 'a5' | 'a4'. Defaults to 'mm80'
-  // (current behaviour). 'mm58'/'mm80' print thermal ESC/POS; 'a5'/'a4' generate
+  // Chosen print paper size: 'mm58' | 'mm80' | 'mm112' | 'a5' | 'a4'. Defaults to 'mm80'
+  // (current behaviour). 'mm58'/'mm80'/'mm112' print thermal ESC/POS; 'a5'/'a4' generate
   // a PDF invoice via the OS print dialog.
   static const _keyPaperSize        = 'paper_size';
   // Kitchen (KOT) printing. Independent of the billing paper size above: the
@@ -209,6 +221,9 @@ class AuthStorage {
     bool roundOffEnabled = false,
     bool showItemNo = false,
     bool quotationsEnabled = false,
+    bool staffCanEditPrice = true,
+    bool batchTrackingEnabled = false,
+    bool staffSeeCost = true,
     bool storeEnabled = false,
     bool customersEnabled = true,
   }) async {
@@ -235,6 +250,9 @@ class AuthStorage {
       prefs.setBool(_keyRoundOffEnabled, roundOffEnabled),
       prefs.setBool(_keyShowItemNo, showItemNo),
       prefs.setBool(_keyQuotationsEnabled, quotationsEnabled),
+      prefs.setBool(_keyStaffCanEditPrice, staffCanEditPrice),
+      prefs.setBool(_keyBatchTracking, batchTrackingEnabled),
+      prefs.setBool(_keyStaffSeeCost, staffSeeCost),
       prefs.setBool(_keyStoreEnabled, storeEnabled),
       prefs.setBool(_keyCustomersEnabled, customersEnabled),
     ]);
@@ -280,6 +298,21 @@ class AuthStorage {
   Future<void> updateQuotationsEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyQuotationsEnabled, enabled);
+  }
+
+  Future<void> updateStaffCanEditPrice(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyStaffCanEditPrice, enabled);
+  }
+
+  Future<void> updateBatchTracking(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBatchTracking, enabled);
+  }
+
+  Future<void> updateStaffSeeCost(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyStaffSeeCost, enabled);
   }
 
   Future<void> updateStoreEnabled(bool enabled) async {
@@ -590,6 +623,9 @@ class AuthStorage {
       'round_off_enabled': prefs.getBool(_keyRoundOffEnabled) ?? false,
       'show_item_no'     : prefs.getBool(_keyShowItemNo) ?? false,
       'quotations_enabled': prefs.getBool(_keyQuotationsEnabled) ?? false,
+      'staff_can_edit_price': prefs.getBool(_keyStaffCanEditPrice) ?? true,
+      'batch_tracking_enabled': prefs.getBool(_keyBatchTracking) ?? false,
+      'staff_see_cost': prefs.getBool(_keyStaffSeeCost) ?? true,
       'store_enabled'    : prefs.getBool(_keyStoreEnabled) ?? false,
       'customers_enabled': prefs.getBool(_keyCustomersEnabled) ?? true,
     };
@@ -648,6 +684,9 @@ Future<void> saveSession({
   bool roundOffEnabled = false,
   bool showItemNo = false,
   bool quotationsEnabled = false,
+  bool staffCanEditPrice = true,
+  bool batchTrackingEnabled = false,
+  bool staffSeeCost = true,
   bool storeEnabled = false,
   bool customersEnabled = true,
 }) => AuthStorage.instance.saveSession(
@@ -667,6 +706,9 @@ Future<void> saveSession({
       roundOffEnabled: roundOffEnabled,
       showItemNo: showItemNo,
       quotationsEnabled: quotationsEnabled,
+      staffCanEditPrice: staffCanEditPrice,
+      batchTrackingEnabled: batchTrackingEnabled,
+      staffSeeCost: staffSeeCost,
       storeEnabled: storeEnabled,
       customersEnabled: customersEnabled,
     );
@@ -724,6 +766,9 @@ Future<void>    updateGstEnabled(bool e)       => AuthStorage.instance.updateGst
 Future<void>    updateRoundOffEnabled(bool e)  => AuthStorage.instance.updateRoundOffEnabled(e);
 Future<void>    updateShowItemNo(bool e)       => AuthStorage.instance.updateShowItemNo(e);
 Future<void>    updateQuotationsEnabled(bool e) => AuthStorage.instance.updateQuotationsEnabled(e);
+Future<void>    updateStaffCanEditPrice(bool e) => AuthStorage.instance.updateStaffCanEditPrice(e);
+Future<void>    updateBatchTracking(bool e)    => AuthStorage.instance.updateBatchTracking(e);
+Future<void>    updateStaffSeeCost(bool e)     => AuthStorage.instance.updateStaffSeeCost(e);
 Future<void>    updateStoreEnabled(bool e)     => AuthStorage.instance.updateStoreEnabled(e);
 Future<void>    updateCustomersEnabled(bool e) => AuthStorage.instance.updateCustomersEnabled(e);
 Future<void>    saveGstProfile({String? gstNumber, String? businessAddress, String? businessPhone, String? defaultSacCode, String? fssaiNumber}) =>

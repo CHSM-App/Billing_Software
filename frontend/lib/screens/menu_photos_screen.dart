@@ -17,8 +17,8 @@ String itemImageUrl(String relative) {
 }
 
 /// Owner-only screen for managing dish photos shown to customers on the QR
-/// order menu. This is the ONLY place the owner works with item images — the
-/// billing and item-management screens never load or show photos.
+/// order menu. This is the ONLY place the owner works with item images; billing
+/// shows them read-only when Settings → "Show item photos" is on.
 ///
 /// Each photo is picked from the camera/gallery, resized and JPEG-compressed on
 /// the device (so uploads stay small), then sent to the server which stores it

@@ -127,6 +127,70 @@ StockTarget? findStockTargetByName(List<StockTarget> targets, String name) {
   return null;
 }
 
+// Count words that carry no meaning of their own.
+const _noiseWords = {'pc', 'pcs', 'nos', 'no', 'x'};
+
+// One spelling per unit, so "1 LTR" and "1L" are the same size.
+const _unitSpelling = {
+  'kgs': 'kg', 'gms': 'g', 'gm': 'g', 'ltr': 'l', 'lt': 'l', 'litre': 'l',
+};
+
+/// [s] split into numbers ("how much / which size") and words ("what").
+/// A number stays glued to its unit ("1 kg" → "1kg") and a tyre's rim to its
+/// R ("195/60R15" → "195", "60", "r15"), so the same size reads the same
+/// however the bill spaces it.
+({Set<String> sizes, Set<String> words}) _tokens(String s) {
+  final norm = s
+      .toLowerCase()
+      .replaceAllMapped(RegExp(r'(\d)\s*(kgs|kg|gms|gm|g|ml|litre|ltr|lt|l)\b'),
+          (m) => '${m[1]}${_unitSpelling[m[2]] ?? m[2]}')
+      .replaceAllMapped(
+          RegExp(r'(\d)\s*z?r\s*(\d{2})\b'), (m) => '${m[1]} r${m[2]}');
+  final sizes = <String>{};
+  final words = <String>{};
+  for (final t in norm.split(RegExp(r'[^a-z0-9.]+'))) {
+    if (t.isEmpty || _noiseWords.contains(t)) continue;
+    if (RegExp(r'^(\d+(\.\d+)?[a-z]*|r\d+)$').hasMatch(t)) {
+      sizes.add(t);
+    } else if (t.length >= 2) {
+      words.add(t.replaceAll('.', ''));
+    }
+  }
+  return (sizes: sizes, words: words);
+}
+
+/// Up to [max] targets that fit [text] — e.g. a supplier's "PARLE-G BISCUIT
+/// 50G" suggests "Parle G Biscuit". Numbers are the identity of a tyre or a
+/// pack, so a target with a number the line doesn't have is never offered
+/// ("215/65 R16" never suggests "255/65 R16"); the rest is shared words. Only
+/// a suggestion for the owner to tap; never used to link on its own.
+// ponytail: word overlap, no typo tolerance ("Biscut" won't match); add
+// edit distance if owners report misses.
+List<StockTarget> suggestStockTargets(List<StockTarget> targets, String text,
+    {int max = 3}) {
+  final line = _tokens(text);
+  // Bills run words together ("TATASALT"); a longer item word found inside
+  // the squashed text counts too. Short words don't — "oil" is in "boiled".
+  final joined = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  if (joined.isEmpty) return const [];
+  final scored = <(StockTarget, double)>[];
+  for (final t in targets) {
+    final own = _tokens(t.name);
+    final total = own.sizes.length + own.words.length;
+    if (total == 0) continue;
+    if (line.sizes.isNotEmpty && !own.sizes.every(line.sizes.contains)) continue;
+    final hits = own.sizes.where(line.sizes.contains).length +
+        own.words
+            .where((w) =>
+                line.words.contains(w) || (w.length >= 4 && joined.contains(w)))
+            .length;
+    final score = hits / total;
+    if (score >= 0.5) scored.add((t, score));
+  }
+  scored.sort((a, b) => b.$2.compareTo(a.$2));
+  return [for (final s in scored.take(max)) s.$1];
+}
+
 /// Opens the searchable bottom sheet and returns the chosen target, or null
 /// when dismissed.
 Future<StockTarget?> showStockTargetPicker(

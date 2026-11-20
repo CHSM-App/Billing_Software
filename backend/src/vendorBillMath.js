@@ -63,6 +63,11 @@ function computeTotals(lines, opts) {
       hsn_code: l.hsn_code ? String(l.hsn_code).trim().slice(0, 10) : null,
       line_total: r2(lineNet + lineTax),
       sort_order: idx,
+      // Stock batches (batches.js): an existing batch to top up, or the batch
+      // no. for a new one (blank = the purchase's automatic one). No effect on
+      // the money.
+      batch_id: l.batch_id || null,
+      batch_no: l.batch_no || null,
       _net: lineNet,
       _tax: lineTax,
     };

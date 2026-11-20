@@ -43,7 +43,6 @@ export default function App() {
       <Route path="/help" element={<HelpCenter />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<LegalPage doc="terms" />} />
-      <Route path="/acceptable-use" element={<LegalPage doc="acceptable-use" />} />
       <Route path="/ordering-terms" element={<LegalPage doc="ordering-terms" />} />
       <Route path="/delete-account" element={<DeleteAccount />} />
       {/* Unlisted: iOS doesn't allow in-app business sign-up (Guideline

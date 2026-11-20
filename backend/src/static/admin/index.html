@@ -174,7 +174,7 @@
             <th data-sort="items">Items</th>
             <th data-sort="scans" title="AI bill scans this month / free scans per month">Scans</th>
             <th>Devices</th>
-            <th data-sort="wa">WhatsApp</th>
+            <th data-sort="wa" title="Mode, and WhatsApp receipts this month">WhatsApp</th>
             <th data-sort="verified">Verified</th>
             <th></th>
           </tr>
@@ -285,6 +285,7 @@
         <option value="api">api (paid — auto-send via Business API)</option>
       </select>
     </div>
+    <div class="kv"><span class="k">WhatsApp this month</span><span id="dWaSent">—</span></div>
     <div class="toggle-row">
       <span>Verified (can log in)</span>
       <label class="switch"><input type="checkbox" id="fVerified"/><span class="slider"></span></label>
@@ -461,7 +462,8 @@
       var expClass = dl!=null && dl<0 ? 'red' : (dl!=null && dl<=3 ? 'amber' : 'gray');
       var expTxt = sub ? (fmtDate(sub.expires_at) + (dl!=null ? ' <span class="chip '+expClass+'">'+(dl<0?'expired':dl+'d')+'</span>' : '')) : '<span class="muted">—</span>';
       var staff = sub ? (b.staff_count+' / '+(sub.max_staff==null?'∞':sub.max_staff)) : b.staff_count;
-      var wa = '<span class="chip '+(b.whatsapp_mode==='api'?'blue':'gray')+'">'+esc(b.whatsapp_mode)+'</span>';
+      var wa = '<span class="chip '+(b.whatsapp_mode==='api'?'blue':'gray')+'">'+esc(b.whatsapp_mode)+'</span>'
+        + '<div class="biz-sub">'+waText(b)+'</div>';
       var ver = b.is_verified ? '<span class="chip green">yes</span>' : '<span class="chip red">no</span>';
       var del = b.deletion_request;
       // Reason (if they gave one) on hover; requested date in the tooltip too.
@@ -511,7 +513,7 @@
     bills:    function(b){ return b.bill_count || 0; },
     items:    function(b){ return b.item_count || 0; },
     scans:    function(b){ return b.scans_month || 0; },
-    wa:       function(b){ return low(b.whatsapp_mode); },
+    wa:       function(b){ return b.wa_sent_month || 0; },
     verified: function(b){ return b.is_verified ? 1 : 0; }
   };
   Array.prototype.forEach.call(document.querySelectorAll('th[data-sort]'), function(th){
@@ -532,6 +534,13 @@
     var full = used >= sub.purchase_scan_limit;
     return '<span class="chip '+(full?'amber':'gray')+'">'+used+' / '+sub.purchase_scan_limit+'</span>'
       + (b.scans_failed_month ? '<div class="biz-sub">'+b.scans_failed_month+' failed</div>' : '');
+  }
+
+  // WhatsApp receipts this month: API sends (paid), failures, deeplink taps (free).
+  function waText(b){
+    return (b.wa_sent_month||0)+' sent'
+      + (b.wa_failed_month ? ' · '+b.wa_failed_month+' failed' : '')
+      + (b.wa_deeplink_month ? ' · '+b.wa_deeplink_month+' deeplink' : '');
   }
 
   // Stored value -> what people call it. The type is still restaurant_with_tables
@@ -589,6 +598,7 @@
     $('fScanLimit').value = sub.purchase_scan_limit_is_default || sub.purchase_scan_limit==null ? '' : sub.purchase_scan_limit;
     $('dScansUsed').textContent = (b.scans_month||0) + (b.scans_failed_month ? ' ('+b.scans_failed_month+' failed)' : '');
     $('fWhatsapp').value = b.whatsapp_mode || 'deeplink';
+    $('dWaSent').textContent = waText(b);
     $('fVerified').checked = !!b.is_verified;
     $('dMsg').textContent = '';
 

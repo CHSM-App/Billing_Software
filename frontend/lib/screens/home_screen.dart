@@ -26,6 +26,7 @@ import '../widgets/whatsapp_mark.dart';
 import '../widgets/stock_target_picker.dart' show isRestaurantBusiness;
 import '../widgets/skeletons.dart';
 import '../widgets/warranty_extra_fields_editor.dart';
+import '../services/bill_settings.dart' show billSettingsProvider;
 import '../services/printer_service.dart';
 import '../services/receipt_output.dart';
 import '../services/receipt_labels.dart';
@@ -37,6 +38,7 @@ import '../main.dart' show rootMessengerKey;
 import 'bill_preview_screen.dart';
 import 'customers_screen.dart' show CustomerBillsScreen;
 import 'login_screen.dart';
+import 'menu_photos_screen.dart' show itemImageUrl;
 import 'printer_setup_screen.dart';
 import '../widgets/category_sheet.dart'
     show
@@ -153,9 +155,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _showMoreCustomerFields = false;
   // Rows for the ad-hoc "extra details" section under the customer fields —
   // e.g. a tyre's vehicle KM reading, available on every bill. Pre-filled
-  // from the category's warranty template whenever the cart holds a
-  // warranty-eligible item.
+  // with the shop's default labels (Billing Setup) once per sale.
   final List<WarrantyExtraRow> _warrantyRows = [];
+  // The detailLabels list last applied; a fresh one (Billing Setup save or a
+  // new sale re-reads the provider) re-applies.
+  List<String>? _appliedDetailLabels;
   // How the bill is paid: rows of [mode][amount] at the bottom of the cart.
   // One row is an ordinary single-mode bill; "+" adds a row and splits it.
   // The last row always takes whatever the others leave of the payable (see
@@ -532,6 +536,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           Bill.fromJson(await getBill(widget.activeBillId!));
       final allItems = itemsAsync.value!;
       ref.read(cartProvider.notifier).loadFromBill(bill, allItems);
+      // An owner's quotation can carry hand-typed prices and discounts that
+      // locked staff may not bill (a held draft keeps them — the server
+      // carries them over). Bill it as the server will.
+      final dropEdits =
+          widget.quotation != null && !ref.read(canEditPricesProvider);
+      if (dropEdits) ref.read(cartProvider.notifier).dropHandEdits();
       if (mounted) {
         setState(() {
           // A draft is never split — its parts are chosen when it is settled.
@@ -556,7 +566,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           }
           // Restore the saved discount. Setting the amount fires the listener,
           // which derives the matching percentage from the (now loaded) total.
-          if (bill.discountAmount > 0) {
+          if (bill.discountAmount > 0 && !dropEdits) {
             _discountAmtController.text = bill.discountAmount.toStringAsFixed(2);
           }
           // Restore any additional charges saved on the draft.
@@ -942,6 +952,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// until one is tapped, which CategoryChipStrip renders for a null [active].
   Widget _buildMajorStrip(List<String> majors) {
     final l10n = context.l10n;
+    final isOwner = ref.watch(userRoleProvider) == 'owner';
     return ValueListenableBuilder<String?>(
       valueListenable: _activeMajor,
       builder: (context, active, _) => CategoryChipStrip(
@@ -952,6 +963,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         onTap: _jumpToMajor,
         controller: _majorStripCtrl,
         chipKeys: _majorChipKeys,
+        // Owner long-presses a chip and drops it on another to rearrange —
+        // the same per-device order as Items → Category order.
+        onReorder: isOwner
+            ? (dragged, target) {
+                final next = List<String>.of(majors)..remove(dragged);
+                next.insert(majors.indexOf(target), dragged);
+                ref.read(majorCategoryOrderProvider.notifier).reorder(next);
+              }
+            : null,
       ),
     );
   }
@@ -2852,6 +2872,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       r.dispose();
     }
     _warrantyRows.clear();
+    // Next sale gets the defaults again — re-read, so a Billing Setup change
+    // (or one synced from /license on a staff device) shows up.
+    _appliedDetailLabels = null;
+    ref.invalidate(billSettingsProvider);
   }
 
   /// Fill BOTH fields from a picked suggestion, whichever field was typed in.
@@ -2929,19 +2953,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// on; printed on the receipt and, when the cart holds a warranty-eligible
   /// item, also copied onto the auto-created warranty record. [setLocal]
   /// repaints the host (panel or sheet).
-  Widget _warrantyDetailsSection(
-      List<CartEntry> cart, void Function(VoidCallback) setLocal) {
-    final warrantyItem = cart.where((e) => e.item.warrantyEligible).firstOrNull;
-    final templates = ref.watch(warrantyFieldTemplatesProvider).valueOrNull;
-    // Template auto-fill is category-specific, so it only applies when the
-    // cart actually has a warranty-eligible item; otherwise rows just start
-    // empty with the generic "+ Add detail" affordance.
-    if (warrantyItem != null) {
-      // Fills in this category's template fields the first time they're
-      // needed (or when switching to a different category) — mutating
-      // _warrantyRows here, before building the editor below, so this same
-      // build already shows them; no separate setState round-trip required.
-      applyWarrantyFieldTemplate(_warrantyRows, warrantyItem.item.category, templates);
+  Widget _warrantyDetailsSection(void Function(VoidCallback) setLocal) {
+    // The shop's default labels (Billing Setup), added once per sale —
+    // mutating _warrantyRows here, before building the editor below, so this
+    // same build shows them. Once per settings load, so a row staff removed
+    // stays removed — but a Billing Setup save mid-sale shows up right away.
+    final labels = ref.watch(billSettingsProvider).valueOrNull?.detailLabels;
+    if (labels != null && !identical(labels, _appliedDetailLabels)) {
+      // Drop untouched default rows whose label Billing Setup just removed.
+      // Disposed after the frame: their TextFields still hold the controllers.
+      _warrantyRows.removeWhere((r) {
+        final stale = r.templateKey != null &&
+            !labels.contains(r.templateKey) &&
+            r.valueCtrl.text.trim().isEmpty;
+        if (stale) WidgetsBinding.instance.addPostFrameCallback((_) => r.dispose());
+        return stale;
+      });
+      addDefaultDetailRows(_warrantyRows, labels);
+      _appliedDetailLabels = labels;
     }
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.space8),
@@ -2951,7 +2980,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         // the same thing twice. The "+ Add detail" action alone is enough;
         // the Warranty tab's own form (no such neighbour) still shows one.
         rows: _warrantyRows,
-        extraSuggestions: allTemplateLabels(templates),
         onAddRow: () => setLocal(() => _warrantyRows.add(WarrantyExtraRow(
               labelCtrl: TextEditingController(),
               valueCtrl: TextEditingController(),
@@ -2967,7 +2995,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// "More details" under the phone field: the customer's address, GSTIN and
   /// ad-hoc extra-detail rows, folded until tapped. [setLocal] repaints the
   /// host (panel or sheet).
-  Widget _moreCustomerFields(AppLocalizations l10n, List<CartEntry> cart,
+  Widget _moreCustomerFields(AppLocalizations l10n,
       void Function(VoidCallback) setLocal) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2986,6 +3014,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         color: AppColors.primary, fontWeight: FontWeight.w500),
                   ),
                 ),
+                if (_knownCustomer != null) _customerInsightChip(l10n),
                 AnimatedRotation(
                   turns: _showMoreCustomerFields ? 0.5 : 0,
                   duration: const Duration(milliseconds: 200),
@@ -3028,11 +3057,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             size: 16, color: AppColors.textSecondary),
                       ),
                     ),
-                    _warrantyDetailsSection(cart, setLocal),
+                    _warrantyDetailsSection(setLocal),
                   ],
                 ),
         ),
       ],
+    );
+  }
+
+  /// "✦ 3 bills · ₹12,400.00 spent" beside "More details" for a known
+  /// customer, styled as an AI insight (gradient sparkle + text, soft fill).
+  Widget _customerInsightChip(AppLocalizations l10n) {
+    final c = _knownCustomer!;
+    const gradient =
+        LinearGradient(colors: [Color(0xFF6366F1), Color(0xFFA855F7), Color(0xFFEC4899)]);
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(c.id),
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 400),
+      builder: (_, t, child) => Opacity(opacity: t, child: child),
+      child: Container(
+        margin: const EdgeInsets.only(right: AppSpacing.space8),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          gradient: LinearGradient(colors: [
+            const Color(0xFF6366F1).withValues(alpha: 0.08),
+            const Color(0xFFEC4899).withValues(alpha: 0.08),
+          ]),
+          border: Border.all(
+              color: const Color(0xFFA855F7).withValues(alpha: 0.35)),
+        ),
+        child: ShaderMask(
+          shaderCallback: gradient.createShader,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.auto_awesome, size: 13, color: Colors.white),
+            const SizedBox(width: 4),
+            Text(
+              '${l10n.customersBills(c.billCount)} · ₹${c.totalSpend.toStringAsFixed(2)} spent',
+              style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 
@@ -3801,7 +3871,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   /// Show a real, WYSIWYG preview of the current cart as it would be printed —
-  /// a thermal receipt bitmap (58/80mm) or an A5/A4 PDF, per the chosen paper
+  /// a thermal receipt bitmap (58/80/112mm) or an A5/A4 PDF, per the chosen paper
   /// size. Read-only: nothing is saved.
   Future<void> _previewBill() async {
     final l10n = context.l10n;
@@ -5177,7 +5247,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                       color: AppColors.textSecondary),
                                 ),
                                 _customerSuggestionList('phone'),
-                                _moreCustomerFields(l10n, cart, setLocal),
+                                _moreCustomerFields(l10n, setLocal),
                               ],
                             ),
                           )
@@ -5248,11 +5318,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
 
             // Discount row — also cashier/owner only; servers don't apply
-            // discounts when building an order. Settings can hide it; a bill
-            // that already carries a discount still shows it, so it is never
-            // applied invisibly.
+            // discounts when building an order, and the owner can lock staff
+            // out of it (canEditPricesProvider). Settings can hide it; a bill
+            // that already carries a discount still shows it — read-only when
+            // locked — so it is never applied invisibly.
             if (canFinalize &&
-                (ref.watch(billDiscountProvider) ||
+                ((ref.watch(billDiscountProvider) &&
+                        ref.watch(canEditPricesProvider)) ||
                     _discountAmtController.text.isNotEmpty))
             Padding(
               padding: const EdgeInsets.fromLTRB(AppSpacing.space16,
@@ -5264,6 +5336,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       key: _discountPctKey,
                       label: l10n.billingDiscountPercent,
                       controller: _discountPctController,
+                      enabled: ref.watch(canEditPricesProvider),
                       focusNode: _discountPctFocus,
                       keyboardType: const TextInputType.numberWithOptions(
                           decimal: true),
@@ -5277,6 +5350,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       key: _discountAmtKey,
                       label: l10n.billingDiscountRupees,
                       controller: _discountAmtController,
+                      enabled: ref.watch(canEditPricesProvider),
                       focusNode: _discountAmtFocus,
                       keyboardType: const TextInputType.numberWithOptions(
                           decimal: true),
@@ -6108,9 +6182,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _buildCartRow(CartEntry entry, {_CartCols? cols}) {
     final gstEnabled = ref.read(gstEnabledProvider);
-    // Repricing is a cashier/owner call, like the bill discount; the server
-    // ignores a waiter's overrides anyway (applyLineOverrides in bills.js).
-    final canEdit = ref.read(userRoleProvider) != 'server';
+    // Repricing is a cashier/owner call, like the bill discount, and the owner
+    // can lock staff out of it in Settings; the server ignores such overrides
+    // anyway (applyLineOverrides in bills.js). Picking one of the owner's price
+    // lists stays open to everyone but a waiter.
+    final canEdit = ref.read(canEditPricesProvider);
+    final canPickList = ref.read(userRoleProvider) != 'server';
     final expanded = canEdit && _expandedCartKey == entry.key;
     final lineNet = entry.lineNet(gstEnabled);
     // The same line at catalog price, undiscounted — struck through beside the
@@ -6127,7 +6204,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final packUnit = entry.packUnit;
     final packSize = entry.packSize;
     final row = isWindows
-        ? _windowsCartRow(entry, canEdit: canEdit, cols: cols!)
+        ? _windowsCartRow(entry,
+            canEdit: canEdit, canPickList: canPickList, cols: cols!)
         : Padding(
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.space16, vertical: 6.0),
@@ -6181,6 +6259,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         ),
                     ],
                   ),
+                  if (_batchCostLine(entry) case final cost?) cost,
                 ],
               ),
             ),
@@ -6278,14 +6357,135 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// A line discount strikes the rate through above the discounted rate.
   static const _cartNameMin = 160.0;
 
+  /// "B-0001 · Cost ₹50" under a cart line while the shop maintains batches:
+  /// the purchase cost of what this line sells from — old stock first, then
+  /// batches oldest first, as the server does — as a range when it spans more
+  /// than one. Red when the line sells below that cost after the bill
+  /// discount. No cost when it isn't known here (hidden from staff). A tap
+  /// picks the batch. Null (nothing shown) when batches are off or the line
+  /// has none — then billing looks exactly as before.
+  Widget? _batchCostLine(CartEntry entry) {
+    if (!ref.watch(batchTrackingProvider) || entry.batches.isEmpty) return null;
+    final l10n = context.l10n;
+    final from = entry.sellingFrom;
+    if (from.isEmpty) return null;
+    final first = from.first;
+    final name = first.isOldStock ? l10n.batchOldStock : first.code;
+    final code = from.length == 1 ? name : '$name+';
+    final known = from.where((b) => b.costKnown).map((b) => b.unitCost).toList();
+    String m(double v) => v.toStringAsFixed(2);
+    String? cost;
+    var belowCost = false;
+    if (known.isNotEmpty) {
+      final lo = known.reduce(math.min);
+      final hi = known.reduce(math.max);
+      cost = (hi - lo).abs() < 0.005 ? m(lo) : '${m(lo)}–${m(hi)}';
+      // What the line really fetches: its own net, less its share of the
+      // bill discount.
+      final subtotal = ref.read(cartSubtotalProvider);
+      final billDisc = (double.tryParse(_discountAmtController.text) ?? 0.0)
+          .clamp(0.0, subtotal);
+      final factor = subtotal > 0 ? (subtotal - billDisc) / subtotal : 1.0;
+      belowCost = entry.discountedNetPrice(ref.read(gstEnabledProvider)) * factor < hi - 0.005;
+    }
+    final color = belowCost ? AppColors.error : AppColors.textSecondary;
+    final text = Text(cost == null ? code : l10n.batchCostLine(code, cost),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context)
+            .textTheme
+            .bodySmall
+            ?.copyWith(color: color, fontWeight: entry.batchId != null ? FontWeight.w600 : null));
+    // Nothing else to sell from: a plain label.
+    if (entry.batches.length + (entry.oldStock > 0 ? 1 : 0) < 2) return text;
+    return InkWell(
+      onTap: () => _pickBatch(entry),
+      borderRadius: BorderRadius.circular(AppRadius.small),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(child: text),
+        Icon(Icons.unfold_more, size: 14, color: color),
+      ]),
+    );
+  }
+
+  /// Which batch this line sells from, with each one's stock left and purchase
+  /// cost. Old stock (from before batches) is offered first and selected
+  /// until the cashier picks another — that is what the server sells first;
+  /// with no old stock, the oldest batch is.
+  Future<void> _pickBatch(CartEntry entry) async {
+    // A second tap while the sheet opens must not stack another one.
+    if (_batchSheetOpen) return;
+    _batchSheetOpen = true;
+    try {
+      await _pickBatchSheet(entry);
+    } finally {
+      _batchSheetOpen = false;
+    }
+  }
+
+  bool _batchSheetOpen = false;
+
+  Future<void> _pickBatchSheet(CartEntry entry) async {
+    final l10n = context.l10n;
+    String m(double v) => v.toStringAsFixed(2);
+    String left(StockBatch b) => b.costKnown
+        ? l10n.batchLeftCost(_trimQty(b.remaining), m(b.unitCost))
+        : l10n.batchLeftOnly(_trimQty(b.remaining));
+    final old = entry.oldStock;
+    // '' = the default (old stock first, else the oldest batch).
+    final defaultId = old > 0 ? '' : entry.batches.first.id;
+    final selected = entry.batches.any((b) => b.id == entry.batchId)
+        ? entry.batchId
+        : defaultId;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: ListView(shrinkWrap: true, children: [
+          ListTile(
+            title: Text(l10n.batchPickTitle,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Text(entry.displayName),
+          ),
+          if (old > 0)
+            ListTile(
+              leading: Icon(selected == ''
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked),
+              title: Text(l10n.batchOldStock),
+              subtitle: Text(left(StockBatch.oldStock(old, entry.oldStockCost))),
+              onTap: () => Navigator.pop(c, ''),
+            ),
+          for (final b in entry.batches)
+            ListTile(
+              leading: Icon(selected == b.id
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked),
+              title: Text(b.code),
+              subtitle: Text(left(b)),
+              onTap: () => Navigator.pop(c, b.id),
+            ),
+        ]),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    // The default is stored as no pick: a line larger than it then runs on
+    // into the next source by itself.
+    _cartChange(entry.key, () => ref
+        .read(cartProvider.notifier)
+        .setLineBatch(entry.key, picked == defaultId || picked.isEmpty ? null : picked));
+  }
+
   Widget _windowsCartRow(CartEntry entry,
-      {required bool canEdit, required _CartCols cols}) {
+      {required bool canEdit,
+      required bool canPickList,
+      required _CartCols cols}) {
     final gst = ref.read(gstEnabledProvider);
     final small = Theme.of(context).textTheme.bodySmall;
     final muted = small?.copyWith(color: AppColors.textSecondary);
     final discounted = entry.lineDiscount(gst) > 0;
     final packLabel = cartPackLabel(context, entry);
-    final badge = _LineListBadge(entry: entry, enabled: canEdit);
+    final badge = _LineListBadge(entry: entry, enabled: canPickList);
     final name = InkWell(
       onTap: canEdit ? () => _toggleCartRow(entry.key) : null,
       borderRadius: BorderRadius.circular(AppRadius.small),
@@ -6305,6 +6505,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           if (packLabel != null)
             Text(packLabel,
                 maxLines: 1, overflow: TextOverflow.ellipsis, style: muted),
+          if (_batchCostLine(entry) case final cost?) cost,
         ],
       ),
     );
@@ -8109,6 +8310,46 @@ class _ExcelItemRowState extends ConsumerState<_ExcelItemRow>
                     // icon on a size row. The size rows are already marked as
                     // belonging to the dish above by their indent and accent
                     // rail; the glyph only ate width the name wanted.
+                    // Item photo, when Settings → "Show item photos" is on.
+                    // Size rows skip it — the dish above already shows it.
+                    if (!widget.nested &&
+                        widget.item.imageUrl != null &&
+                        ref.watch(billingImagesProvider)) ...[
+                      // Tap → the photo full-size in a dialog.
+                      GestureDetector(
+                        onTap: () => showDialog<void>(
+                          context: context,
+                          builder: (ctx) => Dialog(
+                            clipBehavior: Clip.antiAlias,
+                            child: GestureDetector(
+                              onTap: () => Navigator.pop(ctx),
+                              child: Image.network(
+                                itemImageUrl(widget.item.imageUrl!),
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, __, ___) => const Padding(
+                                  padding: EdgeInsets.all(32),
+                                  child: Icon(Icons.broken_image_outlined,
+                                      size: 48),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(AppRadius.small),
+                          child: Image.network(
+                            itemImageUrl(widget.item.imageUrl!),
+                            width: 32,
+                            height: 32,
+                            cacheWidth: 96,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                const SizedBox(width: 32, height: 32),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     // Item name (or size label for a variant row)
                     Expanded(
                       child: Text(

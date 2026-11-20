@@ -7,12 +7,10 @@ import Logo from './Logo'
 // The documents themselves live in docs/legal/ — one source for this site, the
 // advocate's review and the app's "Details" links. Edit the .md, not this file.
 import termsMd from '../../../docs/legal/TERMS_OF_SERVICE.md?raw'
-import aupMd from '../../../docs/legal/ACCEPTABLE_USE_POLICY.md?raw'
 import orderingMd from '../../../docs/legal/CUSTOMER_ORDERING_TERMS.md?raw'
 
 export const LEGAL_DOCS = {
   terms: { title: 'Terms of Service', md: termsMd },
-  'acceptable-use': { title: 'Acceptable Use Policy', md: aupMd },
   'ordering-terms': { title: 'Customer Ordering Terms', md: orderingMd },
 }
 
@@ -64,7 +62,6 @@ export default function LegalPage({ doc }) {
         <div className="flex flex-wrap justify-center gap-6 pt-8 border-t border-slate-200 text-xs text-slate-400">
           <Link to="/" className="hover:text-navy-900 transition-colors">Home</Link>
           <Link to="/terms" className="hover:text-navy-900 transition-colors">Terms of Service</Link>
-          <Link to="/acceptable-use" className="hover:text-navy-900 transition-colors">Acceptable Use</Link>
           <Link to="/privacy" className="hover:text-navy-900 transition-colors">Privacy Policy</Link>
           <a href="mailto:support@vengurlatech.com" className="hover:text-navy-900 transition-colors">Contact</a>
         </div>

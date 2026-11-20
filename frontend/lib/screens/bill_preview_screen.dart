@@ -7,7 +7,7 @@ import '../theme/app_theme.dart';
 import '../widgets/shell_app_bar.dart';
 
 /// Full-screen, read-only preview of a bill exactly as it will be printed:
-/// a thermal receipt bitmap (58/80mm) shown on a paper-like card, or an A5/A4
+/// a thermal receipt bitmap (58/80/112mm) shown on a paper-like card, or an A5/A4
 /// PDF invoice shown in a scrollable PDF viewer. Nothing here saves or prints —
 /// it's a look-before-you-commit view opened from the billing card.
 class BillPreviewScreen extends StatelessWidget {

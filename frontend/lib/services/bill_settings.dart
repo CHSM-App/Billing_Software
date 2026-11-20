@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/models.dart';
@@ -32,6 +33,8 @@ class BillSettings {
   /// The item's unit after the quantity on a printed bill — see [qty].
   final bool showUnits;
   final String note;
+  /// Shop-wide "+ Add detail" labels prefilled on every bill ("Vehicle No").
+  final List<String> detailLabels;
   /// Second shop number, printed after the main one ("Ph: 98…, 98…").
   final String altPhone;
   /// Printed before [altPhone] ("GPay", "WhatsApp"); empty = no label.
@@ -58,6 +61,7 @@ class BillSettings {
     this.upiId = '',
     this.showUnits = false,
     this.note = '',
+    this.detailLabels = const [],
     this.altPhone = '',
     this.altPhoneLabel = '',
     this.bank = const {},
@@ -83,6 +87,9 @@ class BillSettings {
       upiId: j?['upi_id'] is String ? j!['upi_id'] as String : '',
       showUnits: f('show_units', false),
       note: j?['note'] is String ? j!['note'] as String : '',
+      detailLabels: j?['detail_labels'] is List
+          ? (j!['detail_labels'] as List).whereType<String>().toList()
+          : const [],
       altPhone: j?['alt_phone'] is String ? j!['alt_phone'] as String : '',
       altPhoneLabel: j?['alt_phone_label'] is String
           ? j!['alt_phone_label'] as String
@@ -108,6 +115,7 @@ class BillSettings {
         'upi_id': upiId,
         'show_units': showUnits,
         'note': note,
+        'detail_labels': detailLabels,
         'alt_phone': altPhone,
         'alt_phone_label': altPhoneLabel,
         'bank': {for (final k in bankKeys) k: bank[k] ?? ''},
@@ -202,3 +210,8 @@ class BillSettings {
     return BillSettings.fromJson(j, footerNote: prefs.getString(_keyNote));
   }
 }
+
+/// The cached [BillSettings] for screens that need them while billing.
+/// Invalidate after a save/sync to re-read the cache.
+final billSettingsProvider =
+    FutureProvider<BillSettings>((_) => BillSettings.load());

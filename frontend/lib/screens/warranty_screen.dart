@@ -9,6 +9,7 @@ import '../api.dart' show sanitizeUiErrorMessage;
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
+import '../services/bill_settings.dart' show BillSettings;
 import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../utils/text_formatters.dart' show isIndianMobile;
@@ -896,6 +897,10 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
       }
     } else {
       _monthsCtrl.text = '12';
+      // A new record starts with the shop's default details (Billing Setup).
+      BillSettings.load().then((s) {
+        if (mounted) setState(() => addDefaultDetailRows(_extraRows, s.detailLabels));
+      });
     }
   }
 
@@ -945,17 +950,6 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
         _monthsCtrl.text = '${picked.defaultWarrantyMonths}';
       }
     });
-    _applyTemplateForCategory();
-  }
-
-  /// Adds a row for every template field of [_category] that isn't already
-  /// present, so switching products doesn't wipe values the staff already
-  /// typed for a field the two products happen to share.
-  void _applyTemplateForCategory() {
-    final templates = ref.read(warrantyFieldTemplatesProvider).valueOrNull;
-    if (applyWarrantyFieldTemplate(_extraRows, _category, templates)) {
-      setState(() {});
-    }
   }
 
   void _addAdHocRow() {
@@ -1131,8 +1125,6 @@ class _WarrantyFormScreenState extends ConsumerState<WarrantyFormScreen> {
             WarrantyExtraFieldsEditor(
               title: l10n.warrantyExtraDetails,
               rows: _extraRows,
-              extraSuggestions: allTemplateLabels(
-                  ref.watch(warrantyFieldTemplatesProvider).valueOrNull),
               onAddRow: _addAdHocRow,
               onRemoveRow: _removeRow,
             ),

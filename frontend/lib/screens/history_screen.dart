@@ -18,6 +18,7 @@ import '../utils/text_formatters.dart' show isIndianMobile;
 import '../widgets/app_widgets.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/whatsapp_mark.dart';
+import 'bill_returns.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -51,22 +52,15 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   // query the list is still filtered by.
   late final _searchCtrl =
       TextEditingController(text: ref.read(billFilterProvider).search ?? '');
-  Timer? _searchDebounce;
-
   @override
   void dispose() {
-    _searchDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  /// Every keystroke used to refetch (and flash a spinner over the field);
-  /// wait until typing pauses, same as Customers / Warranty.
-  void _onSearchChanged(String v) {
-    _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 350),
-        () => ref.read(billFilterProvider.notifier).setSearch(v.trim()));
-  }
+  /// Filters the loaded list in place — no refetch, so no debounce needed.
+  void _onSearchChanged(String v) =>
+      ref.read(billFilterProvider.notifier).setSearch(v);
 
   Future<void> _pickDateRange() async {
     final filter = ref.read(billFilterProvider);
@@ -259,7 +253,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           ),
         ]),
       ),
-      data: (bills) {
+      data: (all) {
+        final bills =
+            all.where((b) => billMatchesSearch(b, filter.search)).toList();
         if (bills.isEmpty) {
           return RefreshIndicator(
             onRefresh: () async {
@@ -483,6 +479,16 @@ class BillDetailDialog extends StatelessWidget {
     }
   }
 
+  Future<void> _returnItems(BuildContext context) async {
+    final number = await showReturnItemsSheet(context, bill);
+    if (number == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final saved = context.l10n.returnSaved(number);
+    Navigator.pop(context);
+    onChanged();
+    messenger.showSnackBar(SnackBar(content: Text(saved)));
+  }
+
   /// Re-sends the receipt over WhatsApp. A bill settled without a phone asks
   /// for one first; the backend stores it on the bill.
   Future<void> _whatsApp(BuildContext context) async {
@@ -595,6 +601,14 @@ class BillDetailDialog extends StatelessWidget {
                         .textTheme
                         .bodySmall
                         ?.copyWith(color: AppColors.textSecondary)),
+              // Extra fields captured at billing (e.g. "Vehicle No: MH07…").
+              for (final e in bill.warrantyExtraData)
+                if (e.value.isNotEmpty)
+                  Text('${e.label}: ${e.value}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppColors.textSecondary)),
               const SizedBox(height: AppSpacing.space16),
               ...bill.items.map((item) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3),
@@ -702,6 +716,13 @@ class BillDetailDialog extends StatelessWidget {
                 _row(context, l10n.billingBalanceDue,
                     '₹${bill.amountDue.toStringAsFixed(2)}',
                     bold: true),
+              // Credit notes against this bill (sales returns).
+              if (bill.status == 'finalized')
+                BillReturnsSection(
+                    bill: bill,
+                    userRole: userRole,
+                    businessName: businessName,
+                    onChanged: onChanged),
             ],
           ),
         ),
@@ -768,6 +789,12 @@ class BillDetailDialog extends StatelessWidget {
             onPressed: () => _whatsApp(context),
             icon: const WhatsAppMark(size: 18),
             label: Text(l10n.billingWhatsapp),
+          ),
+        if (bill.status == 'finalized' &&
+            (userRole == 'owner' || userRole == 'cashier'))
+          TextButton(
+            onPressed: () => _returnItems(context),
+            child: Text(l10n.returnItemsAction),
           ),
         if (userRole == 'owner' && bill.status != 'voided')
           TextButton(

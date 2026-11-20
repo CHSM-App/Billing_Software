@@ -23,6 +23,18 @@ class SessionData {
   /// Quotations feature (Settings): the Quote button and the Quotations tab.
   final bool quotationsEnabled;
 
+  /// Owner lets staff edit line prices and give discounts (migration 076).
+  /// The owner is never locked — see [canEditPricesProvider].
+  final bool staffCanEditPrice;
+
+  /// "Maintain batches" (migration 079): purchases go into costed batches and
+  /// the cart shows each line's purchase cost. Read through
+  /// [batchTrackingProvider], which also needs inventory on.
+  final bool batchTrackingEnabled;
+
+  /// May staff see purchase cost while billing (owner's setting, batch shops).
+  final bool staffSeeCost;
+
   /// Online store master switch. Gates whether the shell polls the online-order
   /// queue and shows its tab at all.
   final bool storeEnabled;
@@ -45,6 +57,9 @@ class SessionData {
     required this.roundOffEnabled,
     this.showItemNo = false,
     this.quotationsEnabled = false,
+    this.staffCanEditPrice = true,
+    this.batchTrackingEnabled = false,
+    this.staffSeeCost = true,
     required this.storeEnabled,
     this.customersEnabled = true,
   });
@@ -78,6 +93,9 @@ class SessionData {
         roundOffEnabled: m['round_off_enabled'] == true,
         showItemNo: m['show_item_no'] == true,
         quotationsEnabled: m['quotations_enabled'] == true,
+        staffCanEditPrice: m['staff_can_edit_price'] != false,
+        batchTrackingEnabled: m['batch_tracking_enabled'] == true,
+        staffSeeCost: m['staff_see_cost'] != false,
         storeEnabled: m['store_enabled'] == true,
         customersEnabled: m['customers_enabled'] != false,
       );
@@ -136,9 +154,17 @@ final inventoryEnabledProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.inventoryEnabled ?? false);
 
 // Retail-only warranty tracking feature. When true, the Warranty nav tab and
-// each item's "Carries warranty" fields appear.
-final warrantyEnabledProvider = Provider<bool>((ref) =>
-    ref.watch(sessionProvider).valueOrNull?.warrantyEnabled ?? false);
+// each item's "Carries warranty" fields appear. Never for a restaurant (its
+// Settings toggle is hidden too) or a waiter, whatever the stored flag says.
+final warrantyEnabledProvider = Provider<bool>((ref) {
+  final s = ref.watch(sessionProvider).valueOrNull;
+  if (s == null || s.userRole == 'server') return false;
+  if (s.businessType == 'restaurant_with_tables' ||
+      s.businessType == 'restaurant_no_tables') {
+    return false;
+  }
+  return s.warrantyEnabled;
+});
 
 // Master GST toggle. When false (the default), all GST UI and receipt sections
 // are hidden and the app behaves exactly as before.
@@ -159,3 +185,20 @@ final showItemNoProvider = Provider<bool>((ref) =>
 // the Orders page's Quotations tab.
 final quotationsEnabledProvider = Provider<bool>((ref) =>
     ref.watch(sessionProvider).valueOrNull?.quotationsEnabled ?? false);
+
+// May this user retype a line's price or give a discount (line or bill)? The
+// owner always; a waiter never; other staff unless the owner switched it off in
+// Settings. Picking one of the owner's price lists is not gated by this.
+final canEditPricesProvider = Provider<bool>((ref) {
+  final s = ref.watch(sessionProvider).valueOrNull;
+  if (s == null || s.userRole == 'server') return false;
+  return s.userRole == 'owner' || s.staffCanEditPrice;
+});
+
+// Does this shop maintain stock batches? Every batch UI hangs off this; with
+// it off the app looks and bills exactly as before. Batches split tracked
+// stock, so it is off whenever inventory is.
+final batchTrackingProvider = Provider<bool>((ref) {
+  final s = ref.watch(sessionProvider).valueOrNull;
+  return s != null && s.inventoryEnabled && s.batchTrackingEnabled;
+});

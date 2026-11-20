@@ -11,7 +11,7 @@ These terms apply when you order from a shop or restaurant through its **online 
 ## 1. Who you are buying from
 
 - **The shop is the seller.** Your order is with the shop or restaurant whose page you are on. The shop decides its menu, prices and availability. It is responsible for preparing, packing and delivering your order, and for any applicable taxes and food-safety requirements.
-- **Vittam provides the software.** Vittam is ordering and billing software made by Vengurla Tech Private Limited [[PENDING: verify entity name]]. Vittam is not the seller of the shop's goods or services.
+- **Vittam provides the software.** Vittam is ordering and billing software made by Vengurla Tech Private Limited. Vittam is not the seller of the shop's goods or services.
 
 ## 2. Your order
 

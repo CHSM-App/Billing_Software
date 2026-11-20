@@ -19,6 +19,15 @@ class CartEntry {
   /// the price itself travels as [priceOverride].
   final PriceList? priceList;
 
+  /// The stock batch the cashier picked to sell from; null = oldest first
+  /// (backend/src/batches.js). Never part of [key]: one pick per line.
+  final String? batchId;
+
+  /// A reopened held bill: what it already took from each batch, and the
+  /// line's quantity then. Counted back as available for this line.
+  final Map<String, double> held;
+  final double heldQty;
+
   const CartEntry({
     required this.item,
     this.variant,
@@ -27,6 +36,9 @@ class CartEntry {
     this.discountPct,
     this.discountAmt = 0,
     this.priceList,
+    this.batchId,
+    this.held = const {},
+    this.heldQty = 0,
   });
 
   /// Stable key identifying this line: item + optional variant. Two sizes of
@@ -107,6 +119,54 @@ class CartEntry {
   /// 17 bottles → (packs: 1, loose: 2). Null under one full pack. Display only.
   ({int packs, double loose})? get packs => packBreakdown(quantity, packSize);
 
+  /// The line's open stock batches, oldest first (empty when batches are off).
+  List<StockBatch> get batches => variant?.batches ?? item.batches;
+
+  /// Old stock (from before batches) on the shelf for this line: stock less
+  /// what the batches hold, plus — on a reopened held bill — what this bill
+  /// itself took from old stock.
+  double get oldStock {
+    final stock = variant != null ? variant!.stockQuantity : item.stockQuantity;
+    if (stock == null) return 0;
+    final inBatches = batches.fold<double>(0, (s, b) => s + b.remaining);
+    final heldInBatches = held.values.fold<double>(0, (s, v) => s + v);
+    final shelf = stock - inBatches;
+    final heldOld = heldQty - heldInBatches;
+    return (shelf > 0 ? shelf : 0) + (heldOld > 0 ? heldOld : 0);
+  }
+
+  /// Old stock's cost: the average purchase cost, else the buying price.
+  double? get oldStockCost => variant != null
+      ? (variant!.avgCost ?? variant!.buyingPrice ?? item.avgCost ?? item.buyingPrice)
+      : (item.avgCost ?? item.buyingPrice);
+
+  /// Where this line sells from, in the server's order (fifoPlan in
+  /// backend/src/batches.js): the picked batch first, then old stock, then
+  /// batches oldest first, until [quantity] is covered. Old stock shows as a
+  /// [StockBatch.oldStock] entry. A held bill's own share counts back.
+  List<StockBatch> get sellingFrom {
+    final all = [
+      for (final b in batches)
+        StockBatch(id: b.id, code: b.code, unitCost: b.unitCost,
+            remaining: b.remaining + (held[b.id] ?? 0)),
+    ];
+    final old = oldStock;
+    final order = [
+      ...all.where((b) => b.id == batchId),
+      if (old > 0) StockBatch.oldStock(old, oldStockCost),
+      ...all.where((b) => b.id != batchId),
+    ];
+    final out = <StockBatch>[];
+    var left = quantity;
+    for (final b in order) {
+      if (left <= 0) break;
+      if (b.remaining <= 0) continue;
+      out.add(b);
+      left -= b.remaining;
+    }
+    return out;
+  }
+
   /// Display name including the size, e.g. "T-Shirt (XL)".
   String get displayName =>
       variant == null ? item.name : '${item.name} (${variant!.label})';
@@ -139,6 +199,7 @@ class CartEntry {
     return {
       if (priceOverride != null) 'price_override': netPrice(gstEnabled),
       if (disc > 0) 'discount_amount': disc,
+      if (batchId != null) 'batch_id': batchId,
     };
   }
 
@@ -155,6 +216,9 @@ class CartEntry {
     bool clearOverrides = false,
   }) {
     return CartEntry(
+      batchId: batchId,
+      held: held,
+      heldQty: heldQty,
       priceList: clearOverrides ? priceList : (priceList ?? this.priceList),
       item: item ?? this.item,
       variant: variant ?? this.variant,

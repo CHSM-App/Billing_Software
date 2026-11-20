@@ -50,6 +50,18 @@ describe('billSettings', () => {
     expect(parse(r.value).show_warranty_details).toBe(false);
   });
 
+  test('default bill detail labels: empty by default, cleaned and capped', () => {
+    expect(parse(null).detail_labels).toEqual([]);
+    const r = normalize({ detail_labels: [' Vehicle No ', '', 'KM reading', 'Vehicle No'] });
+    expect(r.error).toBeUndefined();
+    expect(parse(r.value).detail_labels).toEqual(['Vehicle No', 'KM reading']);
+    expect(parse(JSON.stringify({ detail_labels: ['A', 5, ' '] })).detail_labels).toEqual(['A']);
+    expect(normalize({ detail_labels: 'Vehicle No' }).error).toBeTruthy();
+    expect(normalize({ detail_labels: ['A', 5] }).error).toBeTruthy();
+    expect(normalize({ detail_labels: Array.from({ length: 11 }, (_, i) => `L${i}`) }).error).toMatch(/At most 10/);
+    expect(normalize({ detail_labels: ['x'.repeat(101)] }).error).toMatch(/100 characters/);
+  });
+
   test('UPI QR: off by default, needs a valid UPI ID to turn on', () => {
     expect(parse(null)).toMatchObject({ show_upi_qr: false, upi_id: '' });
     expect(parse(normalize({ show_upi_qr: true, upi_id: ' shop@okhdfcbank ' }).value))

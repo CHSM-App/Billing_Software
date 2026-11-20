@@ -116,6 +116,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                   const SizedBox(height: 16),
                   _buildStockProfit(),
                   const SizedBox(height: 16),
+                  // Profit for every shop with sales: batch cost, else the
+                  // purchase average, else the item's buying price.
+                  if (summary.netSales > 0) ...[
+                    _buildProfit(l10n, summary),
+                    const SizedBox(height: 16),
+                  ],
                   // GSTR-1 return — only meaningful once GST invoicing is on,
                   // since with the toggle off no bill carries tax.
                   if (ref.watch(gstEnabledProvider)) ...[
@@ -460,6 +466,10 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               _headerStat(l10n.reportsOrders, '${s.billCount}'),
               const SizedBox(width: 28),
               _headerStat(l10n.reportsAvgBill, '₹${_amt.format(s.avgBill)}'),
+              if (s.returnsTotal >= 0.01) ...[
+                const SizedBox(width: 28),
+                _headerStat(l10n.returnsTitle, '− ₹${_amt.format(s.returnsTotal)}'),
+              ],
             ],
           ),
         ],
@@ -667,6 +677,55 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  // ── Profit (stock batches) ──────────────────────────────────────────────────
+  // Pre-tax sales whose purchase cost is known, less what those goods cost.
+  // Sales without a known cost (old stock, untracked items) are named below
+  // instead of being counted as all profit.
+  Widget _buildProfit(AppLocalizations l10n, ReportSummary s) {
+    Widget row(String label, double v, {bool strong = false, Color? color}) =>
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(children: [
+            Expanded(
+                child: Text(label,
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+                        color: AppColors.textPrimary))),
+            Text('₹${_amt.format(v)}',
+                style: TextStyle(
+                    fontSize: strong ? 16 : 14,
+                    fontWeight: FontWeight.w700,
+                    color: color ?? AppColors.textPrimary)),
+          ]),
+        );
+    // Nothing sold had a known cost yet: say how to get one, not ₹0 profit.
+    if (s.costedRevenue < 0.01) {
+      return _SectionCard(
+        title: l10n.reportProfitTitle,
+        child: Text(l10n.reportProfitNoCost,
+            style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+      );
+    }
+    return _SectionCard(
+      title: l10n.reportProfitTitle,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        row(l10n.reportCostedSales, s.costedRevenue),
+        row(l10n.reportCostOfGoods, s.costOfGoods),
+        const Divider(height: 16),
+        row(l10n.reportGrossProfit, s.grossProfit,
+            strong: true,
+            color: s.grossProfit < 0 ? AppColors.error : AppColors.success),
+        if (s.uncostedRevenue >= 0.01) ...[
+          const SizedBox(height: 8),
+          Text(l10n.reportUncostedNote(_amt.format(s.uncostedRevenue)),
+              style: const TextStyle(
+                  fontSize: 12, color: AppColors.textSecondary)),
+        ],
+      ]),
     );
   }
 

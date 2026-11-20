@@ -46,11 +46,9 @@ void main() {
     expect(accepted, isFalse);
   });
 
-  testWidgets('the sentence names all three documents', (tester) async {
+  testWidgets('the sentence names both documents', (tester) async {
     await pump(tester);
     final text = tester.widget<RichText>(find.byType(RichText).last).text.toPlainText();
-    expect(text, contains('Terms of Service'));
-    expect(text, contains('Acceptable Use Policy'));
-    expect(text, contains('Privacy Policy'));
+    expect(text, contains('Terms of Service and Privacy Policy'));
   });
 }

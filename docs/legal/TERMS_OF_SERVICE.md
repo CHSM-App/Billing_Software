@@ -6,9 +6,9 @@
 
 **Effective date:** [[PENDING: set on approval]]
 
-These Terms of Service ("**Terms**") are an agreement between **Vengurla Tech Private Limited** [[PENDING: verify exact registered name, CIN and registered office address]] ("**Vengurla Tech**", "**we**", "**us**") and the business that registers for and uses Vittam ("**you**").
+These Terms of Service ("**Terms**") are an agreement between **Vengurla Tech Private Limited** (CIN [[PENDING: CIN]]), a company with its registered office at C/O Smt Vaishali Rukmangad, Kudalkar Khutaval Wadi, AP Adeli, Vengurla, District Sindhudurg, Maharashtra 416516, India ("**Vengurla Tech**", "**we**", "**us**") and the business that registers for and uses Vittam ("**you**").
 
-By ticking the box to agree to these Terms, the [Acceptable Use Policy](/acceptable-use) and the [Privacy Policy](/privacy), and then tapping **Create Account** or **Agree**, you accept these Terms on behalf of your business. If you do not accept them, do not use Vittam.
+By ticking the box to agree to these Terms and the [Privacy Policy](/privacy), and then tapping **Create Account** or **Agree**, you accept these Terms on behalf of your business. If you do not accept them, do not use Vittam.
 
 ---
 
@@ -25,7 +25,6 @@ In these Terms:
 - **Customer** means a customer of your business, including someone who orders from you through your online store or a table QR page.
 - **Subscription** means your paid right to use the Service for a period, with the limits of the plan you chose.
 - **Trial** means the free 30-day period that starts when you register.
-- **Acceptable Use Policy** means the policy at [/acceptable-use](/acceptable-use). It forms part of these Terms.
 
 ---
 
@@ -81,11 +80,11 @@ In these Terms:
 
 5.3 **Paid Subscriptions.** Paid plans are annual. To subscribe, you contact us and pay. We activate your Subscription after we confirm your payment. Your Subscription runs for the period shown on your invoice or confirmation.
 
-5.4 **Plan limits.** Your plan sets what you may use, for example the number of Staff logins, whether mobile and/or desktop use is allowed, and which features (such as the online store) are included. [[PENDING: publish the list of plans and what each includes, or say where the customer can find it]]
+5.4 **Plan limits.** Your plan sets what you may use, for example the number of Staff logins, whether mobile and/or desktop use is allowed, and which features (such as the online store) are included. The limits of your plan are the ones in the quote we give you before you pay.
 
 5.5 **Renewal.** Subscriptions do not renew automatically. Before your Subscription ends, we may remind you. To continue, you pay for a new period.
 
-5.6 **Changes to plans.** We may change plans and prices for future periods. A change does not affect a period you have already paid for. We will give you at least [[PENDING: notice period, e.g. 30 days]] notice of a price change before your next period.
+5.6 **Changes to plans.** We may change plans and prices for future periods. A change does not affect a period you have already paid for. We will give you at least 30 days' notice of a price change before your next period.
 
 5.7 If we ever introduce automatic renewal or recurring payments, we will update these Terms and ask you to agree before any automatic payment is taken.
 
@@ -93,13 +92,13 @@ In these Terms:
 
 ## 6. Prices, GST and payment
 
-6.1 Annual plans currently cost between **₹3,499 and ₹10,000** per year, depending on the type of business and the plan chosen. The exact price for your Account is the one we quote to you before you pay. [[PENDING: price list and plan names]]
+6.1 Annual plans currently cost between **₹3,499 and ₹10,000** per year, depending on the type of business and the plan chosen. The exact price for your Account is the one we quote to you before you pay.
 
-6.2 **GST.** [[PENDING: state whether quoted prices include or exclude GST]]
+6.2 **GST.** Quoted prices exclude GST. GST is added at the applicable rate and shown on your invoice.
 
 6.3 We issue a tax invoice for every payment.
 
-6.4 **Grace period.** If your Subscription ends and you have not renewed, your plan may give you a grace period. During it, the Application keeps working while you arrange payment. The length of the grace period depends on your plan and is shown in the app. [[PENDING: confirm the grace period rule for each plan]]
+6.4 **Grace period.** If your Subscription ends and you have not renewed, your plan may give you a grace period. During it, the Application keeps working while you arrange payment. The length of the grace period depends on your plan and is shown in the app.
 
 6.5 After the Subscription and any grace period have ended, the Application stops billing until you renew. What happens to your Business Data after that is described in section 15.
 
@@ -107,15 +106,13 @@ In these Terms:
 
 ## 7. Refunds and cancellations
 
-7.1 You may stop using the Service at any time. A Subscription is not cancelled with a refund automatically.
+7.1 **Try before you pay.** Every new Account gets a free 30-day Trial (section 5.1), so you can check that the Service suits your business before you pay.
 
-7.2 **Refund requests.** If you believe you are entitled to a refund, email support@vengurlatech.com with your business name, the registered phone number, the payment reference and the reason. We review each request individually and reply within [[PENDING: review timeline, e.g. 7 working days]].
+7.2 **Fees are non-refundable.** Once a Subscription is activated, the fees for that period are not refunded, including if you stop using the Service part-way through the period.
 
-7.3 We will consider, among other things: how long ago the payment was made; how much the Service was used; whether a fault on our side prevented you from using it; and whether the payment was a duplicate or made in error. [[PENDING: define eligibility, exclusions and refund method with counsel]]
+7.3 **Payment errors.** If you paid twice for the same period, or paid an amount we did not quote to you, email support@vengurlatech.com with your business name, the registered phone number and the payment reference. We will reply within 7 working days. If we confirm the error, we will return the extra amount to the original payment method, or another method we agree with you, within 7 days of confirming it.
 
-7.4 Approved refunds are paid to the original payment method, or another method we agree with you, within [[PENDING: timeline]].
-
-7.5 Nothing in this section limits any right to a refund that you have under applicable law.
+7.4 Nothing in this section limits any right to a refund that you have under applicable law. [[PENDING: advocate to confirm a no-refund rule is acceptable for B2B customers]]
 
 ---
 
@@ -133,7 +130,7 @@ This permission ends when your Business Data is deleted under section 15, except
 
 8.4 You confirm that you have the right to upload the logos, photos, menus and other content you add, and that displaying them as described above does not infringe anyone else's rights.
 
-8.5 **Export.** You can export reports from the Application (for example CSV and PDF). You can also ask us for an export of your Business Data at support@vengurlatech.com. [[PENDING: confirm what a full export contains and how quickly it is provided]]
+8.5 **Export.** You can export reports from the Application (for example CSV and PDF). You can also ask us for an export of your Business Data at support@vengurlatech.com. We will send it within 15 working days, as CSV or Excel files covering your items, bills, customers, vendors, expenses and Staff list.
 
 ---
 
@@ -165,6 +162,14 @@ This permission ends when your Business Data is deleted under section 15, except
 
 10.6 **Keep your own records.** The law requires you to keep your accounts and tax records for a set period. Export and keep your own copies. Do not rely on the Service as your only copy (see also sections 13 and 15).
 
+10.7 **AI bill scanning.** If we switch it on for your Account, you can photograph or upload a supplier bill and the Service will read it with an artificial-intelligence (AI) system and fill in a draft vendor bill. Your plan may limit the number of scans each month.
+
+10.8 **The draft is not checked by a person.** AI can misread numbers, items, GSTINs and tax amounts, or miss them entirely. The Service shows the draft for you to check against the paper bill before you save it. **You must check every scanned bill before saving it.** A saved vendor bill is your own entry, and section 10.3 applies to it, including for any input tax credit you claim.
+
+10.9 **Third-party AI provider.** To read a bill, we send the image or PDF to a third-party AI provider, named in our [Privacy Policy](/privacy). To suggest which of your items each bill line is, we may also send that provider your item names and categories (never your prices, stock or customer details). Do not scan documents that are not bills, or that contain personal data the bill does not need. The Privacy Policy explains how long scanned files are kept.
+
+10.10 We may change, limit or withdraw AI bill scanning at any time. It is not included in any plan unless your quote says so. [[PENDING: advocate to review sections 10.7 to 10.10, including whether consent is needed at the point of scanning (see ADVOCATE_REVIEW_CHECKLIST.md 20a)]]
+
 ---
 
 ## 11. Online store and table QR ordering
@@ -191,9 +196,51 @@ This permission ends when your Business Data is deleted under section 15, except
 
 ## 12. Acceptable use
 
-12.1 You and your Staff must follow the [Acceptable Use Policy](/acceptable-use).
+12.1 This section applies to you and to everyone who logs in under your Account, including Staff. You must not use Vittam, or let anyone use your Account, to do any of the following.
 
-12.2 Breaking the Acceptable Use Policy is a breach of these Terms. We may act on it as described in that policy and in section 15.
+12.2 **Illegal activity.**
+- Break any law that applies to you or your business.
+- Sell goods or services that are illegal, or regulated goods (for example liquor, tobacco, medicines or other licensed items) without the licence or permission the law requires.
+
+12.3 **Tax misuse.**
+- Create fake, inflated or backdated GST invoices, or invoices for supplies that did not happen.
+- Use the Service to evade tax, or to help someone else evade it.
+- Deliberately misuse the tax features to produce misleading invoices or returns.
+
+12.4 **Content you have no rights to.**
+- Upload logos, photos, menus, brand names or other content that you do not own and do not have permission to use.
+- Use another business's name or branding to pass yourself off as that business.
+
+12.5 **Unlawful content on public pages.** Put content on your online store or QR menu pages that is unlawful, defamatory, obscene, hateful, or that deceives customers (for example false prices or descriptions).
+
+12.6 **Spam and messaging abuse.**
+- Send bills, messages or OTPs through the Service to people who have not dealt with your business or who have asked you to stop.
+- Use the Service's WhatsApp or other messaging features for bulk or unsolicited promotional messages, or in breach of the messaging provider's rules.
+
+12.7 **Misuse of personal data.**
+- Collect customer or staff personal data through the Service for a purpose other than running your business with them, or beyond what you have told them.
+- Sell, share or publish your Customers' personal data obtained through the Service.
+
+12.8 **Licence and security circumvention.** Do anything section 4.4 forbids, such as reverse engineering the Application or bypassing the licence check, Subscription status, offline limits or plan limits.
+
+12.9 **Attacks on the Service.**
+- Scrape, crawl or extract data from the Service or its public pages by automated means, except through features we provide for that.
+- Overload the Service, or send traffic designed to slow it down or make it unavailable.
+- Probe, scan or test the Service for vulnerabilities without our written permission. (If you find a security problem, please report it to support@vengurlatech.com. We welcome responsible reports.)
+- Introduce malware or harmful code.
+
+12.10 **Account misuse.**
+- Share one Account between separate, unrelated businesses where your plan does not allow it.
+- Resell, rent or sub-license access to the Service, or give access to anyone outside your business, without our written agreement.
+- Try to access another business's Account, devices or data, or another person's login.
+
+12.11 **How we enforce this section.** If we reasonably believe this section has been broken, we may, depending on how serious the breach is: warn you and ask you to fix it; require corrective action, for example removing content from your public pages; suspend your Account or a feature (such as your online store) until it is fixed; or terminate your Account for serious or repeated breaches. Notice and review work as described in sections 15.2 and 15.3.
+
+12.12 We may report illegal activity to the relevant authorities, and we will cooperate with lawful requests from them.
+
+12.13 Enforcement is not automatic. We decide each case on its facts, as fairly as we can. [[PENDING: advocate to confirm the enforcement process and any notice requirements]]
+
+12.14 **Report a breach.** If you see Vittam being used in breach of this section (for example a store page using your brand without permission), email **support@vengurlatech.com** with the link or details and why you believe it breaks this section.
 
 ---
 
@@ -203,7 +250,7 @@ This permission ends when your Business Data is deleted under section 15, except
 
 13.2 **Offline bills.** Bills created offline are stored on the device and uploaded to our servers when the device is back online. Until a bill has been uploaded, it exists only on that device. If the device is lost, damaged, reset or the app is uninstalled before the upload, those bills can be lost. Connect regularly so your data is uploaded.
 
-13.3 **Backups.** We take backups of the server data on a best-effort basis. We do not guarantee that a backup will exist for any particular point in time, or that data can always be restored. [[PENDING: replace with the verified backup schedule, retention and restore process once confirmed. Do not promise more than the infrastructure provides]]
+13.3 **Backups.** We take backups of the server data on a best-effort basis. We do not guarantee that a backup will exist for any particular point in time, or that data can always be restored. [[PENDING: no backup schedule is verified yet. Keep this wording until one is, and make the Privacy Policy's "age out on their normal rotation" line match]]
 
 13.4 Nothing in this section excludes our responsibility for a loss caused by our own breach of these Terms or our negligence, where the law does not allow that responsibility to be excluded.
 
@@ -222,18 +269,18 @@ This section does not affect any right you have under applicable law that cannot
 15.1 **Suspension by us.** We may suspend your Account, or part of it (for example your online store), if:
 - your Subscription and any grace period have ended without payment;
 - your Account or the Service faces a security risk;
-- you seriously or repeatedly break these Terms or the Acceptable Use Policy;
+- you seriously or repeatedly break these Terms, including the acceptable use rules in section 12;
 - the law or a lawful order from an authority requires it.
 
 15.2 **Notice.** Where reasonable, we will tell you first and give you a chance to fix the problem. We may suspend without advance notice where there is a serious security risk, illegal activity, or a legal requirement. We will tell you the reason as soon as we can.
 
-15.3 **Review.** If you believe a suspension is wrong, write to support@vengurlatech.com. We will review it and reply within [[PENDING: timeline]].
+15.3 **Review.** If you believe a suspension is wrong, write to support@vengurlatech.com. We will review it and reply within 7 working days.
 
 15.4 **Termination.** You may close your Account at any time through [/delete-account](/delete-account) or by contacting us. We may terminate your Account for a serious breach that is not fixed after notice, or where the law requires it.
 
-15.5 **Your data after a Subscription ends.** If your Subscription ends and you do not renew, we keep your Business Data for [[PENDING: retention period after expiry. Business decision required. Do not choose a number without approval]]. During that time you can renew and continue, or ask for an export.
+15.5 **Your data after a Subscription ends.** If your Subscription ends and you do not renew, we keep your Business Data until you ask us to delete your Account (section 15.6). Until then you can renew and continue, or ask for an export. [[PENDING: advocate to confirm that keeping an expired Account's data indefinitely is compatible with the DPDP Act's storage-limitation duty, or set a period]]
 
-15.6 **Deletion.** When you ask for your Account to be deleted, we schedule the deletion and confirm the date to you. You can cancel the request before that date. [[PENDING: confirm the deletion process and timeline. The current system schedules deletion 30 days after the request; confirm how and when deletion is actually carried out, including in backups]]
+15.6 **Deletion.** When you ask for your Account to be deleted, we schedule the deletion for 30 days after your request and confirm the date to you. You can cancel the request before that date. On that date we delete your Account and Business Data from the Service. [[PENDING: confirm what happens to copies in backups once the backup setup is known (see section 13.3)]]
 
 15.7 We may keep some data after deletion where the law requires it (for example tax or accounting records, or records needed for a legal claim), and only for as long as required. [[PENDING: advocate to confirm]]
 
@@ -265,7 +312,7 @@ This section does not affect any right you have under applicable law that cannot
 - content you uploaded that infringes someone else's rights or is unlawful;
 - your sales to your Customers, including orders placed through your online store or QR pages;
 - your use of personal data about your Customers or Staff in breach of the law;
-- your breach of the Acceptable Use Policy.
+- your breach of section 12 (Acceptable use).
 
 17.2 This does not apply to the extent the claim was caused by our own breach of these Terms or our negligence.
 
@@ -275,7 +322,7 @@ This section does not affect any right you have under applicable law that cannot
 
 ## 18. Intellectual property
 
-18.1 Vengurla Tech owns the Service, the Application, the Vittam name and logo, and all related software, designs and materials. Except for the licence in section 4, these Terms do not give you any rights in them. [[PENDING: confirm trademark position before claiming any registered mark]]
+18.1 Vengurla Tech owns the Service, the Application, the Vittam name and logo, and all related software, designs and materials. Except for the licence in section 4, these Terms do not give you any rights in them. "Vittam" is a trademark of Vengurla Tech. It is not a registered trademark.
 
 18.2 Your Business Data and content remain yours (section 8).
 
@@ -285,13 +332,13 @@ This section does not affect any right you have under applicable law that cannot
 
 ## 19. Changes to these Terms
 
-19.1 We may update these Terms, the Acceptable Use Policy or the Privacy Policy. Each version has a version number and an effective date.
+19.1 We may update these Terms or the Privacy Policy. Each version has a version number and an effective date.
 
 19.2 **Material changes.** For a change that materially affects your rights or obligations, we will notify you in the Application and/or by WhatsApp, SMS or email before the change takes effect. The Owner will be asked to review and accept the updated documents in the Application. We will not treat simply continuing to use the Service as acceptance of a material change.
 
 19.3 **Minor changes.** We may make changes that do not materially affect you (for example clearer wording or updated contact details) by publishing the updated version with its new effective date.
 
-19.4 If you do not accept an updated version, you may stop using the Service and ask for an export of your Business Data, and you may ask for a refund under section 7.
+19.4 If you do not accept an updated version, you may stop using the Service and ask for an export of your Business Data. [[PENDING: advocate to advise whether a pro-rata refund must be offered here despite section 7.2]]
 
 ---
 
@@ -299,11 +346,11 @@ This section does not affect any right you have under applicable law that cannot
 
 20.1 These Terms are governed by the laws of India. [[PENDING: advocate to confirm]]
 
-20.2 **Talk to us first.** If you have a dispute with us, please write to support@vengurlatech.com first, so we can try to resolve it. We will reply within [[PENDING: timeline]].
+20.2 **Talk to us first.** If you have a dispute with us, please write to support@vengurlatech.com first, so we can try to resolve it. We will reply within 7 working days.
 
 20.3 [[PENDING: choose ONE option after advocate review. See ADVOCATE_REVIEW_CHECKLIST.md]]
 
-- **Option A: Courts.** Subject to applicable law, the courts at **Sindhudurg, Maharashtra** have exclusive jurisdiction over disputes arising out of these Terms. [[PENDING: confirm Sindhudurg has a valid jurisdictional connection, e.g. the registered office or place of contract]]
+- **Option A: Courts.** Subject to applicable law, the courts at **Sindhudurg, Maharashtra** have exclusive jurisdiction over disputes arising out of these Terms. [[PENDING: advocate to confirm. Our registered office is in Vengurla, Sindhudurg district, which gives the connection]]
 - **Option B: Arbitration.** Disputes will be finally resolved by arbitration under the Arbitration and Conciliation Act, 1996, by a sole arbitrator appointed by agreement. The seat of arbitration is [[PENDING: city]], and the language is English. Either party may still seek urgent interim relief from a competent court.
 
 20.4 Nothing in this section removes a right you have under applicable law to bring a claim before a particular forum.
@@ -316,7 +363,7 @@ This section does not affect any right you have under applicable law that cannot
 
 - **Email:** support@vengurlatech.com
 - **Grievance Officer:** [[PENDING: name, designation, phone. Confirm whether a designated grievance officer is legally required]]
-- **Postal address:** [[PENDING: registered office address]]
+- **Postal address:** Vengurla Tech Private Limited, C/O Smt Vaishali Rukmangad, Kudalkar Khutaval Wadi, AP Adeli, Vengurla, District Sindhudurg, Maharashtra 416516, India
 
 21.2 We aim to acknowledge a complaint within 48 hours and to resolve it within 30 days, the same timelines as our Privacy Policy. [[PENDING: confirm these timelines; advocate to confirm any mandatory ones]]
 
@@ -326,7 +373,7 @@ This section does not affect any right you have under applicable law that cannot
 
 ## 22. General
 
-22.1 **Entire agreement.** These Terms, the Acceptable Use Policy and the Privacy Policy are the whole agreement between you and us about the Service. They replace any earlier statements about it.
+22.1 **Entire agreement.** These Terms and the Privacy Policy are the whole agreement between you and us about the Service. They replace any earlier statements about it.
 
 22.2 **Severability.** If a court finds any part of these Terms unenforceable, the rest stays in effect.
 
@@ -334,7 +381,7 @@ This section does not affect any right you have under applicable law that cannot
 
 22.4 **Force majeure.** We are not responsible for a delay or failure caused by events outside our reasonable control, such as natural disasters, power or internet outages, government action, or failures of third-party services we rely on.
 
-22.5 **Notices.** We may send notices to the phone number or email on your Account, or in the Application. You may send notices to support@vengurlatech.com [[PENDING: and the registered office address]].
+22.5 **Notices.** We may send notices to the phone number or email on your Account, or in the Application. You may send notices to support@vengurlatech.com or by post to the address in section 21.1.
 
 22.6 **No waiver.** If we do not enforce a right immediately, we can still enforce it later.
 

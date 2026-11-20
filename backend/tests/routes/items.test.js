@@ -1023,10 +1023,146 @@ describe('auto barcode on manual saves', () => {
       .mockResolvedValueOnce({ recordset: [sampleItem], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [size], rowsAffected: [1] })
       .mockResolvedValueOnce({ recordset: [], rowsAffected: [1] }) // parent stock reset
+      .mockResolvedValueOnce({ recordset: [], rowsAffected: [0] }) // item's open batches: none
       .mockRejectedValueOnce(dup);                                 // fill UPDATE clashes
     const res = await request(app).post(`/api/items/${ITEM_ID}/variants`)
       .set(authHeader({ role: 'owner' })).send({ label: 'Full', price: 280 });
     expect(res.status).toBe(201);
     expect(res.body.barcode).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stock batches (batches.js) on the item list and on stock corrections
+// ---------------------------------------------------------------------------
+describe('stock batches on items', () => {
+  const BATCH = 'abababab-abab-abab-abab-abababababab';
+  let sqls;
+
+  /** [open] = the rows the open-batch queries return. */
+  /** [on] = the shop maintains batches; [staffSeeCost] its cost setting. */
+  function db(open, { on = true, staffSeeCost = true, avg = [] } = {}) {
+    sqls = [];
+    mockRequest.query.mockImplementation(function (sqlText) {
+      const s = String(sqlText);
+      sqls.push({ s, inputs: { ...this.inputs } });
+      let rs = [{ ...sampleItem }];
+      if (/^\s*SELECT v\.id/.test(s)) rs = []; // attachVariants
+      else if (/SELECT inventory_enabled, batch_tracking_enabled, staff_see_cost/.test(s)) {
+        rs = [{ inventory_enabled: on, batch_tracking_enabled: on, staff_see_cost: staffSeeCost }];
+      } else if (/FROM vendor_bill_items v/.test(s)) rs = avg;
+      else if (/FROM stock_batches/.test(s)) rs = open;
+      else if (/SELECT stock_quantity FROM items/.test(s)) rs = [{ stock_quantity: 3 }];
+      return Promise.resolve({ recordset: rs, rowsAffected: [1] });
+    });
+  }
+
+  test('the item list carries no batch data while batches are off', async () => {
+    db([], { on: false });
+    const res = await request(app).get('/api/items').set(authHeader());
+    expect(res.status).toBe(200);
+    expect(res.body[0]).not.toHaveProperty('batches');
+    expect(res.body[0]).not.toHaveProperty('avg_cost');
+    // One flags read, and nothing about batches after it.
+    expect(sqls.some((c) => /FROM stock_batches/.test(c.s))).toBe(false);
+  });
+
+  test('a batch shop gets each item\'s average purchase cost (its old stock)', async () => {
+    db([], { avg: [{ item_id: ITEM_ID, variant_id: null, cost: 41.5 }] });
+    const res = await request(app).get('/api/items').set(authHeader());
+    expect(res.body[0].avg_cost).toBe(41.5);
+  });
+
+  test('staff see no cost when the owner hides it', async () => {
+    db([{ id: BATCH, item_id: ITEM_ID, variant_id: null, batch_no: 'B-0004', unit_cost: 42.5, qty_remaining: 6 }],
+      { staffSeeCost: false, avg: [{ item_id: ITEM_ID, variant_id: null, cost: 41.5 }] });
+    const res = await request(app).get('/api/items').set(authHeader({ role: 'cashier' }));
+    expect(res.body[0].batches[0]).not.toHaveProperty('unit_cost');
+    expect(res.body[0]).not.toHaveProperty('avg_cost');
+    expect(res.body[0]).not.toHaveProperty('buying_price');
+    // The owner still sees it.
+    const own = await request(app).get('/api/items').set(authHeader({ role: 'owner' }));
+    expect(own.body[0].batches[0].unit_cost).toBe(42.5);
+  });
+
+  test("open batches, with their cost, reach every role's item list", async () => {
+    db([{ id: BATCH, item_id: ITEM_ID, variant_id: null, batch_no: 'B-0004', unit_cost: 42.5, qty_remaining: 6 }]);
+    const res = await request(app).get('/api/items').set(authHeader({ role: 'cashier' }));
+    expect(res.status).toBe(200);
+    expect(res.body[0].batches).toEqual([
+      { id: BATCH, code: 'B-0004', unit_cost: 42.5, remaining: 6 },
+    ]);
+  });
+
+  test('a stock correction below what batches hold writes off the oldest', async () => {
+    // Batches hold 6, the owner sets stock to 3: 3 written off.
+    db([{ id: BATCH, qty_remaining: 6 }]);
+    const res = await request(app).put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' })).send({ stock_quantity: 3 });
+    expect(res.status).toBe(200);
+    const lost = sqls.find((c) => /SET qty_lost = qty_lost \+ @qty/.test(c.s));
+    expect(lost.inputs).toMatchObject({ id: BATCH, qty: 3 });
+  });
+
+  test('clearing stock (a service) saves null and takes the old stock out of the ledger', async () => {
+    db([]);
+    const base = mockRequest.query.getMockImplementation();
+    mockRequest.query.mockImplementation(function (sqlText) {
+      return /OUTPUT INSERTED/.test(String(sqlText))
+        ? base.call(this, sqlText).then(() => ({ recordset: [{ ...sampleItem, stock_quantity: null }], rowsAffected: [1] }))
+        : base.call(this, sqlText);
+    });
+    const res = await request(app).put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' })).send({ stock_quantity: null });
+    expect(res.status).toBe(200);
+    expect(sqls.find((c) => /stock_quantity = @stock_quantity/.test(c.s)).inputs.stock_quantity).toBeNull();
+    const moved = sqls.find((c) => /INSERT INTO stock_movements/.test(c.s));
+    expect(moved.inputs).toMatchObject({ type: 'adjust', qty: -sampleItem.stock_quantity });
+  });
+});
+
+describe('services and closing batches (not a loss)', () => {
+  const BATCH = 'abababab-abab-abab-abab-abababababab';
+  let sqls;
+  function db({ open = [], stock = null } = {}) {
+    sqls = [];
+    mockRequest.query.mockImplementation(function (sqlText) {
+      const s = String(sqlText);
+      sqls.push({ s, inputs: { ...this.inputs } });
+      let rs = [{ ...sampleItem, stock_quantity: stock, variant_count: 0 }];
+      if (/^\s*SELECT v\.id/.test(s) || /SELECT TOP 1 id, name FROM items/.test(s)) rs = [];
+      else if (/FROM stock_batches/.test(s)) rs = open;
+      else if (/SELECT stock_quantity FROM items/.test(s)) rs = [{ stock_quantity: stock }];
+      return Promise.resolve({ recordset: rs, rowsAffected: [1] });
+    });
+  }
+  const closed = () => sqls.find((c) => /SET qty_closed = qty_closed \+ @qty/.test(c.s));
+  const lost = () => sqls.find((c) => /SET qty_lost = qty_lost \+ @qty/.test(c.s));
+
+  test('making an item a service clears its stock and closes its batches', async () => {
+    db({ open: [{ id: BATCH, qty_remaining: 4 }], stock: null });
+    const res = await request(app).put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' })).send({ is_service: true });
+    expect(res.status).toBe(200);
+    const upd = sqls.find((c) => /UPDATE items\s+SET/.test(c.s));
+    expect(upd.s).toMatch(/is_service = @is_service/);
+    expect(upd.s).toMatch(/stock_quantity = NULL/);
+    expect(closed().inputs).toMatchObject({ id: BATCH, qty: 4 });
+    expect(lost()).toBeUndefined();
+  });
+
+  test('clearing stock (untracked) closes batches, not a loss', async () => {
+    db({ open: [{ id: BATCH, qty_remaining: 4 }], stock: null });
+    await request(app).put(`/api/items/${ITEM_ID}`)
+      .set(authHeader({ role: 'owner' })).send({ stock_quantity: null });
+    expect(closed()).toBeDefined();
+    expect(lost()).toBeUndefined();
+  });
+
+  test('deleting an item closes its open batches', async () => {
+    db({ open: [{ id: BATCH, qty_remaining: 6 }], stock: 6 });
+    const res = await request(app).delete(`/api/items/${ITEM_ID}`).set(authHeader({ role: 'owner' }));
+    expect(res.status).toBe(200);
+    expect(closed().inputs).toMatchObject({ id: BATCH, qty: 6 });
   });
 });

@@ -8,7 +8,6 @@ import '../utils/jpeg_compress.dart';
 import '../l10n/l10n_ext.dart';
 import '../models/models.dart';
 import '../providers.dart';
-import '../storage.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../widgets/category_tree_list.dart';
@@ -16,8 +15,6 @@ import '../widgets/bottom_nav_bar.dart';
 import '../widgets/floating_bar_physics.dart';
 import '../widgets/shell_app_bar.dart';
 import '../widgets/skeletons.dart';
-import '../widgets/warranty_extra_fields_editor.dart'
-    show WarrantyLabelField, allTemplateLabels;
 import '../api.dart';
 import '../services/barcode_export.dart';
 import '../services/file_export.dart';
@@ -650,6 +647,7 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
       builder: (_) => _ItemFormDialog(
         item: item,
         inventoryEnabled: inventoryEnabled,
+        batchesEnabled: ref.read(batchTrackingProvider),
         gstEnabled: gstEnabled,
         categories: categories,
         categoryTree: categoryTree,
@@ -681,9 +679,6 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
                 )
             : null,
         isWarrantyShop: ref.read(warrantyEnabledProvider),
-        onManageWarrantyFields: ref.read(warrantyEnabledProvider)
-            ? (category) => _showWarrantyFieldTemplateEditor(category)
-            : null,
         // Only the owner may write price lists (routes/price_lists.js).
         priceLists: ref.read(userRoleProvider) == 'owner'
             ? ref.read(priceListsProvider).valueOrNull ?? const []
@@ -727,15 +722,6 @@ class _ItemsScreenState extends ConsumerState<ItemsScreen>
       });
     }
     await ref.read(priceListsProvider.notifier).reload();
-  }
-
-  /// Opens the editor for [category]'s custom warranty fields (e.g. "KM
-  /// Reading"/"Vehicle Number" for Tyres) — see warranty_field_templates.js.
-  void _showWarrantyFieldTemplateEditor(String category) {
-    showDialog(
-      context: context,
-      builder: (_) => _WarrantyFieldTemplateDialog(category: category),
-    );
   }
 
   void _showVariantManager(Item item) {
@@ -1728,10 +1714,9 @@ class _ItemFormDialog extends StatefulWidget {
   /// "Retail & Warranty" shops only: shows the "Carries warranty" toggle.
   final bool isWarrantyShop;
 
-  /// Opens the category's custom warranty-field editor. Only offered once
-  /// warranty is on and a category is entered — there must be something to
-  /// key the template by.
-  final void Function(String category)? onManageWarrantyFields;
+  /// Shops that maintain batches get the "Service (no stock)" switch: a
+  /// purchase then never starts tracking stock for the item.
+  final bool batchesEnabled;
 
   /// The shop's price lists, offered under the price so this item's list
   /// price can be set right here. Empty → the row is hidden.
@@ -1747,6 +1732,7 @@ class _ItemFormDialog extends StatefulWidget {
   const _ItemFormDialog(
       {this.item,
       required this.inventoryEnabled,
+      this.batchesEnabled = false,
       this.gstEnabled = false,
       this.categories = const [],
       this.categoryTree = const {},
@@ -1755,13 +1741,14 @@ class _ItemFormDialog extends StatefulWidget {
       this.onManageSizes,
       this.onManageRecipe,
       this.isWarrantyShop = false,
-      this.onManageWarrantyFields,
       this.priceLists = const [],
       this.onSavePriceListPrices});
 
   @override
   State<_ItemFormDialog> createState() => _ItemFormDialogState();
 }
+
+String _trimNum(double v) => v % 1 == 0 ? v.toInt().toString() : v.toString();
 
 class _ItemFormDialogState extends State<_ItemFormDialog> {
   final _formKey = GlobalKey<FormState>();
@@ -1806,6 +1793,10 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
   /// "Retail & Warranty" shops only: whether selling this item auto-creates a
   /// warranty record, and the period (months) seeded onto it.
   bool _warrantyEligible = false;
+  bool _isService = false;
+  /// Optional buying price per unit before GST: the profit cost when the shop
+  /// enters no purchase bills.
+  final _buyingCtrl = TextEditingController();
   final _warrantyMonthsCtrl = TextEditingController();
 
   /// The item created by a previous save attempt that then failed part-way
@@ -1875,6 +1866,8 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       _packSizeCtrl.text =
           item.packSize != null ? formatQty(item.packSize!) : '';
       _warrantyEligible = item.warrantyEligible;
+      _isService = item.isService;
+      _buyingCtrl.text = item.buyingPrice == null ? '' : _trimNum(item.buyingPrice!);
       _warrantyMonthsCtrl.text = item.defaultWarrantyMonths?.toString() ?? '';
       if (item.hasVariants) {
         _hasVariants = true;
@@ -2236,6 +2229,7 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
     _itemNoCtrl.dispose();
     _barcodeCtrl.dispose();
     _stockCtrl.dispose();
+    _buyingCtrl.dispose();
     _lowStockCtrl.dispose();
     _packSizeCtrl.dispose();
     _warrantyMonthsCtrl.dispose();
@@ -2536,10 +2530,17 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
       'unit': _unit,
       // A sized item's packs live on its sizes; the server nulls this on create.
       if (!sizedItem) ..._packPayload(_packUnit, _packSizeCtrl),
-      if (widget.inventoryEnabled && sizedItem)
-        'stock_quantity': null
-      else if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
-        'stock_quantity': double.parse(_stockCtrl.text.trim()),
+      // Blank = a service: no stock kept. Sent as null so clearing it on an
+      // edit untracks the item instead of being silently ignored.
+      if (widget.inventoryEnabled)
+        'stock_quantity': sizedItem || _isService || _stockCtrl.text.trim().isEmpty
+            ? null
+            : double.parse(_stockCtrl.text.trim()),
+      // Batch shops only, so every other shop's save is unchanged.
+      if (widget.batchesEnabled) 'is_service': _isService,
+      // Only when used (or cleared), so a save without it is unchanged.
+      if (_buyingCtrl.text.trim().isNotEmpty || widget.item?.buyingPrice != null)
+        'buying_price': double.tryParse(_buyingCtrl.text.trim()),
       if (widget.inventoryEnabled && !sizedItem && _lowStockCtrl.text.trim().isNotEmpty)
         'low_stock_threshold': double.parse(_lowStockCtrl.text.trim()),
       // Always sent (not conditional on the months field) so turning the
@@ -3060,6 +3061,18 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                       return null;
                     },
                   ),
+                  const SizedBox(height: AppSpacing.space12),
+                  AppTextField(
+                    label: l10n.itemsBuyingPrice,
+                    hint: l10n.itemsBuyingPriceHint,
+                    controller: _buyingCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    validator: (v) => v == null || v.trim().isEmpty ||
+                            (double.tryParse(v.trim()) ?? -1) >= 0
+                        ? null
+                        : l10n.commonEnterValidNumber,
+                  ),
                   if (widget.priceLists.isNotEmpty) ...[
                     const SizedBox(height: AppSpacing.space12),
                     _buildPriceListRow(l10n,
@@ -3140,19 +3153,6 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                             : null;
                       },
                     ),
-                    if (widget.onManageWarrantyFields != null &&
-                        _categoryCtrl.text.trim().isNotEmpty) ...[
-                      const SizedBox(height: AppSpacing.space8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: () => widget.onManageWarrantyFields!(
-                              _categoryCtrl.text.trim()),
-                          icon: const Icon(Icons.tune, size: 16),
-                          label: Text(l10n.itemsManageWarrantyFields),
-                        ),
-                      ),
-                    ],
                   ],
                 ],
                 // A sized item is never scanned directly — each size has its own
@@ -3168,10 +3168,26 @@ class _ItemFormDialogState extends State<_ItemFormDialog> {
                 // Item-level stock is only meaningful when the item has NO
                 // sizes. With sizes, stock is tracked per size, so hide it and
                 // show a hint pointing to the size manager.
-                if (widget.inventoryEnabled && !_sizedItem) ...[
+                // A service carries no stock: a purchase never starts it.
+                if (widget.batchesEnabled && widget.inventoryEnabled && !_sizedItem) ...[
+                  const SizedBox(height: AppSpacing.space12),
+                  SwitchListTile(
+                    value: _isService,
+                    onChanged: _saving ? null : (v) => setState(() => _isService = v),
+                    title: Text(l10n.itemsServiceNoStock,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    subtitle: Text(l10n.itemsServiceNoStockHint),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+                if (widget.inventoryEnabled && !_sizedItem && !_isService) ...[
                   const SizedBox(height: AppSpacing.space12),
                   AppTextField(
                     label: l10n.itemsFieldStock,
+                    hint: l10n.itemsFieldStockHint,
                     controller: _stockCtrl,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
@@ -3485,177 +3501,6 @@ class _BarcodePrintDialogState extends State<_BarcodePrintDialog> {
 }
 
 // ---------------------------------------------------------------------------
-// Warranty field template editor — the custom fields ("KM Reading", "Serial
-// Number", ...) every warranty record in one item category asks for. See
-// migration 063 / routes/warranty_field_templates.js.
-// ---------------------------------------------------------------------------
-class _WarrantyFieldTemplateDialog extends ConsumerStatefulWidget {
-  final String category;
-  const _WarrantyFieldTemplateDialog({required this.category});
-
-  @override
-  ConsumerState<_WarrantyFieldTemplateDialog> createState() =>
-      _WarrantyFieldTemplateDialogState();
-}
-
-class _FieldDraft {
-  final TextEditingController labelCtrl;
-  String type;
-  final String? originalKey;
-
-  _FieldDraft({required this.labelCtrl, required this.type, this.originalKey});
-}
-
-class _WarrantyFieldTemplateDialogState
-    extends ConsumerState<_WarrantyFieldTemplateDialog> {
-  final List<_FieldDraft> _fields = [];
-  bool _saving = false;
-  bool _loaded = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_loaded) return;
-    final templates = ref.read(warrantyFieldTemplatesProvider).valueOrNull;
-    final existing = templates?[widget.category];
-    if (existing != null) {
-      for (final f in existing.fields) {
-        _fields.add(_FieldDraft(
-          labelCtrl: TextEditingController(text: f.label),
-          type: f.type,
-          originalKey: f.key,
-        ));
-      }
-    }
-    _loaded = true;
-  }
-
-  @override
-  void dispose() {
-    for (final f in _fields) {
-      f.labelCtrl.dispose();
-    }
-    super.dispose();
-  }
-
-  void _addField() {
-    setState(() => _fields
-        .add(_FieldDraft(labelCtrl: TextEditingController(), type: 'text')));
-  }
-
-  void _removeField(_FieldDraft f) {
-    setState(() => _fields.remove(f));
-    f.labelCtrl.dispose();
-  }
-
-  /// Derives a stable field key from its label (e.g. "KM Reading" →
-  /// "km_reading"), reusing the original key on an edit so renaming a label
-  /// doesn't orphan values already saved under the old key.
-  String _keyFor(_FieldDraft f) =>
-      f.originalKey ??
-      f.labelCtrl.text
-          .trim()
-          .toLowerCase()
-          .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-          .replaceAll(RegExp(r'^_+|_+$'), '');
-
-  Future<void> _save() async {
-    final nonBlank = _fields.where((f) => f.labelCtrl.text.trim().isNotEmpty).toList();
-    setState(() => _saving = true);
-    try {
-      final notifier = ref.read(warrantyFieldTemplatesProvider.notifier);
-      if (nonBlank.isEmpty) {
-        await notifier.remove(widget.category);
-      } else {
-        await notifier.save(
-          widget.category,
-          [
-            for (final f in nonBlank)
-              WarrantyTemplateField(
-                  key: _keyFor(f), label: f.labelCtrl.text.trim(), type: f.type),
-          ],
-        );
-      }
-      rememberWarrantyLabels(
-          [for (final f in nonBlank) f.labelCtrl.text.trim()]);
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(sanitizeUiErrorMessage(e)),
-          backgroundColor: AppColors.error,
-        ));
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = context.l10n;
-    // Other categories' already-defined field labels (e.g. another item's
-    // "Vehicle" or "IMEI"), suggested here too so a label predefined for one
-    // item is reused instead of retyped.
-    final otherLabels = allTemplateLabels(
-        ref.watch(warrantyFieldTemplatesProvider).valueOrNull);
-    return AlertDialog(
-      title: Text(l10n.itemsWarrantyFieldsFor(widget.category)),
-      content: SizedBox(
-        width: 400,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final f in _fields)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.space8),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Expanded(
-                    child: WarrantyLabelField(
-                        label: l10n.warrantyDetailLabel,
-                        controller: f.labelCtrl,
-                        extraSuggestions: otherLabels),
-                  ),
-                  const SizedBox(width: AppSpacing.space8),
-                  DropdownButton<String>(
-                    value: f.type,
-                    items: const [
-                      DropdownMenuItem(value: 'text', child: Text('Text')),
-                      DropdownMenuItem(value: 'number', child: Text('Number')),
-                      DropdownMenuItem(value: 'date', child: Text('Date')),
-                    ],
-                    onChanged: (v) => setState(() => f.type = v ?? 'text'),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 18),
-                    onPressed: () => _removeField(f),
-                  ),
-                ]),
-              ),
-            TextButton.icon(
-              onPressed: _addField,
-              icon: const Icon(Icons.add, size: 18),
-              label: Text(l10n.warrantyAddDetail),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context),
-          child: Text(l10n.commonCancel),
-        ),
-        ElevatedButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? l10n.commonSaving : l10n.commonSave),
-        ),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Variant (sizes) manager — list, add and delete sizes for an existing item.
 // Talks to the API directly; calls onChanged() to reload the catalog.
 // ---------------------------------------------------------------------------
@@ -3680,6 +3525,7 @@ class _VariantManagerDialog extends StatefulWidget {
 
 class _VariantManagerDialogState extends State<_VariantManagerDialog> {
   late List<ItemVariant> _variants;
+  final _sizeBuyingCtrl = TextEditingController();
   final _labelCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
@@ -3705,6 +3551,7 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
     _labelCtrl.dispose();
     _priceCtrl.dispose();
     _stockCtrl.dispose();
+    _sizeBuyingCtrl.dispose();
     _lowStockCtrl.dispose();
     _barcodeCtrl.dispose();
     _packSizeCtrl.dispose();
@@ -3721,6 +3568,8 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
         'label': label,
         if (_priceCtrl.text.trim().isNotEmpty)
           'price': double.tryParse(_priceCtrl.text.trim()),
+        if (_sizeBuyingCtrl.text.trim().isNotEmpty)
+          'buying_price': double.tryParse(_sizeBuyingCtrl.text.trim()),
         if (barcode.isNotEmpty) 'barcode': barcode,
         if (widget.inventoryEnabled && _stockCtrl.text.trim().isNotEmpty)
           'stock_quantity': double.tryParse(_stockCtrl.text.trim()),
@@ -4035,6 +3884,13 @@ class _VariantManagerDialogState extends State<_VariantManagerDialog> {
               AppTextField(
                 label: l10n.itemsSizePrice,
                 controller: _priceCtrl,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: AppSpacing.space8),
+              AppTextField(
+                label: l10n.itemsBuyingPrice,
+                controller: _sizeBuyingCtrl,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
               ),

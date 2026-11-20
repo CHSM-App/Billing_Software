@@ -68,7 +68,6 @@ class _TermsAcceptScreenState extends ConsumerState<TermsAcceptScreen> {
     final text = Theme.of(context).textTheme;
     final docs = [
       (Icons.description_outlined, l10n.termsConsentTos, l10n.settingsTermsSubtitle, termsUrl),
-      (Icons.gavel_outlined, l10n.termsConsentAup, l10n.settingsAupSubtitle, acceptableUseUrl),
       (Icons.privacy_tip_outlined, l10n.termsConsentPrivacy, l10n.settingsPrivacyPolicySubtitle, privacyUrl),
     ];
 

@@ -60,7 +60,7 @@ Audit of the repository against the T&C implementation brief (27 October 2026). 
 ## 5. Differences from the brief
 
 - **`terms_required` comes from `GET /license`, not from the login and refresh responses.** The licence check already runs after every login and on every app open or resume, and the app already acts on its result. Refresh returns only an access token and runs silently in the background, so it is the wrong place to trigger a screen.
-- **One version for the bundle** (ToS + AUP + Privacy Policy), not one per document. Split the versions if the documents ever need to change on separate schedules.
+- **One version for the bundle** (ToS + Privacy Policy; the AUP was merged into ToS §12 on 5 November 2026), not one per document. Split the versions if the documents ever need to change on separate schedules.
 - **Sign-up sends a yes/no (`accept_terms: true`), not a version.** The app can't know the version before login. The server records its own `TERMS_VERSION`, and the document links always open the live (current) pages. Re-acceptance does echo the version, and a mismatch gets a 409.
 - **The ordering pages record no acceptance per order.** The notice is shown but not logged. Add `terms_version` to `online_orders` if the advocate wants it recorded.
 - **The copyright line was left unchanged** until the entity name is verified.

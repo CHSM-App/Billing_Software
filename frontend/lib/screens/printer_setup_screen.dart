@@ -309,6 +309,7 @@ class _PrinterSetupScreenState extends State<PrinterSetupScreen> {
               children: [
                 _paperSizeTile(PaperSizes.mm58, l10n.printerSetupPaperSize58, null),
                 _paperSizeTile(PaperSizes.mm80, l10n.printerSetupPaperSize80, null),
+                _paperSizeTile(PaperSizes.mm112, l10n.printerSetupPaperSize112, null),
                 _paperSizeTile(
                     PaperSizes.a5, l10n.printerSetupPaperSizeA5, l10n.printerSetupPaperSizePdfHint),
                 _paperSizeTile(

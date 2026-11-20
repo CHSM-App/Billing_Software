@@ -16,6 +16,7 @@ jest.mock('../../src/audit', () => ({
 jest.mock('../../src/purchaseScan', () => ({
   ...jest.requireActual('../../src/purchaseScan'),
   extractPurchaseBill: jest.fn(),
+  matchLines: jest.fn(),
 }));
 jest.mock('../../src/middleware/rateLimiter', () => require('../helpers/noRateLimit'));
 
@@ -195,6 +196,84 @@ describe('DELETE /api/vendor-bills/:id — stock reversal', () => {
     expect(res.status).toBe(200);
     expect(stockUpdates()).toHaveLength(0);
   });
+
+  test('reverses applied stock even when inventory has since been turned off', async () => {
+    mockRequest.recordset = [universalRow({ inventoryEnabled: 0 })];
+
+    const res = await request(app)
+      .delete(`/api/vendor-bills/${BILL_ID}`)
+      .set(authHeader());
+
+    expect(res.status).toBe(200);
+    const updates = stockUpdates();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].inputs.qty).toBe(-5);
+  });
+});
+
+describe('PUT / DELETE read the bill under a row lock', () => {
+  const headerReads = () => calls.filter((c) => /FROM vendor_bills vb\b/.test(c.sql)
+    && /has_attachment/.test(c.sql));
+
+  test.each([
+    ['DELETE', () => request(app).delete(`/api/vendor-bills/${BILL_ID}`)],
+    ['PUT', () => request(app).put(`/api/vendor-bills/${BILL_ID}`).send(validBody())],
+  ])('%s locks the bill before reversing stock', async (_, send) => {
+    mockRequest.recordset = [universalRow()];
+
+    const res = await send().set(authHeader());
+
+    expect(res.status).toBe(200);
+    // The first read of the bill is the locked one, ahead of any stock move.
+    const lockAt = calls.indexOf(headerReads()[0]);
+    expect(calls[lockAt].sql).toMatch(/FROM vendor_bills vb WITH \(UPDLOCK, HOLDLOCK\)/);
+    expect(lockAt).toBeLessThan(calls.indexOf(stockUpdates()[0]));
+  });
+});
+
+describe('amount_paid follows the payment status', () => {
+  const billInsert = () => calls.find((c) => /INSERT INTO vendor_bills \(/.test(c.sql));
+
+  test.each([
+    ['paid', undefined, 250],
+    ['unpaid', 500, 0],
+    ['partial', 100, 100],
+  ])('%s with %s saves %s', async (status, amountPaid, saved) => {
+    mockRequest.recordset = [universalRow()];
+
+    const res = await request(app)
+      .post('/api/vendor-bills')
+      .set(authHeader())
+      .send({ ...validBody(), payment_status: status, amount_paid: amountPaid });
+
+    expect(res.status).toBe(201);
+    expect(billInsert().inputs.amount_paid).toBe(saved);
+  });
+
+  test.each([0, 250, 300])('partial with %s is rejected', async (amountPaid) => {
+    mockRequest.recordset = [universalRow()];
+
+    const res = await request(app)
+      .post('/api/vendor-bills')
+      .set(authHeader())
+      .send({ ...validBody(), payment_status: 'partial', amount_paid: amountPaid });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Amount paid/);
+    expect(billInsert()).toBeUndefined();
+  });
+
+  test('an edit applies the same rule', async () => {
+    mockRequest.recordset = [universalRow()];
+
+    const res = await request(app)
+      .put(`/api/vendor-bills/${BILL_ID}`)
+      .set(authHeader())
+      .send({ ...validBody(), payment_status: 'partial', amount_paid: 250 });
+
+    expect(res.status).toBe(400);
+    expect(calls.some((c) => /UPDATE vendor_bills SET/.test(c.sql))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -232,6 +311,11 @@ function scanDb(state) {
     if (/FROM subscriptions/.test(s)) rs = state.sub ? [state.sub] : [];
     else if (/COUNT\(\*\) AS used/.test(s)) rs = [{ used: state.used || 0 }];
     else if (/FROM vendor_item_aliases/.test(s)) rs = state.aliases || [];
+    else if (/SELECT business_type FROM businesses/.test(s)) rs = [{ business_type: state.type || 'retail' }];
+    else if (/FROM raw_materials/.test(s)) rs = state.materials || [];
+    else if (/LEFT JOIN item_variants/.test(s)) rs = state.catalogue || [];
+    else if (/input_tokens = input_tokens \+/.test(s)) rs = [];
+    else if (/AS duplicate_id/.test(s)) rs = state.duplicate ? [state.duplicate] : [];
     else if (/FROM purchase_scans\s+WHERE id = @scan_id/.test(s)) rs = state.scanOk ? [{ id: SCAN_ID }] : [];
     else if (/INNER JOIN purchase_scans/.test(s)) rs = state.attachment ? [state.attachment] : [];
     else if (/SELECT ps\.id, ps\.file_path/.test(s)) rs = [];
@@ -259,6 +343,8 @@ describe('POST /api/vendor-bills/scan', () => {
     scanDb(state);
     purchaseScan.extractPurchaseBill.mockReset();
     purchaseScan.extractPurchaseBill.mockResolvedValue(aiBill());
+    purchaseScan.matchLines.mockReset();
+    purchaseScan.matchLines.mockResolvedValue({ results: [], usage: { input_tokens: 0, output_tokens: 0 } });
   });
 
   afterAll(() => {
@@ -373,6 +459,7 @@ describe('POST /api/vendor-bills/scan', () => {
       vendor_text: 'amul butter 100g', item_id: ITEM_ID, variant_id: null,
       raw_material_id: null, in_packs: 1,
     }];
+    state.catalogue = [{ item_id: ITEM_ID, variant_id: null, name: 'Amul Butter 100g' }];
     const res = await scan();
     expect(res.body.draft.lines[0].match).toEqual({
       item_id: ITEM_ID, variant_id: null, raw_material_id: null, in_packs: true,
@@ -380,6 +467,116 @@ describe('POST /api/vendor-bills/scan', () => {
     const lookup = calls.find((c) => /FROM vendor_item_aliases/.test(c.sql));
     expect(lookup.inputs.business_id).toBe(BUSINESS_ID);
     expect(lookup.inputs.vendor_key).toBe('27ABCDE1234F1Z5');
+    // Every line known: the catalogue is never sent to the AI.
+    expect(purchaseScan.matchLines).not.toHaveBeenCalled();
+  });
+
+  test('a mapping to a since-deleted item is dropped and re-matched', async () => {
+    state.aliases = [{
+      vendor_text: 'amul butter 100g', item_id: ITEM_ID, variant_id: null,
+      raw_material_id: null, in_packs: 0,
+    }];
+    state.catalogue = [{ item_id: BILL_ID, variant_id: null, name: 'Butter' }];
+    const res = await scan();
+    expect(res.body.draft.lines[0].match).toBeUndefined();
+    expect(purchaseScan.matchLines).toHaveBeenCalledTimes(1);
+  });
+
+  describe('AI item matching', () => {
+    const VARIANT_A = 'a0000000-0000-0000-0000-00000000000a';
+    const VARIANT_B = 'b0000000-0000-0000-0000-00000000000b';
+    beforeEach(() => {
+      state.catalogue = [
+        { item_id: ITEM_ID, variant_id: null, major_category: 'Dairy', category: 'Butter', name: 'Amul Butter 100g' },
+        { item_id: BILL_ID, variant_id: VARIANT_A, name: 'Amul Butter', label: 'Salted' },
+        { item_id: BILL_ID, variant_id: VARIANT_B, name: 'Amul Butter', label: 'Unsalted' },
+      ];
+    });
+
+    test('sends unmatched lines with the category-path catalogue, names only', async () => {
+      await scan();
+      const [lines, catalogue] = purchaseScan.matchLines.mock.calls[0];
+      expect(lines).toEqual([expect.objectContaining({ line: 0, text: 'Amul Butter 100g', unit: 'pcs' })]);
+      expect(catalogue).toEqual(['Dairy > Butter > Amul Butter 100g', 'Amul Butter > Salted', 'Amul Butter > Unsalted']);
+      const q = calls.find((c) => /LEFT JOIN item_variants/.test(c.sql));
+      expect(q.inputs.business_id).toBe(BUSINESS_ID);
+      expect(q.sql).not.toMatch(/price|stock/);
+    });
+
+    test('one ref links the line, marked as an AI match', async () => {
+      purchaseScan.matchLines.mockResolvedValue({ results: [{ line: 0, refs: [2] }], usage: {} });
+      const res = await scan();
+      expect(res.body.draft.lines[0].match).toEqual({
+        item_id: null, variant_id: VARIANT_A, raw_material_id: null, in_packs: false, source: 'ai',
+      });
+    });
+
+    test('several refs become choices, not a link', async () => {
+      purchaseScan.matchLines.mockResolvedValue({ results: [{ line: 0, refs: [2, 3] }], usage: {} });
+      const res = await scan();
+      expect(res.body.draft.lines[0].match).toBeUndefined();
+      expect(res.body.draft.lines[0].suggest).toEqual([{ variant_id: VARIANT_A }, { variant_id: VARIANT_B }]);
+    });
+
+    test('refs outside the list sent are ignored', async () => {
+      purchaseScan.matchLines.mockResolvedValue({ results: [{ line: 0, refs: [99] }], usage: {} });
+      const res = await scan();
+      expect(res.body.draft.lines[0].match).toBeUndefined();
+      expect(res.body.draft.lines[0].suggest).toBeUndefined();
+    });
+
+    test('its tokens are added to the same scan', async () => {
+      purchaseScan.matchLines.mockResolvedValue({ results: [], usage: { input_tokens: 800, output_tokens: 40 } });
+      await scan();
+      const add = calls.find((c) => /input_tokens = input_tokens \+/.test(c.sql));
+      expect(add.inputs).toMatchObject({ input_tokens: 800, output_tokens: 40, business_id: BUSINESS_ID });
+    });
+
+    test('a matching failure still returns the scan, lines unlinked', async () => {
+      purchaseScan.matchLines.mockRejectedValue(new Error('timeout'));
+      const res = await scan();
+      expect(res.status).toBe(200);
+      expect(res.body.draft.lines[0].match).toBeUndefined();
+      expect(scanRowUpdates('ok')).toHaveLength(1);
+    });
+
+    test('a sized bill sends only fitting entries and maps the answer back', async () => {
+      const bill = aiBill();
+      bill.raw.lines[0] = { ...bill.raw.lines[0], name: 'Apollo 215/65 R16 GOSS', free_quantity: 0, total_quantity: null };
+      purchaseScan.extractPurchaseBill.mockResolvedValue(bill);
+      state.catalogue = [
+        { item_id: ITEM_ID, variant_id: null, name: 'Apollo Tyres 185/65 R15', label: null },
+        { item_id: BILL_ID, variant_id: VARIANT_A, name: 'Apollo Tyres 215/65 R16', label: 'G055' },
+        { item_id: BILL_ID, variant_id: VARIANT_B, name: 'Apollo Tyres 215/65 R16', label: 'G015' },
+      ];
+      purchaseScan.matchLines.mockResolvedValue({ results: [{ line: 0, refs: [1] }], usage: {} });
+      const res = await scan();
+      expect(purchaseScan.matchLines.mock.calls[0][1])
+        .toEqual(['Apollo Tyres 215/65 R16 > G055', 'Apollo Tyres 215/65 R16 > G015']);
+      // "1" is the first entry SENT — G055 — not the catalogue's first row.
+      expect(res.body.draft.lines[0].match).toMatchObject({ variant_id: VARIANT_A, source: 'ai' });
+    });
+
+    test('a restaurant matches against its raw materials', async () => {
+      state.type = 'restaurant_with_tables';
+      state.materials = [{ id: ITEM_ID, name: 'Butter' }];
+      purchaseScan.matchLines.mockResolvedValue({ results: [{ line: 0, refs: [1] }], usage: {} });
+      const res = await scan();
+      expect(purchaseScan.matchLines.mock.calls[0][1]).toEqual(['Butter']);
+      expect(res.body.draft.lines[0].match).toMatchObject({ raw_material_id: ITEM_ID, item_id: null });
+    });
+  });
+
+  test('warns first when this vendor invoice is already recorded', async () => {
+    state.duplicate = { duplicate_id: BILL_ID, invoice_date: new Date('2026-10-05T00:00:00Z') };
+    const res = await scan();
+    expect(res.status).toBe(200);
+    expect(res.body.warnings[0]).toEqual({
+      code: 'duplicate_invoice', bill_id: BILL_ID, invoice_date: '2026-10-05',
+    });
+    const q = calls.find((c) => /AS duplicate_id/.test(c.sql));
+    expect(q.sql).toMatch(/vendor_gstin = @gstin/);
+    expect(q.inputs.business_id).toBe(BUSINESS_ID);
   });
 });
 
@@ -491,5 +688,274 @@ describe('GET /api/vendor-bills/:id/attachment', () => {
     const res = await request(app).get(`/api/vendor-bills/${BILL_ID}/attachment`)
       .set(authHeader({ role: 'cashier' }));
     expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stock batches (batches.js)
+// ---------------------------------------------------------------------------
+
+describe('stock batches on purchases', () => {
+  const NEW_BATCH = 'abababab-abab-abab-abab-abababababab';
+  const OLD_BATCH = 'cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd';
+
+  /** Answers by what each statement reads; [state] is per test. */
+  function batchDb(state) {
+    mockRequest.query.mockImplementation(function (sqlText) {
+      const s = String(sqlText);
+      calls.push({ sql: s, inputs: { ...this.inputs } });
+      let rs;
+      if (/SELECT stock_quantity FROM/.test(s)) rs = [{ stock_quantity: state.stock === undefined ? 20 : state.stock }];
+      else if (/MAX\(batch_seq\)/.test(s)) rs = [{ seq: 7 }];
+      else if (/INSERT INTO stock_batches/.test(s)) rs = [{ id: NEW_BATCH }];
+      else if (/FROM stock_batches WITH \(UPDLOCK\)\s+WHERE id = @id/.test(s)) rs = state.batch ? [state.batch] : [];
+      else if (/created_by_vendor_bill_id = @vendor_bill_id AND batch_seq IS NOT NULL/.test(s)) rs = state.keptSeq ? [{ batch_seq: state.keptSeq }] : [];
+      else if (/AND batch_no = @batch_no AND ABS\(unit_cost - @unit_cost\)/.test(s)) rs = state.sameBatch ? [{ id: state.sameBatch }] : [];
+      else if (/FROM stock_batches WITH \(UPDLOCK\)\s+WHERE business_id/.test(s)) rs = state.open || [];
+      else {
+        rs = [{
+          ...universalRow(),
+          batch_tracking_enabled: state.on ? 1 : 0,
+          batch_id: state.lineBatch || null,
+        }];
+      }
+      return Promise.resolve({ recordset: rs, rowsAffected: [1] });
+    });
+  }
+
+  const batchSql = () => calls.filter((c) => /stock_batches/.test(c.sql)
+    && !/LEFT JOIN stock_batches/.test(c.sql));
+  const lineInsert = () => calls.find((c) => /INSERT INTO vendor_bill_items/.test(c.sql));
+  const batchInsert = () => calls.find((c) => /INSERT INTO stock_batches/.test(c.sql));
+  const post = (body) => request(app).post('/api/vendor-bills').set(authHeader()).send(body);
+
+  test('with batches off, a purchase runs no batch statements', async () => {
+    batchDb({ on: false });
+    const res = await post(validBody());
+    expect(res.status).toBe(201);
+    expect(batchSql()).toHaveLength(0);
+    expect(lineInsert().inputs.batch_id).toBeNull();
+  });
+
+  test('a tracked line opens a new batch at its unit cost, numbered automatically', async () => {
+    batchDb({ on: true });
+    const res = await post(validBody());
+    expect(res.status).toBe(201);
+    const ins = batchInsert();
+    expect(ins.inputs).toMatchObject({ batch_seq: 7, batch_no: 'B-0007', unit_cost: 50, qty: 5 });
+    expect(ins.inputs.vendor_bill_id).toBe(BILL_ID);
+    expect(lineInsert().inputs.batch_id).toBe(NEW_BATCH);
+  });
+
+  test('a typed batch no. is used as given, with no automatic number', async () => {
+    batchDb({ on: true });
+    await post(validBody({ batch_no: ' L-77 ' }));
+    expect(batchInsert().inputs).toMatchObject({ batch_seq: null, batch_no: 'L-77' });
+    expect(calls.some((c) => /MAX\(batch_seq\)/.test(c.sql))).toBe(false);
+  });
+
+  test('all new batches of one purchase share its batch no.', async () => {
+    batchDb({ on: true });
+    const OTHER = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+    await post({ ...validBody(), lines: [
+      { item_id: ITEM_ID, name: 'Rice', quantity: 5, unit_price: 50 },
+      { item_id: OTHER, name: 'Sugar', quantity: 2, unit_price: 40 },
+    ] });
+    const ins = calls.filter((c) => /INSERT INTO stock_batches/.test(c.sql)).map((c) => c.inputs.batch_no);
+    expect(ins).toEqual(['B-0007', 'B-0007']);
+    // One number for the purchase, not one per line.
+    expect(calls.filter((c) => /MAX\(batch_seq\)/.test(c.sql))).toHaveLength(1);
+  });
+
+  test('reusing a batch no. for the same item at the same rate tops up that batch', async () => {
+    batchDb({ on: true, sameBatch: OLD_BATCH });
+    await post(validBody({ batch_no: 'B-001' }));
+    expect(batchInsert()).toBeUndefined();
+    const add = calls.find((c) => /SET qty_received = qty_received \+ @qty/.test(c.sql));
+    expect(add.inputs).toMatchObject({ id: OLD_BATCH, qty: 5 });
+    const look = calls.find((c) => /AND batch_no = @batch_no/.test(c.sql));
+    expect(look.inputs).toMatchObject({ batch_no: 'B-001', unit_cost: 50 });
+    expect(lineInsert().inputs.batch_id).toBe(OLD_BATCH);
+  });
+
+  test('an edit keeps the purchase\'s automatic number', async () => {
+    batchDb({ on: true, keptSeq: 3 });
+    await request(app).put(`/api/vendor-bills/${BILL_ID}`).set(authHeader()).send(validBody());
+    expect(batchInsert().inputs).toMatchObject({ batch_seq: 3, batch_no: 'B-0003' });
+    expect(calls.some((c) => /MAX\(batch_seq\)/.test(c.sql))).toBe(false);
+  });
+
+  test('the bill discount and free goods lower the unit cost', async () => {
+    batchDb({ on: true });
+    // Rs. 250 for 5 + 5 free, Rs. 25 off the bill: 225 / 10.
+    const res = await post({ ...validBody({ free_quantity: 5 }), discount_amount: 25 });
+    expect(res.status).toBe(201);
+    expect(batchInsert().inputs).toMatchObject({ unit_cost: 22.5, qty: 10 });
+  });
+
+  test('a batch shop starts tracking an untracked item, then batches it', async () => {
+    batchDb({ on: true, stock: 5 }); // what the item holds once received
+    const res = await post(validBody());
+    expect(res.status).toBe(201);
+    const apply = calls.find((c) => /UPDATE items SET stock_quantity = ISNULL\(stock_quantity, 0\) \+ @qty/.test(c.sql));
+    expect(apply).toBeDefined();
+    // Never the parent of a sized item: its stock lives on the sizes.
+    expect(apply.sql).toMatch(/NOT EXISTS \(\s*SELECT 1 FROM item_variants/);
+    // Stock first, so the batch sees the newly tracked item.
+    expect(calls.indexOf(apply)).toBeLessThan(calls.indexOf(batchInsert()));
+  });
+
+  test('with batches off, receiving still never starts tracking', async () => {
+    batchDb({ on: false });
+    await post(validBody());
+    const apply = calls.find((c) => /UPDATE items SET stock_quantity/.test(c.sql));
+    expect(apply.sql).toMatch(/AND stock_quantity IS NOT NULL/);
+    expect(apply.sql).not.toMatch(/ISNULL/);
+  });
+
+  test('stock that stays untracked (a sized item\'s parent) gets no batch', async () => {
+    batchDb({ on: true, stock: null });
+    const res = await post(validBody());
+    expect(res.status).toBe(201);
+    expect(batchInsert()).toBeUndefined();
+  });
+
+  test('topping up an existing batch at the same rate adds to it', async () => {
+    batchDb({ on: true, batch: { id: OLD_BATCH, item_id: ITEM_ID, unit_cost: 50, batch_no: 'B-0003' } });
+    const res = await post(validBody({ batch_id: OLD_BATCH }));
+    expect(res.status).toBe(201);
+    expect(batchInsert()).toBeUndefined();
+    const add = calls.find((c) => /SET qty_received = qty_received \+ @qty/.test(c.sql));
+    expect(add.inputs).toMatchObject({ id: OLD_BATCH, qty: 5 });
+    expect(add.sql).not.toMatch(/unit_cost = @unit_cost/);
+    expect(lineInsert().inputs.batch_id).toBe(OLD_BATCH);
+  });
+
+  test('topping up at a different rate is refused', async () => {
+    batchDb({ on: true, batch: { id: OLD_BATCH, item_id: ITEM_ID, unit_cost: 40, batch_no: 'B-0003' } });
+    const res = await post(validBody({ batch_id: OLD_BATCH }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/rate differs from batch B-0003/);
+    expect(lineInsert()).toBeUndefined();
+  });
+
+  test("another item's batch is refused", async () => {
+    batchDb({ on: true, batch: { id: OLD_BATCH, item_id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', unit_cost: 50, batch_no: 'B-0003' } });
+    const res = await post(validBody({ batch_id: OLD_BATCH }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not for this item/);
+  });
+
+  test('an edit takes back the old receipt and re-prices the batch it opened', async () => {
+    batchDb({
+      on: true,
+      lineBatch: OLD_BATCH,
+      keptSeq: 3,
+      batch: { id: OLD_BATCH, item_id: ITEM_ID, unit_cost: 50, batch_no: 'B-0003', created_by_vendor_bill_id: BILL_ID },
+    });
+    const res = await request(app).put(`/api/vendor-bills/${BILL_ID}`).set(authHeader())
+      .send(validBody({ batch_id: OLD_BATCH, unit_price: 60 }));
+    expect(res.status).toBe(200);
+    const back = calls.find((c) => /SET qty_received = qty_received - @qty/.test(c.sql));
+    expect(back.inputs).toMatchObject({ id: OLD_BATCH, qty: 5 });
+    const add = calls.find((c) => /SET qty_received = qty_received \+ @qty/.test(c.sql));
+    expect(add.sql).toMatch(/unit_cost = @unit_cost/);
+    expect(add.inputs).toMatchObject({ unit_cost: 60 });
+    // No batch no. sent: the batch keeps the name it has (#3).
+    expect(add.sql).not.toMatch(/batch_no = @batch_no/);
+    // Emptied batches go only after the re-receive, so the line keeps its id.
+    const dropAt = calls.findIndex((c) => /DELETE FROM stock_batches/.test(c.sql));
+    expect(dropAt).toBeGreaterThan(calls.indexOf(add));
+  });
+
+  test('an edit that types a batch no. renames the batch it opened', async () => {
+    batchDb({
+      on: true, lineBatch: OLD_BATCH,
+      batch: { id: OLD_BATCH, item_id: ITEM_ID, unit_cost: 50, batch_no: 'B-0003', created_by_vendor_bill_id: BILL_ID },
+    });
+    await request(app).put(`/api/vendor-bills/${BILL_ID}`).set(authHeader())
+      .send(validBody({ batch_id: OLD_BATCH, batch_no: 'L-9' }));
+    const add = calls.find((c) => /SET qty_received = qty_received \+ @qty/.test(c.sql));
+    expect(add.inputs).toMatchObject({ batch_no: 'L-9', batch_seq: null });
+  });
+
+  test('an edit cannot take a batch below what was already sold', async () => {
+    batchDb({
+      on: true, lineBatch: OLD_BATCH,
+      // After the old 5 are taken back: 0 received, 4 sold.
+      batch: { id: OLD_BATCH, item_id: ITEM_ID, unit_cost: 50, batch_no: 'B-0003',
+        created_by_vendor_bill_id: BILL_ID, qty_received: 0, qty_sold: 4, qty_lost: 0 },
+    });
+    const res = await request(app).put(`/api/vendor-bills/${BILL_ID}`).set(authHeader())
+      .send(validBody({ batch_id: OLD_BATCH, quantity: 3 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/4 already sold from batch B-0003/);
+  });
+
+  test("an edited line in another purchase's batch moves to a new batch on a rate change", async () => {
+    batchDb({
+      on: true, lineBatch: OLD_BATCH,
+      batch: { id: OLD_BATCH, item_id: ITEM_ID, unit_cost: 50, batch_no: 'B-0002', batch_seq: 2,
+        created_by_vendor_bill_id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' },
+    });
+    const res = await request(app).put(`/api/vendor-bills/${BILL_ID}`).set(authHeader())
+      .send(validBody({ batch_id: OLD_BATCH, unit_price: 60 }));
+    expect(res.status).toBe(200);
+    // Same batch no., its own row at the corrected cost.
+    expect(batchInsert().inputs).toMatchObject({ batch_no: 'B-0002', batch_seq: 2, unit_cost: 60 });
+  });
+
+  test('a fresh top-up of another purchase\'s batch at a new rate is still refused', async () => {
+    batchDb({
+      on: true,
+      batch: { id: OLD_BATCH, item_id: ITEM_ID, unit_cost: 50, batch_no: 'B-0002',
+        created_by_vendor_bill_id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' },
+    });
+    const res = await post(validBody({ batch_id: OLD_BATCH, unit_price: 60 }));
+    expect(res.status).toBe(400);
+  });
+
+  test('freight on the bill is spread into the goods\' cost', async () => {
+    batchDb({ on: true });
+    // Rice 5 × 50 = 250, freight 100: every rupee lands on the rice → 70 a unit.
+    await post({ ...validBody(), lines: [
+      { item_id: ITEM_ID, name: 'Rice', quantity: 5, unit_price: 50 },
+      { name: 'Freight', quantity: 1, unit_price: 100 },
+    ] });
+    expect(batchInsert().inputs).toMatchObject({ unit_cost: 70, qty: 5 });
+  });
+
+  test('correcting the rate on a batch this bill opened re-costs its past sales', async () => {
+    batchDb({
+      on: true, lineBatch: OLD_BATCH,
+      batch: { id: OLD_BATCH, item_id: ITEM_ID, unit_cost: 50, batch_no: 'B-0003', created_by_vendor_bill_id: BILL_ID },
+    });
+    await request(app).put(`/api/vendor-bills/${BILL_ID}`).set(authHeader())
+      .send(validBody({ batch_id: OLD_BATCH, unit_price: 60 }));
+    const clear = calls.find((c) => /UPDATE bi SET bi\.unit_cost = NULL/.test(c.sql));
+    expect(clear.inputs.batch_id).toBe(OLD_BATCH);
+  });
+
+  test('a purchase never starts tracking a service', async () => {
+    batchDb({ on: true, stock: 5 });
+    await post(validBody());
+    const apply = calls.find((c) => /UPDATE items SET stock_quantity = ISNULL/.test(c.sql));
+    expect(apply.sql).toMatch(/is_service = 0/);
+  });
+
+
+  test('a delete takes back what its lines received', async () => {
+    batchDb({ on: true, lineBatch: OLD_BATCH });
+    const res = await request(app).delete(`/api/vendor-bills/${BILL_ID}`).set(authHeader());
+    expect(res.status).toBe(200);
+    expect(calls.some((c) => /SET qty_received = qty_received - @qty/.test(c.sql))).toBe(true);
+    expect(calls.some((c) => /DELETE FROM stock_batches/.test(c.sql))).toBe(true);
+  });
+
+  test('a delete of a bill without batches runs no batch statements', async () => {
+    batchDb({ on: true });
+    const res = await request(app).delete(`/api/vendor-bills/${BILL_ID}`).set(authHeader());
+    expect(res.status).toBe(200);
+    expect(batchSql()).toHaveLength(0);
   });
 });

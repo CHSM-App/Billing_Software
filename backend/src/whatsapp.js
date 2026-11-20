@@ -559,6 +559,35 @@ async function sendCampaignMessage({ phone, shopName, message }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// logWhatsappSend — one whatsapp_bill_log row per receipt send (migration 077),
+// counted per business on the Vittam admin dashboard.
+//
+// Never throws: a lost log row must not fail a message that already went out.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function logWhatsappSend({ businessId, billId, settlementId, mode, status, campaignId, error }) {
+  try {
+    await poolConnect
+    await pool.request()
+      .input('business_id',   sql.UniqueIdentifier, businessId)
+      .input('bill_id',       sql.UniqueIdentifier, billId       || null)
+      .input('settlement_id', sql.UniqueIdentifier, settlementId || null)
+      .input('mode',          sql.NVarChar(10),     mode)
+      .input('status',        sql.NVarChar(10),     status)
+      .input('campaign_id',   sql.NVarChar(100),    campaignId ? String(campaignId) : null)
+      .input('error_detail',  sql.NVarChar(500),    error ? String(error).slice(0, 500) : null)
+      .query(`
+        INSERT INTO whatsapp_bill_log
+          (business_id, bill_id, settlement_id, mode, status, campaign_id, error_detail)
+        VALUES
+          (@business_id, @bill_id, @settlement_id, @mode, @status, @campaign_id, @error_detail)
+      `)
+  } catch (e) {
+    logger.warn({ err: e }, '[WhatsApp] send log insert failed')
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // sendReceiptLink — the one api/deeplink decision every "send receipt on
 // WhatsApp" endpoint shares (a bill, a credit settlement). Returns the HTTP
 // { status, body } for the route to send:
@@ -568,9 +597,16 @@ async function sendCampaignMessage({ phone, shopName, message }) {
 //                       open the cashier's own WhatsApp with.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function sendReceiptLink({ whatsappMode, phone, shopName, billNumber, receiptUrl, message }) {
+async function sendReceiptLink({ whatsappMode, phone, shopName, billNumber, receiptUrl, message,
+                                 businessId, billId, settlementId }) {
+  const ref = { businessId, billId, settlementId }
   if (whatsappMode === 'api') {
     const result = await sendBillLink({ phone, shopName, billNumber, receiptUrl })
+    await logWhatsappSend({
+      ...ref, mode: 'api',
+      status: result.sent ? 'sent' : result.skipped ? 'skipped' : 'failed',
+      campaignId: result.campaignId, error: result.error,
+    })
     if (result.sent) {
       return { status: 200, body: { mode: 'api', sent: true, campaign_id: result.campaignId } }
     }
@@ -582,10 +618,11 @@ async function sendReceiptLink({ whatsappMode, phone, shopName, billNumber, rece
       body: { mode: 'api', sent: false, error: result.error || 'Failed to send WhatsApp message' },
     }
   }
+  await logWhatsappSend({ ...ref, mode: 'deeplink', status: 'opened' })
   return {
     status: 200,
     body: { mode: 'deeplink', phone: normalisePhone(phone), message, receipt_url: receiptUrl },
   }
 }
 
-module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendReceiptLink, sendOnboardingAlert, sendDemoRequest, sendCampaignMessage, campaignText }
+module.exports = { sendOtp, verifyOtp, normalisePhone, sendBillLink, sendReceiptLink, logWhatsappSend, sendOnboardingAlert, sendDemoRequest, sendCampaignMessage, campaignText }
