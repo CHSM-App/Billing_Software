@@ -39,6 +39,8 @@ const PIN_RE = /^\d{4}$/
 const GST_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/
 const FSSAI_RE = /^\d{14}$/
+// Shows the consent checkbox. Keep in step with TERMS_VERSION in backend src/legal.js.
+const TERMS_CONSENT_ENABLED = false
 
 // ── Step indicator ───────────────────────────────────────────────────────────
 
@@ -47,7 +49,7 @@ function StepDot({ n, active, done }) {
     <div
       className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all"
       style={
-        done
+        done  
           ? { background: '#00e5c0', color: '#0d1b3e' }
           : active
           ? { background: '#0d1b3e', color: '#fff', boxShadow: '0 0 0 3px rgba(0,229,192,0.3)' }
@@ -125,7 +127,7 @@ export default function IosSignup() {
     if (isRestaurant && form.fssaiNumber && !FSSAI_RE.test(form.fssaiNumber)) {
       return 'Enter a valid 14-digit FSSAI number.'
     }
-    if (!form.acceptTerms) return 'Please accept the Terms of Service to continue.'
+    if (TERMS_CONSENT_ENABLED && !form.acceptTerms) return 'Please accept the Terms of Service to continue.'
     return ''
   }
 
@@ -449,7 +451,7 @@ export default function IosSignup() {
                     />
                   )}
 
-                  <label className="flex items-start gap-2 text-xs text-slate-600 pt-2">
+                  {TERMS_CONSENT_ENABLED && <label className="flex items-start gap-2 text-xs text-slate-600 pt-2">
                     <input
                       type="checkbox"
                       className="mt-0.5"
@@ -466,7 +468,7 @@ export default function IosSignup() {
                         Privacy Policy
                       </Link>.
                     </span>
-                  </label>
+                  </label>}
 
                   <button
                     type="submit"

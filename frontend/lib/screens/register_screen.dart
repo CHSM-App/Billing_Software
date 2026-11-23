@@ -483,13 +483,17 @@ class _RegisterScreenState extends State<RegisterScreen>
                       ),
                     ],
                     const SizedBox(height: AppSpacing.space24),
-                    TermsConsent(
-                      onChanged: (v) => setState(() => _termsAccepted = v),
-                    ),
-                    const SizedBox(height: AppSpacing.space16),
+                    if (kTermsConsentEnabled) ...[
+                      TermsConsent(
+                        onChanged: (v) => setState(() => _termsAccepted = v),
+                      ),
+                      const SizedBox(height: AppSpacing.space16),
+                    ],
                     PrimaryButton(
                       text: l10n.registerCreateAccount,
-                      onPressed: _termsAccepted ? _register : null,
+                      onPressed: _termsAccepted || !kTermsConsentEnabled
+                          ? _register
+                          : null,
                       isLoading: _isLoading,
                       icon: Icons.rocket_launch_outlined,
                     ),

@@ -10,6 +10,11 @@ import '../theme/app_theme.dart';
 const termsUrl = 'https://vittam.vengurlatech.com/terms';
 const privacyUrl = 'https://vittam.vengurlatech.com/privacy';
 
+/// Shows the sign-up consent checkbox. Keep in step with TERMS_VERSION in
+/// backend src/legal.js (null there = false here): sign-up runs before login,
+/// so the app can't ask the server.
+const kTermsConsentEnabled = false;
+
 /// Opens a legal page in the browser; a snackbar if it can't.
 Future<void> openLegalUrl(BuildContext context, String url) async {
   bool ok = false;
